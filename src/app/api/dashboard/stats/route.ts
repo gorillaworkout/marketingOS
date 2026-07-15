@@ -1,0 +1,26 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { getDb } from '@/lib/database';
+import { getSession } from '@/lib/auth';
+
+export async function GET(request: NextRequest) {
+  const auth = await getSession(request);
+  if (auth.error) return NextResponse.json({ error: auth.error }, { status: auth.status });
+
+  const db = await getDb();
+
+  const totalTasks = (db.prepare('SELECT COUNT(*) as c FROM tasks').get() as { c: number }).c;
+
+  const tasksByType = db.prepare('SELECT type, COUNT(*) as c FROM tasks GROUP BY type').all() as { type: string; c: number }[];
+
+  const tokenRow = db.prepare('SELECT COALESCE(SUM(input_tokens + output_tokens), 0) as t, COALESCE(SUM(cost), 0) as c FROM token_logs').get() as { t: number; c: number };
+
+  const recentTasks = db.prepare('SELECT id, title, type, status, created_at FROM tasks ORDER BY created_at DESC LIMIT 5').all() as Record<string, unknown>[];
+
+  return NextResponse.json({
+    totalTasks,
+    tasksByType: tasksByType.map(r => ({ type: r.type, count: r.c })),
+    totalTokens: tokenRow.t,
+    totalCost: tokenRow.c,
+    recentTasks
+  });
+}
