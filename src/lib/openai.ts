@@ -326,10 +326,13 @@ export async function generateContent(
 
   // Log to database
   try {
-    const { queryOne, queryAll, execute } = await import('@/lib/database');
+    const { queryOne, execute } = await import('@/lib/database');
     const { v4: uuidv4 } = await import('uuid');
-    await execute('INSERT INTO token_logs (id, user_id, task_id, model, input_tokens, output_tokens, cost) VALUES (?, ?, ?, ?, ?, ?, ?)', [uuidv4(), userId, taskId || null, result.model, inputTokens, outputTokens, cost]);
-      } catch (e) {
+    // Some flows create the task after AI generation. Preserve usage logging while
+    // respecting PostgreSQL's foreign-key constraint during that pre-save phase.
+    const task = taskId ? await queryOne('SELECT id FROM tasks WHERE id = ?', [taskId]) : null;
+    await execute('INSERT INTO token_logs (id, user_id, task_id, model, input_tokens, output_tokens, cost) VALUES (?, ?, ?, ?, ?, ?, ?)', [uuidv4(), userId, task ? taskId : null, result.model, inputTokens, outputTokens, cost]);
+  } catch (e) {
     console.error('Failed to log token usage:', e);
   }
 
