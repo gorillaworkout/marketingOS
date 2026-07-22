@@ -2,7 +2,7 @@ import { NextRequest } from 'next/server';
 import { getDb, saveDbToDisk } from '@/lib/database';
 import { getSession } from '@/lib/auth';
 import { rateLimit } from '@/lib/rate-limit';
-import { generateContent, generateMultiStep, getSmartSystemPrompt, fetchContextMemory, fetchStyleContext, getUserPreferredModel, type BrandGuidelines } from '@/lib/openai';
+import { generateContent, generateMultiStep, getSmartSystemPrompt, fetchContextMemory, fetchStyleContext, getUserPreferredModel, runQC, generateDupoinFileName, type BrandGuidelines, type QCResult } from '@/lib/openai';
 import { v4 as uuidv4 } from 'uuid';
 import fs from 'fs';
 import path from 'path';
@@ -141,6 +141,60 @@ export async function POST(request: NextRequest) {
           const taskId = uuidv4();
           const smartSystem = getSmartSystemPrompt('social-post', platform, brandGuidelines, targetAudience, styleContext);
 
+          // Step 0: Research — fetch last 5 similar posts
+          controller.enqueue(encoder.encode(sseEvent({
+            step: 'research',
+            progress: 3,
+            message: '🔍 Researching past similar posts...',
+          })));
+
+          let researchPosts: Array<{ brief: string; style: string; rating: number; caption: string }> = [];
+          try {
+            const pastTasks = db.prepare(`
+              SELECT output_data, brief, rating FROM tasks
+              WHERE type = 'social-post' AND status = 'completed' AND output_data IS NOT NULL
+              ORDER BY created_at DESC LIMIT 10
+            `).all() as { output_data: string; brief: string; rating: number | null }[];
+
+            // Filter for similar posts (brief contains similar words) — simple keyword matching
+            const briefWords = brief.toLowerCase().split(/\s+/).filter((w: string) => w.length > 3);
+            const scored = pastTasks.map(t => {
+              const taskWords = (t.brief || '').toLowerCase().split(/\s+/);
+              const overlap = briefWords.filter((w: string) => taskWords.includes(w)).length;
+              return { ...t, overlap };
+            }).filter(t => t.overlap > 0).sort((a, b) => b.overlap - a.overlap).slice(0, 5);
+
+            // If not enough similar posts, fill with recent ones
+            if (scored.length < 5) {
+              const remaining = pastTasks.filter(t => !scored.find(s => s.brief === t.brief)).slice(0, 5 - scored.length);
+              scored.push(...remaining.map(t => ({ ...t, overlap: 0 })));
+            }
+
+            researchPosts = scored.slice(0, 5).map(t => {
+              try {
+                const data = JSON.parse(t.output_data);
+                const firstOpt = data.options?.[0] || data.captionData || {};
+                return {
+                  brief: (t.brief || '').substring(0, 80),
+                  style: firstOpt.style || 'unknown',
+                  rating: t.rating || 0,
+                  caption: (firstOpt.caption || '').substring(0, 120),
+                };
+              } catch {
+                return { brief: t.brief || '', style: 'unknown', rating: 0, caption: '' };
+              }
+            });
+          } catch (e) {
+            console.warn('Research step failed:', e);
+          }
+
+          controller.enqueue(encoder.encode(sseEvent({
+            step: 'research',
+            progress: 8,
+            message: `✅ Found ${researchPosts.length} reference posts`,
+            researchPosts,
+          })));
+
           // Generate 3 options in parallel
           controller.enqueue(encoder.encode(sseEvent({
             step: 'draft',
@@ -211,6 +265,25 @@ Follow the SOP strictly. Output JSON format with: { "hook": "...", "caption": ".
             };
           });
 
+          // Run QC on each option
+          controller.enqueue(encoder.encode(sseEvent({
+            step: 'qc',
+            progress: 72,
+            message: '🔍 Running quality checks...',
+          })));
+
+          const qcResults: QCResult[] = options.map(opt => runQC(opt.caption, opt.hashtags, platform));
+
+          controller.enqueue(encoder.encode(sseEvent({
+            step: 'qc',
+            progress: 75,
+            message: `✅ QC complete — ${qcResults.filter(r => r.allPassed).length}/${qcResults.length} passed all checks`,
+            qcResults,
+          })));
+
+          // Generate DUPOIN naming convention
+          const dupoinFileName = generateDupoinFileName(brief, platform);
+
           // Generate image prompt (single, for the overall brief)
           controller.enqueue(encoder.encode(sseEvent({
             step: 'image-prompt',
@@ -222,7 +295,12 @@ Follow the SOP strictly. Output JSON format with: { "hook": "...", "caption": ".
           const smartImageSystem = getSmartSystemPrompt('image-prompt', platform, brandGuidelines, undefined, styleContext);
           const imagePrompt = await generateContent(
             smartImageSystem,
-            `Create a FLUX image prompt for a social media post about: ${brief}. Platform: ${platform || 'Instagram'}. Target: ${targetAudience || 'General'}.`,
+            `Buat prompt untuk generate gambar yang berkaitan dengan post ini.
+Brief: ${brief}
+Platform: ${platform || 'Instagram'}
+Target: ${targetAudience || 'General'}
+
+Tulis deskripsi visual saja. JANGAN tulis hashtag, caption, atau teks apapun di gambar. Cukup deskripsi visualnya.`,
             userId,
             taskId,
             { brandGuidelines, model: imagePromptModel }
@@ -258,7 +336,7 @@ Follow the SOP strictly. Output JSON format with: { "hook": "...", "caption": ".
 
           // Save to DB (store first option as captionData for backward compat)
           db.prepare('INSERT INTO tasks (id, user_id, type, title, brief, status, output_data) VALUES (?, ?, ?, ?, ?, ?, ?)').run(
-            taskId, userId, 'social-post', `Social Post: ${brief.substring(0, 50)}`, brief, 'completed', JSON.stringify(outputData)
+            taskId, userId, 'social-post', `Social Post: ${brief.substring(0, 50)}`, brief, 'draft', JSON.stringify({ ...outputData, qcResults, dupoinFileName, researchPosts })
           );
           saveDbToDisk();
 
@@ -274,6 +352,10 @@ Follow the SOP strictly. Output JSON format with: { "hook": "...", "caption": ".
               imagePrompt: imagePrompt.content,
               outputFile: `/outputs/social-posts/${fileName}`,
               usage: totalUsage,
+              qcResults,
+              dupoinFileName,
+              researchPosts,
+              status: 'draft',
             },
           })));
         })();

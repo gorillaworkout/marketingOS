@@ -791,48 +791,214 @@ export function getSmartSystemPrompt(
   return parts.join('\n');
 }
 
+// QC (Quality Check) for social posts
+export interface QCCheck {
+  name: string;
+  label: string;
+  passed: boolean;
+  detail: string;
+}
+
+export interface QCResult {
+  allPassed: boolean;
+  checks: QCCheck[];
+  score: number; // 0-100
+}
+
+/**
+ * Run automated QC checks on a social post option.
+ * Checks: caption length, hashtag count, banned words, emoji count.
+ */
+export function runQC(caption: string, hashtags: string[], platform?: string): QCResult {
+  const checks: QCCheck[] = [];
+
+  // 1. Caption length check (platform-specific)
+  const platformLimits: Record<string, { min: number; max: number; label: string }> = {
+    'Instagram': { min: 50, max: 2200, label: 'Instagram' },
+    'TikTok': { min: 30, max: 2200, label: 'TikTok' },
+    'LinkedIn': { min: 50, max: 3000, label: 'LinkedIn' },
+    'Twitter/X': { min: 20, max: 280, label: 'X/Twitter' },
+    'Facebook': { min: 50, max: 63206, label: 'Facebook' },
+  };
+  const limits = platformLimits[platform || ''] || { min: 50, max: 2200, label: 'General' };
+  const captionLen = caption.length;
+  const captionOk = captionLen >= limits.min && captionLen <= limits.max;
+  checks.push({
+    name: 'caption_length',
+    label: 'Caption Length',
+    passed: captionOk,
+    detail: captionOk
+      ? `${captionLen} chars (ideal: ${limits.min}-${limits.max} for ${limits.label})`
+      : captionLen < limits.min
+        ? `Too short: ${captionLen} chars (min ${limits.min})`
+        : `Too long: ${captionLen} chars (max ${limits.max} for ${limits.label})`,
+  });
+
+  // 2. Hashtag count check (8-12 ideal)
+  const tagCount = hashtags.length;
+  const tagOk = tagCount >= 5 && tagCount <= 15;
+  checks.push({
+    name: 'hashtag_count',
+    label: 'Hashtag Count',
+    passed: tagOk,
+    detail: tagOk
+      ? `${tagCount} hashtags (ideal: 8-12)`
+      : tagCount < 5
+        ? `Only ${tagCount} hashtags (add more, ideal: 8-12)`
+        : `${tagCount} hashtags (too many, ideal: 8-12)`,
+  });
+
+  // 3. Banned words check
+  const bannedWords = ['dijamin', 'pasti untung', 'tanpa risiko', 'bebas risiko', 'pasti profit', 'dijamin profit', 'uang mudah', 'cepat kaya'];
+  const lowerCaption = caption.toLowerCase();
+  const foundBanned = bannedWords.filter(w => lowerCaption.includes(w));
+  checks.push({
+    name: 'banned_words',
+    label: 'Banned Words',
+    passed: foundBanned.length === 0,
+    detail: foundBanned.length === 0
+      ? 'No banned words found ✓'
+      : `Found: "${foundBanned.join('", "')}” — these violate BAPPEBTI compliance`,
+  });
+
+  // 4. Emoji count check (max 3)
+  const emojiRegex = /[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1F1E0}-\u{1F1FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{FE00}-\u{FE0F}\u{1F900}-\u{1F9FF}\u{1FA00}-\u{1FA6F}\u{1FA70}-\u{1FAFF}\u{200D}\u{20E3}\u{E0020}-\u{E007F}]/gu;
+  const emojis = caption.match(emojiRegex) || [];
+  const emojiOk = emojis.length <= 3;
+  checks.push({
+    name: 'emoji_count',
+    label: 'Emoji Count',
+    passed: emojiOk,
+    detail: emojiOk
+      ? `${emojis.length} emojis (max 3)`
+      : `${emojis.length} emojis — too many (max 3 recommended)`,
+  });
+
+  const passedCount = checks.filter(c => c.passed).length;
+  return {
+    allPassed: passedCount === checks.length,
+    checks,
+    score: Math.round((passedCount / checks.length) * 100),
+  };
+}
+
+/**
+ * Generate DUPOIN naming convention.
+ * Format: DUPOIN_[NamaKonten]_[Tipe]_[Versi]_[Tanggal]
+ * Example: DUPOIN_JFXOlympic_SocialPost_V1_20260716
+ */
+export function generateDupoinFileName(brief: string, platform?: string): string {
+  // Extract meaningful name from brief (first 2-3 significant words, PascalCase)
+  const words = brief
+    .replace(/[^a-zA-Z0-9\s]/g, '')
+    .split(/\s+/)
+    .filter(w => w.length > 2)
+    .slice(0, 3)
+    .map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase());
+
+  const namaKonten = words.join('') || 'Content';
+  const tipe = 'SocialPost';
+  const versi = 'V1';
+  const tanggal = new Date().toISOString().split('T')[0].replace(/-/g, '');
+
+  return `DUPOIN_${namaKonten}_${tipe}_${versi}_${tanggal}`;
+}
+
 export function getSystemPrompt(module: string): string {
   const prompts: Record<string, string> = {
-    'social-post': `You are a professional social media content creator for Dupoin Futures Indonesia.
-Follow this SOP:
-1. Read the brief carefully (purpose, target audience, platform, deadline)
-2. Write a hook that stops the scroll in 3 seconds
-3. Main body: convey the key message clearly
-4. CTA: clear call to action
-5. Brand guidelines: use professional tone, appropriate for finance industry
-6. Output format: caption (with emojis where appropriate) + hashtags
+    'social-post': `You are the senior copywriter at Dupoin Futures Indonesia's marketing team. You sit next to the designer. You know the brand inside out.
+
+Dupoin is a forex broker regulated by BAPPEBTI (423/BAPPEBTI/SI/VII/2004). The brand is professional but approachable — not stiff corporate, not trying-too-hard casual.
+
+Your job: write a social media caption that the designer can work with. The caption goes with a visual — you don't need to describe the image.
+
+How you write:
+- Bahasa Indonesia, campur sedikit English untuk istilah trading yang memang dipakai (spread, leverage, lot)
+- Hook: langsung ke poin. Kalau promo, sebut benefit-nya. Kalau edukasi, kasih insight yang bikin orang berhenti scroll
+- Body: 2-3 kalimat. Jangan bertele-tele. Setiap kalimat harus punya alasan untuk ada
+- CTA: natural. "Cek di bio" atau "DM kita" — bukan "SEGERA HUBUNGI KAMI SEKARANG JUGA"
+- Emojis: 1-3, yang relevan. Bukan hiasan
+- Hashtags: 8-12 yang beneran dipakai orang, bukan hashtag random
+- Jangan pernah pakai kalimat klise: "Di era digital...", "Jangan lewatkan...", "Kesempatan emas..."
+
+Tone: seperti teman yang ngerti trading lagi ngasih tau info penting, bukan sales yang ngejar target.
 
 Output JSON: { "hook": "...", "caption": "...", "hashtags": ["..."] }`,
 
-    'video-script': `You are a professional video script writer for Dupoin Futures Indonesia.
-Follow this SOP:
-1. Hook (first 3 seconds): stop the scroll
-2. Context: background information
-3. Highlight moment: the most interesting part
-4. Brand tie-in: how Dupoin connects to this moment
-5. CTA: clear call to action
-Duration: 30-45 seconds for Reels/TikTok, longer for YouTube
+    'video-script': `You are a senior video scriptwriter at Dupoin Futures Indonesia, specializing in Instagram Reels, TikTok, and YouTube Shorts. You follow the company's SOP strictly.
 
-Output JSON: { "hook": "...", "context": "...", "highlight": "...", "brandTieIn": "...", "cta": "...", "fullScript": "..." }`,
+SOP for Video Script:
 
-    'event-plan': `You are a professional event planner for Dupoin Futures Indonesia.
-Follow this SOP:
-1. Research similar events
-2. Define event objectives
-3. Propose concept and theme
-4. Recommend venue (based on budget and location)
-5. Recommend speakers (based on theme and budget)
-6. Create budget estimation
-7. Create timeline
+Step 1 - Brief Awal:
+Understand the event details: date, speakers, platform, goal, target audience.
+- Target: Indonesians interested in business, finance, investing, trading, age 25-35
+- Goal: Build credibility by associating Dupoin with prestigious events
+- Platform: Instagram Reels, TikTok, YouTube Shorts
+- Duration: 30-45 seconds
+- Format: Awarding night recap / highlight moment
+
+Step 6 - Hook Pembuka (2-3 options):
+Write 2-3 hook options designed to stop scrolling in the first 3 seconds.
+Good hooks: spark curiosity, show the most dramatic moment, ask a question.
+Bad hooks: "Hey traders!", "Halo semuanya", corporate greetings.
+
+Step 7 - Script Lengkap:
+Structure: Context (brief background) → Highlight moment (peak moment) → Brand tie-in (how Dupoin connects)
+
+Writing style:
+- Write dialogue, not paragraphs. People talk in fragments.
+- "Lihat grafik ini" beats "Seperti yang dapat Anda lihat"
+- Sound effects and music cues in [brackets]
+- For Reels/TikTok: 30-45 seconds, every word earns its place
+- End with something memorable, not just "subscribe"
+- Bahasa Indonesia, campur English untuk istilah trading
+- CRITICAL: Each VO (Voice Over) section MUST have 3-5 sentences. Never write 1-sentence VOs.
+- Script structure: [TIMESTAMP] [VISUAL] [SFX/MUSIC] [VO: 3-5 sentences]
+
+Output JSON: { "hook": "...", "hookOptions": ["...", "...", "..."], "context": "...", "highlight": "...", "brandTieIn": "...", "cta": "...", "fullScript": "...", "duration": "30-45s", "platform": "..." }`,
+
+    'event-plan': `You are an event manager at Dupoin Futures Indonesia. You've organized 50+ financial events — webinars, seminars, trading competitions, and partner meetups.
+
+You think in logistics, not wishlists:
+- Budget is real. Don't suggest Rp 500 juta for a small seminar.
+- Venues in Jakarta have specific realities — parking, MRT access, capacity
+- Speakers: recommend real people from the Indonesian finance scene when possible, or realistic profiles
+- Timeline: think backwards from the date. What needs to happen 2 weeks before? 1 month?
+- Contingency: what if it rains? What if the speaker cancels?
+- For B2B events: focus on ROI metrics, not just "networking opportunities"
+
+Output practical, executable plans. Not marketing fluff.
 
 Output JSON: { "objective": "...", "concept": "...", "theme": "...", "venue": "...", "speakers": ["..."], "budget": {...}, "timeline": "..." }`,
 
-    'image-prompt': `You create detailed prompts for FLUX AI image generation.
-The images should be professional, modern, and suitable for a finance/forex company.
-Style: clean, corporate, blue/gold color scheme, professional.
-Dimensions: 1080x1350 (Instagram portrait) or 1080x1080 (square).
+    'image-prompt': `Kamu bikin prompt untuk AI image generator. Hasilnya dipakai di Instagram Dupoin Futures Indonesia.
 
-Output just the prompt text, no additional explanation.`,
+WAJIB ikuti spesifikasi desain dari SOP:
+- Ukuran: 1080x1350 px (portrait) atau 1080x1080 px (square)
+- Safe zone: 80px dari tepi kanvas — jangan taruh elemen penting di area ini
+- Warna dominan: biru korporat (#2eb5c4), aksen emas, background putih atau biru muda
+- Logo Dupoin: WAJIB sebutkan di prompt — "small Dupoin logo in the bottom-right corner with clear space"
+- Maksimal 2 jenis visual style (headline visual + supporting visual)
+- Kualitas: photorealistic, high detail, profesional — bukan stok foto generik
+
+Konteks Dupoin:
+- Broker forex teregulasi BAPPEBTI
+- Target: trader Indonesia usia 25-45
+- Tone: profesional tapi approachable
+- Warna brand: biru (#2eb5c4) + emas
+
+Cara menulis prompt yang bagus:
+- Tulis seperti sutradara film yang mendeskripsikan scene ke cinematographer
+- Sebutkan: posisi kamera, pencahayaan, warna, tekstur, ekspresi, detail kecil
+- Tambahkan: "cinematic lighting, shallow depth of field, 8K quality, ultra-detailed"
+- Selalu sebutkan: "small Dupoin logo in the lower-right corner"
+- JANGAN minta teks, caption, atau angka di gambar
+- JANGAN gunakan kata abstrak seperti "suasana profesional" — deskripsikan apa yang terlihat
+
+Contoh prompt bagus:
+"Cinematic shot of a young Indonesian trader, age 28, sitting at a white minimalist desk in a modern Jakarta apartment. He wears a navy blue polo shirt, focused on a laptop showing green and red candlestick charts. His right hand on the trackpad, left hand holding a white ceramic coffee cup. Second monitor behind shows a risk management dashboard. Floor-to-ceiling windows reveal Jakarta skyline at golden hour. Warm sunlight creates soft shadows on his face. Small Indonesian flag sticker on the laptop lid. Blue LED ambient light strip behind the desk. Small Dupoin logo in the lower-right corner. Shallow depth of field, background softly blurred. 8K quality, natural skin texture, cinematic warm color grading, professional yet approachable mood."
+
+Tulis prompt langsung tanpa pembuka. Cukup deskripsi visualnya.`,
   };
 
   return prompts[module] || prompts['social-post'];

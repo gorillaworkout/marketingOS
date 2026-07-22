@@ -40,7 +40,7 @@ export async function POST(request: NextRequest) {
 
     response.cookies.set('session_id', sessionId, {
       httpOnly: true,
-      secure: false,
+      secure: process.env.NODE_ENV === 'production',
       sameSite: 'lax',
       maxAge: SESSION_DURATION / 1000,
       path: '/',
@@ -77,6 +77,9 @@ export async function POST(request: NextRequest) {
     if (!session?.user_id) {
       return NextResponse.json({ authenticated: false }, { status: 401 });
     }
+
+    // Update last_active
+    db.run("UPDATE users SET last_active = datetime('now') WHERE id = ?", [session.user_id as string]);
 
     return NextResponse.json({
       authenticated: true,

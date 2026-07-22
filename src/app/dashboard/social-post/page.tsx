@@ -1,6 +1,26 @@
 'use client';
 import { useState, useEffect, useRef, useCallback } from 'react';
 
+interface QCCheck {
+  name: string;
+  label: string;
+  passed: boolean;
+  detail: string;
+}
+
+interface QCResult {
+  allPassed: boolean;
+  checks: QCCheck[];
+  score: number;
+}
+
+interface ResearchPost {
+  brief: string;
+  style: string;
+  rating: number;
+  caption: string;
+}
+
 interface ProgressState {
   step: string;
   progress: number;
@@ -20,6 +40,8 @@ interface ProgressEvent {
   progress: number;
   message: string;
   result?: Record<string, unknown>;
+  researchPosts?: ResearchPost[];
+  qcResults?: QCResult[];
 }
 
 interface PostOption {
@@ -32,14 +54,18 @@ interface PostOption {
 }
 
 const STEP_LABELS: Record<string, string> = {
+  research: 'Research past posts',
   draft: 'Generating options',
+  qc: 'Quality check',
   'image-prompt': 'Image prompt',
   done: 'Complete',
   error: 'Error',
 };
 
 const STEP_ICONS: Record<string, string> = {
+  research: '🔍',
   draft: '📝',
+  qc: '🔍',
   'image-prompt': '🎨',
   done: '✅',
   error: '❌',
@@ -70,6 +96,14 @@ export default function SocialPostPage() {
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
   const [savingKnowledge, setSavingKnowledge] = useState(false);
   const [knowledgeSaved, setKnowledgeSaved] = useState(false);
+
+  // SOP state
+  const [researchPosts, setResearchPosts] = useState<ResearchPost[]>([]);
+  const [qcResults, setQcResults] = useState<QCResult[]>([]);
+  const [dupoinFileName, setDupoinFileName] = useState('');
+  const [postStatus, setPostStatus] = useState<string>('draft');
+  const [statusUpdating, setStatusUpdating] = useState(false);
+  const [statusMessage, setStatusMessage] = useState('');
 
   // Streaming progress state
   const [progress, setProgress] = useState<ProgressState | null>(null);
@@ -126,6 +160,11 @@ export default function SocialPostPage() {
     setSelectedIndex(null);
     setKnowledgeSaved(false);
     setTaskId(null);
+    setResearchPosts([]);
+    setQcResults([]);
+    setDupoinFileName('');
+    setPostStatus('draft');
+    setStatusMessage('');
     setProgress({ step: 'draft', progress: 0, message: '🚀 Starting generation...', elapsed: 0 });
 
     // Abort any previous request
@@ -185,6 +224,10 @@ export default function SocialPostPage() {
                 if (r.options?.[0]) {
                   setEditableImagePrompt(r.options[0].imagePrompt || r.imagePrompt || '');
                 }
+                if (r.qcResults) setQcResults(r.qcResults);
+                if (r.dupoinFileName) setDupoinFileName(r.dupoinFileName);
+                if (r.researchPosts) setResearchPosts(r.researchPosts);
+                if (r.status) setPostStatus(r.status);
                 fetchPosts();
               }
               setProgress({ step: 'done', progress: 100, message: '✅ Complete!', elapsed });
@@ -193,6 +236,10 @@ export default function SocialPostPage() {
               setLoading(false);
               return;
             }
+
+            // Capture research and QC data from intermediate events
+            if (event.researchPosts) setResearchPosts(event.researchPosts);
+            if (event.qcResults) setQcResults(event.qcResults);
 
             setProgress({
               step: event.step,
@@ -267,6 +314,39 @@ export default function SocialPostPage() {
     } catch {}
   };
 
+  const updatePostStatus = async (newStatus: string) => {
+    if (!taskId || statusUpdating) return;
+    setStatusUpdating(true);
+    setStatusMessage('');
+    try {
+      const res = await fetch('/api/social-post/status', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ taskId, status: newStatus }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setPostStatus(newStatus);
+        setStatusMessage(data.message || `Status updated to ${newStatus}`);
+        setTimeout(() => setStatusMessage(''), 5000);
+      } else {
+        const data = await res.json();
+        setStatusMessage(data.error || 'Failed to update status');
+      }
+    } catch {
+      setStatusMessage('Network error');
+    }
+    setStatusUpdating(false);
+  };
+
+  const STATUS_OPTIONS = [
+    { value: 'draft', label: '📝 Draft', color: 'text-gray-400' },
+    { value: 'review', label: '👀 Review', color: 'text-yellow-400' },
+    { value: 'approved', label: '✅ Approved', color: 'text-green-400' },
+    { value: 'published', label: '📢 Published', color: 'text-blue-400' },
+    { value: 'archived', label: '📦 Archived', color: 'text-gray-500' },
+  ];
+
   const generateImage = async () => {
     if (!editableImagePrompt.trim()) return;
     setGeneratingImage(true);
@@ -288,7 +368,7 @@ export default function SocialPostPage() {
       const res = await fetch('/api/generate-image', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt: editableImagePrompt, taskId, type: 'social-post' }),
+        body: JSON.stringify({ prompt: editableImagePrompt, taskId, type: 'social-post', brief: brief || editableImagePrompt.substring(0, 100) }),
         signal: controller.signal,
       });
 
@@ -351,6 +431,11 @@ export default function SocialPostPage() {
     setGeneratedImage(null);
     setKnowledgeSaved(false);
     setError('');
+    setResearchPosts([]);
+    setQcResults([]);
+    setDupoinFileName('');
+    setPostStatus(post.status || 'draft');
+    setBrief(post.brief || '');
     try {
       const data = JSON.parse(post.output_data || '{}');
       // Handle both old format (single result) and new format (3 options)
@@ -367,20 +452,24 @@ export default function SocialPostPage() {
         setTaskId(post.id);
         setEditableImagePrompt(imagePrompt);
       }
+      // Load SOP data if available
+      if (data.qcResults) setQcResults(data.qcResults);
+      if (data.dupoinFileName) setDupoinFileName(data.dupoinFileName);
+      if (data.researchPosts) setResearchPosts(data.researchPosts);
     } catch {}
   };
 
   const copyToClipboard = (text: string) => navigator.clipboard.writeText(text);
   const downloadJSON = () => {
-    const dataToExport = options ? { platform, brief, options, usage: tokenUsage, generatedAt: new Date().toISOString() }
-      : result ? { platform, brief, caption: result.caption, imagePrompt: result.imagePrompt, usage: tokenUsage, generatedAt: new Date().toISOString() }
+    const dataToExport = options ? { platform, brief, options, usage: tokenUsage, generatedAt: new Date().toISOString(), qcResults, dupoinFileName, status: postStatus }
+      : result ? { platform, brief, caption: result.caption, imagePrompt: result.imagePrompt, usage: tokenUsage, generatedAt: new Date().toISOString(), qcResults, dupoinFileName, status: postStatus }
       : null;
     if (!dataToExport) return;
     const blob = new Blob([JSON.stringify(dataToExport, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `social-post-${Date.now()}.json`;
+    a.download = dupoinFileName ? `${dupoinFileName}.json` : `social-post-${Date.now()}.json`;
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -388,7 +477,7 @@ export default function SocialPostPage() {
   // Determine which steps are completed
   const getStepStatus = (stepName: string): 'completed' | 'active' | 'pending' => {
     if (!progress) return 'pending';
-    const stepOrder = ['draft', 'image-prompt', 'done'];
+    const stepOrder = ['research', 'draft', 'qc', 'image-prompt', 'done'];
     const currentIdx = stepOrder.indexOf(progress.step);
     const targetIdx = stepOrder.indexOf(stepName);
     if (currentIdx > targetIdx) return 'completed';
@@ -400,7 +489,7 @@ export default function SocialPostPage() {
 
   return (
     <div className="max-w-6xl mx-auto space-y-8">
-      <div><h1 className="text-2xl font-bold text-white">📱 Social Media Post</h1><p className="text-gray-400 mt-1">Generate 3 style options, compare, and pick your favorite</p></div>
+      <div><h1 className="text-2xl font-bold text-white">📱 Social Media Post</h1><p className="text-gray-400 mt-1">Generate 3 style options with SOP compliance — research, QC, naming & delivery workflow</p></div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Left: Form + Result */}
@@ -482,7 +571,7 @@ export default function SocialPostPage() {
 
               {/* Step indicators */}
               <div className="space-y-2 pt-2">
-                {['draft', 'image-prompt'].map((stepName) => {
+                {['research', 'draft', 'qc', 'image-prompt'].map((stepName) => {
                   const status = getStepStatus(stepName);
                   return (
                     <div key={stepName} className={`flex items-center gap-3 px-3 py-1.5 rounded-lg transition-colors ${
@@ -523,6 +612,35 @@ export default function SocialPostPage() {
             <div className="bg-green-500/10 border border-green-500/20 text-green-400 px-4 py-3 rounded-lg flex items-center gap-2">
               <span>✅</span>
               <span>Knowledge saved! Style profile updated. This helps future generations match your preferences.</span>
+            </div>
+          )}
+
+          {/* Research Reference Cards */}
+          {researchPosts.length > 0 && !loading && (
+            <div className="bg-gray-800/50 rounded-xl p-5 border border-gray-700/50">
+              <h3 className="text-base font-semibold text-white mb-3 flex items-center gap-2">
+                🔍 <span>Previous Similar Posts</span>
+                <span className="text-xs text-gray-500 font-normal">— research reference</span>
+              </h3>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                {researchPosts.map((post, i) => (
+                  <div key={i} className="bg-gray-900/50 rounded-lg p-3 border border-gray-700/30">
+                    <p className="text-xs text-gray-400 truncate mb-1">📝 {post.brief}</p>
+                    <p className="text-xs text-gray-300 leading-relaxed line-clamp-3">{post.caption}</p>
+                    <div className="flex items-center gap-2 mt-2">
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded ${
+                        post.style === 'bold' ? 'bg-orange-500/15 text-orange-400' :
+                        post.style === 'professional' ? 'bg-blue-500/15 text-blue-400' :
+                        post.style === 'creative' ? 'bg-purple-500/15 text-purple-400' :
+                        'bg-gray-700/50 text-gray-400'
+                      }`}>{post.style}</span>
+                      {post.rating > 0 && (
+                        <span className="text-[10px] text-yellow-400">{'⭐'.repeat(Math.min(post.rating, 5))}</span>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
 
@@ -610,7 +728,7 @@ export default function SocialPostPage() {
                             </div>
 
                             {/* Copy button */}
-                            <div className="flex gap-2">
+                            <div className="flex gap-2 flex-wrap">
                               <button onClick={() => copyToClipboard(opt.caption)}
                                 className="text-xs px-3 py-1.5 bg-gray-700/50 hover:bg-gray-700 text-gray-300 rounded-lg">
                                 📋 Copy Caption
@@ -624,6 +742,35 @@ export default function SocialPostPage() {
                                 ✕ Deselect
                               </button>
                             </div>
+
+                            {/* QC Checklist for this option */}
+                            {qcResults[index] && (
+                              <div className="bg-gray-900/50 rounded-lg p-4 border border-gray-700/30">
+                                <div className="flex items-center justify-between mb-2">
+                                  <h4 className="text-sm font-semibold text-white">🔍 Quality Check</h4>
+                                  <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                                    qcResults[index].allPassed
+                                      ? 'bg-green-500/20 text-green-400'
+                                      : 'bg-yellow-500/20 text-yellow-400'
+                                  }`}>
+                                    {qcResults[index].score}% — {qcResults[index].allPassed ? 'All Passed' : 'Has Warnings'}
+                                  </span>
+                                </div>
+                                <div className="space-y-1.5">
+                                  {qcResults[index].checks.map((check, ci) => (
+                                    <div key={ci} className="flex items-center gap-2">
+                                      <span className={`text-sm ${check.passed ? 'text-green-400' : 'text-yellow-400'}`}>
+                                        {check.passed ? '✅' : '⚠️'}
+                                      </span>
+                                      <span className="text-xs text-gray-300 font-medium w-28 shrink-0">{check.label}</span>
+                                      <span className={`text-xs ${check.passed ? 'text-gray-400' : 'text-yellow-300/80'}`}>
+                                        {check.detail}
+                                      </span>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
                           </div>
                         )}
                       </div>
@@ -674,20 +821,10 @@ export default function SocialPostPage() {
                   <textarea
                     value={editableImagePrompt}
                     onChange={(e) => setEditableImagePrompt(e.target.value)}
-                    style={{ minHeight: '120px', height: 'auto', overflow: 'hidden' }}
-                    className="w-full bg-gray-900/60 text-gray-200 text-sm leading-relaxed font-mono resize-y focus:outline-none focus:ring-2 focus:ring-purple-500/50 rounded-xl p-4 border border-gray-700/50 placeholder-gray-600"
+                    style={{ minHeight: '120px', maxHeight: '400px', resize: 'vertical' }}
+                    className="w-full bg-gray-900/60 text-gray-200 text-sm leading-relaxed font-mono overflow-y-auto focus:outline-none focus:ring-2 focus:ring-purple-500/50 rounded-xl p-4 border border-gray-700/50 placeholder-gray-600"
                     placeholder="Deskripsikan gambar yang ingin di-generate..."
-                    ref={(el) => {
-                      if (el) {
-                        el.style.height = 'auto';
-                        el.style.height = Math.max(120, Math.min(el.scrollHeight, 600)) + 'px';
-                      }
-                    }}
-                    onInput={(e) => {
-                      const el = e.currentTarget;
-                      el.style.height = 'auto';
-                      el.style.height = Math.max(120, Math.min(el.scrollHeight, 600)) + 'px';
-                    }}
+                    rows={6}
                   />
                   <div className="absolute bottom-3 right-3 text-xs text-gray-600">
                     {editableImagePrompt.length} chars
@@ -707,12 +844,11 @@ export default function SocialPostPage() {
                 )}
 
                 {/* Generate button */}
-                <div className="flex items-center gap-3">
-                  <button onClick={generateImage} disabled={generatingImage || !editableImagePrompt.trim()}
-                    className="flex-1 px-6 py-3 bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 disabled:from-gray-700 disabled:to-gray-700 disabled:cursor-not-allowed text-white font-medium rounded-xl transition-all shadow-lg shadow-purple-500/10">
-                    {generatingImage ? '⏳ Generating...' : '🎨 Generate Image with AI'}
-                  </button>
-                </div>
+                <button onClick={generateImage} disabled={generatingImage || !editableImagePrompt.trim()}
+                  className="w-full px-6 py-3 bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 disabled:from-gray-700 disabled:to-gray-700 disabled:cursor-not-allowed text-white font-medium rounded-xl transition-all shadow-lg shadow-purple-500/10">
+                  {generatingImage ? '⏳ Generating Image...' : '🎨 Generate Image'}
+                </button>
+                <p className="text-xs text-gray-500 mt-1">🎨 Model: gpt-image-2 (Codex) · Quality: High · Resolution: 1024x1536</p>
 
                 {/* Image Generation Progress */}
                 {imageProgress && generatingImage && (
@@ -754,9 +890,63 @@ export default function SocialPostPage() {
             </div>
           )}
 
-          {/* Token Usage + Download + Rating */}
+          {/* Token Usage + Download + Rating + Status */}
           {(options || result) && (
-            <div className="bg-gray-800/50 rounded-xl p-6 border border-gray-700/50">
+            <div className="bg-gray-800/50 rounded-xl p-6 border border-gray-700/50 space-y-4">
+              {/* Naming Convention */}
+              {dupoinFileName && (
+                <div className="bg-gray-900/50 rounded-lg p-4 border border-gray-700/30">
+                  <div className="flex items-center justify-between mb-2">
+                    <h4 className="text-sm font-semibold text-white flex items-center gap-2">📁 File Naming Convention</h4>
+                    <button onClick={() => copyToClipboard(dupoinFileName)}
+                      className="text-xs px-3 py-1.5 bg-gray-700/50 hover:bg-gray-700 text-gray-300 rounded-lg">
+                      📋 Copy Name
+                    </button>
+                  </div>
+                  <p className="text-sm font-mono text-blue-300 bg-gray-800/80 px-3 py-2 rounded border border-gray-700/50">{dupoinFileName}</p>
+                  <p className="text-xs text-gray-500 mt-1">Format: DUPOIN_[NamaKonten]_[Tipe]_[Versi]_[Tanggal]</p>
+                </div>
+              )}
+
+              {/* Status Tracking */}
+              <div className="bg-gray-900/50 rounded-lg p-4 border border-gray-700/30">
+                <div className="flex items-center justify-between mb-3">
+                  <h4 className="text-sm font-semibold text-white flex items-center gap-2">📊 Delivery Status</h4>
+                  {statusMessage && (
+                    <span className="text-xs text-green-400 animate-pulse">{statusMessage}</span>
+                  )}
+                </div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  {STATUS_OPTIONS.map((opt) => {
+                    const isActive = postStatus === opt.value;
+                    const currentIdx = STATUS_OPTIONS.findIndex(s => s.value === postStatus);
+                    const optIdx = STATUS_OPTIONS.findIndex(s => s.value === opt.value);
+                    const isPast = optIdx < currentIdx;
+                    return (
+                      <button
+                        key={opt.value}
+                        onClick={() => updatePostStatus(opt.value)}
+                        disabled={statusUpdating || isActive}
+                        className={`px-3 py-1.5 text-xs rounded-lg border transition-all ${
+                          isActive
+                            ? 'bg-blue-600/30 border-blue-500/50 text-blue-300 font-semibold ring-1 ring-blue-500/30'
+                            : isPast
+                              ? 'bg-gray-700/30 border-gray-600/30 text-gray-500 line-through'
+                              : 'bg-gray-800/50 border-gray-700/30 text-gray-400 hover:bg-gray-700/50 hover:text-gray-300'
+                        }`}
+                      >
+                        {opt.label}
+                      </button>
+                    );
+                  })}
+                </div>
+                {postStatus === 'published' && (
+                  <div className="mt-3 bg-blue-500/10 border border-blue-500/20 rounded-lg px-3 py-2">
+                    <p className="text-xs text-blue-300">📢 <strong>Kirim ke Admin Social Media</strong> untuk proses posting ke platform.</p>
+                  </div>
+                )}
+              </div>
+
               <div className="flex items-center justify-between flex-wrap gap-4">
                 <div className="flex-1 min-w-[200px]">
                   <h3 className="text-lg font-semibold text-white mb-2">💰 Token Usage</h3>
@@ -822,7 +1012,18 @@ export default function SocialPostPage() {
                 <div key={post.id}
                   onClick={() => viewPost(post)}
                   className={`p-3 border-b border-gray-800/50 cursor-pointer hover:bg-gray-700/30 transition-colors ${viewingPost?.id === post.id ? 'bg-blue-600/10 border-l-2 border-l-blue-500' : ''}`}>
-                  <p className="text-sm text-gray-300 truncate">{post.title}</p>
+                  <div className="flex items-center justify-between">
+                    <p className="text-sm text-gray-300 truncate flex-1">{post.title}</p>
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded-full ml-2 shrink-0 ${
+                      post.status === 'published' ? 'bg-blue-500/20 text-blue-400' :
+                      post.status === 'approved' ? 'bg-green-500/20 text-green-400' :
+                      post.status === 'review' ? 'bg-yellow-500/20 text-yellow-400' :
+                      post.status === 'archived' ? 'bg-gray-600/20 text-gray-500' :
+                      'bg-gray-700/30 text-gray-500'
+                    }`}>
+                      {post.status || 'draft'}
+                    </span>
+                  </div>
                   <p className="text-xs text-gray-600 mt-1">{new Date(post.created_at).toLocaleDateString()}</p>
                 </div>
               )) : <p className="text-gray-500 p-4 text-center text-sm">No posts yet</p>}

@@ -137,16 +137,27 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   const navItems = [
     { href: '/dashboard', label: 'Dashboard', icon: '📊' },
+  ];
+
+  const generateItems = [
     { href: '/dashboard/social-post', label: 'Social Post', icon: '📱' },
     { href: '/dashboard/video-script', label: 'Video Script', icon: '🎬' },
     { href: '/dashboard/event-plan', label: 'Event Plan', icon: '📋' },
+    { href: '/dashboard/images', label: 'Images', icon: '🖼️' },
+  ];
+
+  const resourceItems = [
     { href: '/dashboard/brand-guidelines', label: 'Brand Guidelines', icon: '🏷️' },
     { href: '/dashboard/calendar', label: 'Calendar', icon: '📅' },
     { href: '/dashboard/templates', label: 'Templates', icon: '📝' },
     { href: '/dashboard/knowledge', label: 'Knowledge', icon: '📚' },
+    { href: '/dashboard/history', label: 'History', icon: '📁' },
+  ];
+
+  const adminItems = [
     { href: '/dashboard/kanban', label: 'Kanban', icon: '📋' },
     { href: '/dashboard/tokens', label: 'Token Usage', icon: '💰' },
-    { href: '/dashboard/history', label: 'History', icon: '📁' },
+    { href: '/dashboard/accounts', label: 'Accounts', icon: '👥' },
   ];
 
   return (
@@ -163,9 +174,75 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           </div>
         </div>
 
-        <nav className="flex-1 p-4 space-y-1">
+        <nav className="flex-1 p-4 space-y-1 overflow-y-auto">
           {navItems.map(item => {
-            const isActive = pathname === item.href || (item.href !== '/dashboard' && pathname.startsWith(item.href));
+            const isActive = pathname === item.href;
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors ${
+                  isActive
+                    ? 'bg-blue-600/20 text-blue-400 border border-blue-500/20'
+                    : 'text-gray-400 hover:text-white hover:bg-gray-700/50'
+                }`}
+              >
+                <span>{item.icon}</span>
+                <span>{item.label}</span>
+              </Link>
+            );
+          })}
+
+          {/* Generate Section */}
+          <div className="pt-4 pb-1">
+            <p className="px-3 text-[11px] font-semibold uppercase tracking-widest text-gray-500">Generate</p>
+          </div>
+          {generateItems.map(item => {
+            const isActive = pathname === item.href || pathname.startsWith(item.href);
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors ${
+                  isActive
+                    ? 'bg-blue-600/20 text-blue-400 border border-blue-500/20'
+                    : 'text-gray-400 hover:text-white hover:bg-gray-700/50'
+                }`}
+              >
+                <span>{item.icon}</span>
+                <span>{item.label}</span>
+              </Link>
+            );
+          })}
+
+          {/* Resources Section */}
+          <div className="pt-4 pb-1">
+            <p className="px-3 text-[11px] font-semibold uppercase tracking-widest text-gray-500">Resources</p>
+          </div>
+          {resourceItems.map(item => {
+            const isActive = pathname === item.href || pathname.startsWith(item.href);
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors ${
+                  isActive
+                    ? 'bg-blue-600/20 text-blue-400 border border-blue-500/20'
+                    : 'text-gray-400 hover:text-white hover:bg-gray-700/50'
+                }`}
+              >
+                <span>{item.icon}</span>
+                <span>{item.label}</span>
+              </Link>
+            );
+          })}
+
+          {/* Admin Section */}
+          <div className="pt-4 pb-1">
+            <p className="px-3 text-[11px] font-semibold uppercase tracking-widest text-gray-500">Admin</p>
+          </div>
+          {adminItems.map(item => {
+            const isActive = pathname === item.href || pathname.startsWith(item.href);
             return (
               <Link
                 key={item.href}

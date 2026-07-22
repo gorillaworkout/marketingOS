@@ -29,7 +29,7 @@ export async function POST(request: NextRequest) {
     `INSERT INTO knowledge_entries (id, user_id, brief, task_type, selected_output, rejected_outputs, platform, audience, embedding)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
-    knowledgeId, userId, brief, taskType, selectedOutput,
+    knowledgeId, userId, brief, taskType, typeof selectedOutput === "string" ? selectedOutput : JSON.stringify(selectedOutput),
     JSON.stringify(rejectedOutputs || []),
     platform || null, audience || null,
     embedding.length ? JSON.stringify(embedding) : null

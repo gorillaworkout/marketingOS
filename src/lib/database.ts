@@ -116,8 +116,16 @@ async function initializeDb(): Promise<WrappedDb> {
   db.exec(`CREATE TABLE IF NOT EXISTS users (
     id TEXT PRIMARY KEY, username TEXT UNIQUE NOT NULL, name TEXT NOT NULL,
     password_hash TEXT NOT NULL, role TEXT DEFAULT 'member',
+    last_active TEXT,
     created_at TEXT DEFAULT (datetime('now')), updated_at TEXT DEFAULT (datetime('now'))
   )`);
+
+  // Migration: add last_active column if missing (existing databases)
+  try {
+    db.run("ALTER TABLE users ADD COLUMN last_active TEXT");
+  } catch {
+    // Column already exists — ignore
+  }
 
   db.exec(`CREATE TABLE IF NOT EXISTS tasks (
     id TEXT PRIMARY KEY, user_id TEXT NOT NULL,

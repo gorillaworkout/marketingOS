@@ -1,168 +1,137 @@
 import { NextRequest } from 'next/server';
-import { getDb, saveDbToDisk } from '@/lib/database';
 import { getSession } from '@/lib/auth';
 import { rateLimit } from '@/lib/rate-limit';
-import { v4 as uuidv4 } from 'uuid';
+import { exec, ChildProcess } from 'child_process';
 import fs from 'fs';
 import path from 'path';
-
-const OR_API_KEY = process.env.OPENROUTER_API_KEY || '';
-const OR_BASE = 'https://openrouter.ai/api/v1';
-
-function sseEvent(data: Record<string, unknown>) {
-  return `data: ${JSON.stringify(data)}\n\n`;
-}
+import os from 'os';
 
 export async function POST(request: NextRequest) {
   const rl = rateLimit(request);
   if (rl) return rl;
 
   const auth = await getSession(request);
-  if (auth.error) {
-    return new Response(sseEvent({ step: 'error', message: auth.error }), {
-      headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' },
-    });
-  }
-  const userId = auth.userId;
+  if (auth.error) return new Response(JSON.stringify({ error: auth.error }), { status: auth.status });
 
-  const db = await getDb();
-  const { prompt, taskId, type } = await request.json();
-  if (!prompt) {
-    return new Response(sseEvent({ step: 'error', message: 'Prompt is required' }), {
-      headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' },
-    });
-  }
-
-  const models = [
-    { id: 'openai/gpt-5-image', name: 'GPT-5 Image' },
-    { id: 'openai/gpt-5-image-mini', name: 'GPT-5 Image Mini' },
-    { id: 'openai/gpt-5.4-image-2', name: 'GPT-5.4 Image 2' },
-  ];
+  const { prompt, taskId, type, brief } = await request.json();
+  if (!prompt) return new Response(JSON.stringify({ error: 'Prompt is required' }), { status: 400 });
 
   const encoder = new TextEncoder();
-  let timeoutId: ReturnType<typeof setTimeout>;
+  const cwd = process.cwd() || '/Users/bayudarmawan/marketingos';
+  const sopName = generateSOPFileName(brief || prompt, type || 'social-post');
+
+  // Write prompt to temp file
+  const tmpFile = path.join(os.tmpdir(), `codex-prompt-${Date.now()}.txt`);
+  fs.writeFileSync(tmpFile, prompt, 'utf-8');
 
   const stream = new ReadableStream({
-    async start(controller) {
-      const timeoutPromise = new Promise<never>((_, reject) => {
-        timeoutId = setTimeout(() => reject(new Error('Image generation timed out after 120s')), 120_000);
+    start(controller) {
+      let closed = false;
+      let childProc: ChildProcess | null = null;
+      let aborted = false;
+
+      const send = (d: Record<string, unknown>) => {
+        if (!closed) try { controller.enqueue(encoder.encode(`data: ${JSON.stringify(d)}\n\n`)); } catch {}
+      };
+      const done = () => {
+        if (!closed) {
+          closed = true;
+          try { controller.close(); } catch {}
+        }
+      };
+
+      // Handle client disconnect — kill the child process
+      request.signal.addEventListener('abort', () => {
+        aborted = true;
+        if (childProc) {
+          try { childProc.kill('SIGKILL'); } catch {}
+        }
+        cleanup();
+        done();
       });
 
-      try {
-        const generationPromise = (async () => {
-          for (let i = 0; i < models.length; i++) {
-            const model = models[i];
-            const progress = Math.round(((i + 0.5) / models.length) * 80) + 10; // 10-90%
+      send({ step: 'start', progress: 10, message: '🎨 Starting Codex image generation...' });
+      send({ step: 'generating', progress: 30, message: '🤖 Codex generating image (30-90s)...' });
 
-            controller.enqueue(encoder.encode(sseEvent({
-              step: 'trying',
-              progress,
-              message: `🎨 Trying ${model.name}... (model ${i + 1}/${models.length})`,
-            })));
+      try { fs.unlinkSync(path.join(cwd, 'output.png')); } catch {}
 
-            try {
-              const ctrl = new AbortController();
-              const timeout = setTimeout(() => ctrl.abort(), 60000);
+      const script = path.join(cwd, 'scripts', 'codex-image-gen.sh');
+      const cmd = `bash "${script}" "${tmpFile}" "${cwd}"`;
 
-              const response = await fetch(`${OR_BASE}/images/generations`, {
-                method: 'POST',
-                headers: {
-                  'Content-Type': 'application/json',
-                  'Authorization': `Bearer ${OR_API_KEY}`,
-                  'HTTP-Referer': 'https://marketingos.local',
-                  'X-Title': 'MarketingOS',
-                },
-                body: JSON.stringify({ model: model.id, prompt, n: 1, size: '1024x1024' }),
-                signal: ctrl.signal,
-              });
-              clearTimeout(timeout);
+      const cleanup = () => {
+        try { fs.unlinkSync(tmpFile); } catch {}
+      };
 
-              const data = await response.json();
-
-              if (response.ok && data.data?.[0]) {
-                const imageData = data.data[0];
-                let imgResult;
-
-                if (imageData.b64_json) {
-                  imgResult = await saveBase64Image(imageData.b64_json, taskId, type || 'generated');
-                } else if (imageData.url) {
-                  imgResult = await saveImage(imageData.url, taskId, type || 'generated');
-                }
-
-                if (imgResult) {
-                  controller.enqueue(encoder.encode(sseEvent({
-                    step: 'done',
-                    progress: 100,
-                    message: `✅ Image generated with ${model.name}!`,
-                    result: { success: true, ...imgResult, prompt, model: model.id },
-                  })));
-                  return;
-                }
-              }
-            } catch (e: unknown) {
-              const message = e instanceof Error ? e.message : String(e);
-              console.log(`Model ${model.id} failed: ${message}`);
-              controller.enqueue(encoder.encode(sseEvent({
-                step: 'trying',
-                progress: Math.round(((i + 1) / models.length) * 80) + 10,
-                message: `⚠️ ${model.name} failed, trying next...`,
-              })));
-            }
+      childProc = exec(
+        cmd,
+        {
+          cwd,
+          timeout: 300_000, // 5 minutes — generous to avoid race with script's own 240s timeout
+          env: { ...process.env, TERM: 'xterm' } as NodeJS.ProcessEnv,
+          maxBuffer: 10 * 1024 * 1024, // 10MB for stdout
+        },
+        (err, stdout, stderr) => {
+          if (aborted) {
+            cleanup();
+            done();
+            return;
           }
 
-          // All models failed
-          controller.enqueue(encoder.encode(sseEvent({
-            step: 'error',
-            progress: 100,
-            message: 'Image generation failed. Try again or check OpenRouter credits.',
-          })));
-        })();
+          send({ step: 'processing', progress: 80, message: '📦 Processing image...' });
 
-        await Promise.race([generationPromise, timeoutPromise]);
-      } catch (e: unknown) {
-        const message = e instanceof Error ? e.message : 'Image generation failed';
-        console.error('Image generation error:', e);
-        try {
-          controller.enqueue(encoder.encode(sseEvent({ step: 'error', message })));
-        } catch {}
-      } finally {
-        clearTimeout(timeoutId);
-        try { controller.close(); } catch {}
-      }
+          const out = String(stdout || '');
+          const errOut = String(stderr || '');
+
+          if (out.includes('IMAGE_SUCCESS:')) {
+            const m = out.match(/IMAGE_SUCCESS:(\S+)/);
+            const src = m ? path.join(cwd, m[1]) : path.join(cwd, 'output.png');
+            if (fs.existsSync(src)) {
+              const dir = path.join(cwd, 'public', 'outputs', 'images');
+              if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+              const fn = `${sopName}.png`;
+              fs.copyFileSync(src, path.join(dir, fn));
+              try { fs.unlinkSync(src); } catch {}
+              send({
+                step: 'done', progress: 100,
+                message: '✅ Image generated!',
+                result: { success: true, imageUrl: `/outputs/images/${fn}`, fileName: fn, sopName, prompt, model: 'gpt-image-2 (Codex)' },
+              });
+            } else {
+              send({ step: 'error', progress: 0, message: '❌ Image file not found (IMAGE_SUCCESS reported but file missing)' });
+            }
+          } else if (out.includes('IMAGE_FAILED:')) {
+            const m = out.match(/IMAGE_FAILED:(.+)/);
+            const reason = m ? m[1].trim() : 'unknown error';
+            send({ step: 'error', progress: 0, message: `❌ Image generation failed: ${reason}` });
+            console.error(`[generate-image] IMAGE_FAILED: ${reason} | stderr: ${errOut.slice(0, 500)}`);
+          } else {
+            // Script exited without IMAGE_SUCCESS or IMAGE_FAILED — include stderr for debugging
+            const errorDetail = err?.message || 'unknown error';
+            const stderrSnippet = errOut.slice(0, 500);
+            send({ step: 'error', progress: 0, message: `❌ Image generation failed: ${errorDetail}` });
+            console.error(`[generate-image] Script crashed: ${errorDetail} | stdout: ${out.slice(0, 200)} | stderr: ${stderrSnippet}`);
+          }
+          cleanup();
+          done();
+        }
+      );
     },
   });
 
-  return new Response(stream, {
-    headers: {
-      'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache',
-      Connection: 'keep-alive',
-    },
-  });
+  return new Response(stream, { headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache' } });
 }
 
-async function saveBase64Image(base64: string, taskId: string | null, type: string) {
-  const outputDir = path.join(process.cwd(), 'public', 'outputs', 'images');
-  if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true });
-
-  const fileName = `image-${Date.now()}.png`;
-  const filePath = path.join(outputDir, fileName);
-
-  const buffer = Buffer.from(base64, 'base64');
-  fs.writeFileSync(filePath, buffer);
-
-  return { imageUrl: `/outputs/images/${fileName}`, localPath: filePath, fileName };
-}
-
-async function saveImage(imageUrl: string, taskId: string | null, type: string) {
-  const outputDir = path.join(process.cwd(), 'public', 'outputs', 'images');
-  if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true });
-
-  const fileName = `image-${Date.now()}.png`;
-  const filePath = path.join(outputDir, fileName);
-  const response = await fetch(imageUrl);
-  const buffer = Buffer.from(await response.arrayBuffer());
-  fs.writeFileSync(filePath, buffer);
-
-  return { imageUrl: `/outputs/images/${fileName}`, localPath: filePath, fileName };
+function generateSOPFileName(brief: string, type: string): string {
+  const cleaned = brief.replace(/[^a-zA-Z0-9\s]/g, '').trim().split(/\s+/).slice(0, 4).map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join('');
+  const contentName = cleaned || 'Content';
+  const typeMap: Record<string, string> = { 'social-post': 'SocialPost', 'video-script': 'VideoScript', 'event-plan': 'EventPlan', 'generated': 'Image' };
+  const fileType = typeMap[type] || 'Image';
+  const date = new Date().toISOString().split('T')[0].replace(/-/g, '');
+  const dir = path.join(process.cwd(), 'public', 'outputs', 'images');
+  const baseName = `DUPOIN_${contentName}_${fileType}`;
+  let version = 1;
+  if (fs.existsSync(dir)) {
+    version = fs.readdirSync(dir).filter(f => f.startsWith(baseName)).length + 1;
+  }
+  return `DUPOIN_${contentName}_${fileType}_V${version}_${date}`;
 }

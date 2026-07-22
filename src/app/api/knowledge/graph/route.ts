@@ -28,20 +28,24 @@ export async function GET(request: NextRequest) {
 
   const nodeIds = new Set(entries.map((e) => e.id as string));
 
-  // Fetch edges where both endpoints are in our node set
-  const allEdges = db.prepare(
-    `SELECT source_id, target_id, weight, relationship FROM knowledge_edges
-     WHERE source_id IN (${entries.map(() => '?').join(',')}) OR target_id IN (${entries.map(() => '?').join(',')})`
-  ).all(...entries.map((e) => e.id), ...entries.map((e) => e.id)) as Record<string, unknown>[];
+  // Fetch edges where both endpoints are in our node set (guard against empty)
+  let edges: { source: string; target: string; similarity: number; type: string }[] = [];
+  if (entries.length > 0) {
+    const placeholders = entries.map(() => '?').join(',');
+    const allEdges = db.prepare(
+      `SELECT source_id, target_id, weight, relationship FROM knowledge_edges
+       WHERE source_id IN (${placeholders}) OR target_id IN (${placeholders})`
+    ).all(...entries.map((e) => e.id), ...entries.map((e) => e.id)) as Record<string, unknown>[];
 
-  const edges = allEdges
-    .filter((e) => nodeIds.has(e.source_id as string) && nodeIds.has(e.target_id as string))
-    .map((e) => ({
-      source: e.source_id as string,
-      target: e.target_id as string,
-      similarity: e.weight as number,
-      type: e.relationship as string,
-    }));
+    edges = allEdges
+      .filter((e) => nodeIds.has(e.source_id as string) && nodeIds.has(e.target_id as string))
+      .map((e) => ({
+        source: e.source_id as string,
+        target: e.target_id as string,
+        similarity: e.weight as number,
+        type: e.relationship as string,
+      }));
+  }
 
   // Compute cluster summaries from entries
   const clusterMap = new Map<string, number>();
