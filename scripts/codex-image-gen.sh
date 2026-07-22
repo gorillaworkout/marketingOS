@@ -62,12 +62,38 @@ INST_EOF
 # Write prompt safely (avoid shell interpretation)
 printf '%s\n' "$PROMPT" >> "$INSTRUCTION_FILE"
 
+# Resolve Codex on both macOS development machines and Linux VPS hosts.
+CODEX_BIN="${CODEX_BIN:-}"
+if [ -z "$CODEX_BIN" ]; then
+  CODEX_BIN="$(command -v codex 2>/dev/null || true)"
+fi
+if [ -z "$CODEX_BIN" ] && [ -x "$HOME/.npm-global/bin/codex" ]; then
+  CODEX_BIN="$HOME/.npm-global/bin/codex"
+fi
+if [ -z "$CODEX_BIN" ] && [ -x "/opt/homebrew/bin/codex" ]; then
+  CODEX_BIN="/opt/homebrew/bin/codex"
+fi
+if [ -z "$CODEX_BIN" ]; then
+  echo "IMAGE_FAILED:Codex CLI not found. Set CODEX_BIN or install Codex."
+  exit 1
+fi
+
+# Cross-platform mtime + path listing (GNU stat on Linux, BSD stat on macOS).
+list_image_files_by_mtime() {
+  if stat -c '%Y %n' /dev/null >/dev/null 2>&1; then
+    find "$1" -name "*.png" -type f -exec stat -c '%Y %n' {} \; 2>/dev/null
+  else
+    find "$1" -name "*.png" -type f -exec stat -f '%m %N' {} \; 2>/dev/null
+  fi
+}
+
 # Build the codex command - use stdin to avoid escaping issues
 # Use --dangerously-bypass-approvals-and-sandbox to avoid interactive prompts
 # Escape single quotes in variables for safe shell embedding
 CWD_SAFE=$(printf '%s' "$CWD" | sed "s/'/'\\\\''/g")
 INST_SAFE=$(printf '%s' "$INSTRUCTION_FILE" | sed "s/'/'\\\\''/g")
-CODEX_CMD="cd '$CWD_SAFE' && /opt/homebrew/bin/codex exec - -m gpt-5.6-terra --sandbox danger-full-access --dangerously-bypass-approvals-and-sandbox --skip-git-repo-check < '$INST_SAFE'; echo '$MARKER'"
+CODEX_SAFE=$(printf '%s' "$CODEX_BIN" | sed "s/'/'\\\\''/g")
+CODEX_CMD="cd '$CWD_SAFE' && '$CODEX_SAFE' exec - -m gpt-5.6-terra --sandbox danger-full-access --dangerously-bypass-approvals-and-sandbox --skip-git-repo-check < '$INST_SAFE'; echo '$MARKER'"
 
 # Start tmux session with Codex
 tmux new-session -d -s "$SESSION" -x 200 -y 50 "$CODEX_CMD"
@@ -102,7 +128,7 @@ find_newest_image() {
         break
       fi
     fi
-  done < <(find "$codex_dir" -name "*.png" -type f -exec stat -f '%m %N' {} \; 2>/dev/null | sort -rn)
+  done < <(list_image_files_by_mtime "$codex_dir" | sort -rn)
   newest="$best_path"
 
   if [ -n "$newest" ] && [ -f "$newest" ]; then
