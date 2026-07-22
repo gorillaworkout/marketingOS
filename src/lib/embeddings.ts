@@ -5,7 +5,7 @@
  * 3. Hash-based embedding (always works, lower quality)
  */
 
-import { getDb } from './database';
+import { queryOne, queryAll, execute } from './database';
 import { v4 as uuidv4 } from 'uuid';
 
 const API_BASE = process.env.OPENAI_BASE_URL || 'https://openrouter.ai/api/v1';
@@ -177,20 +177,11 @@ export async function findSimilarEntries(
   text: string,
   limit: number = 5
 ): Promise<KnowledgeEntry[]> {
-  const db = await getDb();
   const queryEmbedding = await getEmbedding(text);
   const queryStr = JSON.stringify(queryEmbedding);
 
   // Fetch all entries with embeddings
-  const stmt = db.prepare(
-    'SELECT * FROM knowledge_entries WHERE embedding IS NOT NULL'
-  );
-  stmt.bind([]);
-  const entries: KnowledgeEntry[] = [];
-  while (stmt.step()) {
-    entries.push(stmt.getAsObject() as unknown as KnowledgeEntry);
-  }
-  stmt.free();
+  const entries = await queryAll<KnowledgeEntry>('SELECT * FROM knowledge_entries WHERE embedding IS NOT NULL');
 
   if (entries.length === 0) return [];
 
@@ -218,17 +209,8 @@ export async function findSimilarEntries(
  * Finds the most similar existing entries and creates edges.
  */
 export async function buildConnections(entryId: string): Promise<void> {
-  const db = await getDb();
-
-  // Get the entry
-  const entryStmt = db.prepare('SELECT * FROM knowledge_entries WHERE id = ?');
-  entryStmt.bind([entryId]);
-  if (!entryStmt.step()) {
-    entryStmt.free();
-    return;
-  }
-  const entry = entryStmt.getAsObject() as unknown as KnowledgeEntry;
-  entryStmt.free();
+  const entry = await queryOne<KnowledgeEntry>('SELECT * FROM knowledge_entries WHERE id = ?', [entryId]);
+  if (!entry) return;
 
   if (!entry.embedding) return;
 
@@ -248,14 +230,7 @@ export async function buildConnections(entryId: string): Promise<void> {
       if (score < SIMILARITY_THRESHOLD) continue;
 
       // Check if edge already exists (either direction)
-      const existingStmt = db.prepare(
-        `SELECT id FROM knowledge_edges 
-         WHERE (source_id = ? AND target_id = ?) 
-            OR (source_id = ? AND target_id = ?)`
-      );
-      existingStmt.bind([entryId, similarEntry.id, similarEntry.id, entryId]);
-      const exists = existingStmt.step();
-      existingStmt.free();
+      const exists = await queryOne(`SELECT id FROM knowledge_edges WHERE (source_id = ? AND target_id = ?) OR (source_id = ? AND target_id = ?)`, [entryId, similarEntry.id, similarEntry.id, entryId]);
 
       if (exists) continue;
 
@@ -265,20 +240,10 @@ export async function buildConnections(entryId: string): Promise<void> {
         : 'cross_task_similarity';
 
       // Edge: entry → similar
-      db.prepare(
-        'INSERT INTO knowledge_edges (id, source_id, target_id, relationship, weight, metadata) VALUES (?, ?, ?, ?, ?, ?)'
-      ).run(
-        uuidv4(), entryId, similarEntry.id, relationship, score,
-        JSON.stringify({ auto_generated: true })
-      );
+      await execute('INSERT INTO knowledge_edges (id, source_id, target_id, relationship, weight, metadata) VALUES (?, ?, ?, ?, ?, ?)', [uuidv4(), entryId, similarEntry.id, relationship, score, JSON.stringify({ auto_generated: true })]);
 
       // Edge: similar → entry
-      db.prepare(
-        'INSERT INTO knowledge_edges (id, source_id, target_id, relationship, weight, metadata) VALUES (?, ?, ?, ?, ?, ?)'
-      ).run(
-        uuidv4(), similarEntry.id, entryId, relationship, score,
-        JSON.stringify({ auto_generated: true })
-      );
+      await execute('INSERT INTO knowledge_edges (id, source_id, target_id, relationship, weight, metadata) VALUES (?, ?, ?, ?, ?, ?)', [uuidv4(), similarEntry.id, entryId, relationship, score, JSON.stringify({ auto_generated: true })]);
     } catch {
       // Skip entries with invalid embeddings
     }

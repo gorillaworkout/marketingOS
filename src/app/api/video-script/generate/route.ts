@@ -1,5 +1,5 @@
 import { NextRequest } from 'next/server';
-import { getDb, saveDbToDisk } from '@/lib/database';
+import { queryOne, queryAll, execute } from '@/lib/database';
 import { getSession } from '@/lib/auth';
 import { rateLimit } from '@/lib/rate-limit';
 import { generateContent, getSmartSystemPrompt, fetchContextMemory, fetchStyleContext, getUserPreferredModel, type BrandGuidelines } from '@/lib/openai';
@@ -65,14 +65,13 @@ export async function POST(request: NextRequest) {
   }
   const userId = auth.userId!;
 
-  const db = await getDb();
   const body = await request.json();
   const { mode = 'preview' } = body;
 
   if (mode === 'preview') {
-    return handlePreview(body, userId, db);
+    return handlePreview(body, userId);
   } else if (mode === 'full') {
-    return handleFull(body, userId, db);
+    return handleFull(body, userId);
   } else {
     return new Response(sseEvent({ step: 'error', message: `Unknown mode: ${mode}` }), {
       headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' },
@@ -87,7 +86,6 @@ export async function POST(request: NextRequest) {
 async function handlePreview(
   body: Record<string, unknown>,
   userId: string,
-  db: ReturnType<typeof getDb> extends Promise<infer T> ? T : never
 ) {
   const { event, platform, duration, targetAudience, references, brandGuidelineId } = body as {
     event: string;
@@ -109,9 +107,7 @@ async function handlePreview(
   let brandGuidelines: BrandGuidelines | undefined;
   if (brandGuidelineId) {
     try {
-      const row = db.prepare(
-        'SELECT id, brand_name, tone_of_voice, target_market, key_messages, do_list, dont_list, examples FROM brand_guidelines WHERE id = ? AND user_id = ?'
-      ).get(brandGuidelineId, userId) as Record<string, unknown> | undefined;
+      const row = await queryOne('SELECT id, brand_name, tone_of_voice, target_market, key_messages, do_list, dont_list, examples FROM brand_guidelines WHERE id = ? AND user_id = ?', [brandGuidelineId, userId]) as Record<string, unknown> | undefined;
       if (row) {
         brandGuidelines = {
           id: row.id as string,
@@ -294,7 +290,6 @@ Output JSON format with: { "hook": "the opening hook that stops the scroll", "ho
 async function handleFull(
   body: Record<string, unknown>,
   userId: string,
-  db: ReturnType<typeof getDb> extends Promise<infer T> ? T : never
 ) {
   const { event, platform, duration, targetAudience, references, brandGuidelineId, selectedOption, editedPrompt, style } = body as {
     event: string;
@@ -319,9 +314,7 @@ async function handleFull(
   let brandGuidelines: BrandGuidelines | undefined;
   if (brandGuidelineId) {
     try {
-      const row = db.prepare(
-        'SELECT id, brand_name, tone_of_voice, target_market, key_messages, do_list, dont_list, examples FROM brand_guidelines WHERE id = ? AND user_id = ?'
-      ).get(brandGuidelineId, userId) as Record<string, unknown> | undefined;
+      const row = await queryOne('SELECT id, brand_name, tone_of_voice, target_market, key_messages, do_list, dont_list, examples FROM brand_guidelines WHERE id = ? AND user_id = ?', [brandGuidelineId, userId]) as Record<string, unknown> | undefined;
       if (row) {
         brandGuidelines = {
           id: row.id as string,
@@ -345,11 +338,11 @@ async function handleFull(
   // Fetch best examples
   let bestExamples = '';
   try {
-    const examplesResult = db.prepare(`
+    const examplesResult = await queryAll(`
       SELECT output_data, brief FROM tasks
       WHERE type = 'video-script' AND rating >= 4 AND output_data IS NOT NULL
       ORDER BY rating DESC, created_at DESC LIMIT 3
-    `).all() as { output_data: string; brief: string }[];
+    `, []) as { output_data: string; brief: string }[];
     if (examplesResult.length) {
       bestExamples = '\n\n📚 Best examples from past (highly rated):';
       for (const v of examplesResult) {
@@ -470,10 +463,7 @@ The fullScript must be the complete, detailed script with scene descriptions, di
           fs.writeFileSync(path.join(outputDir, fileName), JSON.stringify(outputData, null, 2));
 
           // Save to DB
-          db.prepare('INSERT INTO tasks (id, user_id, type, title, brief, status, output_data) VALUES (?, ?, ?, ?, ?, ?, ?)').run(
-            taskId, userId, 'video-script', `Video Script: ${event.substring(0, 50)}`, event, 'completed', JSON.stringify(outputData)
-          );
-          saveDbToDisk();
+          await execute('INSERT INTO tasks (id, user_id, type, title, brief, status, output_data) VALUES (?, ?, ?, ?, ?, ?, ?)', [taskId, userId, 'video-script', `Video Script: ${event.substring(0, 50)}`, event, 'completed', JSON.stringify(outputData)]);
 
           controller.enqueue(encoder.encode(sseEvent({
             step: 'done',

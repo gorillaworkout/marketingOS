@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getDb, saveDbToDisk } from '@/lib/database';
+import { queryOne, queryAll, execute } from '@/lib/database';
 import { getSession } from '@/lib/auth';
 import { getEmbedding, cosineSimilarity } from '@/lib/embeddings';
 import { v4 as uuidv4 } from 'uuid';
@@ -14,8 +14,6 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'brief, taskType, and selectedOutput required' }, { status: 400 });
   }
 
-  const db = await getDb();
-
   // Generate embedding for the selected output
   let embedding: number[] = [];
   try {
@@ -25,31 +23,20 @@ export async function POST(request: NextRequest) {
   }
 
   const knowledgeId = uuidv4();
-  db.prepare(
-    `INSERT INTO knowledge_entries (id, user_id, brief, task_type, selected_output, rejected_outputs, platform, audience, embedding)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run(
-    knowledgeId, userId, brief, taskType, typeof selectedOutput === "string" ? selectedOutput : JSON.stringify(selectedOutput),
-    JSON.stringify(rejectedOutputs || []),
-    platform || null, audience || null,
-    embedding.length ? JSON.stringify(embedding) : null
-  );
+  await execute(`INSERT INTO knowledge_entries (id, user_id, brief, task_type, selected_output, rejected_outputs, platform, audience, embedding)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, [knowledgeId, userId, brief, taskType, typeof selectedOutput === "string" ? selectedOutput : JSON.stringify(selectedOutput), JSON.stringify(rejectedOutputs || []), platform || null, audience || null, embedding.length ? JSON.stringify(embedding) : null]);
 
   // Auto-link with similar entries
   let connectionsCount = 0;
   if (embedding.length) {
-    const existing = db.prepare(
-      `SELECT id, embedding FROM knowledge_entries WHERE user_id = ? AND id != ? AND embedding IS NOT NULL`
-    ).all(userId, knowledgeId) as Record<string, unknown>[];
+    const existing = await queryAll(`SELECT id, embedding FROM knowledge_entries WHERE user_id = ? AND id != ? AND embedding IS NOT NULL`, [userId, knowledgeId]) as Record<string, unknown>[];
 
     for (const row of existing) {
       try {
         const otherEmb = JSON.parse(row.embedding as string) as number[];
         const sim = cosineSimilarity(embedding, otherEmb);
         if (sim > 0.75) {
-          db.prepare(
-            `INSERT INTO knowledge_edges (id, source_id, target_id, relationship, weight) VALUES (?, ?, ?, ?, ?)`
-          ).run(uuidv4(), knowledgeId, row.id as string, 'cosine_similarity', sim);
+          await execute(`INSERT INTO knowledge_edges (id, source_id, target_id, relationship, weight) VALUES (?, ?, ?, ?, ?)`, [uuidv4(), knowledgeId, row.id as string, 'cosine_similarity', sim]);
           connectionsCount++;
         }
       } catch { /* skip malformed embeddings */ }
@@ -57,28 +44,20 @@ export async function POST(request: NextRequest) {
   }
 
   // Update user style preferences
-  const prefRow = db.prepare(
-    `SELECT total_selections FROM user_style_preferences WHERE user_id = ?`
-  ).get(userId) as Record<string, unknown> | undefined;
+  const prefRow = await queryOne(`SELECT total_selections FROM user_style_preferences WHERE user_id = ?`, [userId]) as Record<string, unknown> | undefined;
 
   const totalSelections = ((prefRow?.total_selections as number) || 0) + 1;
 
   if (prefRow) {
-    db.prepare(
-      `UPDATE user_style_preferences SET total_selections = ?, updated_at = datetime('now') WHERE user_id = ?`
-    ).run(totalSelections, userId);
+    await execute(`UPDATE user_style_preferences SET total_selections = ?, updated_at = CURRENT_TIMESTAMP WHERE user_id = ?`, [totalSelections, userId]);
   } else {
-    db.prepare(
-      `INSERT INTO user_style_preferences (id, user_id, total_selections) VALUES (?, ?, ?)`
-    ).run(uuidv4(), userId, totalSelections);
+    await execute(`INSERT INTO user_style_preferences (id, user_id, total_selections) VALUES (?, ?, ?)`, [uuidv4(), userId, totalSelections]);
   }
 
   // Auto-analyze every 5 selections
   if (totalSelections % 5 === 0) {
     try {
-      const recent = db.prepare(
-        `SELECT selected_output, task_type, platform FROM knowledge_entries WHERE user_id = ? ORDER BY created_at DESC LIMIT 20`
-      ).all(userId) as Record<string, unknown>[];
+      const recent = await queryAll(`SELECT selected_output, task_type, platform FROM knowledge_entries WHERE user_id = ? ORDER BY created_at DESC LIMIT 20`, [userId]) as Record<string, unknown>[];
 
       const samples = recent.map((r, i) => `${i + 1}. [${r.task_type}/${r.platform}] ${r.selected_output}`).join('\n');
 
@@ -93,14 +72,11 @@ export async function POST(request: NextRequest) {
       );
 
       const parsed = JSON.parse(analysis);
-      db.prepare(
-        `UPDATE user_style_preferences SET style_summary = ?, tone_preferences = ?, hook_preferences = ?, last_analyzed_at = datetime('now'), updated_at = datetime('now') WHERE user_id = ?`
-      ).run(parsed.styleSummary, JSON.stringify(parsed.tonePreferences), JSON.stringify(parsed.hookPreferences), userId);
+      await execute(`UPDATE user_style_preferences SET style_summary = ?, tone_preferences = ?, hook_preferences = ?, last_analyzed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE user_id = ?`, [parsed.styleSummary, JSON.stringify(parsed.tonePreferences), JSON.stringify(parsed.hookPreferences), userId]);
     } catch (e) {
       console.warn('Auto style analysis failed:', e);
     }
   }
 
-  saveDbToDisk();
-  return NextResponse.json({ success: true, knowledgeId, connectionsCount });
+    return NextResponse.json({ success: true, knowledgeId, connectionsCount });
 }

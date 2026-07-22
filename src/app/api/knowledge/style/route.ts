@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getDb, saveDbToDisk } from '@/lib/database';
+import { queryOne, queryAll, execute } from '@/lib/database';
 import { getSession } from '@/lib/auth';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -9,31 +9,22 @@ export async function GET(request: NextRequest) {
   const userId = auth.userId;
 
   const requestedUserId = request.nextUrl.searchParams.get('userId') || userId;
-  const db = await getDb();
 
   // User style profile
-  const userProfile = db.prepare(
-    `SELECT style_summary, tone_preferences, hook_preferences, total_selections, last_analyzed_at
-     FROM user_style_preferences WHERE user_id = ?`
-  ).get(requestedUserId) as Record<string, unknown> | undefined;
+  const userProfile = await queryOne(`SELECT style_summary, tone_preferences, hook_preferences, total_selections, last_analyzed_at
+     FROM user_style_preferences WHERE user_id = ?`, [requestedUserId]) as Record<string, unknown> | undefined;
 
   // Global team style
-  const teamProfile = db.prepare(
-    `SELECT team_summary, top_examples, cluster_distribution, last_analyzed_at
-     FROM global_style_profile WHERE task_type = 'global'`
-  ).get() as Record<string, unknown> | undefined;
+  const teamProfile = await queryOne(`SELECT team_summary, top_examples, cluster_distribution, last_analyzed_at
+     FROM global_style_profile WHERE task_type = 'global'`, []) as Record<string, unknown> | undefined;
 
   // Style clusters (K-Means centroids)
-  const styleClusters = db.prepare(
-    `SELECT name, description, entry_count, example_ids, last_analyzed_at
-     FROM style_clusters ORDER BY name`
-  ).all() as Record<string, unknown>[];
+  const styleClusters = await queryAll(`SELECT name, description, entry_count, example_ids, last_analyzed_at
+     FROM style_clusters ORDER BY name`, []) as Record<string, unknown>[];
 
   // Recent selections
-  const recentSelections = db.prepare(
-    `SELECT id, brief, task_type, platform, selected_output, created_at
-     FROM knowledge_entries WHERE user_id = ? ORDER BY created_at DESC LIMIT 10`
-  ).all(requestedUserId) as Record<string, unknown>[];
+  const recentSelections = await queryAll(`SELECT id, brief, task_type, platform, selected_output, created_at
+     FROM knowledge_entries WHERE user_id = ? ORDER BY created_at DESC LIMIT 10`, [requestedUserId]) as Record<string, unknown>[];
 
   return NextResponse.json({
     userProfile: userProfile ? {
@@ -69,20 +60,14 @@ export async function PUT(request: NextRequest) {
   const userId = auth.userId;
 
   const { styleSummary, tonePreferences, hookPreferences } = await request.json();
-  const db = await getDb();
 
-  const existing = db.prepare(`SELECT id FROM user_style_preferences WHERE user_id = ?`).get(userId);
+  const existing = await queryOne(`SELECT id FROM user_style_preferences WHERE user_id = ?`, [userId]);
 
   if (existing) {
-    db.prepare(
-      `UPDATE user_style_preferences SET style_summary = ?, tone_preferences = ?, hook_preferences = ?, updated_at = datetime('now') WHERE user_id = ?`
-    ).run(styleSummary || null, JSON.stringify(tonePreferences || {}), JSON.stringify(hookPreferences || {}), userId);
+    await execute(`UPDATE user_style_preferences SET style_summary = ?, tone_preferences = ?, hook_preferences = ?, updated_at = CURRENT_TIMESTAMP WHERE user_id = ?`, [styleSummary || null, JSON.stringify(tonePreferences || {}), JSON.stringify(hookPreferences || {}), userId]);
   } else {
-    db.prepare(
-      `INSERT INTO user_style_preferences (id, user_id, style_summary, tone_preferences, hook_preferences) VALUES (?, ?, ?, ?, ?)`
-    ).run(uuidv4(), userId, styleSummary || null, JSON.stringify(tonePreferences || {}), JSON.stringify(hookPreferences || {}));
+    await execute(`INSERT INTO user_style_preferences (id, user_id, style_summary, tone_preferences, hook_preferences) VALUES (?, ?, ?, ?, ?)`, [uuidv4(), userId, styleSummary || null, JSON.stringify(tonePreferences || {}), JSON.stringify(hookPreferences || {})]);
   }
 
-  saveDbToDisk();
-  return NextResponse.json({ success: true });
+    return NextResponse.json({ success: true });
 }

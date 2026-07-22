@@ -1,5 +1,5 @@
 import { NextRequest } from 'next/server';
-import { getDb, saveDbToDisk } from '@/lib/database';
+import { queryOne, queryAll, execute } from '@/lib/database';
 import { getSession } from '@/lib/auth';
 import { rateLimit } from '@/lib/rate-limit';
 import { generateContent, generateMultiStep, getSmartSystemPrompt, fetchContextMemory, fetchStyleContext, getUserPreferredModel, runQC, generateDupoinFileName, type BrandGuidelines, type QCResult } from '@/lib/openai';
@@ -64,8 +64,6 @@ export async function POST(request: NextRequest) {
     });
   }
   const userId = auth.userId!;
-
-  const db = await getDb();
   const { brief, platform, targetAudience, goal, brandGuidelineId } = await request.json();
   if (!brief) {
     return new Response(sseEvent({ step: 'error', message: 'Brief is required' }), {
@@ -79,9 +77,7 @@ export async function POST(request: NextRequest) {
   let brandGuidelines: BrandGuidelines | undefined;
   if (brandGuidelineId) {
     try {
-      const row = db.prepare(
-        'SELECT id, brand_name, tone_of_voice, target_market, key_messages, do_list, dont_list, examples FROM brand_guidelines WHERE id = ? AND user_id = ?'
-      ).get(brandGuidelineId, userId) as Record<string, unknown> | undefined;
+      const row = await queryOne('SELECT id, brand_name, tone_of_voice, target_market, key_messages, do_list, dont_list, examples FROM brand_guidelines WHERE id = ? AND user_id = ?', [brandGuidelineId, userId]) as Record<string, unknown> | undefined;
       if (row) {
         brandGuidelines = {
           id: row.id as string,
@@ -108,11 +104,11 @@ export async function POST(request: NextRequest) {
   // Fetch best examples for auto-learning
   let bestExamples = '';
   try {
-    const examplesResult = db.prepare(`
+    const examplesResult = await queryAll(`
       SELECT output_data, brief FROM tasks
       WHERE type = 'social-post' AND rating >= 4 AND output_data IS NOT NULL
       ORDER BY rating DESC, created_at DESC LIMIT 3
-    `).all() as { output_data: string; brief: string }[];
+    `, []) as { output_data: string; brief: string }[];
     if (examplesResult.length) {
       bestExamples = '\n\n📚 Best examples from past (highly rated):';
       for (const v of examplesResult) {
@@ -150,11 +146,11 @@ export async function POST(request: NextRequest) {
 
           let researchPosts: Array<{ brief: string; style: string; rating: number; caption: string }> = [];
           try {
-            const pastTasks = db.prepare(`
+            const pastTasks = await queryAll(`
               SELECT output_data, brief, rating FROM tasks
               WHERE type = 'social-post' AND status = 'completed' AND output_data IS NOT NULL
               ORDER BY created_at DESC LIMIT 10
-            `).all() as { output_data: string; brief: string; rating: number | null }[];
+            `, []) as { output_data: string; brief: string; rating: number | null }[];
 
             // Filter for similar posts (brief contains similar words) — simple keyword matching
             const briefWords = brief.toLowerCase().split(/\s+/).filter((w: string) => w.length > 3);
@@ -335,10 +331,7 @@ Tulis deskripsi visual saja. JANGAN tulis hashtag, caption, atau teks apapun di 
           fs.writeFileSync(path.join(outputDir, fileName), JSON.stringify(outputData, null, 2));
 
           // Save to DB (store first option as captionData for backward compat)
-          db.prepare('INSERT INTO tasks (id, user_id, type, title, brief, status, output_data) VALUES (?, ?, ?, ?, ?, ?, ?)').run(
-            taskId, userId, 'social-post', `Social Post: ${brief.substring(0, 50)}`, brief, 'draft', JSON.stringify({ ...outputData, qcResults, dupoinFileName, researchPosts })
-          );
-          saveDbToDisk();
+          await execute('INSERT INTO tasks (id, user_id, type, title, brief, status, output_data) VALUES (?, ?, ?, ?, ?, ?, ?)', [taskId, userId, 'social-post', `Social Post: ${brief.substring(0, 50)}`, brief, 'draft', JSON.stringify({ ...outputData, qcResults, dupoinFileName, researchPosts })]);
 
           // Send final result
           controller.enqueue(encoder.encode(sseEvent({

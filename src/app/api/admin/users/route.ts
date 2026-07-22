@@ -1,15 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import bcrypt from 'bcryptjs';
 import { v4 as uuidv4 } from 'uuid';
-import { getDb, saveDbToDisk } from '@/lib/database';
+import { queryOne, queryAll, execute } from '@/lib/database';
 import { getSession, AuthResult, AuthError } from '@/lib/auth';
 
 async function requireAdmin(request: NextRequest): Promise<{ userId: string } | NextResponse> {
   const auth = await getSession(request);
   if ('status' in auth) return NextResponse.json({ error: auth.error, status: auth.status }, { status: auth.status });
-
-  const db = await getDb();
-  const user = db.prepare('SELECT role FROM users WHERE id = ?').get((auth as AuthResult).userId) as { role: string } | undefined;
+  const user = await queryOne('SELECT role FROM users WHERE id = ?', [(auth as AuthResult).userId]) as { role: string } | undefined;
   if (!user || user.role !== 'admin') {
     return NextResponse.json({ error: 'Forbidden: admin only' }, { status: 403 });
   }
@@ -21,11 +19,7 @@ async function requireAdmin(request: NextRequest): Promise<{ userId: string } | 
 export async function GET(request: NextRequest) {
   const auth = await requireAdmin(request);
   if (auth instanceof NextResponse) return auth;
-
-  const db = await getDb();
-  const rows = db.prepare(
-    "SELECT id, username, name, role, last_active, created_at, updated_at FROM users ORDER BY created_at DESC"
-  ).all() as Record<string, unknown>[];
+  const rows = await queryAll("SELECT id, username, name, role, last_active, created_at, updated_at FROM users ORDER BY created_at DESC", []) as Record<string, unknown>[];
 
   return NextResponse.json({ users: rows });
 }
@@ -45,10 +39,8 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'role must be admin or member' }, { status: 400 });
   }
 
-  const db = await getDb();
-
   // Check for duplicate username
-  const existing = db.prepare('SELECT id FROM users WHERE username = ?').get(username) as { id: string } | undefined;
+  const existing = await queryOne('SELECT id FROM users WHERE username = ?', [username]) as { id: string } | undefined;
   if (existing) {
     return NextResponse.json({ error: 'Username already exists' }, { status: 409 });
   }
@@ -57,15 +49,9 @@ export async function POST(request: NextRequest) {
   const id = uuidv4();
   const finalRole = role || 'member';
 
-  db.run(
-    'INSERT INTO users (id, username, name, password_hash, role) VALUES (?, ?, ?, ?, ?)',
-    [id, username, name, hash, finalRole]
-  );
-  saveDbToDisk();
+  await execute('INSERT INTO users (id, username, name, password_hash, role) VALUES (?, ?, ?, ?, ?)', [id, username, name, hash, finalRole]);
 
-  const created = db.prepare(
-    'SELECT id, username, name, role, last_active, created_at FROM users WHERE id = ?'
-  ).get(id) as Record<string, unknown>;
+  const created = await queryOne('SELECT id, username, name, role, last_active, created_at FROM users WHERE id = ?', [id]) as Record<string, unknown>;
 
   return NextResponse.json({ user: created }, { status: 201 });
 }
@@ -81,16 +67,14 @@ export async function PUT(request: NextRequest) {
     return NextResponse.json({ error: 'User id is required' }, { status: 400 });
   }
 
-  const db = await getDb();
-
-  const existing = db.prepare('SELECT * FROM users WHERE id = ?').get(id) as Record<string, unknown> | undefined;
+  const existing = await queryOne('SELECT * FROM users WHERE id = ?', [id]) as Record<string, unknown> | undefined;
   if (!existing) {
     return NextResponse.json({ error: 'User not found' }, { status: 404 });
   }
 
   // Check new username isn't taken by another user
   if (username && username !== existing.username) {
-    const duplicate = db.prepare('SELECT id FROM users WHERE username = ? AND id != ?').get(username, id) as { id: string } | undefined;
+    const duplicate = await queryOne('SELECT id FROM users WHERE username = ? AND id != ?', [username, id]) as { id: string } | undefined;
     if (duplicate) {
       return NextResponse.json({ error: 'Username already taken' }, { status: 409 });
     }
@@ -113,15 +97,12 @@ export async function PUT(request: NextRequest) {
   }
 
   if (updates.length > 0) {
-    updates.push("updated_at = datetime('now')");
+    updates.push("updated_at = CURRENT_TIMESTAMP");
     params.push(id);
-    db.run(`UPDATE users SET ${updates.join(', ')} WHERE id = ?`, params);
-    saveDbToDisk();
-  }
+    await execute(`UPDATE users SET ${updates.join(', ')} WHERE id = ?`, params);
+      }
 
-  const updated = db.prepare(
-    'SELECT id, username, name, role, last_active, created_at, updated_at FROM users WHERE id = ?'
-  ).get(id) as Record<string, unknown>;
+  const updated = await queryOne('SELECT id, username, name, role, last_active, created_at, updated_at FROM users WHERE id = ?', [id]) as Record<string, unknown>;
 
   return NextResponse.json({ user: updated });
 }
@@ -138,33 +119,31 @@ export async function DELETE(request: NextRequest) {
     return NextResponse.json({ error: 'User id is required' }, { status: 400 });
   }
 
-  const db = await getDb();
-
   // Don't allow deleting yourself
   if (id === auth.userId) {
     return NextResponse.json({ error: 'Cannot delete your own account' }, { status: 400 });
   }
 
-  const existing = db.prepare('SELECT id, role FROM users WHERE id = ?').get(id) as { id: string; role: string } | undefined;
+  const existing = await queryOne('SELECT id, role FROM users WHERE id = ?', [id]) as { id: string; role: string } | undefined;
   if (!existing) {
     return NextResponse.json({ error: 'User not found' }, { status: 404 });
   }
 
   // Delete related data first (FK constraints)
-  db.run('DELETE FROM sessions WHERE user_id = ?', [id]);
-  db.run('DELETE FROM tasks WHERE user_id = ?', [id]);
-  db.run('DELETE FROM token_logs WHERE user_id = ?', [id]);
-  db.run('DELETE FROM assets WHERE user_id = ?', [id]);
-  db.run('DELETE FROM brand_guidelines WHERE user_id = ?', [id]);
-  db.run('DELETE FROM content_calendar WHERE user_id = ?', [id]);
-  db.run('DELETE FROM templates WHERE user_id = ?', [id]);
-  db.run('DELETE FROM user_preferences WHERE user_id = ?', [id]);
-  db.run('DELETE FROM task_model_preferences WHERE user_id = ?', [id]);
-  db.run('DELETE FROM knowledge_entries WHERE user_id = ?', [id]);
-  db.run('DELETE FROM user_style_preferences WHERE user_id = ?', [id]);
-  db.run('DELETE FROM kanban_tasks WHERE user_id = ?', [id]);
-  db.run('DELETE FROM users WHERE id = ?', [id]);
-  saveDbToDisk();
+  await execute('DELETE FROM sessions WHERE user_id = ?', [id]);
+  await execute('DELETE FROM token_logs WHERE user_id = ?', [id]);
+  await execute('DELETE FROM assets WHERE user_id = ?', [id]);
+  await execute('DELETE FROM brand_guidelines WHERE user_id = ?', [id]);
+  await execute('DELETE FROM content_calendar WHERE user_id = ?', [id]);
+  await execute('DELETE FROM templates WHERE user_id = ?', [id]);
+  await execute('DELETE FROM user_preferences WHERE user_id = ?', [id]);
+  await execute('DELETE FROM task_model_preferences WHERE user_id = ?', [id]);
+  await execute('DELETE FROM knowledge_edges WHERE source_id IN (SELECT id FROM knowledge_entries WHERE user_id = ?) OR target_id IN (SELECT id FROM knowledge_entries WHERE user_id = ?)', [id, id]);
+  await execute('DELETE FROM knowledge_entries WHERE user_id = ?', [id]);
+  await execute('DELETE FROM user_style_preferences WHERE user_id = ?', [id]);
+  await execute('DELETE FROM kanban_tasks WHERE user_id = ?', [id]);
+  await execute('DELETE FROM tasks WHERE user_id = ?', [id]);
+  await execute('DELETE FROM users WHERE id = ?', [id]);
 
   return NextResponse.json({ success: true });
 }

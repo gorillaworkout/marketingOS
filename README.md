@@ -9,7 +9,7 @@ AI-powered marketing suite untuk **Dupoin Futures**. Generate social media posts
 | Framework | Next.js 16.2 (App Router) |
 | Language | TypeScript 5 |
 | Styling | Tailwind CSS 4 |
-| Database | sql.js (WASM SQLite) |
+| Database | PostgreSQL (`pg` connection pool) |
 | AI Providers | OpenRouter API + Codex CLI |
 | Image Gen | GPT-5-Image (OpenRouter) + FAL.ai |
 
@@ -46,7 +46,10 @@ npm install
 
 # Setup environment
 cp .env.example .env
-# Edit .env dengan API keys
+# Set DATABASE_URL and the API keys required by your deployment
+
+# Apply the canonical PostgreSQL schema (seeds five default users only on an empty DB)
+npm run db:migrate
 
 # Run development server
 npm run dev
@@ -99,7 +102,7 @@ marketingos/
 │   │       ├── tokens/
 │   │       └── history/
 │   └── lib/
-│       ├── database.ts             # sql.js WASM wrapper
+│       ├── database.ts             # async PostgreSQL helpers
 │       ├── openai.ts               # Dual AI provider
 │       ├── embeddings.ts           # OpenAI embeddings
 │       ├── auth.ts                 # JWT auth
@@ -110,9 +113,19 @@ marketingos/
 └── package.json
 ```
 
-## Database
+## Database and deployment
 
-SQLite (via sql.js WASM) dengan 15 tabel:
+Production uses PostgreSQL. Set `DATABASE_URL` to a standard PostgreSQL connection string, run `npm run db:migrate` during deployment before `npm start`, and ensure the deployment platform can reach the database. The migration is idempotent; default users are created only when `users` is empty.
+
+To copy an existing local SQLite file without modifying it, configure `DATABASE_URL` and run:
+
+```bash
+npm run db:import-sqlite
+```
+
+The importer reads `data/marketingos.db` read-only, preserves IDs and timestamps, loads tables in foreign-key-safe order, and skips rows that already exist. If legacy SQLite rows refer to a deleted task, it creates an archived placeholder task with the original ID so the corresponding token logs/assets/calendar links remain intact.
+
+PostgreSQL contains these core tables:
 
 | Tabel | Purpose |
 |-------|---------|

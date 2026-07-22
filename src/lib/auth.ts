@@ -1,5 +1,5 @@
 import { NextRequest } from 'next/server';
-import { getDb } from '@/lib/database';
+import { queryOne } from '@/lib/database';
 
 export interface AuthResult {
   userId: string;
@@ -23,17 +23,8 @@ export async function getSession(request: NextRequest): Promise<AuthResult | Aut
   }
 
   try {
-    const db = await getDb();
-    const stmt = db.prepare(
-      'SELECT user_id FROM sessions WHERE id = ? AND expires_at > datetime("now")'
-    );
-    stmt.bind([sessionId]);
-    let userId: string | null = null;
-    if (stmt.step()) {
-      const obj = stmt.getAsObject();
-      userId = obj.user_id as string;
-    }
-    stmt.free();
+    const row = await queryOne<{ user_id: string }>('SELECT user_id FROM sessions WHERE id = ? AND expires_at > CURRENT_TIMESTAMP', [sessionId]);
+    const userId = row?.user_id;
 
     if (!userId) {
       return { error: 'Unauthorized', status: 401 };

@@ -1,5 +1,5 @@
 import { NextRequest } from 'next/server';
-import { getDb, saveDbToDisk } from '@/lib/database';
+import { queryOne, queryAll, execute } from '@/lib/database';
 import { getSession } from '@/lib/auth';
 import { rateLimit } from '@/lib/rate-limit';
 import { generateContent, getSmartSystemPrompt, fetchContextMemory, fetchStyleContext, getUserPreferredModel, type BrandGuidelines } from '@/lib/openai';
@@ -64,8 +64,6 @@ export async function POST(request: NextRequest) {
     });
   }
   const userId = auth.userId as string;
-
-  const db = await getDb();
   const { eventName, theme, location, budget, targetDate, brandGuidelineId } = await request.json();
   if (!eventName) {
     return new Response(sseEvent({ step: 'error', message: 'Event name is required' }), {
@@ -79,12 +77,10 @@ export async function POST(request: NextRequest) {
   let brandGuidelines: BrandGuidelines | undefined;
   if (brandGuidelineId) {
     try {
-      const stmt = db.prepare(
-        'SELECT id, brand_name, tone_of_voice, target_market, key_messages, do_list, dont_list, examples FROM brand_guidelines WHERE id = ? AND user_id = ?'
+      const row = await queryOne<Record<string, unknown>>(
+        'SELECT id, brand_name, tone_of_voice, target_market, key_messages, do_list, dont_list, examples FROM brand_guidelines WHERE id = ? AND user_id = ?', [brandGuidelineId, userId]
       );
-      stmt.bind([brandGuidelineId, userId]);
-      if (stmt.step()) {
-        const row = stmt.getAsObject();
+      if (row) {
         brandGuidelines = {
           id: row.id as string,
           brand_name: row.brand_name as string,
@@ -96,7 +92,6 @@ export async function POST(request: NextRequest) {
           examples: (row.examples as string) || undefined,
         };
       }
-      stmt.free();
     } catch (e) {
       console.warn('Failed to fetch brand guidelines:', e);
     }
@@ -111,21 +106,18 @@ export async function POST(request: NextRequest) {
   // Fetch best examples for auto-learning
   let bestExamples = '';
   try {
-    const stmt = db.prepare(`
+    const rows = await queryAll<Record<string, unknown>>(`
       SELECT output_data, title FROM tasks
       WHERE type = 'event-plan' AND rating >= 4 AND output_data IS NOT NULL
       ORDER BY rating DESC, created_at DESC LIMIT 3
     `);
-    stmt.bind([]);
-    while (stmt.step()) {
-      const row = stmt.getAsObject();
+    for (const row of rows) {
       try {
         const data = JSON.parse(row.output_data as string);
         const concept = data.concept || data.options?.[0]?.concept || '';
-        bestExamples += `\n- Title: "${(row.title || '').substring(0, 100)}"\n  Concept: "${concept.substring(0, 150)}"`;
+        bestExamples += `\n- Title: "${String(row.title || '').substring(0, 100)}"\n  Concept: "${String(concept).substring(0, 150)}"`;
       } catch {}
     }
-    stmt.free();
   } catch {}
 
   const encoder = new TextEncoder();
@@ -294,10 +286,7 @@ Follow the SOP strictly. Output JSON format with: { "objective": "...", "concept
           fs.writeFileSync(path.join(outputDir, fileName), JSON.stringify(outputData, null, 2));
 
           // Save to DB
-          db.prepare('INSERT INTO tasks (id, user_id, type, title, brief, status, output_data) VALUES (?, ?, ?, ?, ?, ?, ?)').run(
-            taskId, userId, 'event-plan', `Event Plan: ${eventName.substring(0, 50)}`, eventName, 'completed', JSON.stringify(outputData)
-          );
-          saveDbToDisk();
+          await execute('INSERT INTO tasks (id, user_id, type, title, brief, status, output_data) VALUES (?, ?, ?, ?, ?, ?, ?)', [taskId, userId, 'event-plan', `Event Plan: ${eventName.substring(0, 50)}`, eventName, 'completed', JSON.stringify(outputData)]);
 
           // Send final result
           controller.enqueue(encoder.encode(sseEvent({

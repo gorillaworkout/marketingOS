@@ -21,6 +21,7 @@ public/outputs/
 .env
 .env.local
 .env.*.local
+.secrets/
 
 # IDE
 .vscode/
@@ -50,3 +51,4 @@ scripts/create-all-issues.mjs
 scripts/test-linear-api.mjs
 docs/USER-GUIDE.md
 docs/API.md
+backups/

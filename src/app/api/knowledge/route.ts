@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getDb } from '@/lib/database';
+import { queryOne, queryAll, execute } from '@/lib/database';
 import { getSession } from '@/lib/auth';
 
 export async function GET(request: NextRequest) {
@@ -7,21 +7,17 @@ export async function GET(request: NextRequest) {
   if (auth.error) return NextResponse.json({ error: auth.error }, { status: auth.status });
   const userId = auth.userId!;
 
-  const db = await getDb();
-
-  const entries = db.prepare(`
+  const entries = await queryAll(`
     SELECT id, task_type, brief, selected_output, style_cluster, platform, audience, quality_score, created_at
     FROM knowledge_entries
     WHERE user_id = ?
     ORDER BY created_at DESC
     LIMIT 50
-  `).all(userId) as Record<string, unknown>[];
+  `, [userId]) as Record<string, unknown>[];
 
   let stylePreferences = null;
   try {
-    const prefs = db.prepare(
-      'SELECT total_selections, style_summary FROM user_style_preferences WHERE user_id = ?'
-    ).get(userId) as Record<string, unknown> | undefined;
+    const prefs = await queryOne('SELECT total_selections, style_summary FROM user_style_preferences WHERE user_id = ?', [userId]) as Record<string, unknown> | undefined;
     if (prefs) {
       stylePreferences = {
         total_selections: prefs.total_selections,

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getDb } from '@/lib/database';
+import { queryOne, queryAll, execute } from '@/lib/database';
 import { getSession } from '@/lib/auth';
 
 export async function GET(request: NextRequest) {
@@ -9,8 +9,6 @@ export async function GET(request: NextRequest) {
 
   const taskType = request.nextUrl.searchParams.get('taskType');
   const limit = parseInt(request.nextUrl.searchParams.get('limit') || '100', 10);
-
-  const db = await getDb();
 
   let sql = `SELECT id, brief, task_type, platform, audience, style_cluster, created_at
              FROM knowledge_entries WHERE user_id = ?`;
@@ -24,7 +22,7 @@ export async function GET(request: NextRequest) {
   sql += ` ORDER BY created_at DESC LIMIT ?`;
   params.push(limit);
 
-  const entries = db.prepare(sql).all(...params) as Record<string, unknown>[];
+  const entries = await queryAll(sql, [...params]) as Record<string, unknown>[];
 
   const nodeIds = new Set(entries.map((e) => e.id as string));
 
@@ -32,10 +30,8 @@ export async function GET(request: NextRequest) {
   let edges: { source: string; target: string; similarity: number; type: string }[] = [];
   if (entries.length > 0) {
     const placeholders = entries.map(() => '?').join(',');
-    const allEdges = db.prepare(
-      `SELECT source_id, target_id, weight, relationship FROM knowledge_edges
-       WHERE source_id IN (${placeholders}) OR target_id IN (${placeholders})`
-    ).all(...entries.map((e) => e.id), ...entries.map((e) => e.id)) as Record<string, unknown>[];
+    const allEdges = await queryAll(`SELECT source_id, target_id, weight, relationship FROM knowledge_edges
+       WHERE source_id IN (${placeholders}) OR target_id IN (${placeholders})`, [...entries.map((e) => e.id), ...entries.map((e) => e.id)]) as Record<string, unknown>[];
 
     edges = allEdges
       .filter((e) => nodeIds.has(e.source_id as string) && nodeIds.has(e.target_id as string))
@@ -56,10 +52,8 @@ export async function GET(request: NextRequest) {
   const clusterSummary = Array.from(clusterMap.entries()).map(([name, count]) => ({ name, count }));
 
   // Fetch style_clusters table for centroid data
-  const styleClusters = db.prepare(
-    `SELECT id, name, description, centroid_embedding, entry_count, example_ids, last_analyzed_at
-     FROM style_clusters ORDER BY name`
-  ).all() as Record<string, unknown>[];
+  const styleClusters = await queryAll(`SELECT id, name, description, centroid_embedding, entry_count, example_ids, last_analyzed_at
+     FROM style_clusters ORDER BY name`, []) as Record<string, unknown>[];
 
   const clusters = styleClusters.length > 0
     ? styleClusters.map(c => ({

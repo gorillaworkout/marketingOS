@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getDb } from '@/lib/database';
+import { queryOne, queryAll, execute } from '@/lib/database';
 import { getSession } from '@/lib/auth';
 import fs from 'fs';
 import path from 'path';
@@ -8,8 +8,6 @@ export async function GET(request: NextRequest) {
   const auth = await getSession(request);
   if (auth.error) return NextResponse.json({ error: auth.error }, { status: auth.status });
   const userId = auth.userId;
-
-  const db = await getDb();
   const searchParams = request.nextUrl.searchParams;
   const limit = parseInt(searchParams.get('limit') || '50', 10);
   const offset = parseInt(searchParams.get('offset') || '0', 10);
@@ -32,9 +30,7 @@ export async function GET(request: NextRequest) {
   }
 
   // 2. Get task-linked images from the database
-  const tasks = db.prepare(
-    `SELECT id, title, brief, output_data, created_at FROM tasks WHERE user_id = ? AND output_data IS NOT NULL ORDER BY created_at DESC`
-  ).all(userId) as Record<string, unknown>[];
+  const tasks = await queryAll(`SELECT id, title, brief, output_data, created_at FROM tasks WHERE user_id = ? AND output_data IS NOT NULL ORDER BY created_at DESC`, [userId]) as Record<string, unknown>[];
 
   // Map task images: filename -> task info
   const taskImageMap = new Map<string, { taskId: string; title: string; brief: string }>();

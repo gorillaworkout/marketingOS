@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getDb } from '@/lib/database';
+import { queryOne, queryAll, execute } from '@/lib/database';
 import { getSession } from '@/lib/auth';
 import { getEmbedding, cosineSimilarity } from '@/lib/embeddings';
 
@@ -10,8 +10,6 @@ export async function POST(request: NextRequest) {
 
   const { query, taskType, limit = 10 } = await request.json();
   if (!query) return NextResponse.json({ error: 'query required' }, { status: 400 });
-
-  const db = await getDb();
 
   let queryEmbedding: number[];
   try {
@@ -29,7 +27,7 @@ export async function POST(request: NextRequest) {
     params.push(taskType);
   }
 
-  const entries = db.prepare(sql).all(...params) as Record<string, unknown>[];
+  const entries = await queryAll(sql, [...params]) as Record<string, unknown>[];
 
   const results = entries
     .map((entry) => {

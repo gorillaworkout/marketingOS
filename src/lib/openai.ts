@@ -38,30 +38,17 @@ export function getModelTier(modelId: string): 'budget' | 'balanced' | 'premium'
 
 export async function getUserPreferredModel(userId: string, taskType?: string): Promise<string> {
   try {
-    const { getDb } = await import('@/lib/database');
-    const db = await getDb();
+    const { queryOne } = await import('@/lib/database');
 
     // Check per-task preference first
     if (taskType) {
-      const taskStmt = db.prepare('SELECT model FROM task_model_preferences WHERE user_id = ? AND task_type = ?');
-      taskStmt.bind([userId, taskType]);
-      if (taskStmt.step()) {
-        const obj = taskStmt.getAsObject();
-        taskStmt.free();
-        return obj.model as string;
-      }
-      taskStmt.free();
+      const taskPreference = await queryOne<{ model: string }>('SELECT model FROM task_model_preferences WHERE user_id = ? AND task_type = ?', [userId, taskType]);
+      if (taskPreference) return taskPreference.model;
     }
 
     // Fall back to global preference
-    const stmt = db.prepare('SELECT preferred_model FROM user_preferences WHERE user_id = ?');
-    stmt.bind([userId]);
-    let pref: string | null = null;
-    if (stmt.step()) {
-      const obj = stmt.getAsObject();
-      pref = obj.preferred_model as string;
-    }
-    stmt.free();
+    const preference = await queryOne<{ preferred_model: string }>('SELECT preferred_model FROM user_preferences WHERE user_id = ?', [userId]);
+    const pref = preference?.preferred_model;
     return pref || PRIMARY_MODEL;
   } catch {
     return PRIMARY_MODEL;
@@ -339,14 +326,10 @@ export async function generateContent(
 
   // Log to database
   try {
-    const { getDb, saveDbToDisk } = await import('@/lib/database');
-    const db = await getDb();
+    const { queryOne, queryAll, execute } = await import('@/lib/database');
     const { v4: uuidv4 } = await import('uuid');
-    db.prepare(
-      'INSERT INTO token_logs (id, user_id, task_id, model, input_tokens, output_tokens, cost) VALUES (?, ?, ?, ?, ?, ?, ?)'
-    ).run(uuidv4(), userId, taskId || null, result.model, inputTokens, outputTokens, cost);
-    saveDbToDisk();
-  } catch (e) {
+    await execute('INSERT INTO token_logs (id, user_id, task_id, model, input_tokens, output_tokens, cost) VALUES (?, ?, ?, ?, ?, ?, ?)', [uuidv4(), userId, taskId || null, result.model, inputTokens, outputTokens, cost]);
+      } catch (e) {
     console.error('Failed to log token usage:', e);
   }
 
@@ -469,14 +452,10 @@ Output the same JSON structure as the draft, but improved. Output valid JSON onl
 
   // Log total usage
   try {
-    const { getDb, saveDbToDisk } = await import('@/lib/database');
-    const db = await getDb();
+    const { queryOne, queryAll, execute } = await import('@/lib/database');
     const { v4: uuidv4 } = await import('uuid');
-    db.prepare(
-      'INSERT INTO token_logs (id, user_id, task_id, model, input_tokens, output_tokens, cost) VALUES (?, ?, ?, ?, ?, ?, ?)'
-    ).run(uuidv4(), userId, taskId, totalUsage.model, totalUsage.inputTokens, totalUsage.outputTokens, totalUsage.cost);
-    saveDbToDisk();
-  } catch (e) {
+    await execute('INSERT INTO token_logs (id, user_id, task_id, model, input_tokens, output_tokens, cost) VALUES (?, ?, ?, ?, ?, ?, ?)', [uuidv4(), userId, taskId, totalUsage.model, totalUsage.inputTokens, totalUsage.outputTokens, totalUsage.cost]);
+      } catch (e) {
     console.error('Failed to log token usage:', e);
   }
 
@@ -497,14 +476,13 @@ export async function fetchContextMemory(
   limit: number = 5
 ): Promise<string> {
   try {
-    const { getDb } = await import('@/lib/database');
-    const db = await getDb();
+    const { queryAll } = await import('@/lib/database');
 
-    const rows = db.prepare(`
+    const rows = await queryAll(`
       SELECT output_data, brief, created_at FROM tasks
       WHERE user_id = ? AND type = ? AND status = 'completed' AND output_data IS NOT NULL
       ORDER BY created_at DESC LIMIT ?
-    `).all(userId, taskType, limit) as { output_data: string; brief: string; created_at: string }[];
+    `, [userId, taskType, limit]) as { output_data: string; brief: string; created_at: string }[];
 
     if (!rows.length) return '';
 
@@ -548,135 +526,34 @@ export async function fetchContextMemory(
  * Reads user_style_preferences + global_style_profile to inject learned style patterns.
  * Returns a formatted string for prompt injection, or empty if no data.
  */
-export async function fetchStyleContext(
-  userId: string,
-  taskType?: string
-): Promise<string> {
+export async function fetchStyleContext(userId: string, taskType?: string): Promise<string> {
   try {
-    const { getDb } = await import('@/lib/database');
-    const db = await getDb();
-
+    const { queryOne } = await import('@/lib/database');
     const parts: string[] = [];
-
-    // 1. User style preferences
-    const userStmt = db.prepare(
-      'SELECT preferred_cluster, style_summary, tone_preferences, hook_preferences, platform_preferences, total_selections FROM user_style_preferences WHERE user_id = ?'
-    );
-    userStmt.bind([userId]);
-    if (userStmt.step()) {
-      const row = userStmt.getAsObject();
-      userStmt.free();
-
+    const user = await queryOne<Record<string, unknown>>('SELECT preferred_cluster, style_summary, tone_preferences, hook_preferences, platform_preferences, total_selections FROM user_style_preferences WHERE user_id = ?', [userId]);
+    if (user) {
       const sections: string[] = [];
-      if (row.preferred_cluster) {
-        sections.push(`Preferred style: ${row.preferred_cluster}`);
+      if (user.preferred_cluster) sections.push(`Preferred style: ${user.preferred_cluster}`);
+      if (Number(user.total_selections || 0) > 0) sections.push(`Based on ${user.total_selections} past selections`);
+      for (const [label, value] of [['Tone patterns', user.tone_preferences], ['Hook style examples', user.hook_preferences]] as const) {
+        if (!value) continue;
+        try { const parsed = JSON.parse(String(value)); sections.push(`${label}: ${Array.isArray(parsed) ? parsed.slice(0, 5).join(', ') : String(parsed)}`); } catch { sections.push(`${label}: ${value}`); }
       }
-      if (row.total_selections && (row.total_selections as number) > 0) {
-        sections.push(`Based on ${row.total_selections} past selections`);
-      }
-      if (row.tone_preferences) {
-        try {
-          const tones = JSON.parse(row.tone_preferences as string);
-          if (Array.isArray(tones) && tones.length) {
-            sections.push(`Tone patterns: ${tones.slice(0, 5).join(', ')}`);
-          } else if (typeof tones === 'string') {
-            sections.push(`Tone: ${tones}`);
-          }
-        } catch {
-          sections.push(`Tone: ${row.tone_preferences}`);
-        }
-      }
-      if (row.hook_preferences) {
-        try {
-          const hooks = JSON.parse(row.hook_preferences as string);
-          if (Array.isArray(hooks) && hooks.length) {
-            sections.push(`Hook style examples: ${hooks.slice(0, 3).join(' | ')}`);
-          } else if (typeof hooks === 'string') {
-            sections.push(`Hook style: ${hooks}`);
-          }
-        } catch {
-          sections.push(`Hook style: ${row.hook_preferences}`);
-        }
-      }
-      if (row.platform_preferences) {
-        try {
-          const platforms = JSON.parse(row.platform_preferences as string);
-          if (typeof platforms === 'object' && platforms !== null) {
-            const entries = Object.entries(platforms).slice(0, 3).map(([k, v]) => `${k}: ${v}`);
-            if (entries.length) sections.push(`Platform notes: ${entries.join('; ')}`);
-          }
-        } catch {}
-      }
-
-      // Include recent selections as concrete examples
-      if (row.style_summary) {
-        try {
-          const recent = JSON.parse(row.style_summary as string);
-          if (Array.isArray(recent) && recent.length) {
-            const examples = recent.slice(0, 3).map((s: Record<string, unknown>) => {
-              const brief = typeof s.brief === 'string' ? s.brief.substring(0, 60) : '';
-              const cluster = s.style_cluster || s.cluster || '';
-              return cluster ? `"${brief}" (${cluster})` : `"${brief}"`;
-            });
-            if (examples.length) sections.push(`Recent picks: ${examples.join(', ')}`);
-          }
-        } catch {}
-      }
-
-      if (sections.length) {
-        parts.push(`🎯 YOUR STYLE PROFILE:\n${sections.join('\n')}\nUse these patterns to match the user's demonstrated preferences.`);
-      }
-    } else {
-      userStmt.free();
+      if (user.style_summary) sections.push(`Recent picks: ${String(user.style_summary).slice(0, 500)}`);
+      if (sections.length) parts.push(`🎯 YOUR STYLE PROFILE:
+${sections.join('\n')}
+Use these patterns to match the user's demonstrated preferences.`);
     }
-
-    // 2. Global team style profile (singleton per task_type or general)
-    const globalStmt = db.prepare(
-      taskType
-        ? 'SELECT team_summary, top_examples, cluster_distribution FROM global_style_profile WHERE task_type = ?'
-        : 'SELECT task_type, team_summary, top_examples, cluster_distribution FROM global_style_profile ORDER BY updated_at DESC LIMIT 1'
-    );
-    if (taskType) {
-      globalStmt.bind([taskType]);
+    const global = taskType
+      ? await queryOne<Record<string, unknown>>('SELECT team_summary, top_examples, cluster_distribution FROM global_style_profile WHERE task_type = ?', [taskType])
+      : await queryOne<Record<string, unknown>>('SELECT team_summary, top_examples, cluster_distribution FROM global_style_profile ORDER BY updated_at DESC LIMIT 1');
+    if (global) {
+      const sections = [global.team_summary && `Team style summary: ${global.team_summary}`, global.cluster_distribution && `Style distribution: ${global.cluster_distribution}`, global.top_examples && `Top team examples: ${global.top_examples}`].filter(Boolean);
+      if (sections.length) parts.push(`📊 TEAM STYLE CONTEXT:
+${sections.join('\n')}`);
     }
-    if (globalStmt.step()) {
-      const row = globalStmt.getAsObject();
-      globalStmt.free();
-
-      const globalSections: string[] = [];
-      if (row.team_summary) {
-        globalSections.push(`Team style summary: ${row.team_summary}`);
-      }
-      if (row.cluster_distribution) {
-        try {
-          const dist = JSON.parse(row.cluster_distribution as string);
-          if (typeof dist === 'object' && dist !== null) {
-            const distEntries = Object.entries(dist).map(([k, v]) => `${k}: ${v}`).join(', ');
-            globalSections.push(`Style distribution: ${distEntries}`);
-          }
-        } catch {}
-      }
-      if (row.top_examples) {
-        try {
-          const examples = JSON.parse(row.top_examples as string);
-          if (Array.isArray(examples) && examples.length) {
-            globalSections.push(`Top team examples: ${examples.slice(0, 2).join(' | ')}`);
-          }
-        } catch {}
-      }
-
-      if (globalSections.length) {
-        parts.push(`📊 TEAM STYLE CONTEXT:\n${globalSections.join('\n')}`);
-      }
-    } else {
-      globalStmt.free();
-    }
-
     return parts.length ? '\n\n' + parts.join('\n\n') : '';
-  } catch (e) {
-    console.error('Failed to fetch style context:', e);
-    return '';
-  }
+  } catch (e) { console.error('Failed to fetch style context:', e); return ''; }
 }
 
 /**

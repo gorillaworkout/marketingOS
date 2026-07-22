@@ -1,3 +1,4 @@
+// sql.js is used exclusively by the one-off SQLite importer in scripts/.
 declare module 'sql.js' {
   interface Database {
     run(sql: string, params?: unknown[]): void;

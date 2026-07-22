@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getDb, saveDbToDisk } from '@/lib/database';
+import { queryOne, queryAll, execute } from '@/lib/database';
 import { getSession } from '@/lib/auth';
 import { rateLimit } from '@/lib/rate-limit';
 
@@ -24,20 +24,15 @@ export async function PUT(request: NextRequest) {
     return NextResponse.json({ error: `Invalid status. Must be one of: ${VALID_STATUSES.join(', ')}` }, { status: 400 });
   }
 
-  const db = await getDb();
-
   // Verify task exists and belongs to user
-  const task = db.prepare(
-    'SELECT id, status, output_data FROM tasks WHERE id = ? AND user_id = ? AND type = ?'
-  ).get(taskId, userId, 'social-post') as { id: string; status: string; output_data: string } | undefined;
+  const task = await queryOne('SELECT id, status, output_data FROM tasks WHERE id = ? AND user_id = ? AND type = ?', [taskId, userId, 'social-post']) as { id: string; status: string; output_data: string } | undefined;
 
   if (!task) {
     return NextResponse.json({ error: 'Task not found' }, { status: 404 });
   }
 
   // Update status
-  db.prepare('UPDATE tasks SET status = ? WHERE id = ?').run(status, taskId);
-  saveDbToDisk();
+  await execute('UPDATE tasks SET status = ? WHERE id = ?', [status, taskId]);
 
   return NextResponse.json({
     success: true,

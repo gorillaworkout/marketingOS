@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getDb, saveDbToDisk } from '@/lib/database';
+import { queryOne, queryAll, execute } from '@/lib/database';
 import { getSession } from '@/lib/auth';
 import { AVAILABLE_MODELS } from '@/lib/openai';
 import { v4 as uuidv4 } from 'uuid';
@@ -9,18 +9,12 @@ export async function GET(request: NextRequest) {
   const auth = await getSession(request);
   if (auth.error) return NextResponse.json({ error: auth.error }, { status: auth.status });
   const userId = auth.userId;
-
-  const db = await getDb();
-  const pref = db.prepare(
-    'SELECT preferred_model FROM user_preferences WHERE user_id = ?'
-  ).get(userId) as { preferred_model: string } | undefined;
+  const pref = await queryOne('SELECT preferred_model FROM user_preferences WHERE user_id = ?', [userId]) as { preferred_model: string } | undefined;
 
   const currentModel = pref?.preferred_model || 'deepseek/deepseek-v4-flash';
 
   // Fetch per-task preferences
-  const taskPrefs = db.prepare(
-    'SELECT task_type, model FROM task_model_preferences WHERE user_id = ?'
-  ).all(userId) as { task_type: string; model: string }[];
+  const taskPrefs = await queryAll('SELECT task_type, model FROM task_model_preferences WHERE user_id = ?', [userId]) as { task_type: string; model: string }[];
 
   const taskModelPreferences: Record<string, string> = {};
   for (const row of taskPrefs) {
@@ -54,8 +48,6 @@ export async function PUT(request: NextRequest) {
     return NextResponse.json({ error: 'Invalid model' }, { status: 400 });
   }
 
-  const db = await getDb();
-
   if (taskType) {
     // Save per-task preference
     const validTaskTypes = ['caption', 'image-prompt', 'video-script', 'event-plan'];
@@ -63,20 +55,15 @@ export async function PUT(request: NextRequest) {
       return NextResponse.json({ error: 'Invalid task type' }, { status: 400 });
     }
     const modelInfo = AVAILABLE_MODELS.find(m => m.id === model);
-    db.prepare(
-      `INSERT INTO task_model_preferences (id, user_id, task_type, model, provider, updated_at)
-       VALUES (?, ?, ?, ?, ?, datetime('now'))
-       ON CONFLICT(user_id, task_type) DO UPDATE SET model = excluded.model, provider = excluded.provider, updated_at = datetime('now')`
-    ).run(uuidv4(), userId, taskType, model, modelInfo?.provider || 'openrouter');
+    await execute(`INSERT INTO task_model_preferences (id, user_id, task_type, model, provider, updated_at)
+       VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+       ON CONFLICT(user_id, task_type) DO UPDATE SET model = excluded.model, provider = excluded.provider, updated_at = CURRENT_TIMESTAMP`, [uuidv4(), userId, taskType, model, modelInfo?.provider || 'openrouter']);
   } else {
     // Save global preference
-    db.prepare(
-      `INSERT INTO user_preferences (id, user_id, preferred_model, updated_at)
-       VALUES (?, ?, ?, datetime('now'))
-       ON CONFLICT(user_id) DO UPDATE SET preferred_model = excluded.preferred_model, updated_at = datetime('now')`
-    ).run(uuidv4(), userId, model);
+    await execute(`INSERT INTO user_preferences (id, user_id, preferred_model, updated_at)
+       VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+       ON CONFLICT(user_id) DO UPDATE SET preferred_model = excluded.preferred_model, updated_at = CURRENT_TIMESTAMP`, [uuidv4(), userId, model]);
   }
-  saveDbToDisk();
 
   return NextResponse.json({ success: true, model, taskType: taskType || null });
 }

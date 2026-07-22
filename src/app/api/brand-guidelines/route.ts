@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getDb, saveDbToDisk } from '@/lib/database';
+import { queryOne, queryAll, execute } from '@/lib/database';
 import { getSession } from '@/lib/auth';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -8,11 +8,7 @@ export async function GET(request: NextRequest) {
   const auth = await getSession(request);
   if (auth.error) return NextResponse.json({ error: auth.error }, { status: auth.status });
   const userId = auth.userId;
-
-  const db = await getDb();
-  const guidelines = db.prepare(
-    'SELECT id, brand_name, tone_of_voice, target_market, key_messages, do_list, dont_list, examples, created_at, updated_at FROM brand_guidelines WHERE user_id = ? ORDER BY updated_at DESC'
-  ).all(userId) as Record<string, unknown>[];
+  const guidelines = await queryAll('SELECT id, brand_name, tone_of_voice, target_market, key_messages, do_list, dont_list, examples, created_at, updated_at FROM brand_guidelines WHERE user_id = ? ORDER BY updated_at DESC', [userId]) as Record<string, unknown>[];
 
   return NextResponse.json({
     guidelines: guidelines.map((row) => ({
@@ -42,22 +38,9 @@ export async function POST(request: NextRequest) {
   if (!brand_name) {
     return NextResponse.json({ error: 'Brand name is required' }, { status: 400 });
   }
-
-  const db = await getDb();
   const id = uuidv4();
-  db.prepare(
-    `INSERT INTO brand_guidelines (id, user_id, brand_name, tone_of_voice, target_market, key_messages, do_list, dont_list, examples)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run(
-    id, userId, brand_name,
-    tone_of_voice || null,
-    target_market || null,
-    key_messages || null,
-    JSON.stringify(do_list || []),
-    JSON.stringify(dont_list || []),
-    examples || null,
-  );
-  saveDbToDisk();
+  await execute(`INSERT INTO brand_guidelines (id, user_id, brand_name, tone_of_voice, target_market, key_messages, do_list, dont_list, examples)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, [id, userId, brand_name, tone_of_voice || null, target_market || null, key_messages || null, JSON.stringify(do_list || []), JSON.stringify(dont_list || []), examples || null]);
 
   return NextResponse.json({
     success: true,
@@ -76,16 +59,13 @@ export async function PUT(request: NextRequest) {
 
   if (!id) return NextResponse.json({ error: 'Guideline ID is required' }, { status: 400 });
 
-  const db = await getDb();
-
   // Verify ownership
-  const existing = db.prepare('SELECT id FROM brand_guidelines WHERE id = ? AND user_id = ?').get(id, userId);
+  const existing = await queryOne('SELECT id FROM brand_guidelines WHERE id = ? AND user_id = ?', [id, userId]);
   if (!existing) {
     return NextResponse.json({ error: 'Guideline not found' }, { status: 404 });
   }
 
-  db.prepare(
-    `UPDATE brand_guidelines SET
+  await execute(`UPDATE brand_guidelines SET
        brand_name = COALESCE(?, brand_name),
        tone_of_voice = ?,
        target_market = ?,
@@ -93,19 +73,8 @@ export async function PUT(request: NextRequest) {
        do_list = COALESCE(?, do_list),
        dont_list = COALESCE(?, dont_list),
        examples = ?,
-       updated_at = datetime('now')
-     WHERE id = ? AND user_id = ?`
-  ).run(
-    brand_name || null,
-    tone_of_voice ?? null,
-    target_market ?? null,
-    key_messages ?? null,
-    do_list ? JSON.stringify(do_list) : null,
-    dont_list ? JSON.stringify(dont_list) : null,
-    examples ?? null,
-    id, userId,
-  );
-  saveDbToDisk();
+       updated_at = CURRENT_TIMESTAMP
+     WHERE id = ? AND user_id = ?`, [brand_name || null, tone_of_voice ?? null, target_market ?? null, key_messages ?? null, do_list ? JSON.stringify(do_list) : null, dont_list ? JSON.stringify(dont_list) : null, examples ?? null, id, userId]);
 
   return NextResponse.json({ success: true, id });
 }
@@ -119,10 +88,7 @@ export async function DELETE(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const id = searchParams.get('id');
   if (!id) return NextResponse.json({ error: 'Guideline ID is required' }, { status: 400 });
-
-  const db = await getDb();
-  db.prepare('DELETE FROM brand_guidelines WHERE id = ? AND user_id = ?').run(id, userId);
-  saveDbToDisk();
+  await execute('DELETE FROM brand_guidelines WHERE id = ? AND user_id = ?', [id, userId]);
 
   return NextResponse.json({ success: true });
 }
