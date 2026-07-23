@@ -1,5 +1,6 @@
 'use client';
 import { useEffect, useState, useCallback } from 'react';
+import { passwordInputType } from '@/lib/password-visibility';
 
 interface User {
   id: string;
@@ -29,6 +30,7 @@ export default function AccountsPage() {
   const [editTarget, setEditTarget] = useState<User | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<User | null>(null);
   const [form, setForm] = useState<UserForm>(initialForm);
+  const [showAddPassword, setShowAddPassword] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -208,7 +210,7 @@ export default function AccountsPage() {
           <p className="text-gray-400 mt-1">Create, edit, and manage team members</p>
         </div>
         <button
-          onClick={() => { setForm(initialForm); setShowAddModal(true); }}
+          onClick={() => { setForm(initialForm); setShowAddPassword(false); setShowAddModal(true); }}
           className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors flex items-center gap-2"
         >
           <span>+</span> Add User
@@ -355,13 +357,24 @@ export default function AccountsPage() {
               </div>
               <div>
                 <label className="block text-xs text-gray-500 uppercase tracking-wide mb-1.5">Password *</label>
-                <input
-                  type="password"
-                  value={form.password}
-                  onChange={e => setForm(p => ({ ...p, password: e.target.value }))}
-                  className="w-full bg-gray-700/50 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 transition-colors"
-                  placeholder="Min 6 characters"
-                />
+                <div className="relative">
+                  <input
+                    type={passwordInputType(showAddPassword)}
+                    value={form.password}
+                    onChange={e => setForm(p => ({ ...p, password: e.target.value }))}
+                    className="w-full bg-gray-700/50 border border-gray-600 rounded-lg px-3 py-2 pr-11 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 transition-colors"
+                    placeholder="Min 6 characters"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowAddPassword(visible => !visible)}
+                    aria-label={showAddPassword ? 'Hide password' : 'Show password'}
+                    title={showAddPassword ? 'Hide password' : 'Show password'}
+                    className="absolute inset-y-0 right-0 px-3 text-gray-400 hover:text-white transition-colors"
+                  >
+                    {showAddPassword ? '🙈' : '👁️'}
+                  </button>
+                </div>
               </div>
               <div>
                 <label className="block text-xs text-gray-500 uppercase tracking-wide mb-1.5">Role</label>
