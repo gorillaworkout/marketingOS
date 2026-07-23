@@ -18,13 +18,11 @@ export async function GET(request: NextRequest) {
   let fsImages: { filename: string; createdAt: string }[] = [];
 
   if (fs.existsSync(imagesDir)) {
-    const files = fs.readdirSync(imagesDir).filter(f => f.startsWith('image-') && (f.endsWith('.png') || f.endsWith('.jpg') || f.endsWith('.jpeg') || f.endsWith('.webp')));
+    const files = fs.readdirSync(imagesDir).filter(f => f.endsWith('.png') || f.endsWith('.jpg') || f.endsWith('.jpeg') || f.endsWith('.webp'));
     fsImages = files.map(filename => {
-      const match = filename.match(/image-(\d+)/);
-      const timestamp = match ? parseInt(match[1], 10) : 0;
       return {
         filename,
-        createdAt: new Date(timestamp).toISOString(),
+        createdAt: fs.statSync(path.join(imagesDir, filename)).mtime.toISOString(),
       };
     }).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   }
@@ -68,7 +66,7 @@ export async function GET(request: NextRequest) {
     const taskInfo = taskImageMap.get(img.filename);
     return {
       filename: img.filename,
-      url: `/outputs/images/${img.filename}`,
+      url: `/api/generated-images/${encodeURIComponent(img.filename)}`,
       createdAt: img.createdAt,
       taskId: taskInfo?.taskId || null,
       brief: taskInfo?.brief || null,

@@ -94,7 +94,7 @@ export async function POST(request: NextRequest) {
               send({
                 step: 'done', progress: 100,
                 message: '✅ Image generated!',
-                result: { success: true, imageUrl: `/outputs/images/${fn}`, fileName: fn, sopName, prompt, model: 'gpt-image-2 (Codex)' },
+                result: { success: true, imageUrl: `/api/generated-images/${encodeURIComponent(fn)}`, fileName: fn, sopName, prompt, model: 'gpt-image-2 (Codex)' },
               });
             } else {
               send({ step: 'error', progress: 0, message: '❌ Image file not found (IMAGE_SUCCESS reported but file missing)' });
