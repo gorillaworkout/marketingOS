@@ -8,6 +8,7 @@ interface User {
   username: string;
   name: string;
   role: string;
+  enabledFeatures: string[];
 }
 
 interface ModelInfo {
@@ -51,12 +52,17 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       const data = await res.json();
       if (data.authenticated) {
         setUser(data.user);
+        const generationFeature = pathname.split('/').pop() || '';
+        const adminOnlyPages = ['/dashboard/kanban', '/dashboard/tokens', '/dashboard/accounts', '/dashboard/templates', '/dashboard/calendar', '/dashboard/images', '/dashboard/knowledge', '/dashboard/brand-guidelines', '/dashboard/history'];
+        if (data.user.role !== 'admin' && (adminOnlyPages.includes(pathname) || (['social-post', 'video-script', 'event-plan'].includes(generationFeature) && !data.user.enabledFeatures?.includes(generationFeature)))) {
+          router.replace('/dashboard');
+        }
       } else {
         router.push('/');
       }
       setLoading(false);
     });
-  }, [router]);
+  }, [router, pathname]);
 
   useEffect(() => {
     fetch('/api/settings/model').then(async res => {
@@ -143,8 +149,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     { href: '/dashboard/social-post', label: 'Social Post', icon: '📱' },
     { href: '/dashboard/video-script', label: 'Video Script', icon: '🎬' },
     { href: '/dashboard/event-plan', label: 'Event Plan', icon: '📋' },
-    { href: '/dashboard/images', label: 'Images', icon: '🖼️' },
-  ];
+  ].filter(item => user?.role === 'admin' || user?.enabledFeatures.includes(item.href.split('/').pop() || ''));
 
   const resourceItems = [
     { href: '/dashboard/brand-guidelines', label: 'Brand Guidelines', icon: '🏷️' },
@@ -215,6 +220,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             );
           })}
 
+          {user?.role === 'admin' && <>
           {/* Resources Section */}
           <div className="pt-4 pb-1">
             <p className="px-3 text-[11px] font-semibold uppercase tracking-widest text-gray-500">Resources</p>
@@ -257,7 +263,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                 <span>{item.label}</span>
               </Link>
             );
-          })}
+          })}</>}
         </nav>
 
         {/* Model Selector */}

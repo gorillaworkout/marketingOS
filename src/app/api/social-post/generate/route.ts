@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server';
 import { queryOne, queryAll, execute } from '@/lib/database';
-import { getSession } from '@/lib/auth';
+import { requireFeature } from '@/lib/auth';
 import { rateLimit } from '@/lib/rate-limit';
 import { generateContent, generateMultiStep, getSmartSystemPrompt, fetchContextMemory, fetchStyleContext, getUserPreferredModel, runQC, generateDupoinFileName, type BrandGuidelines, type QCResult } from '@/lib/openai';
 import { v4 as uuidv4 } from 'uuid';
@@ -57,13 +57,13 @@ export async function POST(request: NextRequest) {
   const rl = rateLimit(request);
   if (rl) return rl;
 
-  const auth = await getSession(request);
-  if (auth.error) {
+  const auth = await requireFeature(request, 'social-post');
+  if ('error' in auth) {
     return new Response(sseEvent({ step: 'error', message: auth.error }), {
       headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' },
     });
   }
-  const userId = auth.userId!;
+  const userId = auth.id;
   const { brief, platform, targetAudience, goal, brandGuidelineId } = await request.json();
   if (!brief) {
     return new Response(sseEvent({ step: 'error', message: 'Brief is required' }), {

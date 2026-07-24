@@ -2,24 +2,14 @@ import { NextRequest, NextResponse } from 'next/server';
 import bcrypt from 'bcryptjs';
 import { v4 as uuidv4 } from 'uuid';
 import { queryOne, queryAll, execute } from '@/lib/database';
-import { getSession, AuthResult, AuthError } from '@/lib/auth';
-
-async function requireAdmin(request: NextRequest): Promise<{ userId: string } | NextResponse> {
-  const auth = await getSession(request);
-  if ('status' in auth) return NextResponse.json({ error: auth.error, status: auth.status }, { status: auth.status });
-  const user = await queryOne('SELECT role FROM users WHERE id = ?', [(auth as AuthResult).userId]) as { role: string } | undefined;
-  if (!user || user.role !== 'admin') {
-    return NextResponse.json({ error: 'Forbidden: admin only' }, { status: 403 });
-  }
-
-  return { userId: (auth as AuthResult).userId };
-}
+import { requireAdmin } from '@/lib/auth';
 
 // GET: List all users
 export async function GET(request: NextRequest) {
   const auth = await requireAdmin(request);
   if (auth instanceof NextResponse) return auth;
-  const rows = await queryAll("SELECT id, username, name, role, last_active, created_at, updated_at FROM users ORDER BY created_at DESC", []) as Record<string, unknown>[];
+  const rows = await queryAll(`SELECT u.id, u.username, u.name, u.role, u.department_id, d.name AS department_name,
+    u.last_active, u.created_at, u.updated_at FROM users u LEFT JOIN departments d ON d.id = u.department_id ORDER BY u.created_at DESC`, []) as Record<string, unknown>[];
 
   return NextResponse.json({ users: rows });
 }
@@ -29,7 +19,7 @@ export async function POST(request: NextRequest) {
   const auth = await requireAdmin(request);
   if (auth instanceof NextResponse) return auth;
 
-  const { username, name, password, role } = await request.json();
+  const { username, name, password, role, departmentId } = await request.json();
 
   if (!username || !name || !password) {
     return NextResponse.json({ error: 'username, name, and password are required' }, { status: 400 });
@@ -48,10 +38,12 @@ export async function POST(request: NextRequest) {
   const hash = bcrypt.hashSync(password, 10);
   const id = uuidv4();
   const finalRole = role || 'member';
+  if (finalRole === 'member' && !departmentId) return NextResponse.json({ error: 'Department is required for members' }, { status: 400 });
+  if (departmentId && !await queryOne('SELECT id FROM departments WHERE id = ?', [departmentId])) return NextResponse.json({ error: 'Department not found' }, { status: 400 });
 
-  await execute('INSERT INTO users (id, username, name, password_hash, role) VALUES (?, ?, ?, ?, ?)', [id, username, name, hash, finalRole]);
+  await execute('INSERT INTO users (id, username, name, password_hash, role, department_id) VALUES (?, ?, ?, ?, ?, ?)', [id, username, name, hash, finalRole, finalRole === 'admin' ? null : departmentId]);
 
-  const created = await queryOne('SELECT id, username, name, role, last_active, created_at FROM users WHERE id = ?', [id]) as Record<string, unknown>;
+  const created = await queryOne(`SELECT u.id, u.username, u.name, u.role, u.department_id, d.name AS department_name, u.last_active, u.created_at FROM users u LEFT JOIN departments d ON d.id = u.department_id WHERE u.id = ?`, [id]) as Record<string, unknown>;
 
   return NextResponse.json({ user: created }, { status: 201 });
 }
@@ -61,7 +53,7 @@ export async function PUT(request: NextRequest) {
   const auth = await requireAdmin(request);
   if (auth instanceof NextResponse) return auth;
 
-  const { id, username, name, password, role } = await request.json();
+  const { id, username, name, password, role, departmentId } = await request.json();
 
   if (!id) {
     return NextResponse.json({ error: 'User id is required' }, { status: 400 });
@@ -83,6 +75,10 @@ export async function PUT(request: NextRequest) {
   if (role && !['admin', 'member'].includes(role)) {
     return NextResponse.json({ error: 'role must be admin or member' }, { status: 400 });
   }
+  const finalRole = role || existing.role as string;
+  const finalDepartmentId = departmentId === undefined ? existing.department_id as string | null : departmentId;
+  if (finalRole === 'member' && !finalDepartmentId) return NextResponse.json({ error: 'Department is required for members' }, { status: 400 });
+  if (finalDepartmentId && !await queryOne('SELECT id FROM departments WHERE id = ?', [finalDepartmentId])) return NextResponse.json({ error: 'Department not found' }, { status: 400 });
 
   const updates: string[] = [];
   const params: unknown[] = [];
@@ -90,6 +86,7 @@ export async function PUT(request: NextRequest) {
   if (username !== undefined) { updates.push('username = ?'); params.push(username); }
   if (name !== undefined) { updates.push('name = ?'); params.push(name); }
   if (role !== undefined) { updates.push('role = ?'); params.push(role); }
+  if (departmentId !== undefined || (role === 'admin' && existing.role !== 'admin')) { updates.push('department_id = ?'); params.push(finalRole === 'admin' ? null : finalDepartmentId); }
   if (password !== undefined) {
     const hash = bcrypt.hashSync(password, 10);
     updates.push('password_hash = ?');
@@ -102,7 +99,7 @@ export async function PUT(request: NextRequest) {
     await execute(`UPDATE users SET ${updates.join(', ')} WHERE id = ?`, params);
       }
 
-  const updated = await queryOne('SELECT id, username, name, role, last_active, created_at, updated_at FROM users WHERE id = ?', [id]) as Record<string, unknown>;
+  const updated = await queryOne(`SELECT u.id, u.username, u.name, u.role, u.department_id, d.name AS department_name, u.last_active, u.created_at, u.updated_at FROM users u LEFT JOIN departments d ON d.id = u.department_id WHERE u.id = ?`, [id]) as Record<string, unknown>;
 
   return NextResponse.json({ user: updated });
 }
@@ -120,7 +117,7 @@ export async function DELETE(request: NextRequest) {
   }
 
   // Don't allow deleting yourself
-  if (id === auth.userId) {
+  if (id === auth.id) {
     return NextResponse.json({ error: 'Cannot delete your own account' }, { status: 400 });
   }
 

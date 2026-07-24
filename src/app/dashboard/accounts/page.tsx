@@ -9,19 +9,27 @@ interface User {
   role: string;
   last_active: string | null;
   created_at: string;
+  department_id: string | null;
+  department_name: string | null;
 }
+
+interface Department { id: string; name: string; permitted_features: string[]; }
 
 interface UserForm {
   username: string;
   name: string;
   password: string;
   role: string;
+  departmentId: string;
 }
 
-const initialForm: UserForm = { username: '', name: '', password: '', role: 'member' };
+const initialForm: UserForm = { username: '', name: '', password: '', role: 'member', departmentId: '' };
 
 export default function AccountsPage() {
   const [users, setUsers] = useState<User[]>([]);
+  const [departments, setDepartments] = useState<Department[]>([]);
+  const [departmentName, setDepartmentName] = useState('');
+  const [departmentFeatures, setDepartmentFeatures] = useState<string[]>(['social-post', 'video-script', 'event-plan']);
   const [loading, setLoading] = useState(true);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [showAddModal, setShowAddModal] = useState(false);
@@ -57,6 +65,11 @@ export default function AccountsPage() {
     }
   }, [showToast]);
 
+  const fetchDepartments = useCallback(async () => {
+    const response = await fetch('/api/admin/departments');
+    if (response.ok) setDepartments((await response.json()).departments || []);
+  }, []);
+
   useEffect(() => {
     // Get current user info
     fetch('/api/auth', {
@@ -71,10 +84,11 @@ export default function AccountsPage() {
     });
 
     fetchUsers();
-  }, [fetchUsers]);
+    fetchDepartments();
+  }, [fetchUsers, fetchDepartments]);
 
   const handleAdd = async () => {
-    if (!form.username || !form.name || !form.password) {
+    if (!form.username || !form.name || !form.password || (form.role === 'member' && !form.departmentId)) {
       showToast('Please fill in all required fields', 'error');
       return;
     }
@@ -83,7 +97,7 @@ export default function AccountsPage() {
       const res = await fetch('/api/admin/users', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(form),
+      body: JSON.stringify({ ...form, departmentId: form.departmentId || null }),
       });
       const data = await res.json();
       if (res.ok) {
@@ -114,6 +128,7 @@ export default function AccountsPage() {
       if (form.name !== editTarget.name) payload.name = form.name;
       if (form.password) payload.password = form.password;
       if (form.role !== editTarget.role) payload.role = form.role;
+      if (form.departmentId !== (editTarget.department_id || '')) payload.departmentId = form.departmentId || null;
 
       if (Object.keys(payload).length === 1) {
         showToast('No changes to save', 'error');
@@ -168,7 +183,7 @@ export default function AccountsPage() {
 
   const openEdit = (user: User) => {
     setEditTarget(user);
-    setForm({ username: user.username, name: user.name, password: '', role: user.role });
+    setForm({ username: user.username, name: user.name, password: '', role: user.role, departmentId: user.department_id || '' });
     setShowEditModal(true);
   };
 
@@ -192,6 +207,19 @@ export default function AccountsPage() {
   const totalUsers = users.length;
   const adminUsers = users.filter(u => u.role === 'admin').length;
   const activeUsers = users.filter(u => u.last_active).length;
+  const createDepartment = async () => {
+    if (!departmentName.trim()) return showToast('Department name is required', 'error');
+    const response = await fetch('/api/admin/departments', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: departmentName, features: departmentFeatures }) });
+    const data = await response.json();
+    if (!response.ok) return showToast(data.error || 'Failed to create department', 'error');
+    setDepartmentName(''); setDepartmentFeatures(['social-post', 'video-script', 'event-plan']); fetchDepartments(); showToast('Department created', 'success');
+  };
+  const toggleDepartmentFeature = async (department: Department, feature: string) => {
+    const features = department.permitted_features.includes(feature) ? department.permitted_features.filter(value => value !== feature) : [...department.permitted_features, feature];
+    const response = await fetch('/api/admin/departments', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: department.id, features }) });
+    if (!response.ok) return showToast('Failed to update department', 'error');
+    fetchDepartments();
+  };
 
   if (loading) {
     return (
@@ -254,6 +282,7 @@ export default function AccountsPage() {
                 <th className="text-left p-4 text-xs text-gray-500 uppercase tracking-wider font-medium">Username</th>
                 <th className="text-left p-4 text-xs text-gray-500 uppercase tracking-wider font-medium">Name</th>
                 <th className="text-left p-4 text-xs text-gray-500 uppercase tracking-wider font-medium">Role</th>
+                <th className="text-left p-4 text-xs text-gray-500 uppercase tracking-wider font-medium">Department</th>
                 <th className="text-left p-4 text-xs text-gray-500 uppercase tracking-wider font-medium">Created</th>
                 <th className="text-left p-4 text-xs text-gray-500 uppercase tracking-wider font-medium">Last Active</th>
                 <th className="text-right p-4 text-xs text-gray-500 uppercase tracking-wider font-medium">Actions</th>
@@ -286,6 +315,7 @@ export default function AccountsPage() {
                       {user.role}
                     </span>
                   </td>
+                  <td className="p-4 text-sm text-gray-300">{user.role === 'admin' ? 'All access' : user.department_name || '—'}</td>
                   <td className="p-4 text-sm text-gray-400">{formatDate(user.created_at)}</td>
                   <td className="p-4">
                     <div className="flex items-center gap-2">
@@ -317,12 +347,23 @@ export default function AccountsPage() {
               ))}
               {users.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="p-8 text-center text-gray-500">No users found</td>
+                  <td colSpan={7} className="p-8 text-center text-gray-500">No users found</td>
                 </tr>
               )}
             </tbody>
           </table>
         </div>
+      </div>
+
+      <div className="bg-gray-800/50 rounded-xl border border-gray-700/50 p-5">
+        <h2 className="text-lg font-semibold text-white">Departments</h2>
+        <p className="text-sm text-gray-400 mt-1">Choose which generation modules each department can use.</p>
+        <div className="flex flex-wrap gap-3 mt-4">
+          <input value={departmentName} onChange={e => setDepartmentName(e.target.value)} placeholder="Department name" className="bg-gray-700/50 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white" />
+          {['social-post', 'video-script', 'event-plan'].map(feature => <label key={feature} className="text-sm text-gray-300 flex items-center gap-1"><input type="checkbox" checked={departmentFeatures.includes(feature)} onChange={() => setDepartmentFeatures(current => current.includes(feature) ? current.filter(value => value !== feature) : [...current, feature])} /> {feature}</label>)}
+          <button onClick={createDepartment} className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm rounded-lg">Create department</button>
+        </div>
+        <div className="mt-4 text-sm text-gray-300 space-y-3">{departments.map(department => <div key={department.id} className="flex flex-wrap items-center gap-3"><span className="font-medium min-w-28">{department.name}</span>{['social-post', 'video-script', 'event-plan'].map(feature => <label key={feature} className="flex items-center gap-1 text-gray-400"><input type="checkbox" checked={department.permitted_features.includes(feature)} onChange={() => toggleDepartmentFeature(department, feature)} /> {feature}</label>)}</div>)}</div>
       </div>
 
       {/* Add User Modal */}
@@ -355,6 +396,10 @@ export default function AccountsPage() {
                   placeholder="e.g. New Member"
                 />
               </div>
+              {form.role === 'member' && <div>
+                <label className="block text-xs text-gray-500 uppercase tracking-wide mb-1.5">Department *</label>
+                <select value={form.departmentId} onChange={e => setForm(p => ({ ...p, departmentId: e.target.value }))} className="w-full bg-gray-700/50 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white"><option value="">Select department</option>{departments.map(department => <option key={department.id} value={department.id}>{department.name}</option>)}</select>
+              </div>}
               <div>
                 <label className="block text-xs text-gray-500 uppercase tracking-wide mb-1.5">Password *</label>
                 <div className="relative">
@@ -459,6 +504,10 @@ export default function AccountsPage() {
                   <option value="admin">Admin</option>
                 </select>
               </div>
+              {form.role === 'member' && <div>
+                <label className="block text-xs text-gray-500 uppercase tracking-wide mb-1.5">Department *</label>
+                <select value={form.departmentId} onChange={e => setForm(p => ({ ...p, departmentId: e.target.value }))} className="w-full bg-gray-700/50 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white"><option value="">Select department</option>{departments.map(department => <option key={department.id} value={department.id}>{department.name}</option>)}</select>
+              </div>}
             </div>
 
             <div className="flex items-center justify-end gap-3 mt-6 pt-4 border-t border-gray-700/50">
