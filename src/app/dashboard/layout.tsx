@@ -155,6 +155,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   const resourceItems = [
     { href: '/dashboard/brand-guidelines', label: 'Brand Guidelines', icon: '🏷️' },
+    { href: '/dashboard/images', label: 'Image Gallery', icon: '🖼️' },
     { href: '/dashboard/calendar', label: 'Calendar', icon: '📅' },
     { href: '/dashboard/templates', label: 'Templates', icon: '📝' },
     { href: '/dashboard/knowledge', label: 'Knowledge', icon: '📚' },
