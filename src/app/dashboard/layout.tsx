@@ -300,6 +300,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                           const mtc = tierColors[m.tier];
                           const isSelected = m.id === currentModel;
                           const pl2 = providerLabels[m.provider];
+                          const includedLabel = m.provider === 'codex'
+                            ? 'Included in ChatGPT Plus'
+                            : 'Included in Claude subscription';
                           return (
                             <button
                               key={m.id}
@@ -319,7 +322,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                                 </div>
                                 <p className="text-[10px] text-gray-500 mt-0.5">
                                   {m.inputPrice === 0 && m.outputPrice === 0
-                                    ? <span className="text-emerald-400">Included in ChatGPT Plus · <span className={mtc.text}>{m.tier}</span></span>
+                                    ? <span className="text-emerald-400">{includedLabel} · <span className={mtc.text}>{m.tier}</span></span>
                                     : <>${(m.inputPrice * 1_000_000).toFixed(2)}/${(m.outputPrice * 1_000_000).toFixed(2)} per 1M tokens · <span className={mtc.text}>{m.tier}</span></>
                                   }
                                 </p>
