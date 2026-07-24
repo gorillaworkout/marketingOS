@@ -4,7 +4,7 @@ const API_KEY = process.env.OPENROUTER_API_KEY || process.env.OPENAI_API_KEY || 
 const PRIMARY_MODEL = process.env.AI_MODEL || 'deepseek/deepseek-v4-flash';
 const FALLBACK_MODEL = 'deepseek/deepseek-v4-pro';
 
-export type ModelProvider = 'openrouter' | 'codex';
+export type ModelProvider = 'openrouter' | 'codex' | 'claude-code';
 
 export interface ModelInfo {
   id: string;
@@ -24,6 +24,10 @@ export const AVAILABLE_MODELS: ModelInfo[] = [
   { id: 'gpt-5.6-sol', name: 'GPT-5.6 Sol (Codex)', tier: 'premium', provider: 'codex', input: 0, output: 0 },
   { id: 'gpt-5.6-terra', name: 'GPT-5.6 Terra (Codex)', tier: 'balanced', provider: 'codex', input: 0, output: 0 },
   { id: 'gpt-5.6-luna', name: 'GPT-5.6 Luna (Codex)', tier: 'budget', provider: 'codex', input: 0, output: 0 },
+  // Claude Code OAuth subscription models — no per-token dollar cost.
+  { id: 'haiku', name: 'Claude Haiku (Claude Code)', tier: 'budget', provider: 'claude-code', input: 0, output: 0 },
+  { id: 'sonnet', name: 'Claude Sonnet (Claude Code)', tier: 'balanced', provider: 'claude-code', input: 0, output: 0 },
+  { id: 'opus', name: 'Claude Opus (Claude Code)', tier: 'premium', provider: 'claude-code', input: 0, output: 0 },
 ];
 
 export function getModelProvider(modelId: string): ModelProvider {
@@ -65,6 +69,10 @@ const MODEL_PRICING: Record<string, { input: number; output: number }> = {
   'gpt-5.6-sol': { input: 0, output: 0 },
   'gpt-5.6-terra': { input: 0, output: 0 },
   'gpt-5.6-luna': { input: 0, output: 0 },
+  // Claude Code OAuth subscription models — included in the Claude subscription.
+  'haiku': { input: 0, output: 0 },
+  'sonnet': { input: 0, output: 0 },
+  'opus': { input: 0, output: 0 },
 };
 
 function getPricing(model: string) {
@@ -172,6 +180,114 @@ async function callCodex(prompt: string, model: string): Promise<string> {
   }
 }
 
+const CLAUDE_CODE_MODEL_IDS = new Set(
+  AVAILABLE_MODELS.filter(model => model.provider === 'claude-code').map(model => model.id),
+);
+
+/**
+ * Build arguments for the locally authenticated Claude Code CLI. Keeping the
+ * model allowlist here prevents a saved model preference from becoming a CLI
+ * argument injection vector.
+ */
+export function buildClaudeCliArgs(model: string): string[] {
+  if (!CLAUDE_CODE_MODEL_IDS.has(model)) {
+    throw new Error(`Unsupported Claude Code model: ${model}`);
+  }
+
+  return ['--print', '--output-format', 'json', '--model', model];
+}
+
+function getClaudeAnswer(stdout: string): string {
+  let response: unknown;
+  try {
+    response = JSON.parse(stdout);
+  } catch {
+    throw new Error('Claude CLI returned an unexpected response.');
+  }
+
+  if (!response || typeof response !== 'object' || typeof (response as { result?: unknown }).result !== 'string') {
+    throw new Error('Claude CLI returned no generated answer.');
+  }
+
+  return (response as { result: string }).result;
+}
+
+/**
+ * Call Claude Code through its server user's existing OAuth session. The
+ * prompt is passed over stdin from a private temporary file; no shell, API
+ * key, or OAuth credential is involved.
+ */
+export async function callClaude(prompt: string, model: string): Promise<string> {
+  const fs = await import('fs');
+  const fsPromises = await import('fs/promises');
+  const os = await import('os');
+  const path = await import('path');
+  const { spawn } = await import('child_process');
+
+  const tempDirectory = await fsPromises.mkdtemp(path.join(os.tmpdir(), 'marketingos-claude-'));
+  const tempFile = path.join(tempDirectory, 'prompt.txt');
+  await fsPromises.writeFile(tempFile, prompt, { encoding: 'utf8', mode: 0o600 });
+
+  try {
+    const args = buildClaudeCliArgs(model);
+    const stdout = await new Promise<string>((resolve, reject) => {
+      const child = spawn('claude', args, {
+        cwd: process.cwd(),
+        shell: false,
+        stdio: ['pipe', 'pipe', 'pipe'],
+      });
+      const input = fs.createReadStream(tempFile);
+      const chunks: Buffer[] = [];
+      let outputLength = 0;
+      let timedOut = false;
+      const timeout = setTimeout(() => {
+        timedOut = true;
+        child.kill('SIGKILL');
+      }, 180_000);
+
+      const finish = () => clearTimeout(timeout);
+      // Drain diagnostics so a large CLI error cannot block the child. Do not
+      // retain or print them because they may include session information.
+      child.stderr.resume();
+      input.on('error', error => {
+        child.kill('SIGTERM');
+        finish();
+        reject(error);
+      });
+      child.on('error', error => {
+        finish();
+        reject(error);
+      });
+      child.stdout.on('data', (chunk: Buffer) => {
+        outputLength += chunk.length;
+        if (outputLength > 10 * 1024 * 1024) {
+          child.kill('SIGTERM');
+          return;
+        }
+        chunks.push(chunk);
+      });
+      child.on('close', code => {
+        finish();
+        if (timedOut) {
+          reject(new Error('Claude CLI timed out after 180 seconds.'));
+        } else if (outputLength > 10 * 1024 * 1024) {
+          reject(new Error('Claude CLI output exceeded 10 MB.'));
+        } else if (code !== 0) {
+          // Deliberately do not include stderr: CLI diagnostics may contain sensitive session details.
+          reject(new Error(`Claude CLI exited with code ${code ?? 'unknown'}.`));
+        } else {
+          resolve(Buffer.concat(chunks).toString('utf8'));
+        }
+      });
+      input.pipe(child.stdin);
+    });
+
+    return getClaudeAnswer(stdout);
+  } finally {
+    await fsPromises.rm(tempDirectory, { recursive: true, force: true });
+  }
+}
+
 /**
  * Core API call with structured output support, retry on JSON parse failure,
  * and model fallback (primary -> fallback model).
@@ -187,7 +303,7 @@ async function callApi(
 ): Promise<{ content: string; model: string }> {
   const model = options.model || PRIMARY_MODEL;
 
-  // Route to Codex CLI if the model's provider is 'codex'
+  // Route CLI-backed models through their locally authenticated CLIs.
   const provider = getModelProvider(model);
   if (provider === 'codex') {
     // Combine messages into a single prompt for Codex exec
@@ -196,6 +312,14 @@ async function callApi(
       return `[${role}]: ${m.content}`;
     }).join('\n\n');
     const content = await callCodex(prompt, model);
+    return { content, model };
+  }
+  if (provider === 'claude-code') {
+    const prompt = messages.map(m => {
+      const role = m.role.charAt(0).toUpperCase() + m.role.slice(1);
+      return `[${role}]: ${m.content}`;
+    }).join('\n\n');
+    const content = await callClaude(prompt, model);
     return { content, model };
   }
 

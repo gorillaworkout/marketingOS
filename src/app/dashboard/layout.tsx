@@ -15,7 +15,7 @@ interface ModelInfo {
   id: string;
   name: string;
   tier: 'budget' | 'balanced' | 'premium';
-  provider: 'openrouter' | 'codex';
+  provider: 'openrouter' | 'codex' | 'claude-code';
   inputPrice: number;
   outputPrice: number;
 }
@@ -23,6 +23,7 @@ interface ModelInfo {
 const providerLabels: Record<string, { icon: string; label: string; badgeColor: string }> = {
   openrouter: { icon: '📡', label: 'OpenRouter', badgeColor: 'bg-purple-500/20 text-purple-400' },
   codex: { icon: '🤖', label: 'Codex (ChatGPT Plus)', badgeColor: 'bg-emerald-500/20 text-emerald-400' },
+  'claude-code': { icon: '🟠', label: 'Claude Code (Claude subscription)', badgeColor: 'bg-orange-500/20 text-orange-400' },
 };
 
 const tierColors: Record<string, { dot: string; bg: string; text: string }> = {
@@ -285,7 +286,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                   <p className="text-[10px] text-gray-500 uppercase tracking-wider px-2">AI Model</p>
                 </div>
                 <div className="p-1 max-h-64 overflow-y-auto">
-                  {(['openrouter', 'codex'] as const).map(provider => {
+                  {(['openrouter', 'codex', 'claude-code'] as const).map(provider => {
                     const providerModels = models.filter(m => m.provider === provider);
                     if (providerModels.length === 0) return null;
                     const pl = providerLabels[provider];
