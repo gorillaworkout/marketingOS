@@ -26,6 +26,33 @@ function isValidIsoDate(value: unknown): value is string {
   return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
 }
 
+function extractBalancedJsonObject(source: string, key: string): Record<string, unknown> | null {
+  const keyMatch = new RegExp(`"${key}"\\s*:\\s*\\{`).exec(source);
+  if (!keyMatch || keyMatch.index === undefined) return null;
+  const start = source.indexOf('{', keyMatch.index);
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let index = start; index < source.length; index += 1) {
+    const char = source[index];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (char === '\\') escaped = true;
+      else if (char === '"') inString = false;
+      continue;
+    }
+    if (char === '"') inString = true;
+    else if (char === '{') depth += 1;
+    else if (char === '}') {
+      depth -= 1;
+      if (depth === 0) {
+        try { return JSON.parse(source.slice(start, index + 1)) as Record<string, unknown>; } catch { return null; }
+      }
+    }
+  }
+  return null;
+}
+
 const STYLE_VARIANTS = [
   {
     style: 'bold',
@@ -252,11 +279,9 @@ The budget must use this exact JSON schema: { "currency": "IDR", "total": 500000
               if (spMatch) {
                 try { extracted.speakers = JSON.parse('[' + spMatch[1] + ']'); } catch { extracted.speakers = []; }
               }
-              // Extract budget object (first level only)
-              const budgetMatch = str.match(/"budget"\s*:\s*(\{[\s\S]*?\})\s*,\s*"(?:timeline|speakers)"/);
-              if (budgetMatch) {
-                try { extracted.budget = JSON.parse(budgetMatch[1]); } catch { extracted.budget = {}; }
-              }
+              // Budget may contain nested line items, so extract its balanced JSON object rather than a regex that stops at the first nested brace.
+              const budgetObject = extractBalancedJsonObject(str, 'budget') || extractBalancedJsonObject(str, 'budgetBreakdown');
+              if (budgetObject) extracted.budget = budgetObject;
               return Object.keys(extracted).length > 0 ? extracted : null;
             }
 

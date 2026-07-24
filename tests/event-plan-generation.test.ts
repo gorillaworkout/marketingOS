@@ -21,4 +21,6 @@ test('Event Plan generator requires a Rupiah budget breakdown contract', async (
   assert.match(route, /"items": \[/);
   assert.match(route, /"estimatedCost"/);
   assert.match(route, /Budget ceiling/);
+  assert.match(route, /extractBalancedJsonObject/);
+  assert.doesNotMatch(route, /const budgetMatch =/);
 });
