@@ -3,7 +3,7 @@
 import { useState } from 'react';
 
 type BudgetItem = { category: string; estimatedCost: number; notes: string };
-type Budget = { currency: 'IDR'; total?: number; items: BudgetItem[]; contingency?: number };
+type Budget = { currency: 'IDR'; total?: number; items: BudgetItem[]; contingency?: number; preliminary?: boolean };
 type EventPlanOption = {
   style: string;
   styleLabel: string;
@@ -63,6 +63,7 @@ function normalizeBudget(value: unknown): Budget | null {
     currency: 'IDR',
     total: asRupiah(source.total),
     contingency: asRupiah(source.contingency),
+    preliminary: source.preliminary === true,
     items,
   };
 }
@@ -187,5 +188,5 @@ function Detail({ label, value, preserveWhitespace = false }: { label: string; v
 
 function BudgetBreakdown({ budget }: { budget: Budget | null }) {
   if (!budget) return <div className="mb-4"><label className="text-xs text-gray-500 uppercase tracking-wide">💰 Budget Breakdown</label><p className="text-gray-400 mt-1 bg-gray-700/30 p-3 rounded-lg">Budget details were unavailable for this plan.</p></div>;
-  return <div className="mb-4"><label className="text-xs text-gray-500 uppercase tracking-wide">💰 Budget Breakdown</label><div className="mt-1 overflow-x-auto rounded-lg border border-gray-700"><table className="w-full text-sm text-left"><thead className="bg-gray-700/50 text-gray-300"><tr><th className="p-3">Category</th><th className="p-3">Notes</th><th className="p-3 text-right">Estimated cost</th></tr></thead><tbody>{budget.items.length ? budget.items.map((item, index) => <tr key={index} className="border-t border-gray-700 text-gray-300"><td className="p-3">{item.category}</td><td className="p-3">{item.notes}</td><td className="p-3 text-right whitespace-nowrap">{formatIDR(item.estimatedCost)}</td></tr>) : <tr className="border-t border-gray-700 text-gray-400"><td className="p-3" colSpan={3}>No itemized budget details were provided.</td></tr>}</tbody><tfoot className="bg-gray-700/30 text-white"><tr><td className="p-3 font-medium" colSpan={2}>Contingency</td><td className="p-3 text-right whitespace-nowrap">{formatIDR(budget.contingency ?? 0)}</td></tr><tr><td className="p-3 font-semibold" colSpan={2}>Total</td><td className="p-3 text-right font-semibold whitespace-nowrap">{formatIDR(budget.total ?? 0)}</td></tr></tfoot></table></div></div>;
+  return <div className="mb-4"><label className="text-xs text-gray-500 uppercase tracking-wide">💰 Budget Breakdown</label>{budget.preliminary && <p className="mt-1 text-xs text-amber-300">Preliminary IDR allocation based on the budget ceiling. Confirm all figures with vendor quotations.</p>}<div className="mt-1 overflow-x-auto rounded-lg border border-gray-700"><table className="w-full text-sm text-left"><thead className="bg-gray-700/50 text-gray-300"><tr><th className="p-3">Category</th><th className="p-3">Notes</th><th className="p-3 text-right">Estimated cost</th></tr></thead><tbody>{budget.items.length ? budget.items.map((item, index) => <tr key={index} className="border-t border-gray-700 text-gray-300"><td className="p-3">{item.category}</td><td className="p-3">{item.notes}</td><td className="p-3 text-right whitespace-nowrap">{formatIDR(item.estimatedCost)}</td></tr>) : <tr className="border-t border-gray-700 text-gray-400"><td className="p-3" colSpan={3}>No itemized budget details were provided.</td></tr>}</tbody><tfoot className="bg-gray-700/30 text-white"><tr><td className="p-3 font-medium" colSpan={2}>Contingency</td><td className="p-3 text-right whitespace-nowrap">{formatIDR(budget.contingency ?? 0)}</td></tr><tr><td className="p-3 font-semibold" colSpan={2}>Total</td><td className="p-3 text-right font-semibold whitespace-nowrap">{formatIDR(budget.total ?? 0)}</td></tr></tfoot></table></div></div>;
 }

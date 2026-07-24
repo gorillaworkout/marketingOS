@@ -53,6 +53,37 @@ function extractBalancedJsonObject(source: string, key: string): Record<string, 
   return null;
 }
 
+function buildPreliminaryBudget(budgetCeiling: number): Record<string, unknown> {
+  const contingency = Math.floor(budgetCeiling * 0.1);
+  const available = budgetCeiling - contingency;
+  const fixedItems = [
+    { category: 'Venue & room setup', estimatedCost: Math.floor(available * 0.30), notes: 'Preliminary estimate; confirm with venue quotation.' },
+    { category: 'Production & AV', estimatedCost: Math.floor(available * 0.20), notes: 'Preliminary estimate for audio, visual, and technical crew.' },
+    { category: 'Catering & hospitality', estimatedCost: Math.floor(available * 0.20), notes: 'Preliminary estimate based on target attendance.' },
+    { category: 'Speaker & transport', estimatedCost: Math.floor(available * 0.12), notes: 'Preliminary estimate; confirm speaker availability and terms.' },
+  ];
+  const allocated = fixedItems.reduce((sum, item) => sum + item.estimatedCost, 0);
+  return {
+    currency: 'IDR',
+    total: budgetCeiling,
+    items: [...fixedItems, { category: 'Promotion & operations', estimatedCost: available - allocated, notes: 'Preliminary estimate; validate against media plan and vendor quotes.' }],
+    contingency,
+    preliminary: true,
+  };
+}
+
+function normalizeGeneratedBudget(value: unknown, budgetCeiling: number | undefined): Record<string, unknown> {
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    const source = value as Record<string, unknown>;
+    const items = Array.isArray(source.items) ? source.items.filter(item => item && typeof item === 'object' && !Array.isArray(item)) : [];
+    const total = parseRupiahBudget(source.total);
+    if (items.length > 0 && total !== undefined) {
+      return { ...source, currency: 'IDR', total };
+    }
+  }
+  return budgetCeiling === undefined ? {} : buildPreliminaryBudget(budgetCeiling);
+}
+
 const STYLE_VARIANTS = [
   {
     style: 'bold',
@@ -309,7 +340,7 @@ The budget must use this exact JSON schema: { "currency": "IDR", "total": 500000
               theme: planData.theme || theme || '',
               venue: planData.venue || '',
               speakers: planData.speakers || [],
-              budget: planData.budget || {},
+              budget: normalizeGeneratedBudget(planData.budget || planData.budgetBreakdown, budgetCeiling),
               timeline: planData.timeline || '',
             };
           });
