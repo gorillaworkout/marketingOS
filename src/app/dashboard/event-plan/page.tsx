@@ -1,6 +1,8 @@
 'use client';
 
 import { useState } from 'react';
+import { buildEventPlanDownload, eventPlanDownloadFilename } from '@/lib/event-plan-download';
+import type { EventPlanResearch } from '@/lib/event-plan-research';
 
 type BudgetItem = { category: string; estimatedCost: number; notes: string };
 type Budget = { currency: 'IDR'; total?: number; items: BudgetItem[]; contingency?: number; preliminary?: boolean };
@@ -14,6 +16,7 @@ type EventPlanOption = {
   speakers?: unknown;
   budget?: unknown;
   timeline?: string;
+  research?: EventPlanResearch;
 };
 type GenerationEvent = {
   step?: string;
@@ -74,6 +77,7 @@ export default function EventPlanPage() {
   const [location, setLocation] = useState('Jakarta');
   const [budget, setBudget] = useState('');
   const [targetDate, setTargetDate] = useState('');
+  const [researchLinks, setResearchLinks] = useState('');
   const [loading, setLoading] = useState(false);
   const [options, setOptions] = useState<EventPlanOption[]>([]);
   const [selectedOption, setSelectedOption] = useState(0);
@@ -92,7 +96,7 @@ export default function EventPlanPage() {
     try {
       const res = await fetch('/api/event-plan/generate', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ eventName, theme, location, budget: budget ? Number(budget) : undefined, targetDate }),
+        body: JSON.stringify({ eventName, theme, location, budget: budget ? Number(budget) : undefined, targetDate, researchUrls: researchLinks.split(/\r?\n/).map((url) => url.trim()).filter(Boolean) }),
       });
       if (!res.ok) throw new Error(`Generation failed (${res.status})`);
       if (!res.body) throw new Error('The generation stream was unavailable');
@@ -142,6 +146,19 @@ export default function EventPlanPage() {
   const result = options[selectedOption];
   const displayBudget = normalizeBudget(result?.budget);
   const speakers = Array.isArray(result?.speakers) ? result.speakers.filter((speaker): speaker is string => typeof speaker === 'string') : [];
+  const research = result?.research || { status: 'unverified' as const, sources: [], contacts: [] };
+  const handleDownload = (format: 'doc' | 'json') => {
+    if (!result) return;
+    const download = buildEventPlanDownload({ eventName, location, theme, targetDate, option: { ...result, research } }, format);
+    const blob = new Blob([download.content], { type: download.mimeType });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = eventPlanDownloadFilename(eventName, format);
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(link.href);
+  };
 
   return (
     <div className="max-w-4xl mx-auto space-y-8">
@@ -155,6 +172,7 @@ export default function EventPlanPage() {
           <div><label className="block text-sm font-medium text-gray-300 mb-1">Budget ceiling (IDR)</label><input type="text" inputMode="numeric" value={budget ? formatIDR(budget) : ''} onChange={e => setBudget(e.target.value.replace(/\D/g, ''))} className="w-full px-3 py-2 bg-gray-700/50 border border-gray-600 rounded-lg text-white placeholder-gray-500 focus:ring-2 focus:ring-blue-500" placeholder="Rp 50.000.000" /></div>
           <div><label className="block text-sm font-medium text-gray-300 mb-1">Event Target Date</label><input type="date" value={targetDate} onChange={e => setTargetDate(e.target.value)} className="w-full px-3 py-2 bg-gray-700/50 border border-gray-600 rounded-lg text-white focus:ring-2 focus:ring-blue-500" /></div>
         </div>
+        <div><label className="block text-sm font-medium text-gray-300 mb-1">Research / quotation links</label><textarea value={researchLinks} onChange={e => setResearchLinks(e.target.value)} className="w-full px-3 py-2 bg-gray-700/50 border border-gray-600 rounded-lg text-white placeholder-gray-500 focus:ring-2 focus:ring-blue-500" rows={4} placeholder={'https://official-vendor.example/proposal\nhttps://hotel.example/price-list'} /><p className="mt-1 text-xs text-gray-400">Optional. Paste official hotel/vendor pages, proposals, or price lists—one public URL per line (maximum 5). Links are untrusted references and require manual verification; do not enter free-form contact claims.</p></div>
         <button type="submit" disabled={loading || !eventName} className="px-6 py-2.5 bg-orange-600 hover:bg-orange-700 disabled:bg-orange-800/50 disabled:cursor-not-allowed text-white font-medium rounded-lg transition-colors">{loading ? '🤖 Generating…' : '📋 Generate Plan'}</button>
       </form>
 
@@ -174,7 +192,9 @@ export default function EventPlanPage() {
             {speakers.length > 0 && <div className="mb-4"><label className="text-xs text-gray-500 uppercase tracking-wide">🎤 Speakers</label><ul className="mt-1 space-y-1">{speakers.map((speaker, index) => <li key={index} className="text-gray-300 bg-gray-700/30 p-2 rounded-lg">• {speaker}</li>)}</ul></div>}
             <BudgetBreakdown budget={displayBudget} />
             {result.timeline && <Detail label="📅 Timeline" value={result.timeline} preserveWhitespace />}
+            <ResearchPanel research={research} />
           </div>
+          <div className="flex flex-wrap gap-3"><button type="button" onClick={() => handleDownload('doc')} className="px-4 py-2 bg-orange-600 hover:bg-orange-700 text-white font-medium rounded-lg transition-colors">Download Event Plan (.doc)</button><button type="button" onClick={() => handleDownload('json')} className="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white font-medium rounded-lg transition-colors">Download JSON</button></div>
           {tokenUsage && <div className="bg-gray-800/50 rounded-xl p-6 border border-gray-700/50"><h3 className="text-lg font-semibold text-white mb-2">💰 Token Usage</h3><p className="text-gray-400">{(tokenUsage.inputTokens || 0) + (tokenUsage.outputTokens || 0)} tokens</p>{tokenUsage.model && <p className="text-xs text-gray-500 mt-1">Model: <span className="text-gray-400">{tokenUsage.model}</span></p>}</div>}
         </div>
       )}
@@ -189,4 +209,10 @@ function Detail({ label, value, preserveWhitespace = false }: { label: string; v
 function BudgetBreakdown({ budget }: { budget: Budget | null }) {
   if (!budget) return <div className="mb-4"><label className="text-xs text-gray-500 uppercase tracking-wide">💰 Budget Breakdown</label><p className="text-gray-400 mt-1 bg-gray-700/30 p-3 rounded-lg">Budget details were unavailable for this plan.</p></div>;
   return <div className="mb-4"><label className="text-xs text-gray-500 uppercase tracking-wide">💰 Budget Breakdown</label>{budget.preliminary && <p className="mt-1 text-xs text-amber-300">Preliminary IDR allocation based on the budget ceiling. Confirm all figures with vendor quotations.</p>}<div className="mt-1 overflow-x-auto rounded-lg border border-gray-700"><table className="w-full text-sm text-left"><thead className="bg-gray-700/50 text-gray-300"><tr><th className="p-3">Category</th><th className="p-3">Notes</th><th className="p-3 text-right">Estimated cost</th></tr></thead><tbody>{budget.items.length ? budget.items.map((item, index) => <tr key={index} className="border-t border-gray-700 text-gray-300"><td className="p-3">{item.category}</td><td className="p-3">{item.notes}</td><td className="p-3 text-right whitespace-nowrap">{formatIDR(item.estimatedCost)}</td></tr>) : <tr className="border-t border-gray-700 text-gray-400"><td className="p-3" colSpan={3}>No itemized budget details were provided.</td></tr>}</tbody><tfoot className="bg-gray-700/30 text-white"><tr><td className="p-3 font-medium" colSpan={2}>Contingency</td><td className="p-3 text-right whitespace-nowrap">{formatIDR(budget.contingency ?? 0)}</td></tr><tr><td className="p-3 font-semibold" colSpan={2}>Total</td><td className="p-3 text-right font-semibold whitespace-nowrap">{formatIDR(budget.total ?? 0)}</td></tr></tfoot></table></div></div>;
+}
+
+function ResearchPanel({ research }: { research: EventPlanResearch }) {
+  if (research.status === 'unverified') return <section className="mt-4 rounded-lg border-2 border-amber-400 bg-amber-500/15 p-4 text-amber-100" role="alert"><p className="font-semibold">Harga di bawah adalah estimasi AI, bukan quotation vendor. Minta minimal 3 quotation tertulis sebelum booking.</p><p className="mt-1 text-sm">Tidak ada sumber quotation yang dapat diverifikasi secara otomatis.</p></section>;
+  const contacts = research.contacts.filter((contact) => Boolean(contact.sourceUrl));
+  return <section className="mt-4 rounded-lg border border-blue-500/40 bg-blue-500/10 p-4 text-blue-100"><h4 className="font-semibold">Research status: source provided</h4><p className="mt-1 text-sm">Sumber di bawah harus diverifikasi manual; URL saja bukan quotation atau riset terverifikasi.</p><div className="mt-3"><p className="text-xs uppercase tracking-wide text-blue-200">Sources</p><ul className="mt-1 list-disc pl-5 text-sm">{research.sources.map((source) => <li key={source.url}><a className="underline hover:text-white" href={source.url} target="_blank" rel="noreferrer">{source.url}</a> — {source.claim}</li>)}</ul></div>{contacts.length > 0 && <div className="mt-3"><p className="text-xs uppercase tracking-wide text-blue-200">Contacts</p><ul className="mt-1 space-y-1 text-sm">{contacts.map((contact, index) => <li key={`${contact.sourceUrl}-${index}`}><span className="font-medium">{contact.vendor}</span>{contact.phone ? ` · ${contact.phone}` : ''}{contact.email ? ` · ${contact.email}` : ''} · <a className="underline hover:text-white" href={contact.sourceUrl} target="_blank" rel="noreferrer">Source</a></li>)}</ul></div>}</section>;
 }
