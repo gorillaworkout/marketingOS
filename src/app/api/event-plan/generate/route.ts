@@ -14,6 +14,18 @@ function sseEvent(data: Record<string, unknown>) {
   return `data: ${JSON.stringify(data)}\n\n`;
 }
 
+function parseRupiahBudget(value: unknown): number | undefined {
+  if (value === undefined || value === null || value === '') return undefined;
+  const numeric = typeof value === 'number' ? value : Number(String(value).replace(/\D/g, ''));
+  return Number.isSafeInteger(numeric) && numeric >= 0 ? numeric : undefined;
+}
+
+function isValidIsoDate(value: unknown): value is string {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const parsed = new Date(`${value}T00:00:00Z`);
+  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
+}
+
 const STYLE_VARIANTS = [
   {
     style: 'bold',
@@ -65,8 +77,20 @@ export async function POST(request: NextRequest) {
   }
   const userId = auth.id;
   const { eventName, theme, location, budget, targetDate, brandGuidelineId } = await request.json();
+  const budgetCeiling = parseRupiahBudget(budget);
+  const hasBudgetValue = budget !== undefined && budget !== null && budget !== '';
   if (!eventName) {
     return new Response(sseEvent({ step: 'error', message: 'Event name is required' }), {
+      headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' },
+    });
+  }
+  if (hasBudgetValue && budgetCeiling === undefined) {
+    return new Response(sseEvent({ step: 'error', message: 'Budget must be a valid non-negative Rupiah amount' }), {
+      headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' },
+    });
+  }
+  if (targetDate && !isValidIsoDate(targetDate)) {
+    return new Response(sseEvent({ step: 'error', message: 'Target date must use YYYY-MM-DD' }), {
       headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' },
     });
   }
@@ -148,14 +172,15 @@ export async function POST(request: NextRequest) {
 Event Name: ${eventName}
 Theme: ${theme || 'General'}
 Location: ${location || 'Jakarta'}
-Budget: ${budget || 'TBD'}
+Budget ceiling (IDR): ${budgetCeiling === undefined ? 'TBD' : `Rp ${budgetCeiling.toLocaleString('id-ID')}`}
 Target Date: ${targetDate || 'TBD'}
 
 ${variant.instruction}
 ${bestExamples}
 ${contextMemory}
 
-Follow the SOP strictly. Output JSON format with: { "objective": "...", "concept": "...", "theme": "...", "venue": "...", "speakers": ["..."], "budget": {...}, "timeline": "..." }`;
+Follow the SOP strictly. Output JSON with: { "objective": "...", "concept": "...", "theme": "...", "venue": "...", "speakers": ["..."], "budget": { "currency": "IDR", "total": 50000000, "items": [{ "category": "Venue", "estimatedCost": 10000000, "notes": "..." }], "contingency": 5000000 }, "timeline": "..." }.
+The budget must use this exact JSON schema: { "currency": "IDR", "total": 50000000, "items": [{ "category": "Venue", "estimatedCost": 10000000, "notes": "..." }], "contingency": 5000000 }. All money values are integer Rupiah. The total must not exceed the submitted Budget ceiling when supplied, and the budget has to be itemized.`;
 
             const progressBase = 10 + index * 20;
 
