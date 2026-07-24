@@ -87,6 +87,15 @@ list_image_files_by_mtime() {
   fi
 }
 
+# GNU stat is used on Linux and BSD stat on macOS.
+file_size() {
+  if stat -c '%s' "$1" >/dev/null 2>&1; then
+    stat -c '%s' "$1"
+  else
+    stat -f '%z' "$1"
+  fi
+}
+
 # Build the codex command - use stdin to avoid escaping issues
 # Use --dangerously-bypass-approvals-and-sandbox to avoid interactive prompts
 # Escape single quotes in variables for safe shell embedding
@@ -121,7 +130,7 @@ find_newest_image() {
     local path="${line#* }"
     if [ "$ts" -gt "$BEFORE_TS" ]; then
       local size
-      size=$(stat -f%z "$path" 2>/dev/null || echo 0)
+      size=$(file_size "$path" 2>/dev/null || echo 0)
       if [ "$size" -gt 10000 ]; then
         best_path="$path"
         best_size="$size"

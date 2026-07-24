@@ -44,6 +44,23 @@ interface ProgressEvent {
   qcResults?: QCResult[];
 }
 
+interface ImageJobResponse {
+  jobId?: string;
+  status?: string;
+  progress?: number;
+  message?: string;
+  error?: string;
+  result?: { success?: boolean; imageUrl?: string };
+}
+
+async function readImageJobResponse(response: Response): Promise<ImageJobResponse> {
+  try {
+    return await response.json() as ImageJobResponse;
+  } catch {
+    return {};
+  }
+}
+
 interface PostOption {
   style: string;
   styleLabel: string;
@@ -87,7 +104,8 @@ export default function SocialPostPage() {
   const [editableImagePrompt, setEditableImagePrompt] = useState('');
   const [imageProgress, setImageProgress] = useState<ImageProgressState | null>(null);
   const imageProgressTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const imageAbortRef = useRef<AbortController | null>(null);
+  const imagePollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const imageRunRef = useRef(0);
   const [ratingMessage, setRatingMessage] = useState('');
   const [recentPosts, setRecentPosts] = useState<any[]>([]);
   const [viewingPost, setViewingPost] = useState<any>(null);
@@ -138,15 +156,26 @@ export default function SocialPostPage() {
     }
   }, []);
 
+  const stopImageTracking = useCallback(() => {
+    if (imageProgressTimerRef.current) {
+      clearInterval(imageProgressTimerRef.current);
+      imageProgressTimerRef.current = null;
+    }
+    if (imagePollTimerRef.current) {
+      clearInterval(imagePollTimerRef.current);
+      imagePollTimerRef.current = null;
+    }
+  }, []);
+
   // Cleanup on unmount
   useEffect(() => {
     return () => {
       stopElapsedTimer();
-      if (imageProgressTimerRef.current) { clearInterval(imageProgressTimerRef.current); imageProgressTimerRef.current = null; }
+      imageRunRef.current += 1;
+      stopImageTracking();
       abortControllerRef.current?.abort();
-      imageAbortRef.current?.abort();
     };
-  }, [stopElapsedTimer]);
+  }, [stopElapsedTimer, stopImageTracking]);
 
   const handleGenerate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -349,15 +378,13 @@ export default function SocialPostPage() {
 
   const generateImage = async () => {
     if (!editableImagePrompt.trim()) return;
+    imageRunRef.current += 1;
+    const runId = imageRunRef.current;
+    stopImageTracking();
     setGeneratingImage(true);
     setError('');
     setGeneratedImage(null);
     setImageProgress({ step: 'trying', progress: 5, message: '🚀 Starting image generation...', elapsed: 0 });
-
-    // Abort any previous request
-    imageAbortRef.current?.abort();
-    const controller = new AbortController();
-    imageAbortRef.current = controller;
 
     const startTime = Date.now();
     imageProgressTimerRef.current = setInterval(() => {
@@ -369,58 +396,67 @@ export default function SocialPostPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ prompt: editableImagePrompt, taskId, type: 'social-post', brief: brief || editableImagePrompt.substring(0, 100) }),
-        signal: controller.signal,
       });
 
-      if (!res.ok) throw new Error(`Server error: ${res.status}`);
+      const startup = await readImageJobResponse(res);
+      if (!res.ok) throw new Error(startup.error || `Unable to start image generation (HTTP ${res.status}).`);
+      if (typeof startup.jobId !== 'string') throw new Error('Image generation did not return a job ID.');
+      const jobId = startup.jobId;
 
-      const reader = res.body?.getReader();
-      if (!reader) throw new Error('No response stream');
+      const poll = async (): Promise<boolean> => {
+        if (imageRunRef.current !== runId) return true;
+        try {
+          const statusResponse = await fetch(`/api/generate-image?jobId=${encodeURIComponent(jobId)}`, { cache: 'no-store' });
+          const status = await readImageJobResponse(statusResponse);
+          if (!statusResponse.ok) throw new Error(status.error || `Unable to check image generation status (HTTP ${statusResponse.status}).`);
+          if (imageRunRef.current !== runId) return true;
 
-      const decoder = new TextDecoder();
-      let buffer = '';
+          setImageProgress({
+            step: status.status || 'generating',
+            progress: typeof status.progress === 'number' ? status.progress : 0,
+            message: status.message || 'Generating image...',
+            elapsed: Math.floor((Date.now() - startTime) / 1000),
+          });
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || '';
-
-        for (const line of lines) {
-          if (!line.startsWith('data: ')) continue;
-          try {
-            const event = JSON.parse(line.slice(6));
-            const elapsed = Math.floor((Date.now() - startTime) / 1000);
-
-            if (event.step === 'error') {
-              setError(event.message);
-              setImageProgress(null);
-              if (imageProgressTimerRef.current) { clearInterval(imageProgressTimerRef.current); imageProgressTimerRef.current = null; }
-              setGeneratingImage(false);
-              return;
-            }
-
-            if (event.step === 'done' && event.result?.success) {
-              setGeneratedImage(event.result.imageUrl);
-              setImageProgress({ step: 'done', progress: 100, message: '✅ Image generated!', elapsed });
-              if (imageProgressTimerRef.current) { clearInterval(imageProgressTimerRef.current); imageProgressTimerRef.current = null; }
-              setTimeout(() => setImageProgress(null), 3000);
-              setGeneratingImage(false);
-              return;
-            }
-
-            setImageProgress({ step: event.step, progress: event.progress, message: event.message, elapsed });
-          } catch {}
+          if (status.status === 'done' && status.result?.success && status.result.imageUrl) {
+            setGeneratedImage(status.result.imageUrl);
+            setGeneratingImage(false);
+            stopImageTracking();
+            setTimeout(() => {
+              if (imageRunRef.current === runId) setImageProgress(null);
+            }, 3000);
+            return true;
+          }
+          if (status.status === 'error') {
+            setError(status.error || status.message || 'Image generation failed.');
+            setGeneratingImage(false);
+            stopImageTracking();
+            return true;
+          }
+          return false;
+        } catch (pollError: any) {
+          if (imageRunRef.current === runId) {
+            setError(pollError.message || 'Unable to check image generation status.');
+            setImageProgress(null);
+            setGeneratingImage(false);
+            stopImageTracking();
+          }
+          return true;
         }
+      };
+
+      const finished = await poll();
+      if (!finished && imageRunRef.current === runId) {
+        imagePollTimerRef.current = setInterval(() => { void poll(); }, 1500);
       }
     } catch (e: any) {
-      if (e.name !== 'AbortError') setError(e.message || 'Network error');
-      setImageProgress(null);
-      if (imageProgressTimerRef.current) { clearInterval(imageProgressTimerRef.current); imageProgressTimerRef.current = null; }
+      if (imageRunRef.current === runId) {
+        setError(e.message || 'Unable to start image generation.');
+        setImageProgress(null);
+        setGeneratingImage(false);
+        stopImageTracking();
+      }
     }
-    setGeneratingImage(false);
   };
 
   const viewPost = (post: any) => {
