@@ -26,5 +26,6 @@ test('SOP resource exposes the required manual workflow and admin-only access ha
   assert.match(page, /10 menit/);
   assert.match(page, /Tindakan SOP manual/);
   assert.match(layout, /'\/dashboard\/sop'/);
-  assert.match(layout, /label: 'SOP & Flow'/);
+  assert.match(layout, /label: 'Article Market News'/);
+  assert.match(layout, /const generateItems = \[/);
 });

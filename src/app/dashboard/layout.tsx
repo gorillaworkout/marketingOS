@@ -150,11 +150,11 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     { href: '/dashboard/social-post', label: 'Social Post', icon: '📱' },
     { href: '/dashboard/video-script', label: 'Video Script', icon: '🎬' },
     { href: '/dashboard/event-plan', label: 'Event Plan', icon: '📋' },
-  ].filter(item => user?.role === 'admin' || user?.enabledFeatures.includes(item.href.split('/').pop() || ''));
+    { href: '/dashboard/sop', label: 'Article Market News', icon: '📰', adminOnly: true },
+  ].filter(item => user?.role === 'admin' || (!item.adminOnly && user?.enabledFeatures.includes(item.href.split('/').pop() || '')));
 
   const resourceItems = [
     { href: '/dashboard/brand-guidelines', label: 'Brand Guidelines', icon: '🏷️' },
-    { href: '/dashboard/sop', label: 'SOP & Flow', icon: '🔀' },
     { href: '/dashboard/calendar', label: 'Calendar', icon: '📅' },
     { href: '/dashboard/templates', label: 'Templates', icon: '📝' },
     { href: '/dashboard/knowledge', label: 'Knowledge', icon: '📚' },
