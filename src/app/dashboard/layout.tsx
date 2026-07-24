@@ -54,7 +54,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       if (data.authenticated) {
         setUser(data.user);
         const generationFeature = pathname.split('/').pop() || '';
-        const adminOnlyPages = ['/dashboard/kanban', '/dashboard/tokens', '/dashboard/accounts', '/dashboard/templates', '/dashboard/calendar', '/dashboard/images', '/dashboard/knowledge', '/dashboard/brand-guidelines', '/dashboard/history'];
+        const adminOnlyPages = ['/dashboard/kanban', '/dashboard/tokens', '/dashboard/accounts', '/dashboard/templates', '/dashboard/calendar', '/dashboard/images', '/dashboard/knowledge', '/dashboard/brand-guidelines', '/dashboard/history', '/dashboard/sop'];
         if (data.user.role !== 'admin' && (adminOnlyPages.includes(pathname) || (['social-post', 'video-script', 'event-plan'].includes(generationFeature) && !data.user.enabledFeatures?.includes(generationFeature)))) {
           router.replace('/dashboard');
         }
@@ -154,6 +154,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   const resourceItems = [
     { href: '/dashboard/brand-guidelines', label: 'Brand Guidelines', icon: '🏷️' },
+    { href: '/dashboard/sop', label: 'SOP & Flow', icon: '🔀' },
     { href: '/dashboard/calendar', label: 'Calendar', icon: '📅' },
     { href: '/dashboard/templates', label: 'Templates', icon: '📝' },
     { href: '/dashboard/knowledge', label: 'Knowledge', icon: '📚' },
