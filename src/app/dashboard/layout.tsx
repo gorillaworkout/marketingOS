@@ -166,6 +166,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     { href: '/dashboard/kanban', label: 'Kanban', icon: '📋' },
     { href: '/dashboard/tokens', label: 'Token Usage', icon: '💰' },
     { href: '/dashboard/accounts', label: 'Accounts', icon: '👥' },
+    { href: '/dashboard/models', label: 'Models', icon: '🧠' },
   ];
 
   return (

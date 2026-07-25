@@ -5,6 +5,7 @@ export default function HistoryPage() {
   const [tasks, setTasks] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<any>(null);
+  const [typeFilter, setTypeFilter] = useState<'all' | 'social-post' | 'video-script' | 'event-plan'>('all');
 
   useEffect(() => {
     fetch('/api/dashboard/history').then(r => r.json()).then(d => { setTasks(d.tasks || []); setLoading(false); });
