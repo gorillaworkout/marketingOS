@@ -13,20 +13,19 @@ test('token usage API returns the MarketingOS user account for each log', () => 
   assert.match(route, /user_name/);
 });
 
-test('token usage API returns provider and billing source for each log', () => {
+test('token usage API returns provider information for each log', () => {
   assert.match(route, /provider/);
-  assert.match(route, /account_source/);
   assert.match(route, /task_type/);
 });
 
 test('token usage API includes a user-account-level usage breakdown', () => {
   assert.match(route, /accountBreakdown/);
-  assert.match(route, /GROUP BY u\.username, u\.name, l\.account_source, l\.provider/);
+  assert.match(route, /GROUP BY u\.username, u\.name, l\.provider/);
 });
 
-test('token usage page separates user account, source, and provider', () => {
+test('token usage page shows the user account and provider without source labels', () => {
   assert.match(page, />User Account</);
-  assert.match(page, />Source</);
   assert.match(page, />Provider</);
+  assert.doesNotMatch(page, />Source</);
   assert.match(page, /accountBreakdown/);
 });

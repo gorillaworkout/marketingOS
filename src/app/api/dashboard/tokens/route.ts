@@ -10,7 +10,6 @@ type TokenLogRow = {
   user_name: string | null;
   model: string;
   provider: string | null;
-  account_source: string | null;
   task_type: string | null;
   input_tokens: number | string;
   output_tokens: number | string;
@@ -20,7 +19,6 @@ type TokenLogRow = {
 type AccountBreakdownRow = {
   username: string | null;
   user_name: string | null;
-  account_source: string | null;
   provider: string | null;
   total_tokens: number | string;
   total_cost: number | string;
@@ -31,10 +29,6 @@ function inferProvider(model: string): string {
   if (model.startsWith('codex/')) return 'codex';
   if (model.startsWith('claude-code/')) return 'claude-code';
   return 'openrouter';
-}
-
-function accountSource(provider: string, source: string | null): string {
-  return source || (provider === 'openrouter' ? 'personal' : 'office');
 }
 
 export async function GET(request: NextRequest) {
@@ -49,7 +43,7 @@ export async function GET(request: NextRequest) {
   const totalTasks = await queryOne<CountRow>('SELECT COUNT(*) as c FROM tasks WHERE user_id = ?', [userId]);
 
   const logs = await queryAll<TokenLogRow>(`
-    SELECT l.id, u.username, u.name AS user_name, l.model, l.provider, l.account_source, l.task_type,
+    SELECT l.id, u.username, u.name AS user_name, l.model, l.provider, l.task_type,
       l.input_tokens, l.output_tokens, l.cost, l.created_at
     FROM token_logs l
     LEFT JOIN users u ON u.id = l.user_id
@@ -59,14 +53,14 @@ export async function GET(request: NextRequest) {
   `, [userId]);
 
   const accountBreakdownRows = await queryAll<AccountBreakdownRow>(`
-    SELECT u.username, u.name AS user_name, l.account_source, l.provider,
+    SELECT u.username, u.name AS user_name, l.provider,
       COALESCE(SUM(l.input_tokens + l.output_tokens), 0) AS total_tokens,
       COALESCE(SUM(l.cost), 0) AS total_cost,
       COUNT(*) AS request_count
     FROM token_logs l
     LEFT JOIN users u ON u.id = l.user_id
     WHERE l.user_id = ?
-    GROUP BY u.username, u.name, l.account_source, l.provider
+    GROUP BY u.username, u.name, l.provider
     ORDER BY total_tokens DESC
   `, [userId]);
 
@@ -77,7 +71,6 @@ export async function GET(request: NextRequest) {
       username: log.username || 'Unknown user',
       user_name: log.user_name || log.username || 'Unknown user',
       provider,
-      account_source: accountSource(provider, log.account_source),
       input_tokens: Number(log.input_tokens) || 0,
       output_tokens: Number(log.output_tokens) || 0,
       cost: Number(log.cost) || 0,
@@ -89,7 +82,6 @@ export async function GET(request: NextRequest) {
     return {
       username: row.username || 'Unknown user',
       user_name: row.user_name || row.username || 'Unknown user',
-      account_source: accountSource(provider, row.account_source),
       provider,
       total_tokens: Number(row.total_tokens) || 0,
       total_cost: Number(row.total_cost) || 0,
