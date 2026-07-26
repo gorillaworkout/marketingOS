@@ -13,6 +13,11 @@ export default function HistoryPage() {
 
   const typeIcons: Record<string, string> = { 'social-post': '📱', 'video-script': '🎬', 'event-plan': '📋' };
   const typeLabels: Record<string, string> = { 'social-post': 'Social Post', 'video-script': 'Video Script', 'event-plan': 'Event Plan' };
+  const filteredTasks = typeFilter === 'all'
+    ? tasks
+    : typeFilter === 'event-plan'
+      ? tasks.filter(task => task.type === 'event-plan')
+      : tasks.filter(task => task.type === typeFilter);
 
   const downloadJSON = (task: any) => {
     const blob = new Blob([task.output_data || '{}'], { type: 'application/json' });
@@ -30,10 +35,18 @@ export default function HistoryPage() {
     <div className="space-y-8">
       <div><h1 className="text-2xl font-bold text-white">📁 Task History</h1><p className="text-gray-400 mt-1">View and download all generated content</p></div>
 
+      <div className="flex flex-wrap gap-2">
+        {(['all', 'social-post', 'video-script', 'event-plan'] as const).map(type => (
+          <button key={type} onClick={() => setTypeFilter(type)} className={`rounded-lg px-3 py-1.5 text-sm ${typeFilter === type ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-400 hover:text-white'}`}>
+            {type === 'all' ? 'All Tasks' : type === 'event-plan' ? 'Event Plans' : typeLabels[type]}
+          </button>
+        ))}
+      </div>
+
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Task List */}
         <div className="lg:col-span-1 bg-gray-800/50 rounded-xl border border-gray-700/50 overflow-hidden max-h-[70vh] overflow-y-auto">
-          {tasks.length > 0 ? tasks.map((task: any) => (
+          {filteredTasks.length > 0 ? filteredTasks.map((task: any) => (
             <div key={task.id}
               onClick={() => setSelected(task)}
               className={`p-4 border-b border-gray-800/50 cursor-pointer hover:bg-gray-700/30 transition-colors ${selected?.id === task.id ? 'bg-blue-600/10 border-l-2 border-l-blue-500' : ''}`}>
@@ -117,7 +130,7 @@ export default function HistoryPage() {
                     }
 
                     if (selected.type === 'event-plan') {
-                      const plan = data.planData || data;
+                      const plan = data.options?.[0] || data.planData || data;
                       return (
                         <>
                           {plan.objective && <div><label className="text-xs text-gray-500 uppercase tracking-wide">🎯 Objective</label><p className="text-gray-300 mt-1 bg-gray-700/30 p-3 rounded-lg">{plan.objective}</p></div>}
