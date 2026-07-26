@@ -415,6 +415,7 @@ export async function generateContent(
     model?: string;
     temperature?: number;
     maxTokens?: number;
+    taskType?: string;
   }
 ): Promise<{ content: string; usage: TokenUsage }> {
   // Inject brand guidelines into system prompt if provided
@@ -455,7 +456,12 @@ export async function generateContent(
     // Some flows create the task after AI generation. Preserve usage logging while
     // respecting PostgreSQL's foreign-key constraint during that pre-save phase.
     const task = taskId ? await queryOne('SELECT id FROM tasks WHERE id = ?', [taskId]) : null;
-    await execute('INSERT INTO token_logs (id, user_id, task_id, model, input_tokens, output_tokens, cost) VALUES (?, ?, ?, ?, ?, ?, ?)', [uuidv4(), userId, task ? taskId : null, result.model, inputTokens, outputTokens, cost]);
+    const provider = getModelProvider(result.model);
+    const accountSource = provider === 'openrouter' ? 'personal' : 'office';
+    const deptRow = await queryOne<{ department_id: string | null }>('SELECT department_id FROM users WHERE id = ?', [userId]);
+    const departmentId = deptRow?.department_id || null;
+    await execute('INSERT INTO token_logs (id, user_id, task_id, model, provider, account_source, department_id, task_type, input_tokens, output_tokens, cost) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [uuidv4(), userId, task ? taskId : null, result.model, provider, accountSource, departmentId, options?.taskType || '', inputTokens, outputTokens, cost]);
   } catch (e) {
     console.error('Failed to log token usage:', e);
   }
@@ -581,7 +587,12 @@ Output the same JSON structure as the draft, but improved. Output valid JSON onl
   try {
     const { queryOne, queryAll, execute } = await import('@/lib/database');
     const { v4: uuidv4 } = await import('uuid');
-    await execute('INSERT INTO token_logs (id, user_id, task_id, model, input_tokens, output_tokens, cost) VALUES (?, ?, ?, ?, ?, ?, ?)', [uuidv4(), userId, taskId, totalUsage.model, totalUsage.inputTokens, totalUsage.outputTokens, totalUsage.cost]);
+    const provider = getModelProvider(totalUsage.model);
+    const accountSource = provider === 'openrouter' ? 'personal' : 'office';
+    const deptRow = await queryOne<{ department_id: string | null }>('SELECT department_id FROM users WHERE id = ?', [userId]);
+    const departmentId = deptRow?.department_id || null;
+    await execute('INSERT INTO token_logs (id, user_id, task_id, model, provider, account_source, department_id, task_type, input_tokens, output_tokens, cost) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [uuidv4(), userId, taskId, totalUsage.model, provider, accountSource, departmentId, module || '', totalUsage.inputTokens, totalUsage.outputTokens, totalUsage.cost]);
       } catch (e) {
     console.error('Failed to log token usage:', e);
   }

@@ -208,6 +208,7 @@ Output JSON format with: { "hook": "the opening hook that stops the scroll", "ho
               responseFormat: { type: 'json_object' },
               model: preferredModel,
               temperature: variant.temperature,
+              taskType: 'video-script',
             });
 
             return { variant, result: result.content, usage: result.usage };
@@ -416,6 +417,7 @@ The fullScript must be the complete, detailed script with scene descriptions, di
             responseFormat: { type: 'json_object' },
             model: preferredModel,
             temperature: variant.temperature,
+            taskType: 'video-script',
           });
 
           controller.enqueue(encoder.encode(sseEvent({
