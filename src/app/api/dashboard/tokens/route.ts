@@ -6,6 +6,8 @@ type TokenSummaryRow = { t: number | string; c: number | string };
 type CountRow = { c: number | string };
 type TokenLogRow = {
   id: string;
+  username: string | null;
+  user_name: string | null;
   model: string;
   provider: string | null;
   account_source: string | null;
@@ -16,6 +18,8 @@ type TokenLogRow = {
   created_at: string;
 };
 type AccountBreakdownRow = {
+  username: string | null;
+  user_name: string | null;
   account_source: string | null;
   provider: string | null;
   total_tokens: number | string;
@@ -45,22 +49,24 @@ export async function GET(request: NextRequest) {
   const totalTasks = await queryOne<CountRow>('SELECT COUNT(*) as c FROM tasks WHERE user_id = ?', [userId]);
 
   const logs = await queryAll<TokenLogRow>(`
-    SELECT id, model, provider, account_source, task_type,
-      input_tokens, output_tokens, cost, created_at
-    FROM token_logs
-    WHERE user_id = ?
-    ORDER BY created_at DESC
+    SELECT l.id, u.username, u.name AS user_name, l.model, l.provider, l.account_source, l.task_type,
+      l.input_tokens, l.output_tokens, l.cost, l.created_at
+    FROM token_logs l
+    LEFT JOIN users u ON u.id = l.user_id
+    WHERE l.user_id = ?
+    ORDER BY l.created_at DESC
     LIMIT 50
   `, [userId]);
 
   const accountBreakdownRows = await queryAll<AccountBreakdownRow>(`
-    SELECT account_source, provider,
-      COALESCE(SUM(input_tokens + output_tokens), 0) AS total_tokens,
-      COALESCE(SUM(cost), 0) AS total_cost,
+    SELECT u.username, u.name AS user_name, l.account_source, l.provider,
+      COALESCE(SUM(l.input_tokens + l.output_tokens), 0) AS total_tokens,
+      COALESCE(SUM(l.cost), 0) AS total_cost,
       COUNT(*) AS request_count
-    FROM token_logs
-    WHERE user_id = ?
-    GROUP BY account_source, provider
+    FROM token_logs l
+    LEFT JOIN users u ON u.id = l.user_id
+    WHERE l.user_id = ?
+    GROUP BY u.username, u.name, l.account_source, l.provider
     ORDER BY total_tokens DESC
   `, [userId]);
 
@@ -68,6 +74,8 @@ export async function GET(request: NextRequest) {
     const provider = log.provider || inferProvider(log.model);
     return {
       ...log,
+      username: log.username || 'Unknown user',
+      user_name: log.user_name || log.username || 'Unknown user',
       provider,
       account_source: accountSource(provider, log.account_source),
       input_tokens: Number(log.input_tokens) || 0,
@@ -79,6 +87,8 @@ export async function GET(request: NextRequest) {
   const accountBreakdown = accountBreakdownRows.map((row) => {
     const provider = row.provider || 'openrouter';
     return {
+      username: row.username || 'Unknown user',
+      user_name: row.user_name || row.username || 'Unknown user',
       account_source: accountSource(provider, row.account_source),
       provider,
       total_tokens: Number(row.total_tokens) || 0,

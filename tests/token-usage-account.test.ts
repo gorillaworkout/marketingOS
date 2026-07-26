@@ -7,19 +7,26 @@ const root = path.resolve(import.meta.dirname, '..');
 const route = fs.readFileSync(path.join(root, 'src/app/api/dashboard/tokens/route.ts'), 'utf8');
 const page = fs.readFileSync(path.join(root, 'src/app/dashboard/tokens/page.tsx'), 'utf8');
 
-test('token usage API returns provider and account source for each log', () => {
+test('token usage API returns the MarketingOS user account for each log', () => {
+  assert.match(route, /JOIN users/);
+  assert.match(route, /username/);
+  assert.match(route, /user_name/);
+});
+
+test('token usage API returns provider and billing source for each log', () => {
   assert.match(route, /provider/);
   assert.match(route, /account_source/);
   assert.match(route, /task_type/);
 });
 
-test('token usage API includes an account-level usage breakdown', () => {
+test('token usage API includes a user-account-level usage breakdown', () => {
   assert.match(route, /accountBreakdown/);
-  assert.match(route, /GROUP BY account_source, provider/);
+  assert.match(route, /GROUP BY u\.username, u\.name, l\.account_source, l\.provider/);
 });
 
-test('token usage page renders account and provider information', () => {
-  assert.match(page, />Account</);
+test('token usage page separates user account, source, and provider', () => {
+  assert.match(page, />User Account</);
+  assert.match(page, />Source</);
   assert.match(page, />Provider</);
   assert.match(page, /accountBreakdown/);
 });
