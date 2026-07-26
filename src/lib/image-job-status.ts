@@ -30,8 +30,14 @@ export interface ImageJobStore {
   update(id: string, ownerId: string, update: ImageJobUpdate): ImageJob | undefined;
 }
 
+const globalImageJobState = globalThis as typeof globalThis & {
+  __marketingOsImageJobs?: Map<string, ImageJob>;
+};
+
 export function createImageJobStore(): ImageJobStore {
-  const jobs = new Map<string, ImageJob>();
+  // Next.js recreates route modules during development hot reloads. Keep the map
+  // on globalThis so an active job remains visible to the reloaded GET handler.
+  const jobs = globalImageJobState.__marketingOsImageJobs ??= new Map<string, ImageJob>();
 
   return {
     create(ownerId) {

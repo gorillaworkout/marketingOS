@@ -13,6 +13,14 @@ test('recognizes completed and failed image jobs as terminal', () => {
   assert.equal(isTerminalImageJobStatus('generating'), false);
 });
 
+test('keeps image jobs available when the route store is recreated during hot reload', () => {
+  const firstRouteInstance = createImageJobStore();
+  const job = firstRouteInstance.create('hot-reload-user');
+  const reloadedRouteInstance = createImageJobStore();
+
+  assert.equal(reloadedRouteInstance.get(job.id, 'hot-reload-user')?.status, 'queued');
+});
+
 test('keeps image jobs isolated to their owner and exposes terminal results', () => {
   const jobs = createImageJobStore();
   const job = jobs.create('user-a');
