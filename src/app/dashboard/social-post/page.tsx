@@ -114,6 +114,7 @@ export default function SocialPostPage() {
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
   const [savingKnowledge, setSavingKnowledge] = useState(false);
   const [knowledgeSaved, setKnowledgeSaved] = useState(false);
+  const [knowledgeError, setKnowledgeError] = useState('');
 
   // SOP state
   const [researchPosts, setResearchPosts] = useState<ResearchPost[]>([]);
@@ -194,6 +195,7 @@ export default function SocialPostPage() {
     setViewingPost(null);
     setSelectedIndex(null);
     setKnowledgeSaved(false);
+    setKnowledgeError('');
     setTaskId(null);
     setResearchPosts([]);
     setQcResults([]);
@@ -300,6 +302,7 @@ export default function SocialPostPage() {
     setSelectedIndex(index);
     setSavingKnowledge(true);
     setKnowledgeSaved(false);
+    setKnowledgeError('');
 
     const selected = options[index];
     const rejected = options.filter((_, i) => i !== index);
@@ -319,14 +322,19 @@ export default function SocialPostPage() {
         }),
       });
 
-      if (res.ok) {
-        const data = await res.json();
-        setKnowledgeSaved(true);
-        setEditableImagePrompt(selected.imagePrompt || '');
-        setTimeout(() => setKnowledgeSaved(false), 5000);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data.error || `Knowledge save failed (${res.status})`);
       }
+
+      setKnowledgeSaved(true);
+      setEditableImagePrompt(selected.imagePrompt || '');
+      setTimeout(() => setKnowledgeSaved(false), 5000);
     } catch (e) {
+      const message = e instanceof Error ? e.message : 'Unknown error';
       console.error('Failed to save knowledge:', e);
+      setKnowledgeError(`Gagal menyimpan ke Knowledge: ${message}`);
+      setSelectedIndex(null);
     }
 
     setSavingKnowledge(false);
@@ -653,7 +661,17 @@ export default function SocialPostPage() {
           {knowledgeSaved && (
             <div className="bg-green-500/10 border border-green-500/20 text-green-400 px-4 py-3 rounded-lg flex items-center gap-2">
               <span>✅</span>
-              <span>Knowledge saved! Style profile updated. This helps future generations match your preferences.</span>
+              <span>Tersimpan ke Knowledge. Pilihan ini akan membantu generation berikutnya mengikuti preferensi Anda.</span>
+            </div>
+          )}
+          {savingKnowledge && (
+            <div className="bg-blue-500/10 border border-blue-500/20 text-blue-300 px-4 py-3 rounded-lg">
+              Menyimpan pilihan ke Knowledge…
+            </div>
+          )}
+          {knowledgeError && (
+            <div className="bg-red-500/10 border border-red-500/20 text-red-400 px-4 py-3 rounded-lg" role="alert">
+              {knowledgeError} Silakan pilih ulang untuk mencoba lagi.
             </div>
           )}
 
@@ -690,6 +708,12 @@ export default function SocialPostPage() {
           {options && options.length > 0 && !loading && (
             <div className="space-y-4">
               <h3 className="text-lg font-semibold text-white">🎯 Pick Your Favorite Style</h3>
+              {selectedIndex === null && (
+                <div className="rounded-lg border border-amber-500/20 bg-amber-500/10 px-4 py-3">
+                  <p className="text-sm font-medium text-amber-200">Belum masuk Knowledge</p>
+                  <p className="mt-1 text-xs text-gray-300">Pilih satu output yang disetujui. Hanya pilihan tersebut yang disimpan agar Knowledge tidak belajar dari draft yang ditolak.</p>
+                </div>
+              )}
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 {options.map((opt, index) => {
                   const isSelected = selectedIndex === index;
@@ -753,7 +777,7 @@ export default function SocialPostPage() {
                             disabled={savingKnowledge}
                             className="w-full mt-2 px-4 py-2 bg-gray-700/50 hover:bg-gray-600/50 text-white text-sm font-medium rounded-lg transition-colors border border-gray-600/50"
                           >
-                            📌 Pilih ini
+                            {savingKnowledge ? 'Menyimpan…' : '📌 Pilih & simpan ke Knowledge'}
                           </button>
                         )}
 
