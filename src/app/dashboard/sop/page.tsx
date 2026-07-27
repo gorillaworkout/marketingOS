@@ -1,5 +1,7 @@
 'use client';
 
+import ArticleMarketNewsGenerator from './ArticleMarketNewsGenerator';
+
 const steps = [
   {
     number: '01',
@@ -55,16 +57,18 @@ export default function SopPage() {
         <div className="relative flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
           <div>
             <div className="inline-flex items-center gap-2 rounded-full border border-blue-400/20 bg-blue-500/10 px-3 py-1 text-xs font-medium text-blue-300">
-              <span>🔀</span> MarketingOS Resource · Standar Editorial
+              <span>📰</span> MarketingOS Generate · Standar Editorial
             </div>
-            <h1 className="mt-4 text-3xl font-bold tracking-tight text-white md:text-4xl">SOP &amp; Flow</h1>
-            <p className="mt-2 max-w-2xl text-sm leading-6 text-gray-300 md:text-base">Alur kerja manual untuk menstandarkan riset, penulisan, dan quality gate artikel market news.</p>
+            <h1 className="mt-4 text-3xl font-bold tracking-tight text-white md:text-4xl">Article Market News</h1>
+            <p className="mt-2 max-w-2xl text-sm leading-6 text-gray-300 md:text-base">Riset mengikuti SOP, lalu generate draf artikel yang source-gated dan siap diekspor ke DOCX.</p>
           </div>
           <div className="rounded-xl border border-amber-400/20 bg-amber-500/10 px-4 py-3 text-sm text-amber-200 lg:max-w-sm">
-            <span className="font-semibold">Tindakan SOP manual.</span> Kontrol di halaman ini adalah panduan kerja, bukan otomasi Google, Investing.com, Kontan, atau SmallSEOTools.
+            <span className="font-semibold">Tindakan SOP manual:</span> riset &amp; originality check tetap dikerjakan operator. Generator hanya menulis dari fakta dan struktur yang sudah dimasukkan.
           </div>
         </div>
       </header>
+
+      <ArticleMarketNewsGenerator />
 
       <section className="grid gap-4 lg:grid-cols-[1.25fr_.75fr]">
         <div className="rounded-2xl border border-gray-700/60 bg-gray-800/50 p-5 md:p-6">

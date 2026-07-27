@@ -182,6 +182,80 @@ async function callCodex(prompt: string, model: string): Promise<string> {
   }
 }
 
+const CODEX_TEXT_ONLY_DISABLED_FEATURES = [
+  'shell_tool', 'shell_snapshot', 'unified_exec', 'browser_use', 'browser_use_external',
+  'browser_use_full_cdp_access', 'in_app_browser', 'standalone_web_search', 'network_proxy',
+  'computer_use', 'apps', 'plugins', 'plugin_sharing', 'remote_plugin', 'multi_agent',
+  'image_generation', 'auth_elicitation', 'hooks', 'code_mode_host', 'tool_suggest',
+  'tool_call_mcp_elicitation', 'skill_mcp_dependency_install', 'workspace_dependencies',
+] as const;
+
+export function buildCodexTextOnlyArgs(model: string, workingDirectory: string): string[] {
+  if (getModelProvider(model) !== 'codex') throw new Error(`Unsupported Codex model: ${model}`);
+  return [
+    'exec', '--ignore-user-config', '--ignore-rules', '--ephemeral',
+    ...CODEX_TEXT_ONLY_DISABLED_FEATURES.flatMap(feature => ['--disable', feature]),
+    '--sandbox', 'read-only', '--skip-git-repo-check', '-C', workingDirectory,
+    '--json', '-m', model, '-',
+  ];
+}
+
+/** Tool-disabled Codex mode for prompts containing operator-provided data. */
+async function callCodexTextOnly(prompt: string, model: string): Promise<string> {
+  const fsPromises = await import('fs/promises');
+  const os = await import('os');
+  const path = await import('path');
+  const { spawn } = await import('child_process');
+  const tempDirectory = await fsPromises.mkdtemp(path.join(os.tmpdir(), 'marketingos-codex-text-'));
+
+  try {
+    const args = buildCodexTextOnlyArgs(model, tempDirectory);
+    const stdout = await new Promise<string>((resolve, reject) => {
+      const env = { ...process.env };
+      delete env.OPENAI_API_KEY;
+      const child = spawn('codex', args, { cwd: tempDirectory, env, shell: false, stdio: ['pipe', 'pipe', 'pipe'] });
+      const chunks: Buffer[] = [];
+      let outputLength = 0;
+      let timedOut = false;
+      const timeout = setTimeout(() => { timedOut = true; child.kill('SIGKILL'); }, 180_000);
+      const finish = () => clearTimeout(timeout);
+      child.stderr.resume();
+      child.on('error', error => { finish(); reject(error); });
+      child.stdout.on('data', (chunk: Buffer) => {
+        outputLength += chunk.length;
+        if (outputLength > 10 * 1024 * 1024) child.kill('SIGKILL');
+        else chunks.push(chunk);
+      });
+      child.on('close', code => {
+        finish();
+        if (timedOut) reject(new Error('Codex text-only generation timed out after 180 seconds.'));
+        else if (outputLength > 10 * 1024 * 1024) reject(new Error('Codex text-only output exceeded 10 MB.'));
+        else if (code !== 0) reject(new Error(`Codex text-only CLI exited with code ${code ?? 'unknown'}.`));
+        else resolve(Buffer.concat(chunks).toString('utf8'));
+      });
+      child.stdin.end(prompt, 'utf8');
+    });
+
+    let answer = '';
+    for (const line of stdout.split('\n').filter(Boolean)) {
+      let event: unknown;
+      try { event = JSON.parse(line); } catch { throw new Error('Codex text-only CLI returned malformed event output.'); }
+      if (!event || typeof event !== 'object') continue;
+      const record = event as { type?: string; item?: { type?: string; text?: string } };
+      if (record.type === 'item.completed') {
+        if (record.item?.type !== 'agent_message' || typeof record.item.text !== 'string') {
+          throw new Error('Codex text-only mode rejected a non-message tool event.');
+        }
+        answer = record.item.text;
+      }
+    }
+    if (!answer) throw new Error('Codex text-only CLI returned no answer.');
+    return answer;
+  } finally {
+    await fsPromises.rm(tempDirectory, { recursive: true, force: true });
+  }
+}
+
 const CLAUDE_CODE_MODEL_IDS = new Set(
   AVAILABLE_MODELS.filter(model => model.provider === 'claude-code').map(model => model.id),
 );
@@ -301,6 +375,7 @@ async function callApi(
     responseFormat?: { type: 'json_object' } | undefined;
     temperature?: number;
     maxTokens?: number;
+    codexTextOnly?: boolean;
   } = {}
 ): Promise<{ content: string; model: string }> {
   const model = options.model || PRIMARY_MODEL;
@@ -313,7 +388,9 @@ async function callApi(
       const role = m.role.charAt(0).toUpperCase() + m.role.slice(1);
       return `[${role}]: ${m.content}`;
     }).join('\n\n');
-    const content = await callCodex(prompt, model);
+    const content = options.codexTextOnly
+      ? await callCodexTextOnly(prompt, model)
+      : await callCodex(prompt, model);
     return { content, model };
   }
   if (provider === 'claude-code') {
@@ -367,6 +444,8 @@ async function callApiWithFallback(
     temperature?: number;
     maxTokens?: number;
     parseJson?: boolean;
+    codexTextOnly?: boolean;
+    jsonRepairAttempts?: 0 | 1;
   } = {}
 ): Promise<{ content: string; parsed?: unknown; model: string; retried: boolean }> {
   const parseJson = options.parseJson ?? true;
@@ -380,6 +459,7 @@ async function callApiWithFallback(
         const parsed = JSON.parse(result.content);
         return { ...result, parsed, retried };
       } catch {
+        if ((options.jsonRepairAttempts ?? 1) === 0) return { ...result, retried };
         // Retry once with explicit JSON reminder
         retried = true;
         const retryMessages = [
@@ -418,6 +498,8 @@ export async function generateContent(
     temperature?: number;
     maxTokens?: number;
     taskType?: string;
+    codexTextOnly?: boolean;
+    jsonRepairAttempts?: 0 | 1;
   }
 ): Promise<{ content: string; usage: TokenUsage }> {
   // Inject brand guidelines into system prompt if provided
@@ -440,6 +522,8 @@ export async function generateContent(
     temperature: options?.temperature,
     maxTokens: options?.maxTokens,
     parseJson: !!options?.responseFormat,
+    codexTextOnly: options?.codexTextOnly,
+    jsonRepairAttempts: options?.jsonRepairAttempts,
   });
 
   const pricing = getPricing(result.model);
@@ -495,7 +579,7 @@ export async function generateMultiStep(
   usage: TokenUsage;
 }> {
   const drafts: Array<{ step: string; content: string; model: string }> = [];
-  let totalUsage: TokenUsage = { inputTokens: 0, outputTokens: 0, model: PRIMARY_MODEL, cost: 0 };
+  const totalUsage: TokenUsage = { inputTokens: 0, outputTokens: 0, model: PRIMARY_MODEL, cost: 0 };
 
   const bgPrompt = brandGuidelines ? buildBrandGuidelinesPrompt(brandGuidelines) : '';
   const contextSection = contextMemory ? '\n\n' + contextMemory : '';
