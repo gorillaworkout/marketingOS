@@ -1,31 +1,59 @@
 'use client';
 import { useEffect, useState } from 'react';
+import { articleDocxFilename, buildArticleDocxBlob } from '@/lib/article-market-news-docx';
+import type { ArticleSourceInput } from '@/lib/article-market-news';
+
+interface HistoryTask {
+  id: string;
+  type: string;
+  title: string;
+  brief?: string;
+  status: string;
+  output_data?: string;
+  created_at: string;
+}
 
 export default function HistoryPage() {
-  const [tasks, setTasks] = useState<any[]>([]);
+  const [tasks, setTasks] = useState<HistoryTask[]>([]);
   const [loading, setLoading] = useState(true);
-  const [selected, setSelected] = useState<any>(null);
-  const [typeFilter, setTypeFilter] = useState<'all' | 'social-post' | 'video-script' | 'event-plan'>('all');
+  const [selected, setSelected] = useState<HistoryTask | null>(null);
+  const [typeFilter, setTypeFilter] = useState<'all' | 'social-post' | 'video-script' | 'event-plan' | 'article-market-news'>('all');
+  const [articleFactReviewConfirmed, setArticleFactReviewConfirmed] = useState(false);
 
   useEffect(() => {
     fetch('/api/dashboard/history').then(r => r.json()).then(d => { setTasks(d.tasks || []); setLoading(false); });
   }, []);
 
-  const typeIcons: Record<string, string> = { 'social-post': '📱', 'video-script': '🎬', 'event-plan': '📋' };
-  const typeLabels: Record<string, string> = { 'social-post': 'Social Post', 'video-script': 'Video Script', 'event-plan': 'Event Plan' };
+  const typeIcons: Record<string, string> = { 'social-post': '📱', 'video-script': '🎬', 'event-plan': '📋', 'article-market-news': '📰' };
+  const typeLabels: Record<string, string> = { 'social-post': 'Social Post', 'video-script': 'Video Script', 'event-plan': 'Event Plan', 'article-market-news': 'Article Market News' };
   const filteredTasks = typeFilter === 'all'
     ? tasks
     : typeFilter === 'event-plan'
       ? tasks.filter(task => task.type === 'event-plan')
       : tasks.filter(task => task.type === typeFilter);
 
-  const downloadJSON = (task: any) => {
+  const downloadJSON = (task: HistoryTask) => {
     const blob = new Blob([task.output_data || '{}'], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
     a.download = `${task.type}-${task.id.substring(0, 8)}.json`;
     a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const downloadArticleDocx = async (task: HistoryTask) => {
+    if (!articleFactReviewConfirmed) return;
+    const data = JSON.parse(task.output_data || '{}');
+    const article = data.article || {};
+    const input = data.input || {};
+    if (!article.title || !article.articleMarkdown || !input.keyword || !input.researchDate) return;
+    const blob = await buildArticleDocxBlob(article.title, article.metaDescription || '', article.articleMarkdown);
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = articleDocxFilename(input.keyword, input.researchDate);
+    anchor.click();
     URL.revokeObjectURL(url);
   };
 
@@ -36,7 +64,7 @@ export default function HistoryPage() {
       <div><h1 className="text-2xl font-bold text-white">📁 Task History</h1><p className="text-gray-400 mt-1">View and download all generated content</p></div>
 
       <div className="flex flex-wrap gap-2">
-        {(['all', 'social-post', 'video-script', 'event-plan'] as const).map(type => (
+        {(['all', 'social-post', 'video-script', 'event-plan', 'article-market-news'] as const).map(type => (
           <button key={type} onClick={() => setTypeFilter(type)} className={`rounded-lg px-3 py-1.5 text-sm ${typeFilter === type ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-400 hover:text-white'}`}>
             {type === 'all' ? 'All Tasks' : type === 'event-plan' ? 'Event Plans' : typeLabels[type]}
           </button>
@@ -46,9 +74,9 @@ export default function HistoryPage() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Task List */}
         <div className="lg:col-span-1 bg-gray-800/50 rounded-xl border border-gray-700/50 overflow-hidden max-h-[70vh] overflow-y-auto">
-          {filteredTasks.length > 0 ? filteredTasks.map((task: any) => (
+          {filteredTasks.length > 0 ? filteredTasks.map(task => (
             <div key={task.id}
-              onClick={() => setSelected(task)}
+              onClick={() => { setSelected(task); setArticleFactReviewConfirmed(false); }}
               className={`p-4 border-b border-gray-800/50 cursor-pointer hover:bg-gray-700/30 transition-colors ${selected?.id === task.id ? 'bg-blue-600/10 border-l-2 border-l-blue-500' : ''}`}>
               <div className="flex items-center gap-2 mb-1">
                 <span>{typeIcons[task.type] || '📄'}</span>
@@ -75,9 +103,10 @@ export default function HistoryPage() {
                     <p className="text-xs text-gray-500">{new Date(selected.created_at).toLocaleString()}</p>
                   </div>
                 </div>
-                <button onClick={() => downloadJSON(selected)}
-                  className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white text-sm font-medium rounded-lg flex items-center gap-1">
-                  ⬇️ Download
+                <button onClick={() => selected.type === 'article-market-news' ? void downloadArticleDocx(selected) : downloadJSON(selected)}
+                  disabled={selected.type === 'article-market-news' && !articleFactReviewConfirmed}
+                  className="px-4 py-2 bg-green-600 hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-40 text-white text-sm font-medium rounded-lg flex items-center gap-1">
+                  {selected.type === 'article-market-news' ? 'Download DOCX' : '⬇️ Download'}
                 </button>
               </div>
 
@@ -94,6 +123,26 @@ export default function HistoryPage() {
                 {selected.output_data && (() => {
                   try {
                     const data = JSON.parse(selected.output_data);
+
+                    if (selected.type === 'article-market-news') {
+                      const article = data.article || data;
+                      const input = data.input || {};
+                      return (
+                        <>
+                          <div className="grid gap-3 sm:grid-cols-2">
+                            <div><label className="text-xs text-gray-500 uppercase tracking-wide">Model</label><p className="mt-1 text-gray-300">{data.model || 'Codex'}</p></div>
+                            <div><label className="text-xs text-gray-500 uppercase tracking-wide">Word Count</label><p className="mt-1 text-gray-300">{article.wordCount || '—'}</p></div>
+                          </div>
+                          <div><label className="text-xs text-gray-500 uppercase tracking-wide">Meta Description</label><p className="text-gray-300 mt-1 bg-gray-700/30 p-3 rounded-lg">{article.metaDescription}</p></div>
+                          <div><label className="text-xs text-gray-500 uppercase tracking-wide">Article</label><pre className="text-gray-300 mt-1 bg-gray-950/60 p-4 rounded-lg text-sm whitespace-pre-wrap font-mono max-h-[50vh] overflow-y-auto">{article.articleMarkdown}</pre></div>
+                          {Array.isArray(input.sources) && input.sources.length > 0 && <div><label className="text-xs text-gray-500 uppercase tracking-wide">Research Sources</label><ul className="mt-2 space-y-2">{input.sources.map((source: ArticleSourceInput, index: number) => <li key={`${source.url}-${index}`} className="rounded-lg bg-gray-700/30 p-3 text-sm"><span className="text-gray-300">{source.outlet} — {source.title}</span><a href={source.url} target="_blank" rel="noreferrer" className="mt-1 block break-all text-cyan-400 hover:underline">{source.url}</a><span className="mt-1 block text-xs text-gray-500">{source.provenance === 'automated' ? 'Automated publisher research' : 'Optional user reference'}</span></li>)}</ul></div>}
+                          <label className="flex cursor-pointer gap-3 rounded-xl border border-amber-500/25 bg-amber-500/10 p-4 text-sm text-amber-100">
+                            <input type="checkbox" checked={articleFactReviewConfirmed} onChange={event => setArticleFactReviewConfirmed(event.target.checked)} className="mt-0.5 h-4 w-4 accent-emerald-500" />
+                            <span>Saya sudah memeriksa ulang klaim nonnumeric dan source snapshot artikel ini. Aktifkan untuk Download DOCX.</span>
+                          </label>
+                        </>
+                      );
+                    }
 
                     if (selected.type === 'social-post') {
                       const caption = data.captionData || data;

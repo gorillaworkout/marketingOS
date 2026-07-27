@@ -1,8 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { randomUUID } from 'node:crypto';
 import { requireAdmin } from '@/lib/auth';
+import { execute } from '@/lib/database';
 import { rateLimit } from '@/lib/rate-limit';
 import { generateContent, getModelProvider, getUserPreferredModel } from '@/lib/openai';
 import { buildArticleMarketNewsPrompts, normalizeArticleMarketNewsInput, validateGeneratedArticle } from '@/lib/article-market-news';
+import { researchArticleMarketNews } from '@/lib/article-market-news-research';
 
 export const maxDuration = 300;
 
@@ -44,8 +47,14 @@ export async function POST(request: NextRequest) {
   const stream = new ReadableStream({
     async start(controller) {
       try {
-        controller.enqueue(encoder.encode(sseEvent({ step: 'sources', progress: 10, message: 'Validating operator-attested source facts…' })));
-        const { systemPrompt, userPrompt } = buildArticleMarketNewsPrompts(input);
+        controller.enqueue(encoder.encode(sseEvent({ step: 'sources', progress: 10, message: 'Researching same-day publisher feeds and validating optional references…' })));
+        const automatedSources = (await researchArticleMarketNews(input.keyword, input.researchDate)).slice(0, Math.max(1, 5 - input.sources.length));
+        const researchedInput = { ...input, sources: [...automatedSources, ...input.sources] };
+        const effectiveInput = {
+          ...researchedInput,
+          sources: [...new Map(researchedInput.sources.map(source => [source.url, source])).values()],
+        };
+        const { systemPrompt, userPrompt } = buildArticleMarketNewsPrompts(effectiveInput);
         controller.enqueue(encoder.encode(sseEvent({ step: 'draft', progress: 35, message: 'Writing the SOP-compliant article draft…' })));
 
         let generated: Awaited<ReturnType<typeof generateContent>> | undefined;
@@ -73,7 +82,7 @@ export async function POST(request: NextRequest) {
             articleMarkdown = typeof article.articleMarkdown === 'string' ? article.articleMarkdown.trim() : '';
             if (!title || !articleMarkdown) throw new Error('AI returned an incomplete article.');
             if (!metaDescription || metaDescription.length > 155) throw new Error(`Meta description must be 1–155 characters; received ${metaDescription.length}.`);
-            validation = validateGeneratedArticle(title, articleMarkdown, input, metaDescription);
+            validation = validateGeneratedArticle(title, articleMarkdown, effectiveInput, metaDescription);
             if (validation.violations.length === 0) break;
             throw new Error(validation.violations.join(' '));
           } catch (attemptError) {
@@ -90,11 +99,22 @@ export async function POST(request: NextRequest) {
           throw new Error('Article generation ended without a publication-ready draft.');
         }
 
+        const historyId = randomUUID();
+        await execute(
+          'INSERT INTO tasks (id, user_id, type, title, brief, status, output_data) VALUES (?, ?, ?, ?, ?, ?, ?)',
+          [historyId, auth.id, 'article-market-news', `Article Market News: ${title}`, effectiveInput.angle, 'completed', JSON.stringify({
+            article: { ...article, title, metaDescription, articleMarkdown, wordCount: validation.wordCount },
+            input: effectiveInput,
+            model,
+            qc: validation.qc,
+          })],
+        );
+
         controller.enqueue(encoder.encode(sseEvent({
           step: 'done',
           progress: 100,
           message: 'Article draft complete. Run manual fact and originality checks before publishing.',
-          result: { ...article, title, articleMarkdown, wordCount: validation.wordCount, qc: validation.qc, usage: generated.usage, model },
+          result: { ...article, title, articleMarkdown, wordCount: validation.wordCount, qc: validation.qc, usage: generated.usage, model, historyId, normalizedInput: effectiveInput },
         })));
       } catch (error) {
         controller.enqueue(encoder.encode(sseEvent({ step: 'error', progress: 100, message: error instanceof Error ? error.message : 'Article generation failed.' })));

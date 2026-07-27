@@ -15,6 +15,8 @@ const page = read('src/app/dashboard/sop/page.tsx');
 const generator = read('src/app/dashboard/sop/ArticleMarketNewsGenerator.tsx');
 const route = read('src/app/api/article-market-news/generate/route.ts');
 const openai = read('src/lib/openai.ts');
+const historyPage = read('src/app/dashboard/history/page.tsx');
+const articleHistoryMigration = read('db/migrations/007_article_market_news_history.sql');
 
 const competitorHeadings = Array.from({ length: 5 }, (_, index) => `Competitor ${index + 1}:\nH1: Harga Emas\nH2: Faktor Utama\nH3: Risiko Pasar`).join('\n\n');
 const rawInput = {
@@ -99,6 +101,34 @@ test('input gate rejects duplicate PAA, oversized facts, and missing attestation
   assert.throws(() => normalizeArticleMarketNewsInput({ ...rawInput, factsVerified: false }, '2026-07-27'), /facts and quotes were verified/);
 });
 
+test('user references are optional because the server always performs automated research', () => {
+  const withoutReferences = normalizeArticleMarketNewsInput({
+    ...rawInput,
+    sources: [],
+    noCompetitorBroker: false,
+    factsVerified: false,
+  }, '2026-07-27');
+  assert.deepEqual(withoutReferences.sources, []);
+  assert.match(route, /researchArticleMarketNews/);
+  assert.match(route, /automatedSources/);
+  assert.match(route, /sources: \[\.\.\.automatedSources, \.\.\.input\.sources\]/);
+  assert.match(generator, /Reference Articles \(Optional\)/);
+  assert.match(generator, /Isi Contoh/);
+  assert.match(generator, /Lihat contoh input/);
+  assert.doesNotMatch(generator, /sources\.length >= 1/);
+});
+
+test('successful articles are persisted and downloadable again from History', () => {
+  assert.match(articleHistoryMigration, /article-market-news/);
+  assert.match(route, /INSERT INTO tasks/);
+  assert.match(route, /'article-market-news'/);
+  assert.match(route, /historyId/);
+  assert.match(historyPage, /article-market-news/);
+  assert.match(historyPage, /buildArticleDocxBlob/);
+  assert.match(historyPage, /Article Market News/);
+  assert.match(historyPage, /Download DOCX/);
+});
+
 test('citation URL gate rejects loopback, private, link-local, metadata, and special IPv6', () => {
   for (const url of [
     'http://127.0.0.1/a', 'http://10.0.0.1/a', 'http://169.254.169.254/latest',
@@ -162,7 +192,8 @@ test('publication gate preserves numeric and Unicode semantics and requires verb
 });
 
 test('editable DOCX stays tied to immutable generation snapshot and manual fact review', async () => {
-  assert.match(generator, /setGeneratedInput\(requestInput\)/);
+  assert.match(generator, /setGeneratedInput\(\(event\.result as ArticleResult\)\.normalizedInput \|\| requestInput\)/);
+  assert.match(route, /normalizedInput: effectiveInput/);
   assert.match(generator, /validateGeneratedArticle\(result\.title, result\.articleMarkdown, generatedInput, result\.metaDescription \|\| ''\)/);
   assert.match(generator, /setFactReviewConfirmed\(false\)/);
   assert.match(generator, /!factReviewConfirmed/);

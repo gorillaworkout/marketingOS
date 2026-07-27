@@ -21,6 +21,8 @@ interface ArticleResult {
   wordCount: number;
   model: string;
   qc: ArticleQualityCheck;
+  historyId?: string;
+  normalizedInput?: ArticleMarketNewsInput;
 }
 
 const emptySource = (): SourceForm => ({ outlet: '', title: '', url: '', publishedAt: '', verifiedFacts: '' });
@@ -31,7 +33,7 @@ export default function ArticleMarketNewsGenerator() {
   const [angle, setAngle] = useState('');
   const [competitorHeadings, setCompetitorHeadings] = useState('');
   const [paaText, setPaaText] = useState('');
-  const [sources, setSources] = useState<SourceForm[]>([emptySource()]);
+  const [sources, setSources] = useState<SourceForm[]>([]);
   const [noCompetitorBroker, setNoCompetitorBroker] = useState(false);
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState('');
@@ -42,10 +44,12 @@ export default function ArticleMarketNewsGenerator() {
 
   const paaQuestions = useMemo(() => paaText.split('\n').map(value => value.trim()).filter(Boolean), [paaText]);
   const competitorResearchCount = useMemo(() => new Set([...competitorHeadings.matchAll(/(?:competitor|artikel)\s*([1-5])\s*:/gi)].map(match => match[1])).size, [competitorHeadings]);
+  const optionalReferencesReady = sources.length === 0 || Boolean(
+    noCompetitorBroker && sources.every(source => source.outlet.trim() && source.title.trim() && source.url.trim() && source.publishedAt && source.verifiedFacts.trim()),
+  );
   const ready = Boolean(
     keyword.trim() && researchDate && angle.trim() && competitorHeadings.trim() && competitorResearchCount === 5 &&
-    paaQuestions.length === 5 && new Set(paaQuestions).size === 5 && noCompetitorBroker && sources.length >= 1 &&
-    sources.every(source => source.outlet.trim() && source.title.trim() && source.url.trim() && source.publishedAt && source.verifiedFacts.trim()),
+    paaQuestions.length === 5 && new Set(paaQuestions).size === 5 && optionalReferencesReady,
   );
   const currentValidation = useMemo(() => {
     if (!result || !generatedInput) return null;
@@ -54,6 +58,21 @@ export default function ArticleMarketNewsGenerator() {
 
   const updateSource = (index: number, field: keyof SourceForm, value: string) => {
     setSources(current => current.map((source, sourceIndex) => sourceIndex === index ? { ...source, [field]: value } : source));
+  };
+
+  const fillExample = () => {
+    setKeyword('harga emas');
+    setAngle('Membahas pergerakan harga emas hari ini, faktor pendorongnya, dan hal yang perlu diperhatikan trader pemula.');
+    setCompetitorHeadings(Array.from({ length: 5 }, (_, index) => `Competitor ${index + 1}:\nH1: Harga Emas Hari Ini\nH2: Faktor Penggerak Harga Emas\nH3: Risiko yang Perlu Diperhatikan`).join('\n\n'));
+    setPaaText([
+      'Apa yang memengaruhi harga emas hari ini?',
+      'Mengapa harga emas dapat naik atau turun?',
+      'Bagaimana hubungan dolar AS dengan harga emas?',
+      'Apa perbedaan emas fisik dan XAUUSD?',
+      'Apa risiko trading emas untuk pemula?',
+    ].join('\n'));
+    setSources([]);
+    setNoCompetitorBroker(false);
   };
 
   const generateArticle = async () => {
@@ -96,7 +115,7 @@ export default function ArticleMarketNewsGenerator() {
           if (event.step === 'error') throw new Error(event.message || 'Article generation failed.');
           if (event.step === 'done' && event.result) {
             setResult(event.result as ArticleResult);
-            setGeneratedInput(requestInput);
+            setGeneratedInput((event.result as ArticleResult).normalizedInput || requestInput);
             completed = true;
           }
         }
@@ -131,10 +150,24 @@ export default function ArticleMarketNewsGenerator() {
         <div>
           <p className="text-xs font-semibold uppercase tracking-widest text-cyan-300">Article Generator</p>
           <h2 id="article-generator-title" className="mt-1 text-2xl font-semibold text-white">Generate Article Market News</h2>
-          <p className="mt-2 max-w-3xl text-sm leading-6 text-gray-300">Masukkan hasil riset yang sudah diverifikasi. Generator tidak mencari Google/PAA atau menjalankan plagiarism checker secara otomatis.</p>
+          <p className="mt-2 max-w-3xl text-sm leading-6 text-gray-300">Isi keyword, angle, struktur kompetitor, dan lima PAA. Sistem selalu melakukan research otomatis dari publisher feeds; reference tambahan dari user bersifat opsional.</p>
         </div>
-        <span className="rounded-full border border-amber-400/20 bg-amber-500/10 px-3 py-1.5 text-xs text-amber-200">Admin only · source-gated</span>
+        <div className="flex flex-wrap gap-2">
+          <a href="/dashboard/history" className="rounded-lg border border-gray-600 px-3 py-2 text-xs text-gray-200 hover:border-cyan-500">Buka History</a>
+          <button type="button" onClick={fillExample} className="rounded-lg bg-cyan-600 px-3 py-2 text-xs font-semibold text-white hover:bg-cyan-500">Isi Contoh</button>
+        </div>
       </div>
+
+      <details className="mt-5 rounded-xl border border-cyan-500/20 bg-cyan-950/20 p-4 text-sm text-gray-300">
+        <summary className="cursor-pointer font-semibold text-cyan-200">Lihat contoh input</summary>
+        <div className="mt-3 space-y-2 leading-6">
+          <p><strong>Keyword:</strong> harga emas</p>
+          <p><strong>Angle:</strong> pergerakan harga emas hari ini, faktor pendorong, dan risiko untuk trader pemula.</p>
+          <p><strong>Competitor structure:</strong> lima blok berurutan dari Competitor 1–5; setiap blok wajib memiliki H1, H2, dan H3.</p>
+          <p><strong>PAA:</strong> tepat lima pertanyaan unik dan masing-masing berakhir dengan tanda tanya.</p>
+          <p><strong>Reference:</strong> boleh dikosongkan. Jika diisi, reference akan menjadi tambahan; automated research tetap dijalankan.</p>
+        </div>
+      </details>
 
       <div className="mt-6 grid gap-5 lg:grid-cols-2">
         <div className="space-y-4">
@@ -159,12 +192,12 @@ export default function ArticleMarketNewsGenerator() {
 
         <div className="space-y-4">
           <div className="flex items-center justify-between">
-            <div><h3 className="font-semibold text-white">Reference Articles</h3><p className="text-xs text-gray-400">Tambahkan 1–5 artikel eligible dari Investing.com, Kontan, atau sumber alternatif yang tervalidasi.</p></div>
+            <div><h3 className="font-semibold text-white">Reference Articles (Optional)</h3><p className="text-xs text-gray-400">Boleh kosong. Jika diisi, tambahkan maksimal lima reference yang sudah kamu periksa; sistem tetap melakukan research otomatis.</p></div>
             <button type="button" onClick={() => setSources(current => [...current, emptySource()])} disabled={sources.length >= 5} className="rounded-lg border border-gray-600 px-3 py-2 text-xs text-gray-200 hover:border-cyan-500 disabled:opacity-40">+ Add source</button>
           </div>
           {sources.map((source, index) => (
             <div key={index} className="rounded-xl border border-gray-700 bg-gray-900/45 p-4 space-y-3">
-              <div className="flex items-center justify-between"><h4 className="text-sm font-semibold text-cyan-300">Source {index + 1}</h4>{sources.length > 1 && <button type="button" onClick={() => setSources(current => current.filter((_, itemIndex) => itemIndex !== index))} className="text-xs text-red-300 hover:text-red-200">Remove</button>}</div>
+              <div className="flex items-center justify-between"><h4 className="text-sm font-semibold text-cyan-300">Source {index + 1}</h4><button type="button" onClick={() => setSources(current => current.filter((_, itemIndex) => itemIndex !== index))} className="text-xs text-red-300 hover:text-red-200">Remove</button></div>
               <div className="grid gap-3 sm:grid-cols-2">
                 <input value={source.outlet} onChange={event => updateSource(index, 'outlet', event.target.value)} placeholder="Outlet: Investing.com" className="rounded-lg border border-gray-700 bg-gray-950/60 px-3 py-2 text-sm text-white" />
                 <label className="text-xs text-gray-400">
@@ -181,10 +214,10 @@ export default function ArticleMarketNewsGenerator() {
               <textarea value={source.verifiedFacts} onChange={event => updateSource(index, 'verifiedFacts', event.target.value)} rows={5} placeholder="Verified Facts / Quotes: angka, harga, perubahan %, institusi, dan kutipan yang benar-benar tercantum di sumber." className="w-full rounded-lg border border-gray-700 bg-gray-950/60 px-3 py-2 text-sm text-white" />
             </div>
           ))}
-          <label className="flex cursor-pointer gap-3 rounded-xl border border-red-500/20 bg-red-500/5 p-4 text-sm text-red-100">
+          {sources.length > 0 && <label className="flex cursor-pointer gap-3 rounded-xl border border-red-500/20 bg-red-500/5 p-4 text-sm text-red-100">
             <input type="checkbox" checked={noCompetitorBroker} onChange={event => setNoCompetitorBroker(event.target.checked)} className="mt-0.5 h-4 w-4 accent-cyan-500" />
-            <span>Saya sudah memeriksa bahwa referensi tidak menyebut competitor broker dan seluruh fakta/kutipan di atas dapat ditelusuri ke sumber.</span>
-          </label>
+            <span>Saya sudah memeriksa bahwa optional reference tidak menyebut competitor broker dan seluruh fakta/kutipan yang saya masukkan dapat ditelusuri ke sumber.</span>
+          </label>}
         </div>
       </div>
 
@@ -192,7 +225,7 @@ export default function ArticleMarketNewsGenerator() {
         <button type="button" onClick={generateArticle} disabled={!ready || loading} className="rounded-xl bg-cyan-600 px-6 py-3 font-semibold text-white transition hover:bg-cyan-500 disabled:cursor-not-allowed disabled:opacity-40">
           {loading ? 'Generating Article…' : 'Generate Article'}
         </button>
-        {!ready && <p className="text-xs text-gray-400">Lengkapi source gate, struktur kompetitor, tepat 5 PAA, dan konfirmasi referensi.</p>}
+        {!ready && <p className="text-xs text-gray-400">Lengkapi keyword, angle, lima struktur kompetitor, tepat lima PAA, serta optional reference jika kamu menambahkannya.</p>}
         {progress && <p className="text-sm text-cyan-200">{progress}</p>}
       </div>
       {error && <div className="mt-4 rounded-lg border border-red-500/25 bg-red-500/10 px-4 py-3 text-sm text-red-300" role="alert">{error}</div>}

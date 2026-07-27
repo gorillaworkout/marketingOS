@@ -16,6 +16,7 @@ export interface ArticleSourceInput {
   url: string;
   publishedAt: string;
   verifiedFacts: string;
+  provenance?: 'automated' | 'user';
 }
 
 export interface ArticleMarketNewsInput {
@@ -171,13 +172,10 @@ export function normalizeArticleMarketNewsInput(value: unknown, expectedResearch
   if (paaQuestions.some(question => question.length > MAX.paa)) throw new Error(`Each PAA question is limited to ${MAX.paa} characters.`);
   if (paaQuestions.some(question => !question.endsWith('?'))) throw new Error('Every People Also Ask entry must be a question ending with ?.');
   if (new Set(paaQuestions.map(normalized)).size !== 5) throw new Error('The five People Also Ask questions must be exact and unique.');
-  if (input.noCompetitorBroker !== true) throw new Error('Confirm that no source mentions a competitor broker before generating.');
-  if (input.factsVerified !== true) throw new Error('Confirm that all submitted facts and quotes were verified against the source articles.');
-
   const rawSources = Array.isArray(input.sources) ? input.sources : [];
-  if (rawSources.length < 1 || rawSources.length > 5) {
-    throw new Error('Add 1–5 eligible reference articles. If none are available, stop and repeat research in 10 minutes.');
-  }
+  if (rawSources.length > 5) throw new Error('Add no more than five optional reference articles.');
+  if (rawSources.length > 0 && input.noCompetitorBroker !== true) throw new Error('Confirm that no submitted reference mentions a competitor broker before generating.');
+  if (rawSources.length > 0 && input.factsVerified !== true) throw new Error('Confirm that all submitted facts and quotes were verified against the source articles.');
   const sources = rawSources.map((item, zeroIndex): ArticleSourceInput => {
     const index = zeroIndex + 1;
     if (!item || typeof item !== 'object' || Array.isArray(item)) throw new Error(`Reference article ${index} is invalid.`);
@@ -187,7 +185,7 @@ export function normalizeArticleMarketNewsInput(value: unknown, expectedResearch
     const publishedAt = validateWibLocalTimestamp(source.publishedAt, researchDate, index);
     const verifiedFacts = requiredText(source.verifiedFacts, `Reference article ${index} verified facts`, MAX.verifiedFacts);
     if (verifiedFacts.length < 20) throw new Error(`Reference article ${index} needs meaningful verified facts.`);
-    return { outlet, title, publishedAt, verifiedFacts, url: normalizeResearchUrl(source.url) };
+    return { outlet, title, publishedAt, verifiedFacts, url: normalizeResearchUrl(source.url), provenance: 'user' };
   });
   if (new Set(sources.map(source => source.url)).size !== sources.length) throw new Error('Reference article URLs must be unique.');
   return { keyword, researchDate, angle, competitorHeadings, paaQuestions, sources, noCompetitorBroker: true, factsVerified: true };
@@ -230,11 +228,12 @@ function hasEndingDupoinAccountCta(markdown: string): boolean {
 export function buildArticleMarketNewsPrompts(input: ArticleMarketNewsInput): { systemPrompt: string; userPrompt: string } {
   const sourceMaterial = input.sources.map((source, index) => `
 REFERENCE ${index + 1}
+Provenance: ${source.provenance === 'automated' ? 'automated publisher RSS headline/summary' : 'optional user-attested reference'}
 Outlet: ${source.outlet}
 Title: ${source.title}
 Published: ${source.publishedAt}
 URL: ${source.url}
-Operator-attested facts/quotes (the only factual claim source): ${source.verifiedFacts}`).join('\n');
+Source evidence (publisher RSS metadata or user-attested facts, according to provenance): ${source.verifiedFacts}`).join('\n');
 
   const systemPrompt = `You are the senior financial journalist and market analyst at Dupoin Futures Indonesia. Write clean, natural Bahasa Indonesia for beginner traders. Sound like an experienced newsroom writer, not an AI or promotional salesperson.
 
@@ -248,8 +247,8 @@ NON-NEGOTIABLE EDITORIAL RULES:
 - Use professional, objective, analytical journalism. Technical market terms may be used naturally.
 - Cite the source outlet and publication date in the prose and provide a Sources section.
 - Do not fabricate prices, percentages, dates, facts, quotes, analyst names, institutional claims, URLs, or market events.
-- Numeric factual claims may use only numeric tokens present in the operator-attested verified facts. Source titles and URLs never support numeric claims. Publication dates may appear only as exact source-date citations.
-- A quote may appear only if it exists verbatim in the operator-attested facts.
+- Numeric factual claims may use only numeric tokens present in the Source evidence fields. Titles and URLs never support numeric claims. Publication dates may appear only as exact source-date citations.
+- A quote may appear only if it exists verbatim in a Source evidence field.
 - Do not mention competitor brokers.
 - The URLs are citations only. Do not browse, open, fetch, or follow them.
 - End with one natural, imperative, one-sentence CTA that asks the reader to open an account with Dupoin.
@@ -275,11 +274,11 @@ ${input.competitorHeadings}
 FIVE PAA QUESTIONS:
 ${input.paaQuestions.map((question, index) => `${index + 1}. ${question}`).join('\n')}
 
-VERIFIED SOURCE MATERIAL:
+SOURCE EVIDENCE WITH EXPLICIT PROVENANCE:
 ${sourceMaterial}
 </USER_DATA>
 
-Write the article using only factual claims traceable to VERIFIED SOURCE MATERIAL.`;
+Write the article using only factual claims traceable to SOURCE EVIDENCE. Treat automated RSS evidence as publisher-supplied headline/summary metadata, not as a claim that the full article body was independently verified.`;
   return { systemPrompt, userPrompt };
 }
 
