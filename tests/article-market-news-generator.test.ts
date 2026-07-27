@@ -48,6 +48,11 @@ function compliantArticle(): string {
 }
 
 test('page exposes the admin Article Market News generation workflow', () => {
+  assert.match(generator, /Publication Time \(WIB\)/);
+  assert.match(generator, /type="time"/);
+  assert.match(generator, /Tanggal otomatis mengikuti Research Date/);
+  assert.match(generator, /`\$\{researchDate\}T\$\{event\.target\.value\}`/);
+  assert.doesNotMatch(generator, /type="datetime-local"/);
   assert.match(page, /ArticleMarketNewsGenerator/);
   assert.match(generator, /Generate Article/);
   assert.match(generator, /exactly 5 articles/);

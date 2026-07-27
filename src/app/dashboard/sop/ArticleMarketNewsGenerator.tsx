@@ -167,7 +167,14 @@ export default function ArticleMarketNewsGenerator() {
               <div className="flex items-center justify-between"><h4 className="text-sm font-semibold text-cyan-300">Source {index + 1}</h4>{sources.length > 1 && <button type="button" onClick={() => setSources(current => current.filter((_, itemIndex) => itemIndex !== index))} className="text-xs text-red-300 hover:text-red-200">Remove</button>}</div>
               <div className="grid gap-3 sm:grid-cols-2">
                 <input value={source.outlet} onChange={event => updateSource(index, 'outlet', event.target.value)} placeholder="Outlet: Investing.com" className="rounded-lg border border-gray-700 bg-gray-950/60 px-3 py-2 text-sm text-white" />
-                <input type="datetime-local" value={source.publishedAt} min={`${researchDate}T00:00`} max={`${researchDate}T23:59`} onChange={event => updateSource(index, 'publishedAt', event.target.value)} className="rounded-lg border border-gray-700 bg-gray-950/60 px-3 py-2 text-sm text-white" />
+                <label className="text-xs text-gray-400">
+                  Publication Time (WIB)
+                  <div className="mt-1 flex items-center gap-2">
+                    <span className="rounded-lg border border-gray-700 bg-gray-800/70 px-3 py-2 text-sm text-gray-300" title="Tanggal otomatis mengikuti Research Date">{researchDate}</span>
+                    <input type="time" value={source.publishedAt.split('T')[1] || ''} onChange={event => updateSource(index, 'publishedAt', event.target.value ? `${researchDate}T${event.target.value}` : '')} aria-label={`Source ${index + 1} publication time in WIB`} className="min-w-0 flex-1 rounded-lg border border-gray-700 bg-gray-950/60 px-3 py-2 text-sm text-white" />
+                  </div>
+                  <span className="mt-1 block text-[11px] text-gray-500">Tanggal otomatis mengikuti Research Date.</span>
+                </label>
               </div>
               <input value={source.title} onChange={event => updateSource(index, 'title', event.target.value)} placeholder="Article title" className="w-full rounded-lg border border-gray-700 bg-gray-950/60 px-3 py-2 text-sm text-white" />
               <input type="url" value={source.url} onChange={event => updateSource(index, 'url', event.target.value)} placeholder="https://..." className="w-full rounded-lg border border-gray-700 bg-gray-950/60 px-3 py-2 text-sm text-white" />
