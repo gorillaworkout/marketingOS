@@ -24,18 +24,18 @@ setInterval(() => {
  * Check rate limit for the given request.
  * Returns null if allowed, or a 429 NextResponse if rate limited.
  */
-export function rateLimit(request: NextRequest): NextResponse | null {
-  const ip =
+export function rateLimit(request: NextRequest, authenticatedKey?: string): NextResponse | null {
+  const key = authenticatedKey ||
     request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
     request.headers.get('x-real-ip') ||
     '127.0.0.1';
 
   const now = Date.now();
-  let entry = store.get(ip);
+  let entry = store.get(key);
 
   if (!entry || now > entry.resetTime) {
     entry = { count: 1, resetTime: now + WINDOW_MS };
-    store.set(ip, entry);
+    store.set(key, entry);
     return null;
   }
 

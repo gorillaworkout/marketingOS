@@ -24,11 +24,15 @@ export default function DashboardPage() {
     'social-post': '📱',
     'video-script': '🎬',
     'event-plan': '📋',
+    'article-market-news': '📰',
+    'market-research': '🔎',
   };
   const typeLabels: Record<string, string> = {
     'social-post': 'Social Media Post',
     'video-script': 'Video Script',
     'event-plan': 'Event Plan',
+    'article-market-news': 'Article Market News',
+    'market-research': 'Market Research',
   };
 
   if (loading) {
@@ -94,7 +98,7 @@ export default function DashboardPage() {
         <div className="bg-gray-800/50 rounded-xl p-6 border border-gray-700/50">
           <h3 className="text-lg font-semibold text-white mb-4">Tasks by Type</h3>
           <div className="space-y-3">
-            {stats?.tasksByType?.map((t: any) => (
+            {stats?.tasksByType?.map(t => (
               <div key={t.type} className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <span>{typeIcons[t.type] || '📄'}</span>
@@ -112,7 +116,7 @@ export default function DashboardPage() {
         <div className="bg-gray-800/50 rounded-xl p-6 border border-gray-700/50">
           <h3 className="text-lg font-semibold text-white mb-4">Recent Tasks</h3>
           <div className="space-y-3">
-            {stats?.recentTasks?.map((task: any) => (
+            {stats?.recentTasks?.map(task => (
               <div key={task.id} className="flex items-center justify-between py-1">
                 <div className="flex items-center gap-2">
                   <span>{typeIcons[task.type] || '📄'}</span>

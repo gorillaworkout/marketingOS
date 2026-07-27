@@ -2,6 +2,8 @@
 import { useEffect, useState } from 'react';
 import { articleDocxFilename, buildArticleDocxBlob } from '@/lib/article-market-news-docx';
 import type { ArticleSourceInput } from '@/lib/article-market-news';
+import { buildMarketResearchDocxBlob, marketResearchDocxFilename } from '@/lib/market-research-docx';
+import type { MarketResearchItem } from '@/lib/market-research';
 
 interface HistoryTask {
   id: string;
@@ -17,15 +19,16 @@ export default function HistoryPage() {
   const [tasks, setTasks] = useState<HistoryTask[]>([]);
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<HistoryTask | null>(null);
-  const [typeFilter, setTypeFilter] = useState<'all' | 'social-post' | 'video-script' | 'event-plan' | 'article-market-news'>('all');
+  const [typeFilter, setTypeFilter] = useState<'all' | 'social-post' | 'video-script' | 'event-plan' | 'article-market-news' | 'market-research'>('all');
   const [articleFactReviewConfirmed, setArticleFactReviewConfirmed] = useState(false);
+  const [marketResearchReviewConfirmed, setMarketResearchReviewConfirmed] = useState(false);
 
   useEffect(() => {
     fetch('/api/dashboard/history').then(r => r.json()).then(d => { setTasks(d.tasks || []); setLoading(false); });
   }, []);
 
-  const typeIcons: Record<string, string> = { 'social-post': '📱', 'video-script': '🎬', 'event-plan': '📋', 'article-market-news': '📰' };
-  const typeLabels: Record<string, string> = { 'social-post': 'Social Post', 'video-script': 'Video Script', 'event-plan': 'Event Plan', 'article-market-news': 'Article Market News' };
+  const typeIcons: Record<string, string> = { 'social-post': '📱', 'video-script': '🎬', 'event-plan': '📋', 'article-market-news': '📰', 'market-research': '🔎' };
+  const typeLabels: Record<string, string> = { 'social-post': 'Social Post', 'video-script': 'Video Script', 'event-plan': 'Event Plan', 'article-market-news': 'Article Market News', 'market-research': 'Market Research' };
   const filteredTasks = typeFilter === 'all'
     ? tasks
     : typeFilter === 'event-plan'
@@ -57,6 +60,21 @@ export default function HistoryPage() {
     URL.revokeObjectURL(url);
   };
 
+  const downloadMarketResearchDocx = async (task: HistoryTask) => {
+    if (!marketResearchReviewConfirmed) return;
+    const data = JSON.parse(task.output_data || '{}');
+    const input = data.input || {};
+    const items = data.report?.items || [];
+    if (!input.brief || !input.researchDate || !Array.isArray(items) || items.length === 0) return;
+    const blob = await buildMarketResearchDocxBlob(input.brief, input.researchDate, items);
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = marketResearchDocxFilename(input.researchDate);
+    anchor.click();
+    URL.revokeObjectURL(url);
+  };
+
   if (loading) return <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>;
 
   return (
@@ -64,7 +82,7 @@ export default function HistoryPage() {
       <div><h1 className="text-2xl font-bold text-white">📁 Task History</h1><p className="text-gray-400 mt-1">View and download all generated content</p></div>
 
       <div className="flex flex-wrap gap-2">
-        {(['all', 'social-post', 'video-script', 'event-plan', 'article-market-news'] as const).map(type => (
+        {(['all', 'social-post', 'video-script', 'event-plan', 'article-market-news', 'market-research'] as const).map(type => (
           <button key={type} onClick={() => setTypeFilter(type)} className={`rounded-lg px-3 py-1.5 text-sm ${typeFilter === type ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-400 hover:text-white'}`}>
             {type === 'all' ? 'All Tasks' : type === 'event-plan' ? 'Event Plans' : typeLabels[type]}
           </button>
@@ -76,7 +94,7 @@ export default function HistoryPage() {
         <div className="lg:col-span-1 bg-gray-800/50 rounded-xl border border-gray-700/50 overflow-hidden max-h-[70vh] overflow-y-auto">
           {filteredTasks.length > 0 ? filteredTasks.map(task => (
             <div key={task.id}
-              onClick={() => { setSelected(task); setArticleFactReviewConfirmed(false); }}
+              onClick={() => { setSelected(task); setArticleFactReviewConfirmed(false); setMarketResearchReviewConfirmed(false); }}
               className={`p-4 border-b border-gray-800/50 cursor-pointer hover:bg-gray-700/30 transition-colors ${selected?.id === task.id ? 'bg-blue-600/10 border-l-2 border-l-blue-500' : ''}`}>
               <div className="flex items-center gap-2 mb-1">
                 <span>{typeIcons[task.type] || '📄'}</span>
@@ -103,10 +121,10 @@ export default function HistoryPage() {
                     <p className="text-xs text-gray-500">{new Date(selected.created_at).toLocaleString()}</p>
                   </div>
                 </div>
-                <button onClick={() => selected.type === 'article-market-news' ? void downloadArticleDocx(selected) : downloadJSON(selected)}
-                  disabled={selected.type === 'article-market-news' && !articleFactReviewConfirmed}
+                <button onClick={() => selected.type === 'market-research' ? void downloadMarketResearchDocx(selected) : selected.type === 'article-market-news' ? void downloadArticleDocx(selected) : downloadJSON(selected)}
+                  disabled={(selected.type === 'article-market-news' && !articleFactReviewConfirmed) || (selected.type === 'market-research' && !marketResearchReviewConfirmed)}
                   className="px-4 py-2 bg-green-600 hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-40 text-white text-sm font-medium rounded-lg flex items-center gap-1">
-                  {selected.type === 'article-market-news' ? 'Download DOCX' : '⬇️ Download'}
+                  {selected.type === 'article-market-news' || selected.type === 'market-research' ? 'Download DOCX' : '⬇️ Download'}
                 </button>
               </div>
 
@@ -139,6 +157,33 @@ export default function HistoryPage() {
                           <label className="flex cursor-pointer gap-3 rounded-xl border border-amber-500/25 bg-amber-500/10 p-4 text-sm text-amber-100">
                             <input type="checkbox" checked={articleFactReviewConfirmed} onChange={event => setArticleFactReviewConfirmed(event.target.checked)} className="mt-0.5 h-4 w-4 accent-emerald-500" />
                             <span>Saya sudah memeriksa ulang klaim nonnumeric dan source snapshot artikel ini. Aktifkan untuk Download DOCX.</span>
+                          </label>
+                        </>
+                      );
+                    }
+
+                    if (selected.type === 'market-research') {
+                      const items = (data.report?.items || []) as MarketResearchItem[];
+                      return (
+                        <>
+                          <div className="grid gap-3 sm:grid-cols-3">
+                            <div><label className="text-xs text-gray-500 uppercase tracking-wide">Model</label><p className="mt-1 text-gray-300">{data.model || 'Codex'}</p></div>
+                            <div><label className="text-xs text-gray-500 uppercase tracking-wide">Candidates Compared</label><p className="mt-1 text-gray-300">{data.candidateCount || '—'}</p></div>
+                            <div><label className="text-xs text-gray-500 uppercase tracking-wide">Selected</label><p className="mt-1 text-gray-300">{items.length}</p></div>
+                          </div>
+                          {Array.isArray(data.sourceStatus) && <div className="rounded-xl border border-gray-700 bg-gray-950/40 p-4"><label className="text-xs text-gray-500 uppercase tracking-wide">Publisher Feed Status</label><div className="mt-2 space-y-1">{data.sourceStatus.map((source: { outlet: string; status: 'ok' | 'error'; candidateCount: number; error?: string }) => <p key={source.outlet} className={source.status === 'ok' ? 'text-xs text-emerald-400' : 'text-xs text-red-300'}>{source.outlet}: {source.status === 'ok' ? `OK · ${source.candidateCount} candidate` : `Failed · ${source.error || 'Unavailable'}`}</p>)}</div></div>}
+                          <div className="space-y-3">
+                            {items.map((item, index) => <article key={item.candidateId} className="rounded-xl border border-gray-700 bg-gray-950/40 p-4">
+                              <p className="text-xs font-semibold text-cyan-400">#{index + 1} · {item.productCategory}</p>
+                              <h4 className="mt-1 font-semibold text-white">{item.articleTitle}</h4>
+                              <p className="mt-1 text-xs text-gray-500">{item.newsSource} · {item.publicationDate} {item.publicationTime} WIB · Latest Update Time: {item.latestUpdateTime ? `${item.latestUpdateTime} WIB` : 'Not provided'}</p>
+                              <dl className="mt-3 space-y-2 text-sm"><div><dt className="text-gray-500">Main Event</dt><dd className="text-gray-300">{item.mainEvent}</dd></div><div><dt className="text-gray-500">Latest Factual Development</dt><dd className="text-gray-300">{item.latestFactualDevelopment}</dd></div><div><dt className="text-gray-500">Market Relevance</dt><dd className="text-gray-300">{item.marketRelevance}</dd></div></dl>
+                              <a href={item.articleUrl} target="_blank" rel="noreferrer" className="mt-3 block break-all text-sm text-cyan-400 hover:underline">{item.articleUrl}</a>
+                            </article>)}
+                          </div>
+                          <label className="flex cursor-pointer gap-3 rounded-xl border border-amber-500/25 bg-amber-500/10 p-4 text-sm text-amber-100">
+                            <input type="checkbox" checked={marketResearchReviewConfirmed} onChange={event => setMarketResearchReviewConfirmed(event.target.checked)} className="mt-0.5 h-4 w-4 accent-emerald-500" />
+                            <span>Saya sudah membuka seluruh link dan membaca artikel lengkap. Aktifkan untuk Download DOCX.</span>
                           </label>
                         </>
                       );

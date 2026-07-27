@@ -54,7 +54,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       if (data.authenticated) {
         setUser(data.user);
         const generationFeature = pathname.split('/').pop() || '';
-        const adminOnlyPages = ['/dashboard/tokens', '/dashboard/analytics', '/dashboard/accounts', '/dashboard/templates', '/dashboard/calendar', '/dashboard/images', '/dashboard/knowledge', '/dashboard/brand-guidelines', '/dashboard/history', '/dashboard/sop'];
+        const adminOnlyPages = ['/dashboard/tokens', '/dashboard/analytics', '/dashboard/accounts', '/dashboard/templates', '/dashboard/calendar', '/dashboard/images', '/dashboard/knowledge', '/dashboard/brand-guidelines', '/dashboard/history', '/dashboard/sop', '/dashboard/market-research'];
         if (data.user.role !== 'admin' && (adminOnlyPages.includes(pathname) || (['social-post', 'video-script', 'event-plan'].includes(generationFeature) && !data.user.enabledFeatures?.includes(generationFeature)))) {
           router.replace('/dashboard');
         }
@@ -151,6 +151,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     { href: '/dashboard/video-script', label: 'Video Script', icon: '🎬' },
     { href: '/dashboard/event-plan', label: 'Event Plan', icon: '📋' },
     { href: '/dashboard/sop', label: 'Article Market News', icon: '📰', adminOnly: true },
+    { href: '/dashboard/market-research', label: 'Market Research', icon: '🔎', adminOnly: true },
   ].filter(item => user?.role === 'admin' || (!item.adminOnly && user?.enabledFeatures.includes(item.href.split('/').pop() || '')));
 
   const resourceItems = [
