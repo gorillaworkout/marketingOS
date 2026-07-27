@@ -10,9 +10,9 @@ import { migrate } from './migrate';
 const tables = [
   'users', 'tasks', 'token_logs', 'assets', 'sessions', 'brand_guidelines', 'content_calendar', 'templates',
   'user_preferences', 'task_model_preferences', 'knowledge_entries', 'style_clusters', 'user_style_preferences',
-  'global_style_profile', 'knowledge_edges', 'kanban_tasks',
+  'global_style_profile', 'knowledge_edges',
 ];
-const userScopedTables = ['tasks', 'token_logs', 'assets', 'sessions', 'brand_guidelines', 'content_calendar', 'templates', 'user_preferences', 'task_model_preferences', 'knowledge_entries', 'user_style_preferences', 'kanban_tasks'];
+const userScopedTables = ['tasks', 'token_logs', 'assets', 'sessions', 'brand_guidelines', 'content_calendar', 'templates', 'user_preferences', 'task_model_preferences', 'knowledge_entries', 'user_style_preferences'];
 const taskScopedTables = ['token_logs', 'assets', 'content_calendar'];
 
 type SQLiteTable = { columns: string[]; values: unknown[][] };

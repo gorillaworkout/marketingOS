@@ -78,6 +78,12 @@ export default function VideoScriptPage() {
   const progressTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
 
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const template = params.get('template');
+    if (template) setEvent(template);
+  }, []);
+
   const fetchScripts = async () => {
     try {
       const res = await fetch('/api/dashboard/history?type=video-script');

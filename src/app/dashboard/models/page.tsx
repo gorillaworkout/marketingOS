@@ -11,6 +11,8 @@ interface ModelInfo {
   output: number;
   inputPricePerM: number;
   outputPricePerM: number;
+  pricingSource: 'openrouter-live' | 'fallback' | 'subscription';
+  sourceUrl: string | null;
 }
 
 interface ProviderInfo {
@@ -48,6 +50,12 @@ const providerNames: Record<string, string> = {
   'claude-code': 'Claude Code',
 };
 
+function formatPrice(price: number): string {
+  return price < 1
+    ? price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 4 })
+    : price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
 export default function ModelsPage() {
   const [data, setData] = useState<ModelsData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -84,7 +92,7 @@ export default function ModelsPage() {
       <div className="max-w-5xl mx-auto">
         <h1 className="text-2xl font-bold text-white mb-1">🧠 Models & Pricing</h1>
         <p className="text-sm text-gray-400 mb-6">
-          Semua model AI yang tersedia untuk konten generasi. Biaya per 1 juta token.
+          Semua model AI yang tersedia untuk content generation. Harga OpenRouter adalah harga mulai dari provider aktif per 1 juta token.
           Diperbarui: {new Date(data.generatedAt).toLocaleString('id-ID')}
         </p>
 
@@ -138,8 +146,8 @@ export default function ModelsPage() {
                     <tr className="border-b border-gray-700 text-left">
                       <th className="py-2.5 px-3 text-gray-400 font-medium text-xs uppercase tracking-wider">Model</th>
                       <th className="py-2.5 px-3 text-gray-400 font-medium text-xs uppercase tracking-wider">Tier</th>
-                      <th className="py-2.5 px-3 text-gray-400 font-medium text-xs uppercase tracking-wider">Input / 1M tokens</th>
-                      <th className="py-2.5 px-3 text-gray-400 font-medium text-xs uppercase tracking-wider">Output / 1M tokens</th>
+                      <th className="py-2.5 px-3 text-gray-400 font-medium text-xs uppercase tracking-wider">Input mulai / 1M</th>
+                      <th className="py-2.5 px-3 text-gray-400 font-medium text-xs uppercase tracking-wider">Output mulai / 1M</th>
                       <th className="py-2.5 px-3 text-gray-400 font-medium text-xs uppercase tracking-wider">Keterangan</th>
                     </tr>
                   </thead>
@@ -164,7 +172,7 @@ export default function ModelsPage() {
                               {isFree ? (
                                 <span className="text-emerald-400">✓ Included</span>
                               ) : m.inputPricePerM > 0 ? (
-                                `$${m.inputPricePerM.toFixed(2)}`
+                                `$${formatPrice(m.inputPricePerM)}`
                               ) : '< $0.01'}
                             </span>
                           </td>
@@ -173,7 +181,7 @@ export default function ModelsPage() {
                               {isFree ? (
                                 <span className="text-emerald-400">✓ Included</span>
                               ) : m.outputPricePerM > 0 ? (
-                                `$${m.outputPricePerM.toFixed(2)}`
+                                `$${formatPrice(m.outputPricePerM)}`
                               ) : '< $0.01'}
                             </span>
                           </td>
@@ -182,7 +190,17 @@ export default function ModelsPage() {
                               ? pk === 'codex'
                                 ? 'Paket ChatGPT Plus'
                                 : 'Paket Claude subscription'
-                              : `${tc.desc}`
+                              : <div className="space-y-1">
+                                  <div>Mulai dari provider aktif · {tc.desc}</div>
+                                  {m.sourceUrl && (
+                                    <a href={m.sourceUrl} target="_blank" rel="noreferrer" className="text-blue-400 hover:text-blue-300 underline">
+                                      Lihat harga resmi OpenRouter
+                                    </a>
+                                  )}
+                                  {m.pricingSource === 'fallback' && (
+                                    <div className="text-amber-400">Live pricing tidak terjangkau — menampilkan fallback terakhir.</div>
+                                  )}
+                                </div>
                             }
                           </td>
                         </tr>
@@ -199,7 +217,8 @@ export default function ModelsPage() {
         <div className="bg-gray-800/50 border border-gray-700 rounded-xl p-4 mt-4">
           <h3 className="text-sm font-semibold text-white mb-2">💡 Catatan Biaya</h3>
           <ul className="text-xs text-gray-400 space-y-1.5">
-            <li>• <strong className="text-gray-300">OpenRouter</strong> — bayar per token dari saldo akun. Harga tertera per 1 juta token.</li>
+            <li>• <strong className="text-gray-300">OpenRouter</strong> — bayar per token dari saldo akun. Harga diambil dari endpoint provider resmi OpenRouter.</li>
+            <li>• <strong className="text-gray-300">Harga dapat berbeda antar-provider</strong> — angka yang tampil adalah harga termurah dari provider aktif saat data dimuat, bukan quotation tetap.</li>
             <li>• <strong className="text-gray-300">Codex (ChatGPT Plus)</strong> — termasuk dalam langganan ChatGPT Plus $20/bulan. Tidak ada biaya per token.</li>
             <li>• <strong className="text-gray-300">Claude Code</strong> — termasuk dalam langganan Claude. Tidak ada biaya per token.</li>
             <li>• Model budget cocok untuk tugas sederhana & testing. Premium untuk kualitas terbaik.</li>

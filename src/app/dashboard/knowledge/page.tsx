@@ -99,10 +99,6 @@ export default function KnowledgePage() {
     setSearchLoading(false);
   }, []);
 
-  useEffect(() => {
-    fetchData();
-  }, []);
-
   // Debounced search — only fire when query is non-empty and tab is search
   useEffect(() => {
     if (activeTab !== 'search' || !searchQuery.trim()) return;
@@ -224,6 +220,22 @@ export default function KnowledgePage() {
           🔍 Search
         </button>
       </div>
+
+      {!loading && entries.length === 0 && (
+        <div className="rounded-xl border border-blue-500/20 bg-blue-500/10 p-6">
+          <h2 className="font-semibold text-blue-200">Knowledge belum memiliki selection</h2>
+          <p className="mt-2 text-sm text-gray-300">
+            Knowledge terbentuk otomatis saat Anda memilih output di Social Post atau Video Script. Sistem menyimpan pilihan nyata untuk mempelajari tone, hook, platform, dan style yang Anda sukai.
+          </p>
+          <p className="mt-2 text-xs text-gray-400">
+            MarketingOS tidak membuat data contoh palsu. Karena akun ini belum menyimpan pilihan, analytics masih kosong.
+          </p>
+          <div className="mt-4 flex flex-wrap gap-2">
+            <a href="/dashboard/social-post" className="rounded-lg bg-blue-600 px-3 py-2 text-sm text-white hover:bg-blue-500">Buka Social Post</a>
+            <a href="/dashboard/video-script" className="rounded-lg bg-gray-700 px-3 py-2 text-sm text-gray-200 hover:bg-gray-600">Buka Video Script</a>
+          </div>
+        </div>
+      )}
 
       {loading ? (
         <div className="flex items-center justify-center py-20">

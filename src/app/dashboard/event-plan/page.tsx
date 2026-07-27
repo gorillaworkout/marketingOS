@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { buildEventPlanDownload, eventPlanDownloadFilename } from '@/lib/event-plan-download';
 import type { EventPlanResearch } from '@/lib/event-plan-research';
 
@@ -84,6 +84,12 @@ export default function EventPlanPage() {
   const [progress, setProgress] = useState<{ message: string; progress?: number } | null>(null);
   const [error, setError] = useState('');
   const [tokenUsage, setTokenUsage] = useState<TokenUsage | null>(null);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const template = params.get('template');
+    if (template) setTheme(template);
+  }, []);
 
   const handleGenerate = async (e: React.FormEvent) => {
     e.preventDefault();

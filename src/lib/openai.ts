@@ -17,10 +17,12 @@ export interface ModelInfo {
 
 // All available models with metadata
 export const AVAILABLE_MODELS: ModelInfo[] = [
-  { id: 'deepseek/deepseek-v4-flash', name: 'DeepSeek V4 Flash', tier: 'budget', provider: 'openrouter', input: 0.000077, output: 0.000154 },
-  { id: 'deepseek/deepseek-v4-pro', name: 'DeepSeek V4 Pro', tier: 'balanced', provider: 'openrouter', input: 0.000435, output: 0.00087 },
-  { id: 'openai/gpt-4o-mini', name: 'GPT-4o Mini', tier: 'balanced', provider: 'openrouter', input: 0.00015, output: 0.0006 },
-  { id: 'openai/gpt-5.4-pro', name: 'GPT-5.4 Pro', tier: 'premium', provider: 'openrouter', input: 0.03, output: 0.18 },
+  // OpenRouter fallback prices are USD per token. The Models API replaces these
+  // with live minimum provider prices when OpenRouter is reachable.
+  { id: 'deepseek/deepseek-v4-flash', name: 'DeepSeek V4 Flash', tier: 'budget', provider: 'openrouter', input: 0.00000009, output: 0.00000018 },
+  { id: 'deepseek/deepseek-v4-pro', name: 'DeepSeek V4 Pro', tier: 'balanced', provider: 'openrouter', input: 0.000000435, output: 0.00000087 },
+  { id: 'openai/gpt-4o-mini', name: 'GPT-4o Mini', tier: 'balanced', provider: 'openrouter', input: 0.00000015, output: 0.0000006 },
+  { id: 'openai/gpt-5.4-pro', name: 'GPT-5.4 Pro', tier: 'premium', provider: 'openrouter', input: 0.000015, output: 0.00009 },
   { id: 'gpt-5.6-sol', name: 'GPT-5.6 Sol (Codex)', tier: 'premium', provider: 'codex', input: 0, output: 0 },
   { id: 'gpt-5.6-terra', name: 'GPT-5.6 Terra (Codex)', tier: 'balanced', provider: 'codex', input: 0, output: 0 },
   { id: 'gpt-5.6-luna', name: 'GPT-5.6 Luna (Codex)', tier: 'budget', provider: 'codex', input: 0, output: 0 },
@@ -61,10 +63,10 @@ export async function getUserPreferredModel(userId: string, taskType?: string): 
 
 // Dynamic pricing based on model
 const MODEL_PRICING: Record<string, { input: number; output: number }> = {
-  'deepseek/deepseek-v4-flash': { input: 0.000000077, output: 0.000000154 },
+  'deepseek/deepseek-v4-flash': { input: 0.00000009, output: 0.00000018 },
   'deepseek/deepseek-v4-pro': { input: 0.000000435, output: 0.00000087 },
   'openai/gpt-4o-mini': { input: 0.00000015, output: 0.0000006 },
-  'openai/gpt-5.4-pro': { input: 0.00003, output: 0.00018 },
+  'openai/gpt-5.4-pro': { input: 0.000015, output: 0.00009 },
   // Codex models — included in ChatGPT Plus, no per-token cost
   'gpt-5.6-sol': { input: 0, output: 0 },
   'gpt-5.6-terra': { input: 0, output: 0 },
@@ -76,7 +78,7 @@ const MODEL_PRICING: Record<string, { input: number; output: number }> = {
 };
 
 function getPricing(model: string) {
-  return MODEL_PRICING[model] || { input: 0.000000077, output: 0.000000154 };
+  return MODEL_PRICING[model] || { input: 0.00000009, output: 0.00000018 };
 }
 
 export interface TokenUsage {
@@ -444,8 +446,7 @@ export async function generateContent(
   // Estimate tokens from content length (rough: 1 token ≈ 4 chars)
   const inputTokens = Math.ceil((enhancedSystemPrompt.length + userPrompt.length) / 4);
   const outputTokens = Math.ceil(result.content.length / 4);
-  const cost = (inputTokens / 1_000_000) * pricing.input +
-               (outputTokens / 1_000_000) * pricing.output;
+  const cost = inputTokens * pricing.input + outputTokens * pricing.output;
 
   const usage: TokenUsage = { inputTokens, outputTokens, model: result.model, cost };
 

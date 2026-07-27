@@ -128,6 +128,12 @@ export default function SocialPostPage() {
   const progressTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
 
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const template = params.get('template');
+    if (template) setBrief(template);
+  }, []);
+
   // Load recent posts on mount
   useEffect(() => {
     fetchPosts();

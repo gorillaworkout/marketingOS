@@ -40,7 +40,7 @@ export async function getSession(request: NextRequest): Promise<AuthResult | Aut
     }
 
     const adminOnlyPaths = [
-      '/api/kanban', '/api/dashboard/tokens', '/api/admin/users', '/api/admin/departments',
+      '/api/dashboard/tokens', '/api/admin/users', '/api/admin/departments',
       '/api/templates', '/api/calendar', '/api/images', '/api/generated-images', '/api/generate-image', '/api/knowledge',
       '/api/brand-guidelines', '/api/settings/model', '/api/dashboard/history',
     ];

@@ -54,7 +54,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       if (data.authenticated) {
         setUser(data.user);
         const generationFeature = pathname.split('/').pop() || '';
-        const adminOnlyPages = ['/dashboard/kanban', '/dashboard/tokens', '/dashboard/analytics', '/dashboard/accounts', '/dashboard/templates', '/dashboard/calendar', '/dashboard/images', '/dashboard/knowledge', '/dashboard/brand-guidelines', '/dashboard/history', '/dashboard/sop'];
+        const adminOnlyPages = ['/dashboard/tokens', '/dashboard/analytics', '/dashboard/accounts', '/dashboard/templates', '/dashboard/calendar', '/dashboard/images', '/dashboard/knowledge', '/dashboard/brand-guidelines', '/dashboard/history', '/dashboard/sop'];
         if (data.user.role !== 'admin' && (adminOnlyPages.includes(pathname) || (['social-post', 'video-script', 'event-plan'].includes(generationFeature) && !data.user.enabledFeatures?.includes(generationFeature)))) {
           router.replace('/dashboard');
         }
@@ -163,7 +163,6 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   ];
 
   const adminItems = [
-    { href: '/dashboard/kanban', label: 'Kanban', icon: '📋' },
     { href: '/dashboard/tokens', label: 'Token Usage', icon: '💰' },
     { href: '/dashboard/analytics', label: 'Usage Analytics', icon: '📊' },
     { href: '/dashboard/accounts', label: 'Accounts', icon: '👥' },

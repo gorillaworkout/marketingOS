@@ -10,7 +10,8 @@ interface Template {
   output_template: string | null;
   tags: string | null;
   use_count: number;
-  created_at: string;
+  created_at: string | null;
+  is_builtin: boolean;
 }
 
 const TYPES = ['social-post', 'video-script', 'event-plan'];
@@ -113,7 +114,7 @@ export default function TemplatesPage() {
       <div className="flex items-center justify-between mb-8">
         <div>
           <h1 className="text-2xl font-bold text-white">Template Library</h1>
-          <p className="text-gray-400 text-sm mt-1">Reusable templates for content generation</p>
+          <p className="text-gray-400 text-sm mt-1">Template bawaan dan brief reusable untuk mempercepat content generation. Template buatan Anda tersimpan per akun.</p>
         </div>
         <button onClick={handleNew} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm">
           + New Template
@@ -230,7 +231,7 @@ export default function TemplatesPage() {
                   <p className="text-xs text-gray-500 mt-0.5">{TYPE_LABELS[template.type] || template.type}</p>
                 </div>
                 <span className="text-xs bg-gray-700/50 text-gray-400 px-2 py-1 rounded-full">
-                  Used {template.use_count}x
+                  {template.is_builtin ? 'Built-in' : `Used ${template.use_count}x`}
                 </span>
               </div>
 
@@ -257,12 +258,16 @@ export default function TemplatesPage() {
                 >
                   Use Template
                 </button>
-                <button onClick={() => handleEdit(template)} className="text-xs text-gray-400 hover:text-white px-3 py-2 rounded-lg hover:bg-gray-700/50">
-                  Edit
-                </button>
-                <button onClick={() => handleDelete(template.id)} className="text-xs text-red-400 hover:text-red-300 px-3 py-2 rounded-lg hover:bg-red-500/10">
-                  Delete
-                </button>
+                {!template.is_builtin && (
+                  <>
+                    <button onClick={() => handleEdit(template)} className="text-xs text-gray-400 hover:text-white px-3 py-2 rounded-lg hover:bg-gray-700/50">
+                      Edit
+                    </button>
+                    <button onClick={() => handleDelete(template.id)} className="text-xs text-red-400 hover:text-red-300 px-3 py-2 rounded-lg hover:bg-red-500/10">
+                      Delete
+                    </button>
+                  </>
+                )}
               </div>
             </div>
           ))}
