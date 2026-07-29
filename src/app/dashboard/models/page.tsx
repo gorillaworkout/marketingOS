@@ -6,12 +6,12 @@ interface ModelInfo {
   id: string;
   name: string;
   tier: 'budget' | 'balanced' | 'premium';
-  provider: 'openrouter' | 'codex' | 'claude-code';
+  provider: 'openrouter' | 'codex' | 'claude-code' | 'gorillaworkout';
   input: number;
   output: number;
   inputPricePerM: number;
   outputPricePerM: number;
-  pricingSource: 'openrouter-live' | 'fallback' | 'subscription';
+  pricingSource: 'openrouter-live' | 'fallback' | 'subscription' | 'gateway';
   sourceUrl: string | null;
 }
 
@@ -48,6 +48,7 @@ const providerNames: Record<string, string> = {
   openrouter: 'OpenRouter',
   codex: 'Codex (ChatGPT Plus)',
   'claude-code': 'Claude Code',
+  gorillaworkout: 'GorillaWorkout LLM API',
 };
 
 function formatPrice(price: number): string {
@@ -83,7 +84,7 @@ export default function ModelsPage() {
     );
   }
 
-  const providers = (['openrouter', 'codex', 'claude-code'] as const)
+  const providers = (['gorillaworkout', 'codex', 'claude-code', 'openrouter'] as const)
     .filter(p => p in data.providers);
   const provider = data.providers;
 
@@ -97,7 +98,7 @@ export default function ModelsPage() {
         </p>
 
         {/* Provider Status Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 mb-8">
           {providers.map(pk => {
             const p = provider[pk];
             const s = statusConfig[p.status] || statusConfig.unknown;
@@ -120,6 +121,7 @@ export default function ModelsPage() {
                   {pk === 'codex' && 'Termasuk langganan ChatGPT Plus · Tidak ada biaya per token'}
                   {pk === 'claude-code' && 'Termasuk langganan Claude · Tidak ada biaya per token'}
                   {pk === 'openrouter' && 'Bayar per token via saldo OpenRouter'}
+                  {pk === 'gorillaworkout' && 'Model tersedia melalui llm.gorillaworkout.id API'}
                 </p>
               </div>
             );
@@ -188,8 +190,12 @@ export default function ModelsPage() {
                           <td className="py-3 px-3 text-xs text-gray-400">
                             {isFree
                               ? pk === 'codex'
-                                ? 'Paket ChatGPT Plus'
-                                : 'Paket Claude subscription'
+                                ? 'Sumber: Codex · Paket ChatGPT Plus'
+                                : pk === 'claude-code'
+                                  ? 'Sumber: Claude Code · Paket Claude subscription'
+                                  : pk === 'gorillaworkout'
+                                    ? 'Sumber: GorillaWorkout LLM API'
+                                    : 'Sumber: OpenRouter'
                               : <div className="space-y-1">
                                   <div>Mulai dari provider aktif · {tc.desc}</div>
                                   {m.sourceUrl && (

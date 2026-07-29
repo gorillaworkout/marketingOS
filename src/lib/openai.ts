@@ -1,10 +1,12 @@
 const API_BASE = process.env.OPENAI_BASE_URL || 'https://openrouter.ai/api/v1';
 const API_KEY = process.env.OPENROUTER_API_KEY || process.env.OPENAI_API_KEY || '';
+const GORILLAWORKOUT_API_BASE = process.env.GORILLAWORKOUT_API_BASE || 'https://llm.gorillaworkout.id/v1';
+const GORILLAWORKOUT_API_KEY = process.env.GORILLAWORKOUT_API_KEY || '';
 
 const PRIMARY_MODEL = process.env.AI_MODEL || 'deepseek/deepseek-v4-flash';
 const FALLBACK_MODEL = 'deepseek/deepseek-v4-pro';
 
-export type ModelProvider = 'openrouter' | 'codex' | 'claude-code';
+export type ModelProvider = 'openrouter' | 'codex' | 'claude-code' | 'gorillaworkout';
 
 export interface ModelInfo {
   id: string;
@@ -30,6 +32,36 @@ export const AVAILABLE_MODELS: ModelInfo[] = [
   { id: 'haiku', name: 'Claude Haiku (Claude Code)', tier: 'budget', provider: 'claude-code', input: 0, output: 0 },
   { id: 'sonnet', name: 'Claude Sonnet (Claude Code)', tier: 'balanced', provider: 'claude-code', input: 0, output: 0 },
   { id: 'opus', name: 'Claude Opus (Claude Code)', tier: 'premium', provider: 'claude-code', input: 0, output: 0 },
+  // GorillaWorkout OpenAI-compatible gateway. Pricing is managed by the gateway.
+  { id: 'pecut-free', name: 'Pecut Free (GorillaWorkout)', tier: 'budget', provider: 'gorillaworkout', input: 0, output: 0 },
+  { id: 'ag/gemini-3-flash-agent', name: 'Gemini 3 Flash Agent', tier: 'budget', provider: 'gorillaworkout', input: 0, output: 0 },
+  { id: 'ag/gemini-3.5-flash-low', name: 'Gemini 3.5 Flash Low', tier: 'budget', provider: 'gorillaworkout', input: 0, output: 0 },
+  { id: 'ag/gemini-3.5-flash-extra-low', name: 'Gemini 3.5 Flash Extra Low', tier: 'budget', provider: 'gorillaworkout', input: 0, output: 0 },
+  { id: 'ag/gemini-pro-agent', name: 'Gemini Pro Agent', tier: 'balanced', provider: 'gorillaworkout', input: 0, output: 0 },
+  { id: 'ag/gemini-3.1-pro-low', name: 'Gemini 3.1 Pro Low', tier: 'balanced', provider: 'gorillaworkout', input: 0, output: 0 },
+  { id: 'ag/claude-sonnet-4-6', name: 'Claude Sonnet 4.6', tier: 'balanced', provider: 'gorillaworkout', input: 0, output: 0 },
+  { id: 'ag/claude-opus-4-6-thinking', name: 'Claude Opus 4.6 Thinking', tier: 'premium', provider: 'gorillaworkout', input: 0, output: 0 },
+  { id: 'ag/gpt-oss-120b-medium', name: 'GPT OSS 120B Medium', tier: 'balanced', provider: 'gorillaworkout', input: 0, output: 0 },
+  { id: 'ag/gemini-3-flash', name: 'Gemini 3 Flash', tier: 'budget', provider: 'gorillaworkout', input: 0, output: 0 },
+  { id: 'cc/claude-fable-5', name: 'Claude Fable 5', tier: 'balanced', provider: 'gorillaworkout', input: 0, output: 0 },
+  { id: 'cc/claude-sonnet-5', name: 'Claude Sonnet 5', tier: 'balanced', provider: 'gorillaworkout', input: 0, output: 0 },
+  { id: 'cc/claude-opus-4-8', name: 'Claude Opus 4.8', tier: 'premium', provider: 'gorillaworkout', input: 0, output: 0 },
+  { id: 'cc/claude-opus-4-7', name: 'Claude Opus 4.7', tier: 'premium', provider: 'gorillaworkout', input: 0, output: 0 },
+  { id: 'cc/claude-haiku-4-5-20251001', name: 'Claude Haiku 4.5', tier: 'budget', provider: 'gorillaworkout', input: 0, output: 0 },
+  { id: 'cx/gpt-5.6-sol', name: 'GPT-5.6 Sol', tier: 'premium', provider: 'gorillaworkout', input: 0, output: 0 },
+  { id: 'cx/gpt-5.6-sol-review', name: 'GPT-5.6 Sol Review', tier: 'premium', provider: 'gorillaworkout', input: 0, output: 0 },
+  { id: 'cx/gpt-5.6-terra', name: 'GPT-5.6 Terra', tier: 'balanced', provider: 'gorillaworkout', input: 0, output: 0 },
+  { id: 'cx/gpt-5.6-terra-review', name: 'GPT-5.6 Terra Review', tier: 'balanced', provider: 'gorillaworkout', input: 0, output: 0 },
+  { id: 'cx/gpt-5.6-luna', name: 'GPT-5.6 Luna', tier: 'budget', provider: 'gorillaworkout', input: 0, output: 0 },
+  { id: 'cx/gpt-5.6-luna-review', name: 'GPT-5.6 Luna Review', tier: 'budget', provider: 'gorillaworkout', input: 0, output: 0 },
+  { id: 'cx/gpt-5.5', name: 'GPT-5.5', tier: 'balanced', provider: 'gorillaworkout', input: 0, output: 0 },
+  { id: 'cx/gpt-5.5-review', name: 'GPT-5.5 Review', tier: 'balanced', provider: 'gorillaworkout', input: 0, output: 0 },
+  { id: 'cx/gpt-5.4', name: 'GPT-5.4', tier: 'balanced', provider: 'gorillaworkout', input: 0, output: 0 },
+  { id: 'cx/gpt-5.4-review', name: 'GPT-5.4 Review', tier: 'balanced', provider: 'gorillaworkout', input: 0, output: 0 },
+  { id: 'cx/gpt-5.4-mini', name: 'GPT-5.4 Mini', tier: 'budget', provider: 'gorillaworkout', input: 0, output: 0 },
+  { id: 'cx/gpt-5.4-mini-review', name: 'GPT-5.4 Mini Review', tier: 'budget', provider: 'gorillaworkout', input: 0, output: 0 },
+  { id: 'cx/gpt-5.3-codex-spark', name: 'GPT-5.3 Codex Spark', tier: 'budget', provider: 'gorillaworkout', input: 0, output: 0 },
+  { id: 'cx/gpt-5.3-codex-spark-review', name: 'GPT-5.3 Codex Spark Review', tier: 'budget', provider: 'gorillaworkout', input: 0, output: 0 },
 ];
 
 export function getModelProvider(modelId: string): ModelProvider {
@@ -412,11 +444,15 @@ async function callApi(
     body.response_format = options.responseFormat;
   }
 
-  const response = await fetch(`${API_BASE}/chat/completions`, {
+  const apiBase = provider === 'gorillaworkout' ? GORILLAWORKOUT_API_BASE : API_BASE;
+  const apiKey = provider === 'gorillaworkout' ? GORILLAWORKOUT_API_KEY : API_KEY;
+  if (!apiKey) throw new Error(`${provider === 'gorillaworkout' ? 'GORILLAWORKOUT_API_KEY' : 'OPENROUTER_API_KEY'} is not configured.`);
+
+  const response = await fetch(`${apiBase}/chat/completions`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'Authorization': `Bearer ${API_KEY}`,
+      'Authorization': `Bearer ${apiKey}`,
       'HTTP-Referer': 'https://marketingos.local',
       'X-Title': 'MarketingOS',
     },

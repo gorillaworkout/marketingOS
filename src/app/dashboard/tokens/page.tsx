@@ -36,6 +36,7 @@ const providerNames: Record<string, string> = {
   codex: 'Codex CLI',
   'claude-code': 'Claude Code',
   openrouter: 'OpenRouter',
+  gorillaworkout: 'GorillaWorkout LLM API',
 };
 
 export default function TokensPage() {

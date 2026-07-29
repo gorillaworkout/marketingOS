@@ -53,6 +53,12 @@ export async function GET() {
     openrouter: { label: 'OpenRouter', icon: '📡', credits: null, status: 'unknown' },
     codex: { label: 'Codex (ChatGPT Plus)', icon: '🤖', credits: null, status: 'available' },
     'claude-code': { label: 'Claude Code (Claude subscription)', icon: '🟠', credits: null, status: 'available' },
+    gorillaworkout: {
+      label: 'GorillaWorkout LLM',
+      icon: '🦍',
+      credits: null,
+      status: process.env.GORILLAWORKOUT_API_KEY ? 'available' : 'not_configured',
+    },
   };
 
   const openrouterKey = process.env.OPENROUTER_API_KEY;
@@ -95,8 +101,10 @@ export async function GET() {
       outputPricePerM: output * 1_000_000,
       pricingSource: model.provider === 'openrouter'
         ? livePrice ? 'openrouter-live' : 'fallback'
-        : 'subscription',
-      sourceUrl: model.provider === 'openrouter' ? `https://openrouter.ai/${model.id}` : null,
+        : model.provider === 'gorillaworkout' ? 'gateway' : 'subscription',
+      sourceUrl: model.provider === 'openrouter'
+        ? `https://openrouter.ai/${model.id}`
+        : model.provider === 'gorillaworkout' ? 'https://llm.gorillaworkout.id' : null,
     };
   });
 

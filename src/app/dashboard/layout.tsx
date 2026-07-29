@@ -15,7 +15,7 @@ interface ModelInfo {
   id: string;
   name: string;
   tier: 'budget' | 'balanced' | 'premium';
-  provider: 'openrouter' | 'codex' | 'claude-code';
+  provider: 'openrouter' | 'codex' | 'claude-code' | 'gorillaworkout';
   inputPrice: number;
   outputPrice: number;
 }
@@ -24,6 +24,7 @@ const providerLabels: Record<string, { icon: string; label: string; badgeColor: 
   openrouter: { icon: '📡', label: 'OpenRouter', badgeColor: 'bg-purple-500/20 text-purple-400' },
   codex: { icon: '🤖', label: 'Codex (ChatGPT Plus)', badgeColor: 'bg-emerald-500/20 text-emerald-400' },
   'claude-code': { icon: '🟠', label: 'Claude Code (Claude subscription)', badgeColor: 'bg-orange-500/20 text-orange-400' },
+  gorillaworkout: { icon: '🦍', label: 'GorillaWorkout LLM API', badgeColor: 'bg-cyan-500/20 text-cyan-300' },
 };
 
 const tierColors: Record<string, { dot: string; bg: string; text: string }> = {
@@ -290,7 +291,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                   <p className="text-[10px] text-gray-500 uppercase tracking-wider px-2">AI Model</p>
                 </div>
                 <div className="p-1 max-h-64 overflow-y-auto">
-                  {(['openrouter', 'codex', 'claude-code'] as const).map(provider => {
+                  {(['gorillaworkout', 'codex', 'claude-code', 'openrouter'] as const).map(provider => {
                     const providerModels = models.filter(m => m.provider === provider);
                     if (providerModels.length === 0) return null;
                     const pl = providerLabels[provider];
@@ -305,8 +306,12 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                           const isSelected = m.id === currentModel;
                           const pl2 = providerLabels[m.provider];
                           const includedLabel = m.provider === 'codex'
-                            ? 'Included in ChatGPT Plus'
-                            : 'Included in Claude subscription';
+                            ? 'Via Codex · ChatGPT Plus'
+                            : m.provider === 'claude-code'
+                              ? 'Via Claude Code · Claude subscription'
+                              : m.provider === 'gorillaworkout'
+                                ? 'Via llm.gorillaworkout.id'
+                                : 'Via OpenRouter';
                           return (
                             <button
                               key={m.id}
@@ -386,8 +391,11 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                                   }`}
                                 >
                                   <span className={`w-1.5 h-1.5 rounded-full ${tierColors[m.tier].dot}`}></span>
-                                  {m.name}
-                                  {isSelected && <span className="ml-auto">✓</span>}
+                                  <span className="truncate">{m.name}</span>
+                                  <span className={`ml-auto text-[9px] px-1.5 py-0.5 rounded-full ${providerLabels[m.provider].badgeColor}`}>
+                                    {m.provider === 'gorillaworkout' ? 'LLM API' : m.provider === 'claude-code' ? 'Claude' : m.provider === 'codex' ? 'Codex' : 'OpenRouter'}
+                                  </span>
+                                  {isSelected && <span>✓</span>}
                                 </button>
                               );
                             })}
