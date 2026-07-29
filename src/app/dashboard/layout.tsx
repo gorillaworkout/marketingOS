@@ -173,11 +173,14 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   ];
 
   return (
-    <div className="min-h-screen bg-gray-900 flex">
+    <div className="mos-shell min-h-screen flex">
       {/* Sidebar */}
-      <aside className="w-64 bg-gray-800/50 border-r border-gray-700/50 flex flex-col">
-        <div className="p-6 border-b border-gray-700/50">
-          <h1 className="text-xl font-bold text-white">MarketingOS</h1>
+      <aside className="mos-sidebar w-64 border-r flex flex-col">
+        <div className="px-5 py-5 border-b border-white/[.05]">
+          <div className="flex items-center gap-2.5">
+            <div className="flex h-7 w-7 items-center justify-center rounded-md border border-white/[.08] bg-white/[.04] text-[11px] font-semibold tracking-tight text-[#d0d6e0]">MO</div>
+            <div><h1 className="text-sm font-[590] tracking-[-.2px] text-[#f7f8f8]">MarketingOS</h1><p className="mt-0.5 text-[10px] text-[#51545b]">Dupoin workspace</p></div>
+          </div>
           <div className="mt-2">
             <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium ${tc.bg} ${tc.text}`}>
               <span className={`w-1.5 h-1.5 rounded-full ${tc.dot}`}></span>
@@ -431,8 +434,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       </aside>
 
       {/* Main content */}
-      <main className="flex-1 overflow-auto">
-        <div className="p-8">
+      <main className="mos-content flex-1 overflow-auto">
+        <div className="mos-page p-6 lg:p-8">
           {children}
         </div>
       </main>

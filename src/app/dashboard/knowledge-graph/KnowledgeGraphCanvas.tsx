@@ -93,17 +93,33 @@ export default function KnowledgeGraphCanvas({ nodes, edges, selectedId, onSelec
       const projectedById = new Map(projected.map(point => [point.id, point]));
 
       context.lineCap = 'round';
-      edges.forEach(edge => {
+      const now = performance.now();
+      edges.forEach((edge, edgeIndex) => {
         const source = projectedById.get(edge.source);
         const target = projectedById.get(edge.target);
         if (!source || !target) return;
-        const alpha = Math.max(0.04, Math.min(0.2, ((source.scale + target.scale) / 2 - 0.55) * 0.24));
+        const alpha = Math.max(0.05, Math.min(0.22, ((source.scale + target.scale) / 2 - 0.5) * 0.25));
         context.beginPath();
         context.moveTo(source.sx, source.sy);
         context.lineTo(target.sx, target.sy);
-        context.strokeStyle = `rgba(155,160,190,${alpha})`;
-        context.lineWidth = Math.max(0.45, edge.weight * 0.8);
+        context.strokeStyle = `rgba(150,155,180,${alpha})`;
+        context.lineWidth = Math.max(0.5, edge.weight * 0.8);
         context.stroke();
+
+        // A small signal travels along every stored relationship. Staggering each
+        // edge keeps the network alive without turning the graph into decoration.
+        const phase = ((now * 0.00016) + edgeIndex * 0.173) % 1;
+        const pulseX = source.sx + (target.sx - source.sx) * phase;
+        const pulseY = source.sy + (target.sy - source.sy) * phase;
+        const pulseRadius = Math.max(1.1, 1.8 * ((source.scale + target.scale) / 2));
+        const pulse = context.createRadialGradient(pulseX, pulseY, 0, pulseX, pulseY, pulseRadius * 4);
+        pulse.addColorStop(0, 'rgba(174,176,255,.95)');
+        pulse.addColorStop(0.3, 'rgba(113,112,255,.58)');
+        pulse.addColorStop(1, 'rgba(113,112,255,0)');
+        context.fillStyle = pulse;
+        context.beginPath();
+        context.arc(pulseX, pulseY, pulseRadius * 4, 0, Math.PI * 2);
+        context.fill();
       });
 
       projected.forEach(point => {

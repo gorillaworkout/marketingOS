@@ -36,5 +36,7 @@ test('knowledge graph uses a real interactive 3D canvas and restrained enterpris
   assert.match(canvas, /rotationX/);
   assert.match(canvas, /rotationY/);
   assert.match(canvas, /Drag to rotate/);
+  assert.match(canvas, /performance\.now/);
+  assert.match(canvas, /createRadialGradient\(pulseX/);
   assert.doesNotMatch(page, /🕸️|📊|📈|✨|🔥/);
 });
