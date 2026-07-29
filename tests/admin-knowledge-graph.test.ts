@@ -22,6 +22,8 @@ test('learning health compares two real time windows and reports insufficient da
   assert.match(route, /INTERVAL '60 days'/);
   assert.match(route, /INTERVAL '30 days'/);
   assert.match(route, /insufficient-data/);
+  assert.match(route, /derivedEdges/);
+  assert.match(route, /same_department/);
   assert.match(page, /learning health/i);
   assert.match(page, /More records do not imply better quality/);
 });

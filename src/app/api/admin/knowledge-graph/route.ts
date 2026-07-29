@@ -95,14 +95,46 @@ export async function GET(request: NextRequest) {
     username: String(entry.username || entry.user_name || 'Unknown'),
     createdAt: String(entry.created_at),
   }));
-  const edges = edgeRows
+  const storedEdges = edgeRows
     .filter(edge => nodeIds.has(String(edge.source_id)) && nodeIds.has(String(edge.target_id)))
     .map(edge => ({
       source: String(edge.source_id),
       target: String(edge.target_id),
       type: String(edge.relationship || 'related'),
       weight: asNumber(edge.weight as number | string | null),
+      sourceType: 'stored' as const,
     }));
+
+  // Older knowledge records may not have embeddings, so no semantic edges exist.
+  // Build a sparse, deterministic view from real metadata instead of drawing
+  // decorative random lines. These edges are view-only and clearly identified.
+  const derivedEdges: Array<{ source: string; target: string; type: string; weight: number; sourceType: 'derived' }> = [];
+  const connected = new Set(storedEdges.flatMap(edge => [edge.source, edge.target]));
+  for (let index = 1; index < nodes.length; index++) {
+    const node = nodes[index];
+    if (connected.has(node.id)) continue;
+    const candidates = nodes.slice(0, index).map(candidate => {
+      let score = 0;
+      const reasons: string[] = [];
+      if (candidate.department === node.department) { score += 4; reasons.push('same_department'); }
+      if (candidate.taskType === node.taskType) { score += 3; reasons.push('same_task_type'); }
+      if (candidate.platform && candidate.platform === node.platform) { score += 2; reasons.push('same_platform'); }
+      if (candidate.styleCluster === node.styleCluster) { score += 1; reasons.push('same_style'); }
+      return { candidate, score, reasons };
+    }).filter(item => item.score > 0).sort((left, right) => right.score - left.score);
+    const best = candidates[0];
+    if (!best) continue;
+    derivedEdges.push({
+      source: node.id,
+      target: best.candidate.id,
+      type: best.reasons.join('+'),
+      weight: Math.min(1, best.score / 10),
+      sourceType: 'derived',
+    });
+    connected.add(node.id);
+    connected.add(best.candidate.id);
+  }
+  const edges = [...storedEdges, ...derivedEdges];
 
   const normalizeWindow = (window?: LearningWindow) => {
     const generated = asNumber(window?.generated);
