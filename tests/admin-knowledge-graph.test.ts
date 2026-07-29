@@ -22,6 +22,19 @@ test('learning health compares two real time windows and reports insufficient da
   assert.match(route, /INTERVAL '60 days'/);
   assert.match(route, /INTERVAL '30 days'/);
   assert.match(route, /insufficient-data/);
-  assert.match(page, /Learning Health/);
-  assert.match(page, /Banyak node bukan bukti sistem pintar/);
+  assert.match(page, /learning health/i);
+  assert.match(page, /More records do not imply better quality/);
+});
+
+test('knowledge graph uses a real interactive 3D canvas and restrained enterprise UI', async () => {
+  const [page, canvas] = await Promise.all([
+    readFile('src/app/dashboard/knowledge-graph/page.tsx', 'utf8'),
+    readFile('src/app/dashboard/knowledge-graph/KnowledgeGraphCanvas.tsx', 'utf8'),
+  ]);
+  assert.match(page, /KnowledgeGraphCanvas/);
+  assert.match(canvas, /<canvas/);
+  assert.match(canvas, /rotationX/);
+  assert.match(canvas, /rotationY/);
+  assert.match(canvas, /Drag to rotate/);
+  assert.doesNotMatch(page, /🕸️|📊|📈|✨|🔥/);
 });

@@ -1,19 +1,9 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import KnowledgeGraphCanvas from './KnowledgeGraphCanvas';
 
-type GraphNode = {
-  id: string;
-  brief: string;
-  taskType: string;
-  styleCluster: string;
-  platform: string | null;
-  audience: string | null;
-  qualityScore: number;
-  department: string;
-  username: string;
-  createdAt: string;
-};
+type GraphNode = { id: string; brief: string; taskType: string; styleCluster: string; platform: string | null; audience: string | null; qualityScore: number; department: string; username: string; createdAt: string };
 type GraphEdge = { source: string; target: string; type: string; weight: number };
 type WindowMetrics = { generated: number; approved: number; rated: number; approvalRate: number; feedbackCoverage: number; averageRating: number };
 type GraphData = {
@@ -26,19 +16,14 @@ type GraphData = {
   edges: GraphEdge[];
 };
 
-const departmentColors = ['#22d3ee', '#a78bfa', '#34d399', '#f59e0b', '#fb7185', '#60a5fa'];
-const statusConfig = {
-  improving: { label: 'Improving', color: 'text-emerald-300', bg: 'bg-emerald-500/15 border-emerald-500/30', detail: 'Sinyal approval atau rating meningkat.' },
-  stable: { label: 'Stable', color: 'text-blue-300', bg: 'bg-blue-500/15 border-blue-500/30', detail: 'Kualitas relatif stabil dibanding 30 hari sebelumnya.' },
-  declining: { label: 'Needs attention', color: 'text-red-300', bg: 'bg-red-500/15 border-red-500/30', detail: 'Approval atau rating mengalami penurunan.' },
-  'insufficient-data': { label: 'Insufficient data', color: 'text-amber-300', bg: 'bg-amber-500/15 border-amber-500/30', detail: 'Belum cukup feedback untuk membuktikan sistem makin pintar.' },
+const health = {
+  improving: { label: 'Improving', dot: 'bg-[#55c2b7]', text: 'Approval and rating signals are moving in the right direction.' },
+  stable: { label: 'Stable', dot: 'bg-[#739adf]', text: 'Quality signals are holding steady against the prior period.' },
+  declining: { label: 'Review needed', dot: 'bg-[#d2778a]', text: 'Recent approval or rating signals have weakened.' },
+  'insufficient-data': { label: 'Gathering signal', dot: 'bg-[#d5a85d]', text: 'More approvals and ratings are needed before a trend can be established.' },
 };
-
-function percent(value: number) { return `${Math.round(value * 100)}%`; }
-function delta(value: number, points = false) {
-  const display = points ? `${Math.abs(value * 100).toFixed(1)} pp` : Math.abs(value).toFixed(2);
-  return `${value > 0 ? '+' : value < 0 ? '-' : ''}${display}`;
-}
+const pct = (value: number) => `${Math.round(value * 100)}%`;
+const pp = (value: number) => `${value > 0 ? '+' : ''}${(value * 100).toFixed(1)} pp`;
 
 export default function AdminKnowledgeGraphPage() {
   const [data, setData] = useState<GraphData | null>(null);
@@ -53,92 +38,61 @@ export default function AdminKnowledgeGraphPage() {
     try {
       const response = await fetch('/api/admin/knowledge-graph?limit=350', { cache: 'no-store' });
       const payload = await response.json();
-      if (!response.ok) throw new Error(payload.error || 'Gagal memuat knowledge graph');
+      if (!response.ok) throw new Error(payload.error || 'Knowledge graph could not be loaded.');
       setData(payload);
-    } catch (err) { setError(err instanceof Error ? err.message : 'Gagal memuat knowledge graph'); }
+    } catch (cause) { setError(cause instanceof Error ? cause.message : 'Knowledge graph could not be loaded.'); }
     finally { setLoading(false); }
   };
   useEffect(() => { void load(); }, []);
 
-  const filteredNodes = useMemo(() => (data?.nodes || []).filter(node =>
-    (department === 'all' || node.department === department) &&
-    (taskType === 'all' || node.taskType === taskType)
-  ), [data, department, taskType]);
-  const filteredIds = useMemo(() => new Set(filteredNodes.map(node => node.id)), [filteredNodes]);
-  const filteredEdges = useMemo(() => (data?.edges || []).filter(edge => filteredIds.has(edge.source) && filteredIds.has(edge.target)), [data, filteredIds]);
-  const positions = useMemo(() => {
-    const groups = new Map<string, GraphNode[]>();
-    filteredNodes.forEach(node => groups.set(node.department, [...(groups.get(node.department) || []), node]));
-    const output = new Map<string, { x: number; y: number; color: string }>();
-    const departments = [...groups.keys()];
-    departments.forEach((name, departmentIndex) => {
-      const angle = (departmentIndex / Math.max(departments.length, 1)) * Math.PI * 2 - Math.PI / 2;
-      const centerX = 500 + Math.cos(angle) * Math.min(270, departments.length * 55);
-      const centerY = 280 + Math.sin(angle) * Math.min(150, departments.length * 35);
-      const nodes = groups.get(name) || [];
-      nodes.forEach((node, index) => {
-        const nodeAngle = (index / Math.max(nodes.length, 1)) * Math.PI * 2;
-        const radius = Math.min(105, 28 + nodes.length * 4);
-        output.set(node.id, { x: centerX + Math.cos(nodeAngle) * radius, y: centerY + Math.sin(nodeAngle) * radius, color: departmentColors[departmentIndex % departmentColors.length] });
-      });
-    });
-    return output;
-  }, [filteredNodes]);
+  const filteredNodes = useMemo(() => (data?.nodes || []).filter(node => (department === 'all' || node.department === department) && (taskType === 'all' || node.taskType === taskType)), [data, department, taskType]);
+  const ids = useMemo(() => new Set(filteredNodes.map(node => node.id)), [filteredNodes]);
+  const filteredEdges = useMemo(() => (data?.edges || []).filter(edge => ids.has(edge.source) && ids.has(edge.target)), [data, ids]);
 
-  if (loading) return <div className="flex min-h-[70vh] items-center justify-center"><div className="h-9 w-9 animate-spin rounded-full border-b-2 border-cyan-400" /></div>;
-  if (error || !data) return <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-5 text-red-300">{error || 'Data tidak tersedia'} <button onClick={load} className="ml-3 underline">Coba lagi</button></div>;
-  const status = statusConfig[data.learningHealth.status];
+  if (loading) return <div className="flex min-h-[72vh] items-center justify-center bg-[#08090a]"><div className="h-5 w-5 animate-spin rounded-full border border-[#34343a] border-t-[#8b8cf8]" /></div>;
+  if (error || !data) return <div className="border border-white/[.08] bg-[#0f1011] p-6 text-sm text-[#d2778a]">{error}<button onClick={load} className="ml-4 text-[#d0d6e0] underline underline-offset-4">Retry</button></div>;
+  const state = health[data.learningHealth.status];
 
-  return <div className="mx-auto max-w-7xl space-y-6">
-    <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
-      <div><p className="text-xs font-semibold uppercase tracking-[0.24em] text-cyan-400">Admin Intelligence</p><h1 className="mt-1 text-3xl font-bold text-white">Knowledge Graph</h1><p className="mt-2 max-w-3xl text-sm text-gray-400">Peta pengetahuan lintas department, kontribusi manusia, dan bukti apakah MarketingOS benar-benar belajar.</p></div>
-      <button onClick={load} className="rounded-lg border border-gray-600 bg-gray-800 px-4 py-2 text-sm text-gray-200 hover:bg-gray-700">Refresh data</button>
-    </div>
+  return <main className="kg-page -m-6 min-h-screen bg-[#08090a] px-6 py-7 text-[#f7f8f8] lg:px-9">
+    <div className="mx-auto max-w-[1500px]">
+      <header className="flex flex-col gap-5 border-b border-white/[.06] pb-7 lg:flex-row lg:items-end lg:justify-between">
+        <div><p className="mb-3 font-mono text-[10px] uppercase tracking-[.18em] text-[#62666d]">Organization intelligence / Knowledge</p><h1 className="text-[30px] font-[510] tracking-[-.7px] text-[#f7f8f8]">Knowledge graph</h1><p className="mt-2 max-w-2xl text-[14px] leading-6 text-[#8a8f98]">A current view of what the organization has learned, where it came from, and whether that knowledge is improving output quality.</p></div>
+        <div className="flex items-center gap-3"><p className="hidden text-xs text-[#62666d] sm:block">Updated {new Date(data.generatedAt).toLocaleString('id-ID')}</p><button onClick={load} className="rounded-md border border-white/[.08] bg-white/[.025] px-3.5 py-2 text-xs font-medium text-[#d0d6e0] transition hover:bg-white/[.055]">Refresh</button></div>
+      </header>
 
-    <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
-      {[
-        ['Knowledge nodes', data.totals.knowledge, 'Approved selections'],
-        ['Relationships', data.totals.edges, 'Graph connections'],
-        ['Added 30 days', data.totals.addedLast30Days, 'Knowledge growth'],
-        ['Contributors', data.totals.contributors, 'People teaching AI'],
-        ['Departments', data.totals.departments, 'Organization scope'],
-      ].map(([label, value, note]) => <div key={String(label)} className="rounded-xl border border-gray-700 bg-gray-800/60 p-4"><p className="text-xs uppercase tracking-wide text-gray-500">{label}</p><p className="mt-2 text-3xl font-semibold text-white">{value}</p><p className="mt-1 text-xs text-gray-500">{note}</p></div>)}
-    </div>
-
-    <section className={`rounded-2xl border p-5 ${status.bg}`}>
-      <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
-        <div><p className="text-xs uppercase tracking-[0.2em] text-gray-400">Learning Health · latest 30 days</p><div className="mt-2 flex items-center gap-3"><span className={`text-2xl font-bold ${status.color}`}>{status.label}</span><span className="rounded-full bg-black/20 px-2 py-1 text-xs text-gray-300">vs previous 30 days</span></div><p className="mt-2 text-sm text-gray-300">{status.detail} {data.learningHealth.note}</p></div>
-        <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-          <Metric label="Approval rate" value={percent(data.learningHealth.current.approvalRate)} change={delta(data.learningHealth.approvalDelta, true)} />
-          <Metric label="Average rating" value={data.learningHealth.current.averageRating ? data.learningHealth.current.averageRating.toFixed(2) : '—'} change={delta(data.learningHealth.ratingDelta)} />
-          <Metric label="Feedback coverage" value={percent(data.learningHealth.current.feedbackCoverage)} />
-          <Metric label="Generated" value={String(data.learningHealth.current.generated)} />
-        </div>
-      </div>
-    </section>
-
-    <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_320px]">
-      <section className="overflow-hidden rounded-2xl border border-gray-700 bg-[#0b1220]">
-        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-800 p-4">
-          <div><h2 className="font-semibold text-white">Organization Graph</h2><p className="text-xs text-gray-500">Klik node untuk melihat provenance. Garis menunjukkan relationship yang tersimpan.</p></div>
-          <div className="flex gap-2"><select value={department} onChange={event => setDepartment(event.target.value)} className="rounded-lg border border-gray-700 bg-gray-900 px-3 py-2 text-xs text-gray-300"><option value="all">All departments</option>{data.departments.map(item => <option key={item.name}>{item.name}</option>)}</select><select value={taskType} onChange={event => setTaskType(event.target.value)} className="rounded-lg border border-gray-700 bg-gray-900 px-3 py-2 text-xs text-gray-300"><option value="all">All knowledge types</option>{data.taskTypes.map(item => <option key={item.name}>{item.name}</option>)}</select></div>
-        </div>
-        {filteredNodes.length ? <div className="overflow-x-auto"><svg viewBox="0 0 1000 560" className="min-h-[520px] min-w-[900px] w-full">
-          <g opacity="0.34">{filteredEdges.map((edge, index) => { const source = positions.get(edge.source); const target = positions.get(edge.target); return source && target ? <line key={`${edge.source}-${edge.target}-${index}`} x1={source.x} y1={source.y} x2={target.x} y2={target.y} stroke="#64748b" strokeWidth={Math.max(0.7, Math.min(3, edge.weight * 2))} /> : null; })}</g>
-          {filteredNodes.map(node => { const position = positions.get(node.id)!; const active = selected?.id === node.id; return <g key={node.id} onClick={() => setSelected(node)} className="cursor-pointer"><circle cx={position.x} cy={position.y} r={active ? 11 : 7} fill={position.color} stroke={active ? '#fff' : '#0f172a'} strokeWidth={active ? 3 : 1.5} /><title>{node.department} · {node.taskType} · {node.brief}</title></g>; })}
-        </svg></div> : <div className="p-16 text-center text-gray-500">Belum ada node untuk filter ini.</div>}
-        <div className="flex flex-wrap gap-3 border-t border-gray-800 p-4">{data.departments.map((item, index) => <div key={item.name} className="flex items-center gap-2 text-xs text-gray-400"><span className="h-2.5 w-2.5 rounded-full" style={{ background: departmentColors[index % departmentColors.length] }} />{item.name} ({item.knowledgeCount})</div>)}</div>
+      <section className="grid border-b border-white/[.06] sm:grid-cols-2 lg:grid-cols-5">
+        <Stat label="Knowledge" value={data.totals.knowledge} note="approved records" />
+        <Stat label="Relationships" value={data.totals.edges} note="stored links" />
+        <Stat label="Recent growth" value={data.totals.addedLast30Days} note="last 30 days" />
+        <Stat label="Contributors" value={data.totals.contributors} note="people represented" />
+        <Stat label="Departments" value={data.totals.departments} note="organization scope" last />
       </section>
 
-      <aside className="space-y-5">
-        <section className="rounded-2xl border border-gray-700 bg-gray-800/60 p-5"><h2 className="font-semibold text-white">Node details</h2>{selected ? <div className="mt-4 space-y-3 text-sm"><Detail label="Department" value={selected.department} /><Detail label="Contributor" value={selected.username} /><Detail label="Knowledge type" value={selected.taskType} /><Detail label="Style" value={selected.styleCluster} /><Detail label="Platform" value={selected.platform || '—'} /><Detail label="Quality score" value={selected.qualityScore.toFixed(2)} /><div><p className="text-xs text-gray-500">Approved content brief</p><p className="mt-1 rounded-lg bg-gray-900/60 p-3 text-gray-300">{selected.brief}</p></div><Detail label="Created" value={new Date(selected.createdAt).toLocaleString('id-ID')} /></div> : <p className="mt-4 text-sm text-gray-500">Pilih node pada graph untuk memeriksa sumber dan konteksnya.</p>}</section>
-        <section className="rounded-2xl border border-gray-700 bg-gray-800/60 p-5"><h2 className="font-semibold text-white">Department coverage</h2><div className="mt-4 space-y-3">{data.departments.length ? data.departments.map(item => <div key={item.name}><div className="flex justify-between text-xs"><span className="text-gray-300">{item.name}</span><span className="text-gray-500">{item.knowledgeCount} nodes · {item.contributorCount} contributors</span></div><div className="mt-1 h-1.5 overflow-hidden rounded-full bg-gray-700"><div className="h-full rounded-full bg-cyan-500" style={{ width: `${Math.max(3, item.knowledgeCount / Math.max(data.totals.knowledge, 1) * 100)}%` }} /></div></div>) : <p className="text-sm text-gray-500">Belum ada knowledge.</p>}</div></section>
-      </aside>
-    </div>
+      <section className="grid gap-px border-b border-white/[.06] bg-white/[.06] lg:grid-cols-[1.3fr_repeat(4,minmax(130px,.55fr))]">
+        <div className="bg-[#0d0e10] p-5"><div className="flex items-center gap-2"><span className={`h-1.5 w-1.5 rounded-full ${state.dot}`} /><span className="text-sm font-medium text-[#f7f8f8]">{state.label}</span><span className="text-[11px] text-[#62666d]">30-day learning health</span></div><p className="mt-2 max-w-lg text-xs leading-5 text-[#8a8f98]">{state.text} The comparison uses the preceding 30-day period.</p></div>
+        <Measure label="Approval rate" value={pct(data.learningHealth.current.approvalRate)} change={pp(data.learningHealth.approvalDelta)} />
+        <Measure label="Average rating" value={data.learningHealth.current.averageRating ? data.learningHealth.current.averageRating.toFixed(2) : '—'} change={`${data.learningHealth.ratingDelta > 0 ? '+' : ''}${data.learningHealth.ratingDelta.toFixed(2)}`} />
+        <Measure label="Feedback coverage" value={pct(data.learningHealth.current.feedbackCoverage)} />
+        <Measure label="Generated" value={String(data.learningHealth.current.generated)} />
+      </section>
 
-    <section className="rounded-2xl border border-gray-700 bg-gray-800/50 p-5"><h2 className="font-semibold text-white">Interpretasi yang jujur</h2><ul className="mt-3 grid gap-2 text-sm text-gray-400 md:grid-cols-2"><li>• Node bertambah hanya saat output benar-benar dipilih/disetujui, bukan setiap draft.</li><li>• Banyak node bukan bukti sistem pintar; lihat approval, rating, dan feedback coverage.</li><li>• “Insufficient data” adalah status valid jika user belum memberi rating/approval yang cukup.</li><li>• Department tanpa node berarti belum ada pembelajaran terverifikasi dari department tersebut.</li></ul></section>
-  </div>;
+      <section className="mt-7 overflow-hidden rounded-xl border border-white/[.08] bg-[#0f1011] shadow-[0_24px_80px_rgba(0,0,0,.32)]">
+        <div className="flex flex-col gap-4 border-b border-white/[.06] px-5 py-4 md:flex-row md:items-center md:justify-between"><div><h2 className="text-sm font-[510] text-[#f7f8f8]">Organization map</h2><p className="mt-1 text-xs text-[#62666d]">Connections between approved knowledge records, grouped by department.</p></div><div className="flex gap-2"><Filter value={department} onChange={setDepartment} label="All departments" options={data.departments.map(item => item.name)} /><Filter value={taskType} onChange={setTaskType} label="All knowledge types" options={data.taskTypes.map(item => item.name)} /></div></div>
+        <div className="grid lg:grid-cols-[minmax(0,1fr)_310px]">
+          <div className="min-w-0 border-white/[.06] lg:border-r">{filteredNodes.length ? <KnowledgeGraphCanvas nodes={filteredNodes} edges={filteredEdges} selectedId={selected?.id} onSelect={setSelected} /> : <div className="flex h-[590px] items-center justify-center text-sm text-[#62666d]">No records match these filters.</div>}</div>
+          <aside className="bg-[#0d0e10]">
+            <div className="border-b border-white/[.06] p-5"><p className="font-mono text-[10px] uppercase tracking-[.16em] text-[#62666d]">Selected record</p>{selected ? <div className="mt-5 space-y-4"><div><h3 className="line-clamp-3 text-[15px] font-medium leading-6 text-[#f7f8f8]">{selected.brief}</h3><p className="mt-2 text-xs text-[#62666d]">Recorded {new Date(selected.createdAt).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })}</p></div><dl className="grid grid-cols-2 gap-x-4 gap-y-4 border-t border-white/[.06] pt-4"><Meta label="Department" value={selected.department} /><Meta label="Contributor" value={selected.username} /><Meta label="Type" value={selected.taskType} /><Meta label="Style" value={selected.styleCluster} /><Meta label="Platform" value={selected.platform || 'Not set'} /><Meta label="Quality" value={selected.qualityScore.toFixed(2)} /></dl></div> : <p className="mt-4 text-sm leading-6 text-[#737780]">Select a node to inspect its source, owner, type, and quality score.</p>}</div>
+            <div className="p-5"><p className="font-mono text-[10px] uppercase tracking-[.16em] text-[#62666d]">Department coverage</p><div className="mt-4 space-y-4">{data.departments.map(item => <div key={item.name}><div className="flex items-baseline justify-between gap-3"><span className="truncate text-xs text-[#d0d6e0]">{item.name}</span><span className="font-mono text-[10px] text-[#62666d]">{item.knowledgeCount} / {item.contributorCount}</span></div><div className="mt-2 h-px bg-white/[.06]"><div className="h-px bg-[#7170ff]" style={{ width: `${Math.max(2, item.knowledgeCount / Math.max(data.totals.knowledge, 1) * 100)}%` }} /></div></div>)}</div><p className="mt-4 text-[10px] leading-4 text-[#51545b]">Values show records and contributors. Empty departments have not produced verified knowledge yet.</p></div>
+          </aside>
+        </div>
+      </section>
+
+      <footer className="mt-5 flex flex-col gap-2 border-t border-white/[.06] pt-5 text-xs leading-5 text-[#62666d] md:flex-row md:justify-between"><p>Only selected or approved outputs become knowledge. Draft volume is excluded.</p><p>More records do not imply better quality. Learning health depends on approvals, ratings, and feedback coverage.</p></footer>
+    </div>
+  </main>;
 }
 
-function Metric({ label, value, change }: { label: string; value: string; change?: string }) { return <div className="min-w-28 rounded-xl bg-black/20 p-3"><p className="text-[10px] uppercase tracking-wide text-gray-500">{label}</p><p className="mt-1 text-xl font-semibold text-white">{value}</p>{change && <p className="text-xs text-gray-400">{change}</p>}</div>; }
-function Detail({ label, value }: { label: string; value: string }) { return <div><p className="text-xs text-gray-500">{label}</p><p className="mt-0.5 text-gray-200">{value}</p></div>; }
+function Stat({ label, value, note, last = false }: { label: string; value: number; note: string; last?: boolean }) { return <div className={`py-5 pr-5 sm:border-r sm:border-white/[.06] ${last ? 'lg:border-r-0' : ''}`}><p className="text-[11px] text-[#62666d]">{label}</p><p className="mt-2 text-[25px] font-[510] tracking-[-.5px] text-[#f7f8f8]">{value.toLocaleString()}</p><p className="mt-1 text-[10px] text-[#51545b]">{note}</p></div>; }
+function Measure({ label, value, change }: { label: string; value: string; change?: string }) { return <div className="bg-[#0d0e10] p-5"><p className="text-[10px] text-[#62666d]">{label}</p><div className="mt-2 flex items-baseline gap-2"><p className="text-xl font-[510] text-[#f7f8f8]">{value}</p>{change && <span className="font-mono text-[10px] text-[#737780]">{change}</span>}</div></div>; }
+function Meta({ label, value }: { label: string; value: string }) { return <div><dt className="text-[10px] text-[#51545b]">{label}</dt><dd className="mt-1 truncate text-xs text-[#b5bac4]" title={value}>{value}</dd></div>; }
+function Filter({ value, onChange, label, options }: { value: string; onChange: (value: string) => void; label: string; options: string[] }) { return <select value={value} onChange={event => onChange(event.target.value)} className="rounded-md border border-white/[.08] bg-[#151619] px-3 py-2 text-[11px] text-[#b5bac4] outline-none transition focus:border-[#7170ff]/60"><option value="all">{label}</option>{options.map(option => <option key={option}>{option}</option>)}</select>; }
