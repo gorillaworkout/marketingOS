@@ -1,5 +1,6 @@
 'use client';
 import { useState, useEffect, useCallback } from 'react';
+import { Button, PageHeader, PageStack, Toolbar, FilterGroup } from '@/components/ui/dashboard';
 
 interface ImageItem {
   filename: string;
@@ -113,24 +114,11 @@ export default function ImagesPage() {
   };
 
   return (
-    <div>
-      <div className="flex items-center justify-between mb-8">
-        <div>
-          <h1 className="text-2xl font-bold text-white">🖼️ Image Gallery</h1>
-          <p className="text-gray-400 text-sm mt-1">
-            Browse and manage all generated images · {total} total
-          </p>
-        </div>
-        <button
-          onClick={fetchImages}
-          className="bg-gray-700 hover:bg-gray-600 text-gray-300 px-4 py-2 rounded-lg text-sm transition-colors"
-        >
-          ↻ Refresh
-        </button>
-      </div>
+    <PageStack>
+      <PageHeader eyebrow="Library / Assets" title="Image gallery" description={`Browse and manage generated image assets · ${total} total`} actions={<Button onClick={fetchImages}>Refresh</Button>} />
 
       {/* Filters */}
-      <div className="flex gap-2 mb-6">
+      <Toolbar><FilterGroup>
         {FILTERS.map(f => (
           <button
             key={f.key}
@@ -144,7 +132,7 @@ export default function ImagesPage() {
             {f.icon} {f.label}
           </button>
         ))}
-      </div>
+      </FilterGroup></Toolbar>
 
       {/* Loading */}
       {loading && (
@@ -331,6 +319,6 @@ export default function ImagesPage() {
           </div>
         </div>
       )}
-    </div>
+    </PageStack>
   );
 }

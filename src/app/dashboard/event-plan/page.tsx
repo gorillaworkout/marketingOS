@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { buildEventPlanDownload, eventPlanDownloadFilename } from '@/lib/event-plan-download';
 import type { EventPlanResearch } from '@/lib/event-plan-research';
+import { Button, FormField, PageHeader, PageStack, TextArea, TextInput } from '@/components/ui/dashboard';
 
 type BudgetItem = { category: string; estimatedCost: number; notes: string };
 type Budget = { currency: 'IDR'; total?: number; items: BudgetItem[]; contingency?: number; preliminary?: boolean };
@@ -167,19 +168,19 @@ export default function EventPlanPage() {
   };
 
   return (
-    <div className="max-w-4xl mx-auto space-y-8">
-      <div><h1 className="text-2xl font-bold text-white">📋 Event Plan</h1><p className="text-gray-400 mt-1">Plan events with AI-powered research, proposals, and budgeting</p></div>
+    <PageStack className="max-w-5xl">
+      <PageHeader eyebrow="Create / Events" title="Event plan" description="Riset, proposal, dan budgeting dalam satu workflow dengan kontrol sumber yang jelas." />
 
-      <form onSubmit={handleGenerate} className="bg-gray-800/50 rounded-xl p-6 border border-gray-700/50 space-y-4">
+      <form onSubmit={handleGenerate} className="space-y-4 rounded-[var(--mos-radius-panel)] border border-[var(--mos-border)] bg-[var(--mos-panel)] p-5 md:p-6">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div><label className="block text-sm font-medium text-gray-300 mb-1">Event Name</label><input type="text" value={eventName} onChange={e => setEventName(e.target.value)} className="w-full px-3 py-2 bg-gray-700/50 border border-gray-600 rounded-lg text-white placeholder-gray-500 focus:ring-2 focus:ring-blue-500" placeholder="e.g., Bloomberg Awarding Night" required /></div>
-          <div><label className="block text-sm font-medium text-gray-300 mb-1">Location</label><input type="text" value={location} onChange={e => setLocation(e.target.value)} className="w-full px-3 py-2 bg-gray-700/50 border border-gray-600 rounded-lg text-white placeholder-gray-500 focus:ring-2 focus:ring-blue-500" placeholder="Jakarta" /></div>
-          <div><label className="block text-sm font-medium text-gray-300 mb-1">Theme</label><input type="text" value={theme} onChange={e => setTheme(e.target.value)} className="w-full px-3 py-2 bg-gray-700/50 border border-gray-600 rounded-lg text-white placeholder-gray-500 focus:ring-2 focus:ring-blue-500" placeholder="e.g., Financial Awards" /></div>
-          <div><label className="block text-sm font-medium text-gray-300 mb-1">Budget ceiling (IDR)</label><input type="text" inputMode="numeric" value={budget ? formatIDR(budget) : ''} onChange={e => setBudget(e.target.value.replace(/\D/g, ''))} className="w-full px-3 py-2 bg-gray-700/50 border border-gray-600 rounded-lg text-white placeholder-gray-500 focus:ring-2 focus:ring-blue-500" placeholder="Rp 50.000.000" /></div>
-          <div><label className="block text-sm font-medium text-gray-300 mb-1">Event Target Date</label><input type="date" value={targetDate} onChange={e => setTargetDate(e.target.value)} className="w-full px-3 py-2 bg-gray-700/50 border border-gray-600 rounded-lg text-white focus:ring-2 focus:ring-blue-500" /></div>
+          <FormField label="Event name" required><TextInput value={eventName} onChange={e => setEventName(e.target.value)} placeholder="e.g., Bloomberg Awarding Night" required /></FormField>
+          <FormField label="Location"><TextInput value={location} onChange={e => setLocation(e.target.value)} placeholder="Jakarta" /></FormField>
+          <FormField label="Theme"><TextInput value={theme} onChange={e => setTheme(e.target.value)} placeholder="e.g., Financial Awards" /></FormField>
+          <FormField label="Budget ceiling" hint="IDR"><TextInput inputMode="numeric" value={budget ? formatIDR(budget) : ''} onChange={e => setBudget(e.target.value.replace(/\D/g, ''))} placeholder="Rp 50.000.000" /></FormField>
+          <FormField label="Event target date"><TextInput type="date" value={targetDate} onChange={e => setTargetDate(e.target.value)} /></FormField>
         </div>
-        <div><label className="block text-sm font-medium text-gray-300 mb-1">Research / quotation links</label><textarea value={researchLinks} onChange={e => setResearchLinks(e.target.value)} className="w-full px-3 py-2 bg-gray-700/50 border border-gray-600 rounded-lg text-white placeholder-gray-500 focus:ring-2 focus:ring-blue-500" rows={4} placeholder={'https://official-vendor.example/proposal\nhttps://hotel.example/price-list'} /><p className="mt-1 text-xs text-gray-400">Optional. Paste official hotel/vendor pages, proposals, or price lists—one public URL per line (maximum 5). Links are untrusted references and require manual verification; do not enter free-form contact claims.</p></div>
-        <button type="submit" disabled={loading || !eventName} className="px-6 py-2.5 bg-orange-600 hover:bg-orange-700 disabled:bg-orange-800/50 disabled:cursor-not-allowed text-white font-medium rounded-lg transition-colors">{loading ? '🤖 Generating…' : '📋 Generate Plan'}</button>
+        <FormField label="Research / quotation links" hint="Optional · maximum 5"><TextArea value={researchLinks} onChange={e => setResearchLinks(e.target.value)} rows={4} placeholder={'https://official-vendor.example/proposal\nhttps://hotel.example/price-list'} /><span className="mt-1.5 block text-xs leading-5 text-[var(--mos-text-faint)]">Paste official hotel/vendor pages, proposals, or price lists—one public URL per line. Links require manual verification; do not enter free-form contact claims.</span></FormField>
+        <Button type="submit" variant="primary" disabled={loading || !eventName}>{loading ? 'Generating…' : 'Generate plan'}</Button>
       </form>
 
       {loading && progress && <div className="bg-blue-500/10 border border-blue-500/20 text-blue-200 px-4 py-3 rounded-lg" role="status">{progress.progress !== undefined && <span className="font-medium mr-2">{progress.progress}%</span>}{progress.message}</div>}
@@ -204,7 +205,7 @@ export default function EventPlanPage() {
           {tokenUsage && <div className="bg-gray-800/50 rounded-xl p-6 border border-gray-700/50"><h3 className="text-lg font-semibold text-white mb-2">💰 Token Usage</h3><p className="text-gray-400">{(tokenUsage.inputTokens || 0) + (tokenUsage.outputTokens || 0)} tokens</p>{tokenUsage.model && <p className="text-xs text-gray-500 mt-1">Model: <span className="text-gray-400">{tokenUsage.model}</span></p>}</div>}
         </div>
       )}
-    </div>
+    </PageStack>
   );
 }
 

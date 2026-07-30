@@ -1,5 +1,6 @@
 'use client';
 import { useState, useEffect, useCallback } from 'react';
+import { Button, PageHeader, PageStack, Toolbar, FilterGroup } from '@/components/ui/dashboard';
 
 interface KnowledgeEntry {
   id: string;
@@ -187,20 +188,11 @@ export default function KnowledgePage() {
   };
 
   return (
-    <div className="max-w-6xl mx-auto space-y-6">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-white">📊 Knowledge Analytics</h1>
-          <p className="text-gray-400 mt-1">Style insights, selection patterns & top examples</p>
-        </div>
-        <button onClick={fetchData} className="px-4 py-2 bg-gray-700/50 hover:bg-gray-700 text-gray-300 text-sm rounded-lg transition-colors">
-          🔄 Refresh
-        </button>
-      </div>
+    <PageStack className="max-w-6xl">
+      <PageHeader eyebrow="Library / Learning" title="Knowledge" description="Style insights, selection patterns, and verified examples from approved output." actions={<Button onClick={fetchData}>Refresh</Button>} />
 
       {/* Tab switcher */}
-      <div className="flex gap-1 bg-gray-800/60 rounded-xl p-1 w-fit">
+      <Toolbar className="w-fit"><FilterGroup>
         <button
           onClick={() => setActiveTab('analytics')}
           className={`px-4 py-2 text-sm rounded-lg transition-all ${activeTab === 'analytics' ? 'bg-blue-600/30 text-blue-300 font-medium' : 'text-gray-400 hover:text-white'}`}
@@ -219,7 +211,7 @@ export default function KnowledgePage() {
         >
           🔍 Search
         </button>
-      </div>
+      </FilterGroup></Toolbar>
 
       {!loading && entries.length === 0 && (
         <div className="rounded-xl border border-blue-500/20 bg-blue-500/10 p-6">
@@ -615,6 +607,6 @@ export default function KnowledgePage() {
           )}
         </div>
       )}
-    </div>
+    </PageStack>
   );
 }

@@ -1,5 +1,6 @@
 'use client';
 import { useState, useEffect, useCallback } from 'react';
+import { PageHeader, PageStack } from '@/components/ui/dashboard';
 
 interface CalendarItem {
   id: string;
@@ -123,13 +124,8 @@ export default function CalendarPage() {
   const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
   return (
-    <div>
-      <div className="flex items-center justify-between mb-8">
-        <div>
-          <h1 className="text-2xl font-bold text-white">Content Calendar</h1>
-          <p className="text-gray-400 text-sm mt-1">Schedule and manage your content publishing</p>
-        </div>
-      </div>
+    <PageStack>
+      <PageHeader eyebrow="Library / Publishing" title="Content calendar" description="Schedule and manage content publishing across channels." />
 
       <div className="flex gap-6">
         {/* Calendar Grid */}
@@ -310,6 +306,6 @@ export default function CalendarPage() {
           </div>
         </div>
       </div>
-    </div>
+    </PageStack>
   );
 }

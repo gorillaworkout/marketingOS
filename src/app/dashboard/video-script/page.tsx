@@ -1,5 +1,6 @@
 'use client';
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { PageHeader, PageStack } from '@/components/ui/dashboard';
 
 interface ProgressState {
   step: string;
@@ -38,10 +39,10 @@ const STEP_LABELS: Record<string, string> = {
 };
 
 const STEP_ICONS: Record<string, string> = {
-  preview: '🎬',
-  full: '📜',
-  done: '✅',
-  error: '❌',
+  preview: '01',
+  full: '02',
+  done: '03',
+  error: '!',
 };
 
 const STYLE_COLORS: Record<string, { border: string; bg: string; accent: string }> = {
@@ -462,11 +463,8 @@ export default function VideoScriptPage() {
   };
 
   return (
-    <div className="max-w-6xl mx-auto space-y-8">
-      <div>
-        <h1 className="text-2xl font-bold text-white">🎬 Video Script</h1>
-        <p className="text-gray-400 mt-1">Step 1: Preview 3 style options. Step 2: Edit & generate full script.</p>
-      </div>
+    <PageStack className="max-w-6xl">
+      <PageHeader eyebrow="Create / Video" title="Video script" description="Compare three directions, refine the selected concept, then generate the full script." />
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Left: Form + Result */}
@@ -965,6 +963,6 @@ export default function VideoScriptPage() {
           100% { transform: translateX(100%); }
         }
       `}</style>
-    </div>
+    </PageStack>
   );
 }

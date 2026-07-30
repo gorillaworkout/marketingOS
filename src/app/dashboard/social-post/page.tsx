@@ -1,5 +1,6 @@
 'use client';
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { PageHeader, PageStack } from '@/components/ui/dashboard';
 
 interface QCCheck {
   name: string;
@@ -80,12 +81,12 @@ const STEP_LABELS: Record<string, string> = {
 };
 
 const STEP_ICONS: Record<string, string> = {
-  research: '🔍',
-  draft: '📝',
-  qc: '🔍',
-  'image-prompt': '🎨',
-  done: '✅',
-  error: '❌',
+  research: '01',
+  draft: '02',
+  qc: '03',
+  'image-prompt': '04',
+  done: '05',
+  error: '!',
 };
 
 export default function SocialPostPage() {
@@ -538,8 +539,8 @@ export default function SocialPostPage() {
   const selectedOption = selectedIndex !== null && options ? options[selectedIndex] : null;
 
   return (
-    <div className="max-w-6xl mx-auto space-y-8">
-      <div><h1 className="text-2xl font-bold text-white">📱 Social Media Post</h1><p className="text-gray-400 mt-1">Generate 3 style options with SOP compliance — research, QC, naming & delivery workflow</p></div>
+    <PageStack className="max-w-6xl">
+      <PageHeader eyebrow="Create / Social" title="Social media post" description="Generate three structured options with research, quality control, naming, and delivery review." />
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Left: Form + Result */}
@@ -1105,6 +1106,6 @@ export default function SocialPostPage() {
           100% { transform: translateX(100%); }
         }
       `}</style>
-    </div>
+    </PageStack>
   );
 }

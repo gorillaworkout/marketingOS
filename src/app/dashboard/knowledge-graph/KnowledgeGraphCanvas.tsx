@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 
 export type CanvasNode = { id: string; department: string; taskType: string; brief: string; qualityScore: number; styleCluster: string; platform: string | null; audience: string | null; username: string; createdAt: string };
-export type CanvasEdge = { source: string; target: string; weight: number };
+export type CanvasEdge = { source: string; target: string; weight: number; sourceType: 'stored' | 'derived'; type?: string };
 
 type Point3D = CanvasNode & { x: number; y: number; z: number; color: string };
 type Projected = Point3D & { sx: number; sy: number; scale: number; depth: number };
@@ -35,7 +35,7 @@ export default function KnowledgeGraphCanvas({ nodes, edges, selectedId, onSelec
     if (!context) return;
 
     const departments = [...new Set(nodes.map(node => node.department))];
-    const points: Point3D[] = nodes.map((node, index) => {
+    const points: Point3D[] = nodes.map(node => {
       const departmentIndex = departments.indexOf(node.department);
       const departmentNodes = nodes.filter(item => item.department === node.department);
       const localIndex = departmentNodes.findIndex(item => item.id === node.id);
@@ -51,8 +51,6 @@ export default function KnowledgeGraphCanvas({ nodes, edges, selectedId, onSelec
         color: palette[departmentIndex % palette.length],
       };
     });
-    const byId = new Map(points.map(point => [point.id, point]));
-
     const resize = () => {
       const rect = canvas.getBoundingClientRect();
       const ratio = Math.min(window.devicePixelRatio || 1, 2);
@@ -98,13 +96,15 @@ export default function KnowledgeGraphCanvas({ nodes, edges, selectedId, onSelec
         const source = projectedById.get(edge.source);
         const target = projectedById.get(edge.target);
         if (!source || !target) return;
-        const alpha = Math.max(0.05, Math.min(0.22, ((source.scale + target.scale) / 2 - 0.5) * 0.25));
+        const alpha = Math.max(edge.sourceType === 'stored' ? 0.14 : 0.1, Math.min(0.3, ((source.scale + target.scale) / 2 - 0.45) * 0.28));
         context.beginPath();
         context.moveTo(source.sx, source.sy);
         context.lineTo(target.sx, target.sy);
-        context.strokeStyle = `rgba(150,155,180,${alpha})`;
-        context.lineWidth = Math.max(0.5, edge.weight * 0.8);
+        context.setLineDash(edge.sourceType === 'derived' ? [4, 5] : []);
+        context.strokeStyle = edge.sourceType === 'stored' ? `rgba(164,168,194,${alpha})` : `rgba(119,118,229,${alpha})`;
+        context.lineWidth = Math.max(0.75, edge.weight * 0.9);
         context.stroke();
+        context.setLineDash([]);
 
         // A small signal travels along every stored relationship. Staggering each
         // edge keeps the network alive without turning the graph into decoration.
@@ -113,7 +113,7 @@ export default function KnowledgeGraphCanvas({ nodes, edges, selectedId, onSelec
         const pulseY = source.sy + (target.sy - source.sy) * phase;
         const pulseRadius = Math.max(1.1, 1.8 * ((source.scale + target.scale) / 2));
         const pulse = context.createRadialGradient(pulseX, pulseY, 0, pulseX, pulseY, pulseRadius * 4);
-        pulse.addColorStop(0, 'rgba(174,176,255,.95)');
+        pulse.addColorStop(0, edge.sourceType === 'stored' ? 'rgba(211,213,255,.95)' : 'rgba(164,163,255,.88)');
         pulse.addColorStop(0.3, 'rgba(113,112,255,.58)');
         pulse.addColorStop(1, 'rgba(113,112,255,0)');
         context.fillStyle = pulse;
@@ -178,6 +178,10 @@ export default function KnowledgeGraphCanvas({ nodes, edges, selectedId, onSelec
       onWheel={event => { event.preventDefault(); stateRef.current.zoom = Math.max(0.55, Math.min(2.1, stateRef.current.zoom - event.deltaY * 0.001)); }}
       className={`h-full w-full touch-none ${dragging ? 'cursor-grabbing' : 'cursor-grab'}`} />
     <div className="pointer-events-none absolute bottom-4 left-4 rounded-md border border-white/[.07] bg-black/30 px-2.5 py-1.5 text-[11px] text-[#737780] backdrop-blur-md">Drag to rotate · Scroll to zoom · Select a node for details</div>
-    <div className="pointer-events-none absolute right-4 top-4 flex items-center gap-2 rounded-md border border-white/[.07] bg-black/30 px-2.5 py-1.5 text-[11px] text-[#737780] backdrop-blur-md"><span className="h-1.5 w-1.5 rounded-full bg-[#55c2b7] shadow-[0_0_8px_#55c2b7]" />Live organization map</div>
+    <div className="pointer-events-none absolute right-4 top-4 rounded-md border border-white/[.07] bg-black/40 px-3 py-2 text-[10px] text-[#858a94] backdrop-blur-md">
+      <div className="flex items-center gap-2"><span className="h-px w-5 bg-[#a4a8c2]" />Stored edge</div>
+      <div className="mt-1.5 flex items-center gap-2"><span className="w-5 border-t border-dashed border-[#7776e5]" />Derived view edge</div>
+      <div className="mt-1.5 flex items-center gap-2"><span className="h-1.5 w-1.5 rounded-full bg-[#8b8cf8] shadow-[0_0_7px_#8b8cf8]" />Animated live signal</div>
+    </div>
   </div>;
 }

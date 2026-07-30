@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useState, useCallback } from 'react';
 import { passwordInputType } from '@/lib/password-visibility';
+import { Button, LoadingState, PageHeader, PageStack } from '@/components/ui/dashboard';
 
 interface User {
   id: string;
@@ -222,28 +223,12 @@ export default function AccountsPage() {
   };
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
-      </div>
-    );
+    return <LoadingState label="Loading accounts" />;
   }
 
   return (
-    <div className="space-y-8">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-white">👥 Manage Accounts</h1>
-          <p className="text-gray-400 mt-1">Create, edit, and manage team members</p>
-        </div>
-        <button
-          onClick={() => { setForm(initialForm); setShowAddPassword(false); setShowAddModal(true); }}
-          className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors flex items-center gap-2"
-        >
-          <span>+</span> Add User
-        </button>
-      </div>
+    <PageStack>
+      <PageHeader eyebrow="Administration / Access" title="Accounts" description="Create, edit, and manage team access, roles, and departments." actions={<Button variant="primary" onClick={() => { setForm(initialForm); setShowAddPassword(false); setShowAddModal(true); }}>Add user</Button>} />
 
       {/* Toast */}
       {toast && (
@@ -566,6 +551,6 @@ export default function AccountsPage() {
           </div>
         </div>
       )}
-    </div>
+    </PageStack>
   );
 }

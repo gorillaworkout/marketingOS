@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Button, DataTableFrame, MetricCard, PageHeader, PageStack, Select } from '@/components/ui/dashboard';
 
 type Period = 'month' | 'quarter' | 'year';
 type Summary = { totalTokens: number; totalCost: number; activeUsers: number; avgTokensPerUser: number };
@@ -48,27 +49,22 @@ export default function AnalyticsPage() {
 
   const exportCsv = () => { window.location.assign(`/api/admin/usage/export?period=${period}`); };
   const cards = [
-    ['🪙', 'Total Tokens', number(summary?.totalTokens || 0), 'text-white'],
-    ['💵', 'Total Cost', money(summary?.totalCost || 0), 'text-green-400'],
-    ['👤', 'Active Users', number(summary?.activeUsers || 0), 'text-white'],
-    ['📈', 'Avg Tokens/User', number(summary?.avgTokensPerUser || 0), 'text-white'],
+    ['Total tokens', number(summary?.totalTokens || 0), 'Model consumption'],
+    ['Total cost', money(summary?.totalCost || 0), 'Attributed API spend'],
+    ['Active users', number(summary?.activeUsers || 0), 'Users in selected period'],
+    ['Average tokens / user', number(summary?.avgTokensPerUser || 0), 'Consumption distribution'],
   ];
 
-  return <div className="space-y-8">
-    <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-      <div><h1 className="text-2xl font-bold text-white">📊 Usage Analytics</h1><p className="mt-1 text-gray-400">Monitor AI usage, spend, and attribution across MarketingOS.</p></div>
-      <div className="flex gap-2">
-        <select value={period} onChange={event => setPeriod(event.target.value as Period)} className="rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white focus:border-blue-500 focus:outline-none">
+  return <PageStack>
+    <PageHeader eyebrow="Administration / Reporting" title="Usage analytics" description="Monitor AI usage, spend, and attribution across MarketingOS." actions={<>
+        <Select value={period} onChange={event => setPeriod(event.target.value as Period)} className="w-auto">
           <option value="month">This month</option><option value="quarter">Last 3 months</option><option value="year">Last 12 months</option>
-        </select>
-        <button onClick={exportCsv} className="rounded-lg border border-blue-500/40 bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-500">Export CSV</button>
-      </div>
-    </div>
+        </Select>
+        <Button variant="primary" onClick={exportCsv}>Export CSV</Button>
+      </>} />
 
-    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-      {cards.map(([icon, label, value, color]) => <div key={label} className="rounded-xl border border-gray-700 bg-gray-800 p-5">
-        <div className="mb-3 text-2xl">{icon}</div><div className={`text-2xl font-bold ${color}`}>{loading ? '—' : value}</div><div className="mt-1 text-sm text-gray-400">{label}</div>
-      </div>)}
+    <div className="grid overflow-hidden rounded-[var(--mos-radius-panel)] border border-[var(--mos-border)] bg-[var(--mos-panel)] sm:grid-cols-2 xl:grid-cols-4">
+      {cards.map(([label, value, note]) => <MetricCard key={label} label={label} value={loading ? '—' : value} note={note} />)}
     </div>
 
     <Section title="Top Spenders" action={<button onClick={() => setSort(sort === 'cost' ? 'tokens' : 'cost')} className="text-xs text-blue-400 hover:text-blue-300">Sort: {sort === 'cost' ? 'Cost' : 'Tokens'}</button>}>
@@ -84,11 +80,11 @@ export default function AnalyticsPage() {
     <Section title="Provider Attribution"><table className="w-full min-w-[620px] text-sm"><thead className="border-b border-gray-700 text-left text-xs uppercase tracking-wide text-gray-500"><tr><th className="p-3">Provider</th><th className="p-3">Source</th><th className="p-3 text-right">Tokens</th><th className="p-3 text-right">Cost</th><th className="p-3">Models</th></tr></thead>
       <tbody>{providers.map(provider => <tr key={`${provider.provider}-${provider.accountSource}`} className="border-b border-gray-700/60 text-gray-300"><td className="p-3 font-medium text-white">{provider.provider}</td><td className="p-3">{provider.accountSource === 'personal' ? '👤 Personal' : '🏢 Office'}</td><td className="p-3 text-right">{number(provider.totalTokens)}</td><td className="p-3 text-right text-green-400">{money(provider.totalCost)}</td><td className="p-3 text-xs">{provider.modelBreakdown.map(model => model.model).join(', ') || '—'}</td></tr>)}{!loading && !providers.length && <Empty colSpan={5} />}</tbody>
     </table></Section>
-  </div>;
+  </PageStack>;
 }
 
 function Section({ title, action, children }: { title: string; action?: React.ReactNode; children: React.ReactNode }) {
-  return <section className="overflow-hidden rounded-xl border border-gray-700 bg-gray-800"><div className="flex items-center justify-between border-b border-gray-700 px-5 py-4"><h2 className="font-semibold text-white">{title}</h2>{action}</div><div className="overflow-x-auto">{children}</div></section>;
+  return <DataTableFrame title={title} action={action}>{children}</DataTableFrame>;
 }
 
 function Empty({ colSpan }: { colSpan: number }) { return <tr><td colSpan={colSpan} className="p-8 text-center text-gray-500">No usage data for this period.</td></tr>; }

@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { PageHeader, PageStack } from '@/components/ui/dashboard';
 
 interface ModelInfo {
   id: string;
@@ -89,13 +90,8 @@ export default function ModelsPage() {
   const provider = data.providers;
 
   return (
-    <div className="min-h-screen bg-gray-900 p-6">
-      <div className="max-w-5xl mx-auto">
-        <h1 className="text-2xl font-bold text-white mb-1">🧠 Models & Pricing</h1>
-        <p className="text-sm text-gray-400 mb-6">
-          Semua model AI yang tersedia untuk content generation. Harga OpenRouter adalah harga mulai dari provider aktif per 1 juta token.
-          Diperbarui: {new Date(data.generatedAt).toLocaleString('id-ID')}
-        </p>
+    <PageStack className="max-w-6xl">
+        <PageHeader eyebrow="Administration / Providers" title="Models & pricing" description={`Semua model AI yang tersedia untuk content generation. Harga OpenRouter adalah harga mulai dari provider aktif per 1 juta token. Diperbarui ${new Date(data.generatedAt).toLocaleString('id-ID')}.`} />
 
         {/* Provider Status Cards */}
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 mb-8">
@@ -239,7 +235,6 @@ export default function ModelsPage() {
             Provider yang tersedia: <code className="text-cyan-400">openai-codex</code>, <code className="text-cyan-400">openrouter</code>, <code className="text-cyan-400">anthropic</code>.
           </p>
         </div>
-      </div>
-    </div>
+    </PageStack>
   );
 }

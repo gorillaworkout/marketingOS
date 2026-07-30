@@ -1,7 +1,9 @@
 'use client';
-import { useEffect, useState, useRef } from 'react';
-import { useRouter, usePathname } from 'next/navigation';
+
+import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
+import { usePathname, useRouter } from 'next/navigation';
+import { Button, StatusBadge } from '@/components/ui/dashboard';
 
 interface User {
   id: string;
@@ -20,25 +22,73 @@ interface ModelInfo {
   outputPrice: number;
 }
 
-const providerLabels: Record<string, { icon: string; label: string; badgeColor: string }> = {
-  openrouter: { icon: '📡', label: 'OpenRouter', badgeColor: 'bg-purple-500/20 text-purple-400' },
-  codex: { icon: '🤖', label: 'Codex (ChatGPT Plus)', badgeColor: 'bg-emerald-500/20 text-emerald-400' },
-  'claude-code': { icon: '🟠', label: 'Claude Code (Claude subscription)', badgeColor: 'bg-orange-500/20 text-orange-400' },
-  gorillaworkout: { icon: '🦍', label: 'GorillaWorkout LLM API', badgeColor: 'bg-cyan-500/20 text-cyan-300' },
+type IconName =
+  | 'home' | 'social' | 'video' | 'event' | 'article' | 'research'
+  | 'brand' | 'image' | 'calendar' | 'template' | 'knowledge' | 'history'
+  | 'graph' | 'tokens' | 'analytics' | 'accounts' | 'models';
+
+const iconPaths: Record<IconName, string> = {
+  home: 'M3 10.5 12 3l9 7.5M5 9.5V21h14V9.5M9 21v-7h6v7',
+  social: 'M7 8h10M7 12h7M5 4h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2h-7l-5 3v-3H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z',
+  video: 'm15 10 4.5-3v10L15 14M5 5h8a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z',
+  event: 'M5 4h14a2 2 0 0 1 2 2v14H3V6a2 2 0 0 1 2-2Zm3-2v4m8-4v4M3 9h18M7 13h4m-4 4h8',
+  article: 'M6 3h9l4 4v14H6V3Zm9 0v5h4M9 12h7m-7 4h7',
+  research: 'm20 20-4.5-4.5M18 10a8 8 0 1 1-16 0 8 8 0 0 1 16 0Z',
+  brand: 'm3 12 9-9 9 9-9 9-9-9Zm6 0h6',
+  image: 'M4 4h16v16H4V4Zm0 12 4-4 3 3 3-4 6 6M8 8h.01',
+  calendar: 'M4 5h16v16H4V5Zm4-3v6m8-6v6M4 10h16',
+  template: 'M5 3h14v18H5V3Zm4 4h6m-6 4h6m-6 4h4',
+  knowledge: 'M4 5a3 3 0 0 1 3-3h5v18H7a3 3 0 0 0-3 3V5Zm16 0a3 3 0 0 0-3-3h-5v18h5a3 3 0 0 1 3 3V5Z',
+  history: 'M3 12a9 9 0 1 0 3-6.7L3 8m0-5v5h5m4-2v6l4 2',
+  graph: 'M12 4v6m0 4v6M6 7l6 3 6-3M6 17l6-3 6 3M6 7v10m12-10v10',
+  tokens: 'M12 3c4.4 0 8 1.3 8 3s-3.6 3-8 3-8-1.3-8-3 3.6-3 8-3Zm-8 3v6c0 1.7 3.6 3 8 3s8-1.3 8-3V6M4 12v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6',
+  analytics: 'M4 20V10m6 10V4m6 16v-7m4 7H2',
+  accounts: 'M16 20v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2m7-10a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm8 2a4 4 0 0 1 4 4v2m-4-10a4 4 0 0 0 0-8',
+  models: 'M12 3 4 7v10l8 4 8-4V7l-8-4Zm-8 4 8 4 8-4m-8 4v10',
 };
 
-const tierColors: Record<string, { dot: string; bg: string; text: string }> = {
-  budget: { dot: 'bg-green-400', bg: 'bg-green-500/15', text: 'text-green-400' },
-  balanced: { dot: 'bg-yellow-400', bg: 'bg-yellow-500/15', text: 'text-yellow-400' },
-  premium: { dot: 'bg-red-400', bg: 'bg-red-500/15', text: 'text-red-400' },
-};
+function NavIcon({ name }: { name: IconName }) {
+  return <svg aria-hidden="true" className="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d={iconPaths[name]} /></svg>;
+}
+
+const providers = {
+  gorillaworkout: { label: 'GorillaWorkout LLM API', detail: 'Via llm.gorillaworkout.id' },
+  codex: { label: 'Codex', detail: 'ChatGPT subscription' },
+  'claude-code': { label: 'Claude Code', detail: 'Claude subscription' },
+  openrouter: { label: 'OpenRouter', detail: 'Provider marketplace' },
+} as const;
+
+const taskTypes = [
+  { key: 'caption', label: 'Caption' },
+  { key: 'image-prompt', label: 'Image prompt' },
+  { key: 'video-script', label: 'Video script' },
+  { key: 'event-plan', label: 'Event plan' },
+];
+
+const generateItems = [
+  { href: '/dashboard/social-post', label: 'Social post', icon: 'social' },
+  { href: '/dashboard/video-script', label: 'Video script', icon: 'video' },
+  { href: '/dashboard/event-plan', label: 'Event plan', icon: 'event' },
+  { href: '/dashboard/sop', label: 'Article Market News', icon: 'article', adminOnly: true },
+  { href: '/dashboard/market-research', label: 'Market research', icon: 'research', adminOnly: true },
+] satisfies Array<{ href: string; label: string; icon: IconName; adminOnly?: boolean }>;
+
+const resourceItems = [
+  { href: '/dashboard/brand-guidelines', label: 'Brand guidelines', icon: 'brand', adminOnly: true },
+  { href: '/dashboard/images', label: 'Image Gallery', icon: 'image', adminOnly: true },
+  { href: '/dashboard/calendar', label: 'Calendar', icon: 'calendar', adminOnly: true },
+  { href: '/dashboard/templates', label: 'Templates', icon: 'template', adminOnly: true },
+  { href: '/dashboard/knowledge', label: 'Knowledge', icon: 'knowledge', adminOnly: true },
+  { href: '/dashboard/history', label: 'History', icon: 'history', adminOnly: true },
+] satisfies Array<{ href: string; label: string; icon: IconName; adminOnly?: boolean }>;
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
-  const [currentModel, setCurrentModel] = useState<string>('deepseek/deepseek-v4-flash');
+  const [currentModel, setCurrentModel] = useState('deepseek/deepseek-v4-flash');
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [modelDropdownOpen, setModelDropdownOpen] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
   const [taskModelPreferences, setTaskModelPreferences] = useState<Record<string, string>>({});
   const [expandedTask, setExpandedTask] = useState<string | null>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -50,8 +100,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: 'check' }),
-    }).then(async res => {
-      const data = await res.json();
+    }).then(async response => {
+      const data = await response.json();
       if (data.authenticated) {
         setUser(data.user);
         const generationFeature = pathname.split('/').pop() || '';
@@ -67,27 +117,23 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   }, [router, pathname]);
 
   useEffect(() => {
-    fetch('/api/settings/model').then(async res => {
-      const data = await res.json();
+    fetch('/api/settings/model').then(async response => {
+      const data = await response.json();
       if (data.models) {
         setCurrentModel(data.currentModel);
         setModels(data.models);
-        if (data.taskModelPreferences) {
-          setTaskModelPreferences(data.taskModelPreferences);
-        }
+        if (data.taskModelPreferences) setTaskModelPreferences(data.taskModelPreferences);
       }
     });
   }, []);
 
-  // Close dropdown on outside click
+
   useEffect(() => {
-    function handleClick(e: MouseEvent) {
-      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
-        setModelDropdownOpen(false);
-      }
-    }
-    document.addEventListener('mousedown', handleClick);
-    return () => document.removeEventListener('mousedown', handleClick);
+    const close = (event: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) setModelDropdownOpen(false);
+    };
+    document.addEventListener('mousedown', close);
+    return () => document.removeEventListener('mousedown', close);
   }, []);
 
   const handleLogout = async () => {
@@ -102,342 +148,186 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const handleModelSelect = async (modelId: string) => {
     setModelDropdownOpen(false);
     if (modelId === currentModel) return;
-    const res = await fetch('/api/settings/model', {
+    const response = await fetch('/api/settings/model', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ model: modelId }),
     });
-    if (res.ok) {
-      setCurrentModel(modelId);
-    }
+    if (response.ok) setCurrentModel(modelId);
   };
 
   const handleTaskModelSelect = async (taskType: string, modelId: string) => {
-    const res = await fetch('/api/settings/model', {
+    const response = await fetch('/api/settings/model', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ model: modelId, taskType }),
     });
-    if (res.ok) {
-      setTaskModelPreferences(prev => ({ ...prev, [taskType]: modelId }));
+    if (response.ok) {
+      setTaskModelPreferences(previous => ({ ...previous, [taskType]: modelId }));
       setExpandedTask(null);
     }
   };
 
-  const taskTypes = [
-    { key: 'caption', label: 'Caption', icon: '📝' },
-    { key: 'image-prompt', label: 'Image Prompt', icon: '🎨' },
-    { key: 'video-script', label: 'Video Script', icon: '🎬' },
-    { key: 'event-plan', label: 'Event Plan', icon: '📋' },
-  ];
-
-  const currentModelInfo = models.find(m => m.id === currentModel);
-  const currentTier = currentModelInfo?.tier || 'budget';
-  const tc = tierColors[currentTier];
-
   if (loading) {
-    return (
-      <div className="min-h-screen bg-gray-900 flex items-center justify-center">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
-      </div>
-    );
+    return <div className="flex min-h-screen items-center justify-center bg-[var(--mos-bg)]"><span className="h-5 w-5 animate-spin rounded-full border border-[var(--mos-border-strong)] border-t-[var(--mos-accent)]" /></div>;
   }
 
-  const navItems = [
-    { href: '/dashboard', label: 'Dashboard', icon: '📊' },
+  const sections: Array<{ label?: string; items: Array<{ href: string; label: string; icon: IconName; adminOnly?: boolean }> }> = [
+    { items: [{ href: '/dashboard', label: 'Overview', icon: 'home' }] },
+    {
+      label: 'Create',
+      items: generateItems,
+    },
+    {
+      label: 'Library',
+      items: resourceItems,
+    },
+    {
+      label: 'Administration',
+      items: [
+        { href: '/dashboard/knowledge-graph', label: 'Knowledge Graph', icon: 'graph', adminOnly: true },
+        { href: '/dashboard/tokens', label: 'Token usage', icon: 'tokens', adminOnly: true },
+        { href: '/dashboard/analytics', label: 'Analytics', icon: 'analytics', adminOnly: true },
+        { href: '/dashboard/accounts', label: 'Accounts', icon: 'accounts', adminOnly: true },
+        { href: '/dashboard/models', label: 'Models', icon: 'models', adminOnly: true },
+      ],
+    },
   ];
 
-  const generateItems = [
-    { href: '/dashboard/social-post', label: 'Social Post', icon: '📱' },
-    { href: '/dashboard/video-script', label: 'Video Script', icon: '🎬' },
-    { href: '/dashboard/event-plan', label: 'Event Plan', icon: '📋' },
-    { href: '/dashboard/sop', label: 'Article Market News', icon: '📰', adminOnly: true },
-    { href: '/dashboard/market-research', label: 'Market Research', icon: '🔎', adminOnly: true },
-  ].filter(item => user?.role === 'admin' || (!item.adminOnly && user?.enabledFeatures.includes(item.href.split('/').pop() || '')));
+  const visibleSections = sections.map(section => ({
+    ...section,
+    items: section.items.filter(item => {
+      if (item.adminOnly) return user?.role === 'admin';
+      if (!['social-post', 'video-script', 'event-plan'].includes(item.href.split('/').pop() || '')) return true;
+      return user?.role === 'admin' || user?.enabledFeatures.includes(item.href.split('/').pop() || '');
+    }),
+  })).filter(section => section.items.length);
 
-  const resourceItems = [
-    { href: '/dashboard/brand-guidelines', label: 'Brand Guidelines', icon: '🏷️' },
-    { href: '/dashboard/images', label: 'Image Gallery', icon: '🖼️' },
-    { href: '/dashboard/calendar', label: 'Calendar', icon: '📅' },
-    { href: '/dashboard/templates', label: 'Templates', icon: '📝' },
-    { href: '/dashboard/knowledge', label: 'Knowledge', icon: '📚' },
-    { href: '/dashboard/history', label: 'History', icon: '📁' },
-  ];
+  const currentModelInfo = models.find(model => model.id === currentModel);
 
-  const adminItems = [
-    { href: '/dashboard/knowledge-graph', label: 'Knowledge Graph', icon: '🕸️' },
-    { href: '/dashboard/tokens', label: 'Token Usage', icon: '💰' },
-    { href: '/dashboard/analytics', label: 'Usage Analytics', icon: '📊' },
-    { href: '/dashboard/accounts', label: 'Accounts', icon: '👥' },
-    { href: '/dashboard/models', label: 'Models', icon: '🧠' },
-  ];
+  const sidebar = (
+    <aside className="flex h-full w-[264px] flex-col border-r border-[var(--mos-border-subtle)] bg-[var(--mos-sidebar)]">
+      <div className="flex h-16 items-center gap-3 border-b border-[var(--mos-border-subtle)] px-4">
+        <div className="flex h-8 w-8 items-center justify-center rounded-[7px] border border-white/[0.08] bg-white/[0.045] text-[11px] font-semibold tracking-[-0.02em] text-[var(--mos-text)]">MO</div>
+        <div className="min-w-0">
+          <p className="text-sm font-[560] tracking-[-0.02em] text-[var(--mos-text)]">MarketingOS</p>
+          <p className="truncate text-[11px] text-[var(--mos-text-faint)]">Dupoin workspace</p>
+        </div>
+        <button aria-label="Close navigation" className="ml-auto p-2 text-[var(--mos-text-muted)] lg:hidden" onClick={() => setMobileOpen(false)}>×</button>
+      </div>
+
+      <nav className="flex-1 space-y-5 overflow-y-auto px-3 py-4">
+        {visibleSections.map((section, sectionIndex) => (
+          <div key={section.label || sectionIndex}>
+            {section.label && <p className="mb-1.5 px-2 text-[10px] font-medium uppercase tracking-[0.12em] text-[var(--mos-text-faint)]">{section.label}</p>}
+            <div className="space-y-0.5">
+              {section.items.map(item => {
+                const active = item.href === '/dashboard' ? pathname === item.href : pathname.startsWith(item.href);
+                return (
+                  <Link key={item.href} href={item.href} onClick={() => setMobileOpen(false)} className={`group flex h-8.5 items-center gap-2.5 rounded-[6px] px-2.5 text-[13px] transition ${active ? 'bg-white/[0.065] text-[var(--mos-text)] shadow-[inset_2px_0_0_var(--mos-accent)]' : 'text-[var(--mos-text-muted)] hover:bg-white/[0.035] hover:text-[var(--mos-text-secondary)]'}`}>
+                    <NavIcon name={item.icon} />
+                    <span>{item.label}</span>
+                  </Link>
+                );
+              })}
+            </div>
+          </div>
+        ))}
+      </nav>
+
+      <div ref={dropdownRef} className="relative border-t border-[var(--mos-border-subtle)] p-3">
+        <button onClick={() => setModelDropdownOpen(open => !open)} className="flex w-full items-center gap-3 rounded-[7px] border border-[var(--mos-border)] bg-[var(--mos-panel)] p-2.5 text-left transition hover:border-[var(--mos-border-strong)]">
+          <span className="flex h-7 w-7 items-center justify-center rounded-[6px] bg-indigo-400/10 text-indigo-200"><NavIcon name="models" /></span>
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-xs font-medium text-[var(--mos-text-secondary)]">{currentModelInfo?.name || currentModel}</span>
+            <span className="mt-0.5 block text-[10px] text-[var(--mos-text-faint)]">{currentModelInfo ? providers[currentModelInfo.provider].label : 'Default model'}</span>
+          </span>
+          <svg className="h-3.5 w-3.5 text-[var(--mos-text-faint)]" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path d="m7 10 5 5 5-5" /></svg>
+        </button>
+
+        {modelDropdownOpen && (
+          <div className="absolute bottom-[calc(100%-4px)] left-3 z-50 w-[360px] max-w-[calc(100vw-24px)] overflow-hidden rounded-[8px] border border-[var(--mos-border-strong)] bg-[var(--mos-raised)] shadow-2xl">
+            <div className="border-b border-[var(--mos-border-subtle)] px-4 py-3">
+              <p className="text-xs font-medium text-[var(--mos-text)]">Generation model</p>
+              <p className="mt-0.5 text-[10px] text-[var(--mos-text-faint)]">Providers and billing paths are shown separately.</p>
+            </div>
+            <div className="max-h-[48vh] overflow-y-auto p-2">
+              {(Object.keys(providers) as Array<keyof typeof providers>).map(provider => {
+                const providerModels = models.filter(model => model.provider === provider);
+                if (!providerModels.length) return null;
+                return (
+                  <div key={provider} className="mb-3 last:mb-0">
+                    <div className="flex items-baseline justify-between px-2 py-1.5">
+                      <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--mos-text-muted)]">{providers[provider].label}</span>
+                      <span className="text-[10px] text-[var(--mos-text-faint)]">{providers[provider].detail}</span>
+                    </div>
+                    {providerModels.map(model => {
+                      const selected = model.id === currentModel;
+                      return (
+                        <button key={model.id} onClick={() => handleModelSelect(model.id)} className={`flex w-full items-start gap-2.5 rounded-[6px] px-2.5 py-2 text-left ${selected ? 'bg-indigo-400/10' : 'hover:bg-white/[0.035]'}`}>
+                          <span className={`mt-1.5 h-1.5 w-1.5 rounded-full ${selected ? 'bg-indigo-300' : 'bg-[var(--mos-text-faint)]'}`} />
+                          <span className="min-w-0 flex-1">
+                            <span className={`block truncate text-xs ${selected ? 'text-indigo-100' : 'text-[var(--mos-text-secondary)]'}`}>{model.name}</span>
+                            <span className="mt-0.5 block text-[10px] text-[var(--mos-text-faint)]">
+                              {model.inputPrice === 0 && model.outputPrice === 0 ? 'Included with provider access' : `$${(model.inputPrice * 1_000_000).toFixed(2)} / $${(model.outputPrice * 1_000_000).toFixed(2)} per 1M tokens`}
+                            </span>
+                          </span>
+                          <StatusBadge>{model.tier}</StatusBadge>
+                        </button>
+                      );
+                    })}
+                  </div>
+                );
+              })}
+            </div>
+            <div className="border-t border-[var(--mos-border-subtle)] p-2">
+              <p className="px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--mos-text-faint)]">Task overrides</p>
+              {taskTypes.map(task => {
+                const taskModel = models.find(model => model.id === taskModelPreferences[task.key]);
+                const expanded = expandedTask === task.key;
+                return (
+                  <div key={task.key}>
+                    <button onClick={() => setExpandedTask(expanded ? null : task.key)} className="flex w-full items-center justify-between rounded-[5px] px-2 py-1.5 text-xs hover:bg-white/[0.035]">
+                      <span className="text-[var(--mos-text-muted)]">{task.label}</span>
+                      <span className="max-w-44 truncate text-[10px] text-[var(--mos-text-faint)]">{taskModel?.name || 'Use default'}</span>
+                    </button>
+                    {expanded && <div className="mb-1 ml-3 max-h-32 overflow-y-auto border-l border-[var(--mos-border)] pl-2">
+                      {models.map(model => <button key={model.id} onClick={() => handleTaskModelSelect(task.key, model.id)} className="block w-full truncate rounded-[4px] px-2 py-1 text-left text-[10px] text-[var(--mos-text-muted)] hover:bg-white/[0.035] hover:text-[var(--mos-text-secondary)]">{providers[model.provider].label} · {model.name}</button>)}
+                    </div>}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div className="flex items-center gap-3 border-t border-[var(--mos-border-subtle)] p-3">
+        <div className="flex h-8 w-8 items-center justify-center rounded-full border border-indigo-300/15 bg-indigo-400/10 text-xs font-medium text-indigo-100">{user?.name?.charAt(0) || '?'}</div>
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-xs font-medium text-[var(--mos-text-secondary)]">{user?.name}</p>
+          <p className="truncate text-[10px] capitalize text-[var(--mos-text-faint)]">{user?.role} account</p>
+        </div>
+        <Button variant="ghost" size="sm" aria-label="Sign out" onClick={handleLogout} className="w-8 px-0">
+          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeWidth="1.7" d="M10 17l5-5-5-5m5 5H3m10-9h6a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-6" /></svg>
+        </Button>
+      </div>
+    </aside>
+  );
 
   return (
-    <div className="mos-shell min-h-screen flex">
-      {/* Sidebar */}
-      <aside className="mos-sidebar w-64 border-r flex flex-col">
-        <div className="px-5 py-5 border-b border-white/[.05]">
-          <div className="flex items-center gap-2.5">
-            <div className="flex h-7 w-7 items-center justify-center rounded-md border border-white/[.08] bg-white/[.04] text-[11px] font-semibold tracking-tight text-[#d0d6e0]">MO</div>
-            <div><h1 className="text-sm font-[590] tracking-[-.2px] text-[#f7f8f8]">MarketingOS</h1><p className="mt-0.5 text-[10px] text-[#51545b]">Dupoin workspace</p></div>
-          </div>
-          <div className="mt-2">
-            <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium ${tc.bg} ${tc.text}`}>
-              <span className={`w-1.5 h-1.5 rounded-full ${tc.dot}`}></span>
-              {currentModelInfo?.name || currentModel}
-            </span>
-          </div>
-        </div>
-
-        <nav className="flex-1 p-4 space-y-1 overflow-y-auto">
-          {navItems.map(item => {
-            const isActive = pathname === item.href;
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors ${
-                  isActive
-                    ? 'bg-blue-600/20 text-blue-400 border border-blue-500/20'
-                    : 'text-gray-400 hover:text-white hover:bg-gray-700/50'
-                }`}
-              >
-                <span>{item.icon}</span>
-                <span>{item.label}</span>
-              </Link>
-            );
-          })}
-
-          {/* Generate Section */}
-          <div className="pt-4 pb-1">
-            <p className="px-3 text-[11px] font-semibold uppercase tracking-widest text-gray-500">Generate</p>
-          </div>
-          {generateItems.map(item => {
-            const isActive = pathname === item.href || pathname.startsWith(item.href);
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors ${
-                  isActive
-                    ? 'bg-blue-600/20 text-blue-400 border border-blue-500/20'
-                    : 'text-gray-400 hover:text-white hover:bg-gray-700/50'
-                }`}
-              >
-                <span>{item.icon}</span>
-                <span>{item.label}</span>
-              </Link>
-            );
-          })}
-
-          {user?.role === 'admin' && <>
-          {/* Resources Section */}
-          <div className="pt-4 pb-1">
-            <p className="px-3 text-[11px] font-semibold uppercase tracking-widest text-gray-500">Resources</p>
-          </div>
-          {resourceItems.map(item => {
-            const isActive = pathname === item.href || pathname.startsWith(item.href);
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors ${
-                  isActive
-                    ? 'bg-blue-600/20 text-blue-400 border border-blue-500/20'
-                    : 'text-gray-400 hover:text-white hover:bg-gray-700/50'
-                }`}
-              >
-                <span>{item.icon}</span>
-                <span>{item.label}</span>
-              </Link>
-            );
-          })}
-
-          {/* Admin Section */}
-          <div className="pt-4 pb-1">
-            <p className="px-3 text-[11px] font-semibold uppercase tracking-widest text-gray-500">Admin</p>
-          </div>
-          {adminItems.map(item => {
-            const isActive = pathname === item.href || pathname.startsWith(item.href);
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors ${
-                  isActive
-                    ? 'bg-blue-600/20 text-blue-400 border border-blue-500/20'
-                    : 'text-gray-400 hover:text-white hover:bg-gray-700/50'
-                }`}
-              >
-                <span>{item.icon}</span>
-                <span>{item.label}</span>
-              </Link>
-            );
-          })}</>}
-        </nav>
-
-        {/* Model Selector */}
-        <div className="px-4 pb-2" ref={dropdownRef}>
-          <div className="relative">
-            <button
-              onClick={() => setModelDropdownOpen(!modelDropdownOpen)}
-              className="w-full flex items-center justify-between gap-2 px-3 py-2 rounded-lg bg-gray-700/50 border border-gray-600/50 hover:border-gray-500/50 transition-colors text-left"
-            >
-              <div className="flex items-center gap-2 min-w-0">
-                <span className={`w-2 h-2 rounded-full ${tc.dot} flex-shrink-0`}></span>
-                <span className="text-xs text-gray-300 truncate">{currentModelInfo?.name || currentModel}</span>
-              </div>
-              <svg className={`w-3.5 h-3.5 text-gray-500 flex-shrink-0 transition-transform ${modelDropdownOpen ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
-            </button>
-            {modelDropdownOpen && (
-              <div className="absolute bottom-full left-0 right-0 mb-1 bg-gray-800 border border-gray-700 rounded-lg shadow-xl overflow-hidden z-50">
-                <div className="p-2 border-b border-gray-700">
-                  <p className="text-[10px] text-gray-500 uppercase tracking-wider px-2">AI Model</p>
-                </div>
-                <div className="p-1 max-h-64 overflow-y-auto">
-                  {(['gorillaworkout', 'codex', 'claude-code', 'openrouter'] as const).map(provider => {
-                    const providerModels = models.filter(m => m.provider === provider);
-                    if (providerModels.length === 0) return null;
-                    const pl = providerLabels[provider];
-                    return (
-                      <div key={provider}>
-                        <div className="px-3 py-1.5 flex items-center gap-1.5">
-                          <span className="text-[10px]">{pl.icon}</span>
-                          <span className="text-[10px] text-gray-500 uppercase tracking-wider font-medium">{pl.label}</span>
-                        </div>
-                        {providerModels.map(m => {
-                          const mtc = tierColors[m.tier];
-                          const isSelected = m.id === currentModel;
-                          const pl2 = providerLabels[m.provider];
-                          const includedLabel = m.provider === 'codex'
-                            ? 'Via Codex · ChatGPT Plus'
-                            : m.provider === 'claude-code'
-                              ? 'Via Claude Code · Claude subscription'
-                              : m.provider === 'gorillaworkout'
-                                ? 'Via llm.gorillaworkout.id'
-                                : 'Via OpenRouter';
-                          return (
-                            <button
-                              key={m.id}
-                              onClick={() => handleModelSelect(m.id)}
-                              className={`w-full text-left px-3 py-2 rounded-md flex items-start gap-2 transition-colors ${
-                                isSelected ? 'bg-blue-600/20' : 'hover:bg-gray-700/50'
-                              }`}
-                            >
-                              <span className={`w-2 h-2 rounded-full ${mtc.dot} flex-shrink-0 mt-1.5`}></span>
-                              <div className="min-w-0 flex-1">
-                                <div className="flex items-center justify-between gap-2">
-                                  <span className={`text-sm ${isSelected ? 'text-blue-400' : 'text-gray-200'}`}>{m.name}</span>
-                                  <div className="flex items-center gap-1.5 flex-shrink-0">
-                                    <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-medium ${pl2.badgeColor}`}>{pl2.label.split(' ')[0]}</span>
-                                    {isSelected && <span className="text-blue-400 text-xs">✓</span>}
-                                  </div>
-                                </div>
-                                <p className="text-[10px] text-gray-500 mt-0.5">
-                                  {m.inputPrice === 0 && m.outputPrice === 0
-                                    ? <span className="text-emerald-400">{includedLabel} · <span className={mtc.text}>{m.tier}</span></span>
-                                    : <>${(m.inputPrice * 1_000_000).toFixed(2)}/${(m.outputPrice * 1_000_000).toFixed(2)} per 1M tokens · <span className={mtc.text}>{m.tier}</span></>
-                                  }
-                                </p>
-                              </div>
-                            </button>
-                          );
-                        })}
-                      </div>
-                    );
-                  })}
-                </div>
-                {/* Per-task model overrides */}
-                <div className="p-2 border-t border-gray-700">
-                  <p className="text-[10px] text-gray-500 uppercase tracking-wider px-2 mb-1">Per-Task Override</p>
-                  {taskTypes.map(tt => {
-                    const taskModel = taskModelPreferences[tt.key];
-                    const taskModelInfo = models.find(m => m.id === taskModel);
-                    const isExpanded = expandedTask === tt.key;
-                    return (
-                      <div key={tt.key} className="mb-0.5">
-                        <button
-                          onClick={() => setExpandedTask(isExpanded ? null : tt.key)}
-                          className="w-full text-left px-2 py-1.5 rounded-md flex items-center justify-between hover:bg-gray-700/50 transition-colors"
-                        >
-                          <div className="flex items-center gap-1.5">
-                            <span className="text-xs">{tt.icon}</span>
-                            <span className="text-[11px] text-gray-400">{tt.label}</span>
-                          </div>
-                          <span className="text-[10px] text-gray-500 truncate max-w-[100px]">
-                            {taskModelInfo?.name || <span className="italic">default</span>}
-                          </span>
-                        </button>
-                        {isExpanded && (
-                          <div className="ml-4 mt-0.5 mb-1 space-y-0.5 max-h-32 overflow-y-auto">
-                            <button
-                              onClick={() => {
-                                setTaskModelPreferences(prev => { const n = { ...prev }; delete n[tt.key]; return n; });
-                                // Remove override (will use global default)
-                                fetch('/api/settings/model', {
-                                  method: 'PUT',
-                                  headers: { 'Content-Type': 'application/json' },
-                                  body: JSON.stringify({ model: currentModel, taskType: tt.key }),
-                                }).then(() => setExpandedTask(null));
-                              }}
-                              className="w-full text-left px-2 py-1 rounded text-[11px] text-gray-500 hover:text-gray-300 hover:bg-gray-700/30"
-                            >
-                              ↩ Use default
-                            </button>
-                            {models.map(m => {
-                              const isSelected = m.id === taskModel;
-                              return (
-                                <button
-                                  key={m.id}
-                                  onClick={() => handleTaskModelSelect(tt.key, m.id)}
-                                  className={`w-full text-left px-2 py-1 rounded text-[11px] flex items-center gap-1.5 ${
-                                    isSelected ? 'text-blue-400 bg-blue-600/10' : 'text-gray-400 hover:text-gray-200 hover:bg-gray-700/30'
-                                  }`}
-                                >
-                                  <span className={`w-1.5 h-1.5 rounded-full ${tierColors[m.tier].dot}`}></span>
-                                  <span className="truncate">{m.name}</span>
-                                  <span className={`ml-auto text-[9px] px-1.5 py-0.5 rounded-full ${providerLabels[m.provider].badgeColor}`}>
-                                    {m.provider === 'gorillaworkout' ? 'LLM API' : m.provider === 'claude-code' ? 'Claude' : m.provider === 'codex' ? 'Codex' : 'OpenRouter'}
-                                  </span>
-                                  {isSelected && <span>✓</span>}
-                                </button>
-                              );
-                            })}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* User info */}
-        <div className="p-4 border-t border-gray-700/50">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <div className="w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center text-sm font-medium text-white">
-                {user?.name?.charAt(0) || '?'}
-              </div>
-              <div>
-                <p className="text-sm text-white">{user?.name}</p>
-                <p className="text-xs text-gray-500">{user?.role}</p>
-              </div>
-            </div>
-            <button onClick={handleLogout} className="text-gray-500 hover:text-white text-sm">
-              ⏻
-            </button>
-          </div>
-        </div>
-      </aside>
-
-      {/* Main content */}
-      <main className="mos-content flex-1 overflow-auto">
-        <div className="mos-page p-6 lg:p-8">
-          {children}
-        </div>
+    <div className="min-h-screen bg-[var(--mos-bg)] text-[var(--mos-text)]">
+      <div className="fixed inset-y-0 left-0 z-40 hidden lg:block">{sidebar}</div>
+      {mobileOpen && <div className="fixed inset-0 z-50 lg:hidden"><button aria-label="Close navigation overlay" className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={() => setMobileOpen(false)} /><div className="relative h-full">{sidebar}</div></div>}
+      <header className="sticky top-0 z-30 flex h-14 items-center border-b border-[var(--mos-border-subtle)] bg-[var(--mos-bg)]/90 px-4 backdrop-blur-xl lg:hidden">
+        <button aria-label="Open navigation" className="mr-3 rounded-[6px] border border-[var(--mos-border)] p-2 text-[var(--mos-text-muted)]" onClick={() => setMobileOpen(true)}>
+          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" d="M4 7h16M4 12h16M4 17h16" /></svg>
+        </button>
+        <p className="text-sm font-medium text-[var(--mos-text)]">MarketingOS</p>
+        <span className="ml-auto max-w-40 truncate text-[11px] text-[var(--mos-text-faint)]">{currentModelInfo?.name || currentModel}</span>
+      </header>
+      <main className="min-h-screen lg:pl-[264px]">
+        <div className="mx-auto w-full max-w-[1544px] px-4 py-5 sm:px-6 sm:py-7 lg:px-8">{children}</div>
       </main>
     </div>
   );

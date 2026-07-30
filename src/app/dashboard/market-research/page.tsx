@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useState } from 'react';
 import { buildMarketResearchDocxBlob, marketResearchDocxFilename } from '@/lib/market-research-docx';
 import type { MarketResearchInput, MarketResearchItem } from '@/lib/market-research';
+import { PageHeader, PageStack } from '@/components/ui/dashboard';
 
 interface MarketResearchResult {
   items: MarketResearchItem[];
@@ -83,14 +84,8 @@ export default function MarketResearchPage() {
   };
 
   return (
-    <div className="mx-auto max-w-7xl space-y-6 pb-10">
-      <header className="relative overflow-hidden rounded-2xl border border-cyan-500/20 bg-gradient-to-br from-cyan-950/70 via-gray-800/80 to-gray-900 p-6 md:p-8">
-        <div className="absolute -right-16 -top-16 h-52 w-52 rounded-full bg-cyan-500/10 blur-3xl" />
-        <div className="relative flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-          <div><p className="text-xs font-semibold uppercase tracking-[0.2em] text-cyan-300">Latest Market News Research & Selection</p><h1 className="mt-2 text-3xl font-bold text-white md:text-4xl">Market Research</h1><p className="mt-3 max-w-3xl text-sm leading-6 text-gray-300">Berikan brief. MarketingOS memindai Forex, Gold, Oil, dan US Indices secara terpisah, lalu memilih maksimal lima berita faktual dan high-impact yang diterbitkan hari ini.</p></div>
-          <Link href="/dashboard/history" className="inline-flex w-fit rounded-lg border border-gray-600 bg-gray-900/50 px-4 py-2 text-sm font-medium text-gray-200 hover:border-cyan-400 hover:text-white">Buka History</Link>
-        </div>
-      </header>
+    <PageStack>
+      <PageHeader eyebrow="Create / Market intelligence" title="Market research" description="Berikan brief. MarketingOS memindai Forex, Gold, Oil, dan US Indices secara terpisah, lalu memilih maksimal lima berita faktual dan high-impact yang diterbitkan hari ini." actions={<Link href="/dashboard/history" className="inline-flex h-9 items-center rounded-[var(--mos-radius-control)] border border-[var(--mos-border)] bg-[var(--mos-raised)] px-3.5 text-sm font-medium text-[var(--mos-text-secondary)] hover:border-[var(--mos-border-strong)]">Buka history</Link>} />
 
       <section className="rounded-2xl border border-gray-700/60 bg-gray-800/50 p-5 md:p-6">
         <div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="text-xl font-semibold text-white">Research Brief</h2><p className="mt-1 text-sm text-gray-400">Tanggal riset dikunci otomatis ke hari ini dalam WIB.</p></div><button type="button" onClick={fillExample} className="rounded-lg border border-cyan-500/30 bg-cyan-500/10 px-3 py-2 text-sm font-medium text-cyan-200 hover:bg-cyan-500/20">Isi Contoh</button></div>
@@ -114,6 +109,6 @@ export default function MarketResearchPage() {
         {result.items.map((item, index) => <article key={item.candidateId} className="rounded-2xl border border-gray-700/60 bg-gray-800/50 p-5 md:p-6"><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-xs font-semibold text-cyan-400">#{index + 1} · {item.productCategory}</p><h3 className="mt-1 text-lg font-semibold text-white">{item.articleTitle}</h3><p className="mt-1 text-sm text-gray-400">{item.newsSource}</p></div><div className="text-right text-xs text-gray-400"><p>Published: {item.publicationDate} {item.publicationTime} WIB</p><p>Latest Update Time: {item.latestUpdateTime ? `${item.latestUpdateTime} WIB` : 'Not provided'}</p></div></div><dl className="mt-5 grid gap-4 md:grid-cols-3"><div className="rounded-xl bg-gray-950/50 p-4"><dt className="text-xs uppercase tracking-wide text-gray-500">Main Event</dt><dd className="mt-2 text-sm leading-6 text-gray-300">{item.mainEvent}</dd></div><div className="rounded-xl bg-gray-950/50 p-4"><dt className="text-xs uppercase tracking-wide text-gray-500">Latest Factual Development</dt><dd className="mt-2 text-sm leading-6 text-gray-300">{item.latestFactualDevelopment}</dd></div><div className="rounded-xl bg-gray-950/50 p-4"><dt className="text-xs uppercase tracking-wide text-gray-500">Market Relevance</dt><dd className="mt-2 text-sm leading-6 text-gray-300">{item.marketRelevance}</dd></div></dl><a href={item.articleUrl} target="_blank" rel="noreferrer" className="mt-4 block break-all text-sm text-cyan-400 hover:underline">Open publisher article: {item.articleUrl}</a></article>)}
         <label className="flex cursor-pointer gap-3 rounded-xl border border-amber-500/25 bg-amber-500/10 p-4 text-sm leading-6 text-amber-100"><input type="checkbox" checked={reviewConfirmed} onChange={event => setReviewConfirmed(event.target.checked)} className="mt-1 h-4 w-4 accent-emerald-500" /><span>Saya sudah membuka seluruh link, membaca artikel lengkap, dan memeriksa title, waktu, main event, factual development, serta market relevance. Aktifkan untuk Download DOCX.</span></label>
       </section>}
-    </div>
+    </PageStack>
   );
 }

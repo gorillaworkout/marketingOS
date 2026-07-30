@@ -1,6 +1,7 @@
 'use client';
 
 import ArticleMarketNewsGenerator from './ArticleMarketNewsGenerator';
+import { PageHeader, PageStack, Panel, StatusBadge } from '@/components/ui/dashboard';
 
 const steps = [
   {
@@ -51,22 +52,9 @@ const topicKeywords = ['Emas', 'Harga Emas', 'XAUUSD/XAU/USD', 'Rupiah', 'Dollar
 
 export default function SopPage() {
   return (
-    <div className="max-w-7xl mx-auto space-y-8 pb-8">
-      <header className="relative overflow-hidden rounded-2xl border border-blue-500/20 bg-gradient-to-br from-blue-950/70 via-gray-800/80 to-gray-800/50 p-6 md:p-8">
-        <div className="absolute -right-10 -top-12 h-48 w-48 rounded-full bg-blue-500/10 blur-3xl" />
-        <div className="relative flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
-          <div>
-            <div className="inline-flex items-center gap-2 rounded-full border border-blue-400/20 bg-blue-500/10 px-3 py-1 text-xs font-medium text-blue-300">
-              <span>📰</span> MarketingOS Generate · Standar Editorial
-            </div>
-            <h1 className="mt-4 text-3xl font-bold tracking-tight text-white md:text-4xl">Article Market News</h1>
-            <p className="mt-2 max-w-2xl text-sm leading-6 text-gray-300 md:text-base">Riset mengikuti SOP, lalu generate draf artikel yang source-gated dan siap diekspor ke DOCX.</p>
-          </div>
-          <div className="rounded-xl border border-amber-400/20 bg-amber-500/10 px-4 py-3 text-sm text-amber-200 lg:max-w-sm">
-            <span className="font-semibold">Tindakan SOP manual:</span> riset &amp; originality check tetap dikerjakan operator. Generator hanya menulis dari fakta dan struktur yang sudah dimasukkan.
-          </div>
-        </div>
-      </header>
+    <PageStack>
+      <PageHeader eyebrow="Create / Standar editorial" title="Article market news" description="Riset mengikuti SOP, lalu generate draf artikel yang source-gated dan siap diekspor ke DOCX." actions={<StatusBadge tone="warning">Manual review required</StatusBadge>} />
+      <Panel padding="compact" className="border-amber-400/15 bg-amber-400/[0.045] text-sm leading-6 text-amber-100"><span className="font-semibold">Tindakan SOP manual:</span> riset dan originality check tetap dikerjakan operator. Generator hanya menulis dari fakta dan struktur yang sudah dimasukkan.</Panel>
 
       <ArticleMarketNewsGenerator />
 
@@ -96,8 +84,8 @@ export default function SopPage() {
         </div>
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           {steps.map((step, index) => (
-            <article key={step.number} className="relative flex min-h-64 flex-col rounded-2xl border border-gray-700/60 bg-gray-800/50 p-5 transition-colors hover:border-blue-500/40">
-              <div className="flex items-start justify-between gap-3"><span className="text-3xl font-bold text-blue-400/80">{step.number}</span><span className="rounded-full bg-blue-500/10 px-2.5 py-1 text-[11px] font-medium text-blue-300">{step.badge}</span></div>
+            <article key={step.number} className="relative flex min-h-64 flex-col rounded-[var(--mos-radius-panel)] border border-[var(--mos-border)] bg-[var(--mos-panel)] p-5 transition-colors hover:border-[var(--mos-border-strong)]">
+              <div className="flex items-start justify-between gap-3"><span className="font-mono text-xl text-[var(--mos-accent-soft)]">{step.number}</span><StatusBadge>{step.badge}</StatusBadge></div>
               <h3 className="mt-4 text-lg font-semibold text-white">{step.title}</h3>
               <p className="mt-2 text-sm leading-6 text-gray-400">{step.detail}</p>
               <div className="mt-auto border-t border-gray-700/60 pt-3 text-sm font-medium leading-5 text-emerald-300">{step.outcome}</div>
@@ -150,6 +138,6 @@ export default function SopPage() {
           {['Topik valid ditemukan dan sumber dicatat', 'Lima artikel Kontan (judul, waktu, URL) tercatat', 'H1 SEO dan lima PAA telah dipilih', 'Judul ≤60 karakter; draf 800–1000 kata', 'Keyword ada di paragraf pertama dan struktur H1/H2/H3 lengkap', 'Outlet/tanggal sumber serta fakta/kutipan tervalidasi', 'CTA satu kalimat menuju akun Dupoin tersedia', 'DOCX atau Google Docs siap; skor >90% terdokumentasi'].map(item => <div key={item} className="flex gap-3 rounded-lg border border-gray-700/50 bg-gray-900/30 px-3 py-2.5"><span className="text-blue-400">□</span><span>{item}</span></div>)}
         </div>
       </section>
-    </div>
+    </PageStack>
   );
 }

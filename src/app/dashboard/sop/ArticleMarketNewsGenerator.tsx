@@ -3,6 +3,7 @@
 import { useMemo, useState } from 'react';
 import { jakartaDate, validateGeneratedArticle, type ArticleMarketNewsInput, type ArticleQualityCheck } from '@/lib/article-market-news';
 import { articleDocxFilename, buildArticleDocxBlob } from '@/lib/article-market-news-docx';
+import { Panel } from '@/components/ui/dashboard';
 
 interface SourceForm {
   outlet: string;
@@ -145,10 +146,10 @@ export default function ArticleMarketNewsGenerator() {
   const currentWordCount = currentValidation?.wordCount || 0;
 
   return (
-    <section className="rounded-2xl border border-cyan-500/25 bg-gradient-to-br from-cyan-950/30 via-gray-800/70 to-gray-800/50 p-5 md:p-7" aria-labelledby="article-generator-title">
+    <Panel aria-labelledby="article-generator-title">
       <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-widest text-cyan-300">Article Generator</p>
+          <p className="text-xs font-semibold uppercase tracking-widest text-[var(--mos-accent-soft)]">Article generator</p>
           <h2 id="article-generator-title" className="mt-1 text-2xl font-semibold text-white">Generate Article Market News</h2>
           <p className="mt-2 max-w-3xl text-sm leading-6 text-gray-300">Isi keyword, angle, struktur kompetitor, dan lima PAA. Sistem selalu melakukan research otomatis dari publisher feeds; reference tambahan dari user bersifat opsional.</p>
         </div>
@@ -256,6 +257,6 @@ export default function ArticleMarketNewsGenerator() {
           <div className="rounded-xl border border-amber-500/25 bg-amber-500/10 p-4 text-sm text-amber-100"><strong>Manual publication gate:</strong> upload DOCX ke SmallSEOTools. Skor harus &gt;90%. Jika di bawah 90%, revisi bagian yang ditandai lalu periksa kembali.</div>
         </div>
       )}
-    </section>
+    </Panel>
   );
 }

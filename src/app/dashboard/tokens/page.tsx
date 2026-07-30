@@ -1,5 +1,6 @@
 'use client';
 import { useEffect, useState } from 'react';
+import { LoadingState, MetricCard, PageHeader, PageStack } from '@/components/ui/dashboard';
 
 type TokenLog = {
   id: string;
@@ -50,29 +51,17 @@ export default function TokensPage() {
       .finally(() => setLoading(false));
   }, []);
 
-  if (loading) return <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500" />;
+  if (loading) return <LoadingState label="Loading token usage" />;
   if (data?.error) return <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-red-300">{data.error}</div>;
 
   return (
-    <div className="space-y-8">
-      <div>
-        <h1 className="text-2xl font-bold text-white">Token Usage</h1>
-        <p className="text-gray-400 mt-1">Track AI consumption by MarketingOS user and provider.</p>
-      </div>
+    <PageStack>
+      <PageHeader eyebrow="Administration / Usage" title="Token usage" description="Track AI consumption by MarketingOS user and provider." />
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="bg-gray-800/50 rounded-xl p-6 border border-gray-700/50">
-          <div className="text-2xl font-bold text-white">{(data?.totalTokens || 0).toLocaleString()}</div>
-          <div className="text-sm text-gray-400">Total Tokens</div>
-        </div>
-        <div className="bg-gray-800/50 rounded-xl p-6 border border-gray-700/50">
-          <div className="text-2xl font-bold text-green-400">${(data?.totalCost || 0).toFixed(6)}</div>
-          <div className="text-sm text-gray-400">Total Cost</div>
-        </div>
-        <div className="bg-gray-800/50 rounded-xl p-6 border border-gray-700/50">
-          <div className="text-2xl font-bold text-white">{data?.totalTasks || 0}</div>
-          <div className="text-sm text-gray-400">Tasks Generated</div>
-        </div>
+      <div className="grid overflow-hidden rounded-[var(--mos-radius-panel)] border border-[var(--mos-border)] bg-[var(--mos-panel)] md:grid-cols-3">
+        <MetricCard label="Total tokens" value={(data?.totalTokens || 0).toLocaleString()} note="Recorded consumption" />
+        <MetricCard label="Total cost" value={`$${(data?.totalCost || 0).toFixed(6)}`} note="Attributed API cost" />
+        <MetricCard label="Tasks generated" value={data?.totalTasks || 0} note="Usage-bearing tasks" />
       </div>
 
       <section className="bg-gray-800/50 rounded-xl p-6 border border-gray-700/50">
@@ -133,6 +122,6 @@ export default function TokensPage() {
           </div>
         ) : <p className="text-gray-500">No token usage data yet.</p>}
       </section>
-    </div>
+    </PageStack>
   );
 }

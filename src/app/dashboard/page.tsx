@@ -1,5 +1,8 @@
 'use client';
+
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
+import { DataTableFrame, EmptyState, LoadingState, MetricCard, PageHeader, PageStack, Panel, SectionHeader, StatusBadge } from '@/components/ui/dashboard';
 
 interface DashboardStats {
   totalTasks: number;
@@ -9,132 +12,96 @@ interface DashboardStats {
   recentTasks: { id: string; title: string; type: string; status: string; created_at: string }[];
 }
 
+const typeLabels: Record<string, string> = {
+  'social-post': 'Social media post',
+  'video-script': 'Video script',
+  'event-plan': 'Event plan',
+  'article-market-news': 'Market news article',
+  'market-research': 'Market research',
+};
+
+const quickActions = [
+  { href: '/dashboard/social-post', index: '01', title: 'Social post', description: 'Develop captions and image directions for social channels.' },
+  { href: '/dashboard/video-script', index: '02', title: 'Video script', description: 'Build structured short-form scripts from a campaign brief.' },
+  { href: '/dashboard/event-plan', index: '03', title: 'Event plan', description: 'Research and prepare event proposals with budget controls.' },
+];
+
 export default function DashboardPage() {
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch('/api/dashboard/stats').then(res => res.json()).then(data => {
+    fetch('/api/dashboard/stats').then(response => response.json()).then(data => {
       setStats(data);
       setLoading(false);
     });
   }, []);
 
-  const typeIcons: Record<string, string> = {
-    'social-post': '📱',
-    'video-script': '🎬',
-    'event-plan': '📋',
-    'article-market-news': '📰',
-    'market-research': '🔎',
-  };
-  const typeLabels: Record<string, string> = {
-    'social-post': 'Social Media Post',
-    'video-script': 'Video Script',
-    'event-plan': 'Event Plan',
-    'article-market-news': 'Article Market News',
-    'market-research': 'Market Research',
-  };
-
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
-      </div>
-    );
-  }
+  if (loading) return <LoadingState label="Loading workspace" />;
 
   return (
-    <div className="space-y-8">
-      <div>
-        <h1 className="text-2xl font-bold text-white">Dashboard</h1>
-        <p className="text-gray-400 mt-1">Welcome to MarketingOS — your AI marketing suite</p>
-      </div>
+    <PageStack>
+      <PageHeader
+        eyebrow="Workspace overview"
+        title="Dashboard"
+        description="Monitor production activity, usage, and recent work across MarketingOS."
+      />
 
-      {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <div className="bg-gray-800/50 rounded-xl p-6 border border-gray-700/50">
-          <div className="text-3xl mb-2">📋</div>
-          <div className="text-2xl font-bold text-white">{stats?.totalTasks || 0}</div>
-          <div className="text-sm text-gray-400">Total Tasks</div>
+      <Panel padding="none">
+        <div className="grid sm:grid-cols-2 lg:grid-cols-4">
+          <MetricCard label="Total tasks" value={stats?.totalTasks || 0} note="All generation workflows" />
+          <MetricCard label="Tokens used" value={stats?.totalTokens?.toLocaleString() || 0} note="Recorded model consumption" />
+          <MetricCard label="Total cost" value={`$${stats?.totalCost?.toFixed(4) || '0.0000'}`} note="Attributed API cost" />
+          <MetricCard label="Team members" value="5" note="Current workspace access" />
         </div>
-        <div className="bg-gray-800/50 rounded-xl p-6 border border-gray-700/50">
-          <div className="text-3xl mb-2">🤖</div>
-          <div className="text-2xl font-bold text-white">{stats?.totalTokens?.toLocaleString() || 0}</div>
-          <div className="text-sm text-gray-400">Tokens Used</div>
-        </div>
-        <div className="bg-gray-800/50 rounded-xl p-6 border border-gray-700/50">
-          <div className="text-3xl mb-2">💰</div>
-          <div className="text-2xl font-bold text-white">${stats?.totalCost?.toFixed(4) || '0.0000'}</div>
-          <div className="text-sm text-gray-400">Total Cost</div>
-        </div>
-        <div className="bg-gray-800/50 rounded-xl p-6 border border-gray-700/50">
-          <div className="text-3xl mb-2">👥</div>
-          <div className="text-2xl font-bold text-white">5</div>
-          <div className="text-sm text-gray-400">Team Members</div>
-        </div>
-      </div>
+      </Panel>
 
-      {/* Quick Actions */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <a href="/dashboard/social-post" className="bg-gradient-to-br from-purple-600/20 to-blue-600/20 rounded-xl p-6 border border-purple-500/20 hover:border-purple-500/40 transition-all group">
-          <div className="text-4xl mb-3">📱</div>
-          <h3 className="text-lg font-semibold text-white group-hover:text-purple-400 transition-colors">Social Media Post</h3>
-          <p className="text-sm text-gray-400 mt-1">Generate captions & images for social media</p>
-        </a>
-        <a href="/dashboard/video-script" className="bg-gradient-to-br from-green-600/20 to-emerald-600/20 rounded-xl p-6 border border-green-500/20 hover:border-green-500/40 transition-all group">
-          <div className="text-4xl mb-3">🎬</div>
-          <h3 className="text-lg font-semibold text-white group-hover:text-green-400 transition-colors">Video Script</h3>
-          <p className="text-sm text-gray-400 mt-1">Create engaging video scripts for Reels/TikTok</p>
-        </a>
-        <a href="/dashboard/event-plan" className="bg-gradient-to-br from-orange-600/20 to-red-600/20 rounded-xl p-6 border border-orange-500/20 hover:border-orange-500/40 transition-all group">
-          <div className="text-4xl mb-3">📋</div>
-          <h3 className="text-lg font-semibold text-white group-hover:text-orange-400 transition-colors">Event Plan</h3>
-          <p className="text-sm text-gray-400 mt-1">Plan events with AI-powered research & proposals</p>
-        </a>
-      </div>
+      <section>
+        <SectionHeader title="Start new work" description="Choose a production workflow. Your brief and generated output remain within that workflow." />
+        <div className="mt-3 grid gap-3 md:grid-cols-3">
+          {quickActions.map(action => (
+            <Link key={action.href} href={action.href} className="group rounded-[var(--mos-radius-panel)] border border-[var(--mos-border)] bg-[var(--mos-panel)] p-5 transition hover:border-[var(--mos-border-strong)] hover:bg-[var(--mos-raised)]">
+              <div className="flex items-center justify-between">
+                <span className="font-mono text-[10px] text-[var(--mos-text-faint)]">{action.index}</span>
+                <span className="text-[var(--mos-text-faint)] transition group-hover:translate-x-0.5 group-hover:text-[var(--mos-accent-soft)]">→</span>
+              </div>
+              <h3 className="mt-8 text-sm font-[560] text-[var(--mos-text)]">{action.title}</h3>
+              <p className="mt-1.5 text-xs leading-5 text-[var(--mos-text-muted)]">{action.description}</p>
+            </Link>
+          ))}
+        </div>
+      </section>
 
-      {/* Tasks by Type */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <div className="bg-gray-800/50 rounded-xl p-6 border border-gray-700/50">
-          <h3 className="text-lg font-semibold text-white mb-4">Tasks by Type</h3>
-          <div className="space-y-3">
-            {stats?.tasksByType?.map(t => (
-              <div key={t.type} className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <span>{typeIcons[t.type] || '📄'}</span>
-                  <span className="text-gray-300 text-sm">{typeLabels[t.type] || t.type}</span>
-                </div>
-                <span className="text-white font-semibold">{t.count}</span>
+      <div className="grid gap-4 lg:grid-cols-[0.75fr_1.25fr]">
+        <Panel>
+          <SectionHeader title="Production mix" description="Completed and in-progress tasks by workflow." />
+          <div className="mt-5 divide-y divide-[var(--mos-border-subtle)]">
+            {stats?.tasksByType?.map(item => (
+              <div key={item.type} className="flex items-center justify-between py-3 first:pt-0 last:pb-0">
+                <span className="text-xs text-[var(--mos-text-secondary)]">{typeLabels[item.type] || item.type}</span>
+                <span className="font-mono text-xs text-[var(--mos-text-muted)]">{item.count}</span>
               </div>
             ))}
-            {(!stats?.tasksByType || stats.tasksByType.length === 0) && (
-              <p className="text-gray-500 text-sm">No tasks yet</p>
-            )}
+            {!stats?.tasksByType?.length && <EmptyState title="No tasks yet" description="Your workflow distribution will appear after the first generation." className="min-h-40" />}
           </div>
-        </div>
+        </Panel>
 
-        <div className="bg-gray-800/50 rounded-xl p-6 border border-gray-700/50">
-          <h3 className="text-lg font-semibold text-white mb-4">Recent Tasks</h3>
-          <div className="space-y-3">
-            {stats?.recentTasks?.map(task => (
-              <div key={task.id} className="flex items-center justify-between py-1">
-                <div className="flex items-center gap-2">
-                  <span>{typeIcons[task.type] || '📄'}</span>
-                  <span className="text-gray-300 text-sm truncate max-w-[200px]">{task.title}</span>
+        <DataTableFrame title="Recent tasks" description="Latest activity across production workflows.">
+          {stats?.recentTasks?.length ? (
+            <div className="divide-y divide-[var(--mos-border-subtle)]">
+              {stats.recentTasks.map(task => (
+                <div key={task.id} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-4 px-5 py-3.5">
+                  <div className="min-w-0">
+                    <p className="truncate text-xs font-medium text-[var(--mos-text-secondary)]">{task.title}</p>
+                    <p className="mt-1 text-[11px] text-[var(--mos-text-faint)]">{typeLabels[task.type] || task.type} · {new Date(task.created_at).toLocaleDateString('id-ID')}</p>
+                  </div>
+                  <StatusBadge tone={task.status === 'completed' ? 'success' : 'warning'} dot>{task.status}</StatusBadge>
                 </div>
-                <span className={`text-xs px-2 py-0.5 rounded-full ${
-                  task.status === 'completed' ? 'bg-green-500/20 text-green-400' : 'bg-yellow-500/20 text-yellow-400'
-                }`}>
-                  {task.status}
-                </span>
-              </div>
-            ))}
-            {(!stats?.recentTasks || stats.recentTasks.length === 0) && (
-              <p className="text-gray-500 text-sm">No recent tasks</p>
-            )}
-          </div>
-        </div>
+              ))}
+            </div>
+          ) : <EmptyState title="No recent tasks" description="Generated content will be listed here." />}
+        </DataTableFrame>
       </div>
-    </div>
+    </PageStack>
   );
 }

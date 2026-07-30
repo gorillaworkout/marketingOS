@@ -4,6 +4,7 @@ import { articleDocxFilename, buildArticleDocxBlob } from '@/lib/article-market-
 import type { ArticleSourceInput } from '@/lib/article-market-news';
 import { buildMarketResearchDocxBlob, marketResearchDocxFilename } from '@/lib/market-research-docx';
 import type { MarketResearchItem } from '@/lib/market-research';
+import { LoadingState, PageHeader, PageStack, Toolbar, FilterGroup } from '@/components/ui/dashboard';
 
 interface HistoryTask {
   id: string;
@@ -75,19 +76,19 @@ export default function HistoryPage() {
     URL.revokeObjectURL(url);
   };
 
-  if (loading) return <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>;
+  if (loading) return <LoadingState label="Loading task history" />;
 
   return (
-    <div className="space-y-8">
-      <div><h1 className="text-2xl font-bold text-white">📁 Task History</h1><p className="text-gray-400 mt-1">View and download all generated content</p></div>
+    <PageStack>
+      <PageHeader eyebrow="Library / Archive" title="Task history" description="Review and download generated content across every production workflow." />
 
-      <div className="flex flex-wrap gap-2">
+      <Toolbar><FilterGroup>
         {(['all', 'social-post', 'video-script', 'event-plan', 'article-market-news', 'market-research'] as const).map(type => (
           <button key={type} onClick={() => setTypeFilter(type)} className={`rounded-lg px-3 py-1.5 text-sm ${typeFilter === type ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-400 hover:text-white'}`}>
             {type === 'all' ? 'All Tasks' : type === 'event-plan' ? 'Event Plans' : typeLabels[type]}
           </button>
         ))}
-      </div>
+      </FilterGroup></Toolbar>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Task List */}
@@ -250,6 +251,6 @@ export default function HistoryPage() {
           )}
         </div>
       </div>
-    </div>
+    </PageStack>
   );
 }

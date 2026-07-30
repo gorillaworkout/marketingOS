@@ -1,5 +1,6 @@
 'use client';
 import { useState, useEffect } from 'react';
+import { Button, FilterGroup, PageHeader, PageStack, Toolbar } from '@/components/ui/dashboard';
 
 interface Template {
   id: string;
@@ -110,19 +111,11 @@ export default function TemplatesPage() {
   };
 
   return (
-    <div>
-      <div className="flex items-center justify-between mb-8">
-        <div>
-          <h1 className="text-2xl font-bold text-white">Template Library</h1>
-          <p className="text-gray-400 text-sm mt-1">Template bawaan dan brief reusable untuk mempercepat content generation. Template buatan Anda tersimpan per akun.</p>
-        </div>
-        <button onClick={handleNew} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm">
-          + New Template
-        </button>
-      </div>
+    <PageStack>
+      <PageHeader eyebrow="Library / Reusable briefs" title="Template library" description="Template bawaan dan brief reusable untuk mempercepat content generation. Template buatan Anda tersimpan per akun." actions={<Button variant="primary" onClick={handleNew}>New template</Button>} />
 
       {/* Filters */}
-      <div className="flex gap-2 mb-6">
+      <Toolbar><FilterGroup>
         {['all', ...TYPES].map(t => (
           <button
             key={t}
@@ -134,7 +127,7 @@ export default function TemplatesPage() {
             {t === 'all' ? 'All' : TYPE_LABELS[t] || t}
           </button>
         ))}
-      </div>
+      </FilterGroup></Toolbar>
 
       {/* Template Form Modal */}
       {showForm && (
@@ -273,6 +266,6 @@ export default function TemplatesPage() {
           ))}
         </div>
       )}
-    </div>
+    </PageStack>
   );
 }

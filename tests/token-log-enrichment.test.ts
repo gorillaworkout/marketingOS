@@ -25,7 +25,8 @@ void describe('Token Log Enrichment', () => {
     assert(providers.has('openrouter'), 'missing openrouter');
     assert(providers.has('codex'), 'missing codex');
     assert(providers.has('claude-code'), 'missing claude-code');
-    assert.strictEqual(providers.size, 3);
+    assert(providers.has('gorillaworkout'), 'missing gorillaworkout');
+    assert.strictEqual(providers.size, 4);
   });
 
   void it('each caller passes taskType in options', () => {
