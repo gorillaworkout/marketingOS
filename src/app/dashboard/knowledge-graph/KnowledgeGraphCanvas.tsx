@@ -23,7 +23,7 @@ export default function KnowledgeGraphCanvas({ nodes, edges, selectedId, onSelec
   onSelect: (node: CanvasNode) => void;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const stateRef = useRef({ rotationX: -0.18, rotationY: 0.48, zoom: 1.32, dragging: false, x: 0, y: 0 });
+  const stateRef = useRef({ rotationX: -0.18, rotationY: 0.48, zoom: 1.32, fitted: false, dragging: false, x: 0, y: 0 });
   const projectedRef = useRef<Projected[]>([]);
   const frameRef = useRef(0);
   const [dragging, setDragging] = useState(false);
@@ -53,6 +53,10 @@ export default function KnowledgeGraphCanvas({ nodes, edges, selectedId, onSelec
     });
     const resize = () => {
       const rect = canvas.getBoundingClientRect();
+      if (!stateRef.current.fitted) {
+        stateRef.current.zoom = rect.width < 640 ? 0.72 : 1.32;
+        stateRef.current.fitted = true;
+      }
       const ratio = Math.min(window.devicePixelRatio || 1, 2);
       canvas.width = Math.max(1, Math.round(rect.width * ratio));
       canvas.height = Math.max(1, Math.round(rect.height * ratio));

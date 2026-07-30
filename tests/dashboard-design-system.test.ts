@@ -118,4 +118,5 @@ test('knowledge graph distinguishes stored and derived edges while animating bot
   assert.match(canvas, /performance\.now/);
   assert.match(canvas, /createRadialGradient\(pulseX/);
   assert.match(canvas, /Animated live signal/);
+  assert.match(canvas, /rect\.width < 640 \? 0\.72 : 1\.32/);
 });
