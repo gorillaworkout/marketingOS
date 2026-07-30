@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/dashboard';
+import { GENERATION_FEATURES } from '@/lib/authorization';
 
 interface User {
   id: string;
@@ -47,8 +48,8 @@ const generateItems = [
   { href: '/dashboard/social-post', label: 'Social post', icon: 'social' },
   { href: '/dashboard/video-script', label: 'Video script', icon: 'video' },
   { href: '/dashboard/event-plan', label: 'Event plan', icon: 'event' },
-  { href: '/dashboard/sop', label: 'Article Market News', icon: 'article', adminOnly: true },
-  { href: '/dashboard/market-research', label: 'Market research', icon: 'research', adminOnly: true },
+  { href: '/dashboard/sop', label: 'Article Market News', icon: 'article' },
+  { href: '/dashboard/market-research', label: 'Market research', icon: 'research' },
 ] satisfies Array<{ href: string; label: string; icon: IconName; adminOnly?: boolean }>;
 
 const resourceItems = [
@@ -77,8 +78,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       if (data.authenticated) {
         setUser(data.user);
         const generationFeature = pathname.split('/').pop() || '';
-        const adminOnlyPages = ['/dashboard/tokens', '/dashboard/analytics', '/dashboard/accounts', '/dashboard/templates', '/dashboard/calendar', '/dashboard/images', '/dashboard/knowledge', '/dashboard/knowledge-graph', '/dashboard/brand-guidelines', '/dashboard/history', '/dashboard/sop', '/dashboard/market-research'];
-        if (data.user.role !== 'admin' && (adminOnlyPages.includes(pathname) || (['social-post', 'video-script', 'event-plan'].includes(generationFeature) && !data.user.enabledFeatures?.includes(generationFeature)))) {
+        const adminOnlyPages = ['/dashboard/tokens', '/dashboard/analytics', '/dashboard/accounts', '/dashboard/templates', '/dashboard/calendar', '/dashboard/images', '/dashboard/knowledge', '/dashboard/knowledge-graph', '/dashboard/brand-guidelines', '/dashboard/history'];
+        if (data.user.role !== 'admin' && (adminOnlyPages.includes(pathname) || (GENERATION_FEATURES.includes(generationFeature as typeof GENERATION_FEATURES[number]) && !data.user.enabledFeatures?.includes(generationFeature)))) {
           router.replace('/dashboard');
         }
       } else {
@@ -132,8 +133,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     ...section,
     items: section.items.filter(item => {
       if (item.adminOnly) return user?.role === 'admin';
-      if (!['social-post', 'video-script', 'event-plan'].includes(item.href.split('/').pop() || '')) return true;
-      return user?.role === 'admin' || user?.enabledFeatures.includes(item.href.split('/').pop() || '');
+      const feature = item.href.split('/').pop() || '';
+      if (!GENERATION_FEATURES.includes(feature as typeof GENERATION_FEATURES[number])) return true;
+      return user?.role === 'admin' || user?.enabledFeatures.includes(feature);
     }),
   })).filter(section => section.items.length);
 

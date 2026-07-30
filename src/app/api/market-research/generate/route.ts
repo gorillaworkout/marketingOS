@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { randomUUID } from 'node:crypto';
-import { requireAdmin } from '@/lib/auth';
+import { requireFeature } from '@/lib/auth';
 import { execute } from '@/lib/database';
 import { rateLimit } from '@/lib/rate-limit';
 import { generateContent, getUserPreferredModel } from '@/lib/openai';
@@ -24,8 +24,8 @@ function parseSelection(content: string): Record<string, unknown> {
 }
 
 export async function POST(request: NextRequest) {
-  const auth = await requireAdmin(request);
-  if (auth instanceof NextResponse) return auth;
+  const auth = await requireFeature(request, 'market-research');
+  if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status });
   const limited = rateLimit(request, `market-research:${auth.id}`);
   if (limited) return limited;
 

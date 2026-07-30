@@ -1,4 +1,10 @@
-export const GENERATION_FEATURES = ['social-post', 'video-script', 'event-plan'] as const;
+export const GENERATION_FEATURES = [
+  'social-post',
+  'video-script',
+  'event-plan',
+  'article-market-news',
+  'market-research',
+] as const;
 export type GenerationFeature = typeof GENERATION_FEATURES[number];
 
 export interface FeaturePrincipal {
