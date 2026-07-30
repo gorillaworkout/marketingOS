@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { buildEventPlanDownload, eventPlanDownloadFilename } from '@/lib/event-plan-download';
 import type { EventPlanResearch } from '@/lib/event-plan-research';
-import { Button, FormField, PageHeader, PageStack, TextArea, TextInput } from '@/components/ui/dashboard';
+import { Button, DataTableFrame, FormField, Panel, PageHeader, PageStack, SectionHeader, StatusBadge, TextArea, TextInput, Toolbar } from '@/components/ui/dashboard';
 
 type BudgetItem = { category: string; estimatedCost: number; notes: string };
 type Budget = { currency: 'IDR'; total?: number; items: BudgetItem[]; contingency?: number; preliminary?: boolean };
@@ -171,7 +171,9 @@ export default function EventPlanPage() {
     <PageStack className="max-w-5xl">
       <PageHeader eyebrow="Create / Events" title="Event plan" description="Riset, proposal, dan budgeting dalam satu workflow dengan kontrol sumber yang jelas." />
 
-      <form onSubmit={handleGenerate} className="space-y-4 rounded-[var(--mos-radius-panel)] border border-[var(--mos-border)] bg-[var(--mos-panel)] p-5 md:p-6">
+      <Panel>
+      <form onSubmit={handleGenerate} className="space-y-5">
+        <SectionHeader title="Event brief" description="Set the operating constraints and optional research sources." />
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <FormField label="Event name" required><TextInput value={eventName} onChange={e => setEventName(e.target.value)} placeholder="e.g., Bloomberg Awarding Night" required /></FormField>
           <FormField label="Location"><TextInput value={location} onChange={e => setLocation(e.target.value)} placeholder="Jakarta" /></FormField>
@@ -182,27 +184,27 @@ export default function EventPlanPage() {
         <FormField label="Research / quotation links" hint="Optional · maximum 5"><TextArea value={researchLinks} onChange={e => setResearchLinks(e.target.value)} rows={4} placeholder={'https://official-vendor.example/proposal\nhttps://hotel.example/price-list'} /><span className="mt-1.5 block text-xs leading-5 text-[var(--mos-text-faint)]">Paste official hotel/vendor pages, proposals, or price lists—one public URL per line. Links require manual verification; do not enter free-form contact claims.</span></FormField>
         <Button type="submit" variant="primary" disabled={loading || !eventName}>{loading ? 'Generating…' : 'Generate plan'}</Button>
       </form>
+      </Panel>
 
-      {loading && progress && <div className="bg-blue-500/10 border border-blue-500/20 text-blue-200 px-4 py-3 rounded-lg" role="status">{progress.progress !== undefined && <span className="font-medium mr-2">{progress.progress}%</span>}{progress.message}</div>}
+      {loading && progress && <div role="status"><Toolbar><span className="text-sm text-[var(--mos-text-secondary)]">{progress.message}</span>{progress.progress !== undefined && <StatusBadge tone="info" dot>{progress.progress}%</StatusBadge>}</Toolbar></div>}
       {error && <div className="bg-red-500/10 border border-red-500/20 text-red-400 px-4 py-3 rounded-lg" role="alert">{error}</div>}
 
       {options.length > 0 && result && (
         <div className="space-y-6">
-          <section><h2 className="text-lg font-semibold text-white mb-3">Choose a plan style</h2><div className="grid grid-cols-1 md:grid-cols-3 gap-3">{options.map((option, index) => <button type="button" key={`${option.style}-${index}`} onClick={() => setSelectedOption(index)} className={`text-left rounded-xl border p-4 transition-colors ${selectedOption === index ? 'border-orange-500 bg-orange-500/10' : 'border-gray-700/50 bg-gray-800/50 hover:border-gray-500'}`}><p className="font-semibold text-white">{option.styleLabel || option.style}</p><p className="text-sm text-gray-300 mt-2 line-clamp-3">{option.concept || option.objective || 'No concept preview available.'}</p><p className="text-xs text-gray-500 mt-3">{option.objective || 'View full plan'}</p></button>)}</div></section>
-          <div className="bg-gray-800/50 rounded-xl p-6 border border-gray-700/50">
-            <h3 className="text-lg font-semibold text-white mb-4">📋 {result.styleLabel || 'Event Plan'}</h3>
-            {result.objective && <Detail label="🎯 Objective" value={result.objective} />}
-            {result.concept && <Detail label="💡 Concept" value={result.concept} />}
-            {result.theme && <Detail label="🎨 Theme" value={result.theme} />}
-            {result.venue && <Detail label="📍 Venue" value={result.venue} />}
-            {targetDate && <Detail label="📅 Event Target Date" value={formatTargetDate(targetDate)} />}
-            {speakers.length > 0 && <div className="mb-4"><label className="text-xs text-gray-500 uppercase tracking-wide">🎤 Speakers</label><ul className="mt-1 space-y-1">{speakers.map((speaker, index) => <li key={index} className="text-gray-300 bg-gray-700/30 p-2 rounded-lg">• {speaker}</li>)}</ul></div>}
+          <section><SectionHeader className="mb-3" title="Choose a plan style" description="Compare concepts and open the full operating plan." /><div className="grid grid-cols-1 md:grid-cols-3 gap-3">{options.map((option, index) => <button type="button" key={`${option.style}-${index}`} onClick={() => setSelectedOption(index)} className={`rounded-[var(--mos-radius-control)] border bg-[var(--mos-panel)] p-4 text-left transition-colors ${selectedOption === index ? 'border-[var(--mos-accent-border)] ring-2 ring-[var(--mos-accent-ring)]' : 'border-[var(--mos-border)] hover:border-[var(--mos-border-strong)]'}`}><p className="font-semibold text-white">{option.styleLabel || option.style}</p><p className="text-sm text-[var(--mos-text-secondary)] mt-2 line-clamp-3">{option.concept || option.objective || 'No concept preview available.'}</p><p className="text-xs text-[var(--mos-text-faint)] mt-3">{option.objective || 'View full plan'}</p></button>)}</div></section>
+          <Panel>
+            <SectionHeader className="mb-5" title={result.styleLabel || 'Event plan'} description="Selected plan details, budget, timeline, and research provenance." />
+            {result.objective && <Detail label="Objective" value={result.objective} />}
+            {result.concept && <Detail label="Concept" value={result.concept} />}
+            {result.theme && <Detail label="Theme" value={result.theme} />}
+            {result.venue && <Detail label="Venue" value={result.venue} />}
+            {targetDate && <Detail label="Event target date" value={formatTargetDate(targetDate)} />}
+            {speakers.length > 0 && <div className="mb-4"><label className="text-xs text-[var(--mos-text-faint)] uppercase tracking-wide">Speakers</label><ul className="mt-2 divide-y divide-[var(--mos-border-subtle)] rounded-[var(--mos-radius-control)] border border-[var(--mos-border)]">{speakers.map((speaker, index) => <li key={index} className="px-3 py-2 text-[var(--mos-text-secondary)]">{speaker}</li>)}</ul></div>}
             <BudgetBreakdown budget={displayBudget} />
-            {result.timeline && <Detail label="📅 Timeline" value={result.timeline} preserveWhitespace />}
+            {result.timeline && <Detail label="Timeline" value={result.timeline} preserveWhitespace />}
             <ResearchPanel research={research} />
-          </div>
-          <div className="flex flex-wrap gap-3"><button type="button" onClick={() => handleDownload('doc')} className="px-4 py-2 bg-orange-600 hover:bg-orange-700 text-white font-medium rounded-lg transition-colors">Download Event Plan (.doc)</button><button type="button" onClick={() => handleDownload('json')} className="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white font-medium rounded-lg transition-colors">Download JSON</button></div>
-          {tokenUsage && <div className="bg-gray-800/50 rounded-xl p-6 border border-gray-700/50"><h3 className="text-lg font-semibold text-white mb-2">💰 Token Usage</h3><p className="text-gray-400">{(tokenUsage.inputTokens || 0) + (tokenUsage.outputTokens || 0)} tokens</p>{tokenUsage.model && <p className="text-xs text-gray-500 mt-1">Model: <span className="text-gray-400">{tokenUsage.model}</span></p>}</div>}
+          </Panel>
+          <Toolbar><div className="flex flex-wrap gap-2"><Button variant="primary" onClick={() => handleDownload('doc')}>Download event plan (.doc)</Button><Button onClick={() => handleDownload('json')}>Download JSON</Button></div>{tokenUsage && <div className="text-right"><p className="text-xs font-medium text-[var(--mos-text-secondary)]">{(tokenUsage.inputTokens || 0) + (tokenUsage.outputTokens || 0)} tokens</p>{tokenUsage.model && <p className="text-[11px] text-[var(--mos-text-faint)]">{tokenUsage.model}</p>}</div>}</Toolbar>
         </div>
       )}
     </PageStack>
@@ -210,12 +212,12 @@ export default function EventPlanPage() {
 }
 
 function Detail({ label, value, preserveWhitespace = false }: { label: string; value: string; preserveWhitespace?: boolean }) {
-  return <div className="mb-4"><label className="text-xs text-gray-500 uppercase tracking-wide">{label}</label><p className={`text-gray-300 mt-1 bg-gray-700/30 p-3 rounded-lg ${preserveWhitespace ? 'whitespace-pre-wrap' : ''}`}>{value}</p></div>;
+  return <div className="mb-4"><label className="text-xs text-[var(--mos-text-faint)] uppercase tracking-wide">{label}</label><p className={`mt-2 border-l border-[var(--mos-border-strong)] pl-3 text-sm leading-6 text-[var(--mos-text-secondary)] ${preserveWhitespace ? 'whitespace-pre-wrap' : ''}`}>{value}</p></div>;
 }
 
 function BudgetBreakdown({ budget }: { budget: Budget | null }) {
-  if (!budget) return <div className="mb-4"><label className="text-xs text-gray-500 uppercase tracking-wide">💰 Budget Breakdown</label><p className="text-gray-400 mt-1 bg-gray-700/30 p-3 rounded-lg">Budget details were unavailable for this plan.</p></div>;
-  return <div className="mb-4"><label className="text-xs text-gray-500 uppercase tracking-wide">💰 Budget Breakdown</label>{budget.preliminary && <p className="mt-1 text-xs text-amber-300">Preliminary IDR allocation based on the budget ceiling. Confirm all figures with vendor quotations.</p>}<div className="mt-1 overflow-x-auto rounded-lg border border-gray-700"><table className="w-full text-sm text-left"><thead className="bg-gray-700/50 text-gray-300"><tr><th className="p-3">Category</th><th className="p-3">Notes</th><th className="p-3 text-right">Estimated cost</th></tr></thead><tbody>{budget.items.length ? budget.items.map((item, index) => <tr key={index} className="border-t border-gray-700 text-gray-300"><td className="p-3">{item.category}</td><td className="p-3">{item.notes}</td><td className="p-3 text-right whitespace-nowrap">{formatIDR(item.estimatedCost)}</td></tr>) : <tr className="border-t border-gray-700 text-gray-400"><td className="p-3" colSpan={3}>No itemized budget details were provided.</td></tr>}</tbody><tfoot className="bg-gray-700/30 text-white"><tr><td className="p-3 font-medium" colSpan={2}>Contingency</td><td className="p-3 text-right whitespace-nowrap">{formatIDR(budget.contingency ?? 0)}</td></tr><tr><td className="p-3 font-semibold" colSpan={2}>Total</td><td className="p-3 text-right font-semibold whitespace-nowrap">{formatIDR(budget.total ?? 0)}</td></tr></tfoot></table></div></div>;
+  if (!budget) return <div className="mb-4"><label className="text-xs text-[var(--mos-text-faint)] uppercase tracking-wide">Budget breakdown</label><p className="mt-2 text-sm text-[var(--mos-text-muted)]">Budget details were unavailable for this plan.</p></div>;
+  return <div className="mb-4"><label className="text-xs text-[var(--mos-text-faint)] uppercase tracking-wide">Budget breakdown</label>{budget.preliminary && <p className="mt-1 text-xs text-amber-300">Preliminary IDR allocation based on the budget ceiling. Confirm all figures with vendor quotations.</p>}<DataTableFrame className="mt-2"><table className="w-full text-sm text-left"><thead className="bg-[var(--mos-raised)] text-[var(--mos-text-secondary)]"><tr><th className="p-3">Category</th><th className="p-3">Notes</th><th className="p-3 text-right">Estimated cost</th></tr></thead><tbody>{budget.items.length ? budget.items.map((item, index) => <tr key={index} className="border-t border-[var(--mos-border)] text-[var(--mos-text-secondary)]"><td className="p-3">{item.category}</td><td className="p-3">{item.notes}</td><td className="p-3 text-right whitespace-nowrap">{formatIDR(item.estimatedCost)}</td></tr>) : <tr className="border-t border-[var(--mos-border)] text-[var(--mos-text-muted)]"><td className="p-3" colSpan={3}>No itemized budget details were provided.</td></tr>}</tbody><tfoot className="bg-[var(--mos-raised)] text-white"><tr><td className="p-3 font-medium" colSpan={2}>Contingency</td><td className="p-3 text-right whitespace-nowrap">{formatIDR(budget.contingency ?? 0)}</td></tr><tr><td className="p-3 font-semibold" colSpan={2}>Total</td><td className="p-3 text-right font-semibold whitespace-nowrap">{formatIDR(budget.total ?? 0)}</td></tr></tfoot></table></DataTableFrame></div>;
 }
 
 function ResearchPanel({ research }: { research: EventPlanResearch }) {

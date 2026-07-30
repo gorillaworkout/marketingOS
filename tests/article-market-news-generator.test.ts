@@ -56,8 +56,8 @@ test('page exposes the admin Article Market News generation workflow', () => {
   assert.match(generator, /`\$\{researchDate\}T\$\{event\.target\.value\}`/);
   assert.doesNotMatch(generator, /type="datetime-local"/);
   assert.match(page, /ArticleMarketNewsGenerator/);
-  assert.match(generator, /Generate Article/);
-  assert.match(generator, /exactly 5 articles/);
+  assert.match(generator, /Generate Article/i);
+  assert.match(generator, /exactly 5 articles/i);
   assert.match(generator, /People Also Ask/);
   assert.match(generator, /Verified Facts/);
 });
@@ -112,8 +112,8 @@ test('user references are optional because the server always performs automated 
   assert.match(route, /researchArticleMarketNews/);
   assert.match(route, /automatedSources/);
   assert.match(route, /sources: \[\.\.\.automatedSources, \.\.\.input\.sources\]/);
-  assert.match(generator, /Reference Articles \(Optional\)/);
-  assert.match(generator, /Isi Contoh/);
+  assert.match(generator, /Reference Articles \(Optional\)/i);
+  assert.match(generator, /Isi contoh/i);
   assert.match(generator, /Lihat contoh input/);
   assert.doesNotMatch(generator, /sources\.length >= 1/);
 });

@@ -12,7 +12,7 @@ test('Event Plan client consumes its SSE generator and exposes structured IDR/da
   assert.doesNotMatch(page, /const data = await res\.json\(\);/);
   assert.match(page, /type="date"/);
   assert.match(page, /formatIDR/);
-  assert.match(page, /Budget Breakdown/);
+  assert.match(page, /Budget breakdown/i);
 });
 
 test('Event Plan generator requires a Rupiah budget breakdown contract', async () => {

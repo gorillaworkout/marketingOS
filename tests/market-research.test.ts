@@ -129,8 +129,8 @@ test('prompt treats brief and publisher text as untrusted data and requires exac
 
 test('Market Research is admin-only, Codex-only, persisted, downloadable, and additively migrated', async () => {
   assert.match(layout, /\/dashboard\/market-research/);
-  assert.match(page, /Market Research/);
-  assert.match(page, /Research Brief/);
+  assert.match(page, /Market research/i);
+  assert.match(page, /Research brief/i);
   assert.match(page, /Latest Update Time/);
   assert.match(page, /Download DOCX/);
   assert.match(route, /requireAdmin\(request\)/);

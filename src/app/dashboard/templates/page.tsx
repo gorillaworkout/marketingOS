@@ -1,6 +1,6 @@
 'use client';
 import { useState, useEffect } from 'react';
-import { Button, FilterGroup, PageHeader, PageStack, Toolbar } from '@/components/ui/dashboard';
+import { Button, EmptyState, FilterGroup, FormField, Panel, PageHeader, PageStack, SectionHeader, Select, StatusBadge, TextArea, TextInput, Toolbar } from '@/components/ui/dashboard';
 
 interface Template {
   id: string;
@@ -18,9 +18,9 @@ interface Template {
 const TYPES = ['social-post', 'video-script', 'event-plan'];
 const PLATFORMS = ['Instagram', 'TikTok', 'YouTube', 'Twitter/X', 'LinkedIn', 'Facebook'];
 const TYPE_LABELS: Record<string, string> = {
-  'social-post': '📱 Social Post',
-  'video-script': '🎬 Video Script',
-  'event-plan': '📋 Event Plan',
+  'social-post': 'Social Post',
+  'video-script': 'Video Script',
+  'event-plan': 'Event Plan',
 };
 
 export default function TemplatesPage() {
@@ -121,7 +121,7 @@ export default function TemplatesPage() {
             key={t}
             onClick={() => setFilter(t)}
             className={`px-4 py-2 rounded-lg text-sm transition-colors ${
-              filter === t ? 'bg-blue-600 text-white' : 'bg-gray-800/50 text-gray-400 hover:text-white hover:bg-gray-700/50'
+              filter === t ? 'bg-blue-600 text-white' : 'bg-[var(--mos-raised)] text-[var(--mos-text-muted)] hover:text-white hover:bg-[var(--mos-raised)]'
             }`}
           >
             {t === 'all' ? 'All' : TYPE_LABELS[t] || t}
@@ -132,100 +132,90 @@ export default function TemplatesPage() {
       {/* Template Form Modal */}
       {showForm && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
-          <div className="bg-gray-800 rounded-xl border border-gray-700 p-6 w-full max-w-lg max-h-[90vh] overflow-y-auto">
-            <h3 className="text-lg font-semibold text-white mb-4">{editingTemplate ? 'Edit Template' : 'New Template'}</h3>
+          <Panel className="w-full max-w-lg max-h-[90vh] overflow-y-auto">
+            <SectionHeader className="mb-4" title={editingTemplate ? 'Edit template' : 'New template'} />
             <div className="space-y-4">
-              <div>
-                <label className="text-xs text-gray-400 mb-1 block">Name *</label>
-                <input
+              <FormField label="Name" required>
+                <TextInput
                   value={form.name}
                   onChange={(e) => setForm({ ...form, name: e.target.value })}
-                  className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white"
                   placeholder="Template name"
                 />
-              </div>
+              </FormField>
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="text-xs text-gray-400 mb-1 block">Type *</label>
-                  <select
+                  <label className="text-xs text-[var(--mos-text-muted)] mb-1 block">Type *</label>
+                  <Select
                     value={form.type}
                     onChange={(e) => setForm({ ...form, type: e.target.value })}
-                    className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white"
                   >
                     {TYPES.map(t => <option key={t} value={t}>{TYPE_LABELS[t]}</option>)}
-                  </select>
+                  </Select>
                 </div>
                 <div>
-                  <label className="text-xs text-gray-400 mb-1 block">Platform</label>
-                  <select
+                  <label className="text-xs text-[var(--mos-text-muted)] mb-1 block">Platform</label>
+                  <Select
                     value={form.platform}
                     onChange={(e) => setForm({ ...form, platform: e.target.value })}
-                    className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white"
                   >
                     <option value="">Any</option>
                     {PLATFORMS.map(p => <option key={p} value={p}>{p}</option>)}
-                  </select>
+                  </Select>
                 </div>
               </div>
               <div>
-                <label className="text-xs text-gray-400 mb-1 block">Brief Template</label>
-                <textarea
+                <label className="text-xs text-[var(--mos-text-muted)] mb-1 block">Brief Template</label>
+                <TextArea
                   value={form.brief_template}
                   onChange={(e) => setForm({ ...form, brief_template: e.target.value })}
                   rows={4}
-                  className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white"
                   placeholder="Template brief with placeholders..."
                 />
               </div>
               <div>
-                <label className="text-xs text-gray-400 mb-1 block">Output Template (JSON)</label>
-                <textarea
+                <label className="text-xs text-[var(--mos-text-muted)] mb-1 block">Output Template (JSON)</label>
+                <TextArea
                   value={form.output_template}
                   onChange={(e) => setForm({ ...form, output_template: e.target.value })}
                   rows={3}
-                  className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white font-mono"
+                  className="font-mono"
                   placeholder='{"format": "...", "sections": [...]}'
                 />
               </div>
               <div>
-                <label className="text-xs text-gray-400 mb-1 block">Tags (comma-separated)</label>
-                <input
+                <label className="text-xs text-[var(--mos-text-muted)] mb-1 block">Tags (comma-separated)</label>
+                <TextInput
                   value={form.tags}
                   onChange={(e) => setForm({ ...form, tags: e.target.value })}
-                  className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white"
                   placeholder="promo, launch, seasonal"
                 />
               </div>
             </div>
             <div className="flex gap-2 mt-6">
-              <button onClick={handleSave} className="flex-1 bg-blue-600 hover:bg-blue-700 text-white text-sm py-2.5 rounded-lg">
+              <Button variant="primary" className="flex-1" onClick={handleSave}>
                 {editingTemplate ? 'Update' : 'Create'} Template
-              </button>
-              <button onClick={() => { setShowForm(false); setEditingTemplate(null); }} className="px-4 bg-gray-700 hover:bg-gray-600 text-gray-300 text-sm py-2.5 rounded-lg">
+              </Button>
+              <Button onClick={() => { setShowForm(false); setEditingTemplate(null); }}>
                 Cancel
-              </button>
+              </Button>
             </div>
-          </div>
+          </Panel>
         </div>
       )}
 
       {/* Template Cards */}
       {templates.length === 0 ? (
-        <div className="bg-gray-800/50 rounded-xl border border-gray-700/50 p-12 text-center">
-          <p className="text-gray-500">No templates yet. Create your first template to get started.</p>
-        </div>
+        <Panel padding="none"><EmptyState title="No templates yet" description="Create your first template to get started." /></Panel>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {templates.map(template => (
-            <div key={template.id} className="bg-gray-800/50 rounded-xl border border-gray-700/50 p-5 hover:border-gray-600/50 transition-colors">
+            <Panel key={template.id} className="transition-colors hover:border-[var(--mos-border-strong)]">
               <div className="flex items-start justify-between mb-3">
                 <div>
                   <h3 className="text-white font-medium">{template.name}</h3>
-                  <p className="text-xs text-gray-500 mt-0.5">{TYPE_LABELS[template.type] || template.type}</p>
+                  <p className="text-xs text-[var(--mos-text-faint)] mt-0.5">{TYPE_LABELS[template.type] || template.type}</p>
                 </div>
-                <span className="text-xs bg-gray-700/50 text-gray-400 px-2 py-1 rounded-full">
-                  {template.is_builtin ? 'Built-in' : `Used ${template.use_count}x`}
-                </span>
+                <StatusBadge>{template.is_builtin ? 'Built-in' : `Used ${template.use_count}x`}</StatusBadge>
               </div>
 
               {template.platform && (
@@ -233,36 +223,29 @@ export default function TemplatesPage() {
               )}
 
               {template.brief_template && (
-                <p className="text-xs text-gray-400 line-clamp-3 mb-3">{template.brief_template}</p>
+                <p className="text-xs text-[var(--mos-text-muted)] line-clamp-3 mb-3">{template.brief_template}</p>
               )}
 
               {template.tags && (
                 <div className="flex gap-1 flex-wrap mb-3">
                   {template.tags.split(',').map((tag, i) => (
-                    <span key={i} className="text-[10px] bg-gray-700/50 text-gray-500 px-2 py-0.5 rounded">{tag.trim()}</span>
+                    <span key={i} className="text-[10px] bg-[var(--mos-raised)] text-[var(--mos-text-faint)] px-2 py-0.5 rounded">{tag.trim()}</span>
                   ))}
                 </div>
               )}
 
-              <div className="flex gap-2 pt-3 border-t border-gray-700/30">
-                <button
-                  onClick={() => handleUse(template)}
-                  className="flex-1 bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 text-xs py-2 rounded-lg"
-                >
+              <div className="flex gap-2 pt-3 border-t border-[var(--mos-border)]">
+                <Button variant="primary" size="sm" className="flex-1" onClick={() => handleUse(template)}>
                   Use Template
-                </button>
+                </Button>
                 {!template.is_builtin && (
                   <>
-                    <button onClick={() => handleEdit(template)} className="text-xs text-gray-400 hover:text-white px-3 py-2 rounded-lg hover:bg-gray-700/50">
-                      Edit
-                    </button>
-                    <button onClick={() => handleDelete(template.id)} className="text-xs text-red-400 hover:text-red-300 px-3 py-2 rounded-lg hover:bg-red-500/10">
-                      Delete
-                    </button>
+                    <Button size="sm" onClick={() => handleEdit(template)}>Edit</Button>
+                    <Button size="sm" variant="danger" onClick={() => handleDelete(template.id)}>Delete</Button>
                   </>
                 )}
               </div>
-            </div>
+            </Panel>
           ))}
         </div>
       )}

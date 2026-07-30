@@ -44,21 +44,27 @@ export async function PUT(request: NextRequest) {
   const body = await request.json();
   const { model, taskType } = body;
 
-  if (!model || !AVAILABLE_MODELS.find(m => m.id === model)) {
-    return NextResponse.json({ error: 'Invalid model' }, { status: 400 });
-  }
-
   if (taskType) {
     // Save per-task preference
     const validTaskTypes = ['caption', 'image-prompt', 'video-script', 'event-plan'];
     if (!validTaskTypes.includes(taskType)) {
       return NextResponse.json({ error: 'Invalid task type' }, { status: 400 });
     }
+    if (model === null) {
+      await execute('DELETE FROM task_model_preferences WHERE user_id = ? AND task_type = ?', [userId, taskType]);
+      return NextResponse.json({ success: true, model: null, taskType });
+    }
+    if (!model || !AVAILABLE_MODELS.find(m => m.id === model)) {
+      return NextResponse.json({ error: 'Invalid model' }, { status: 400 });
+    }
     const modelInfo = AVAILABLE_MODELS.find(m => m.id === model);
     await execute(`INSERT INTO task_model_preferences (id, user_id, task_type, model, provider, updated_at)
        VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
        ON CONFLICT(user_id, task_type) DO UPDATE SET model = excluded.model, provider = excluded.provider, updated_at = CURRENT_TIMESTAMP`, [uuidv4(), userId, taskType, model, modelInfo?.provider || 'openrouter']);
   } else {
+    if (!model || !AVAILABLE_MODELS.find(m => m.id === model)) {
+      return NextResponse.json({ error: 'Invalid model' }, { status: 400 });
+    }
     // Save global preference
     await execute(`INSERT INTO user_preferences (id, user_id, preferred_model, updated_at)
        VALUES (?, ?, ?, CURRENT_TIMESTAMP)

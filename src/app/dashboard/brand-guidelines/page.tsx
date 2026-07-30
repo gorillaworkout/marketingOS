@@ -1,6 +1,6 @@
 'use client';
 import { useState, useEffect } from 'react';
-import { Button, PageHeader, PageStack } from '@/components/ui/dashboard';
+import { Button, EmptyState, FormField, Panel, PageHeader, PageStack, SectionHeader, TextArea, TextInput } from '@/components/ui/dashboard';
 
 interface BrandGuideline {
   id: string;
@@ -77,7 +77,7 @@ export default function BrandGuidelinesPage() {
       body: JSON.stringify(body),
     });
     if (res.ok) {
-      setSaveMsg(editing ? '✅ Updated!' : '✅ Created!');
+      setSaveMsg(editing ? 'Guideline updated.' : 'Guideline created.');
       setTimeout(() => setSaveMsg(''), 3000);
       resetForm();
       fetchGuidelines();
@@ -100,102 +100,68 @@ export default function BrandGuidelinesPage() {
 
       {/* Form */}
       {showForm && (
-        <div className="bg-gray-800/50 rounded-xl p-6 border border-gray-700/50 space-y-4">
-          <h3 className="text-lg font-semibold text-white">{editing ? 'Edit Guideline' : 'New Brand Guideline'}</h3>
+        <Panel className="space-y-4">
+          <SectionHeader title={editing ? 'Edit guideline' : 'New brand guideline'} />
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-300 mb-1">Brand Name *</label>
-              <input value={form.brand_name} onChange={e => setForm({ ...form, brand_name: e.target.value })}
-                className="w-full px-3 py-2 bg-gray-700/50 border border-gray-600 rounded-lg text-white" placeholder="Dupoin Futures" />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-300 mb-1">Tone of Voice</label>
-              <input value={form.tone_of_voice} onChange={e => setForm({ ...form, tone_of_voice: e.target.value })}
-                className="w-full px-3 py-2 bg-gray-700/50 border border-gray-600 rounded-lg text-white" placeholder="Professional, friendly, trustworthy" />
-            </div>
+            <FormField label="Brand name" required><TextInput value={form.brand_name} onChange={e => setForm({ ...form, brand_name: e.target.value })} placeholder="Dupoin Futures" /></FormField>
+            <FormField label="Tone of voice"><TextInput value={form.tone_of_voice} onChange={e => setForm({ ...form, tone_of_voice: e.target.value })} placeholder="Professional, friendly, trustworthy" /></FormField>
           </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-300 mb-1">Target Market</label>
-            <input value={form.target_market} onChange={e => setForm({ ...form, target_market: e.target.value })}
-              className="w-full px-3 py-2 bg-gray-700/50 border border-gray-600 rounded-lg text-white" placeholder="Indonesian traders, 25-45, middle-upper income" />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-300 mb-1">Key Messages</label>
-            <textarea value={form.key_messages} onChange={e => setForm({ ...form, key_messages: e.target.value })} rows={2}
-              className="w-full px-3 py-2 bg-gray-700/50 border border-gray-600 rounded-lg text-white" placeholder="Trusted broker, fast execution, local support" />
-          </div>
+          <FormField label="Target market"><TextInput value={form.target_market} onChange={e => setForm({ ...form, target_market: e.target.value })} placeholder="Indonesian traders, 25-45, middle-upper income" /></FormField>
+          <FormField label="Key messages"><TextArea value={form.key_messages} onChange={e => setForm({ ...form, key_messages: e.target.value })} rows={2} placeholder="Trusted broker, fast execution, local support" /></FormField>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-300 mb-1">✅ DO (one per line)</label>
-              <textarea value={form.do_list} onChange={e => setForm({ ...form, do_list: e.target.value })} rows={4}
-                className="w-full px-3 py-2 bg-gray-700/50 border border-gray-600 rounded-lg text-white" placeholder={"Use data-driven claims\nInclude risk disclaimers\nShow real platform screenshots"} />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-300 mb-1">❌ DON&apos;T (one per line)</label>
-              <textarea value={form.dont_list} onChange={e => setForm({ ...form, dont_list: e.target.value })} rows={4}
-                className="w-full px-3 py-2 bg-gray-700/50 border border-gray-600 rounded-lg text-white" placeholder={"Promise guaranteed profits\nUse overly aggressive language\nMention competitors by name"} />
-            </div>
+            <FormField label="Do" hint="One per line"><TextArea value={form.do_list} onChange={e => setForm({ ...form, do_list: e.target.value })} rows={4} placeholder={"Use data-driven claims\nInclude risk disclaimers\nShow real platform screenshots"} /></FormField>
+            <FormField label="Don't" hint="One per line"><TextArea value={form.dont_list} onChange={e => setForm({ ...form, dont_list: e.target.value })} rows={4} placeholder={"Promise guaranteed profits\nUse overly aggressive language\nMention competitors by name"} /></FormField>
           </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-300 mb-1">Example Content (optional)</label>
-            <textarea value={form.examples} onChange={e => setForm({ ...form, examples: e.target.value })} rows={3}
-              className="w-full px-3 py-2 bg-gray-700/50 border border-gray-600 rounded-lg text-white" placeholder="Paste a sample caption/post that represents the brand voice..." />
-          </div>
+          <FormField label="Example content" hint="Optional"><TextArea value={form.examples} onChange={e => setForm({ ...form, examples: e.target.value })} rows={3} placeholder="Paste a sample caption/post that represents the brand voice..." /></FormField>
           <div className="flex gap-2">
-            <button onClick={handleSave} className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg">
-              {editing ? '💾 Update' : '✨ Create'}
-            </button>
-            <button onClick={resetForm} className="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded-lg">Cancel</button>
+            <Button variant="primary" onClick={handleSave}>{editing ? 'Update' : 'Create'}</Button>
+            <Button onClick={resetForm}>Cancel</Button>
           </div>
-        </div>
+        </Panel>
       )}
 
       {/* List */}
       <div className="space-y-4">
         {guidelines.length === 0 && !showForm && (
-          <div className="bg-gray-800/50 rounded-xl p-8 border border-gray-700/50 text-center">
-            <p className="text-4xl mb-3">🏷️</p>
-            <p className="text-gray-400">No brand guidelines yet</p>
-            <p className="text-gray-600 text-sm mt-1">Create one to make AI-generated content match your brand voice</p>
-          </div>
+          <Panel padding="none"><EmptyState title="No brand guidelines yet" description="Create one to make AI-generated content match your brand voice." /></Panel>
         )}
         {guidelines.map(g => (
-          <div key={g.id} className="bg-gray-800/50 rounded-xl p-6 border border-gray-700/50">
+          <Panel key={g.id}>
             <div className="flex items-start justify-between mb-3">
               <div>
                 <h3 className="text-lg font-semibold text-white">{g.brand_name}</h3>
                 {g.tone_of_voice && <p className="text-sm text-blue-400">{g.tone_of_voice}</p>}
               </div>
               <div className="flex gap-2">
-                <button onClick={() => startEdit(g)} className="text-xs px-3 py-1 bg-gray-700/50 hover:bg-gray-700 text-gray-300 rounded-lg">✏️ Edit</button>
-                <button onClick={() => handleDelete(g.id)} className="text-xs px-3 py-1 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-lg">🗑️ Delete</button>
+                <Button size="sm" onClick={() => startEdit(g)}>Edit</Button>
+                <Button size="sm" variant="danger" onClick={() => handleDelete(g.id)}>Delete</Button>
               </div>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
-              {g.target_market && <div><span className="text-gray-500">Target:</span> <span className="text-gray-300">{g.target_market}</span></div>}
-              {g.key_messages && <div><span className="text-gray-500">Key Messages:</span> <span className="text-gray-300">{g.key_messages}</span></div>}
+              {g.target_market && <div><span className="text-[var(--mos-text-faint)]">Target:</span> <span className="text-[var(--mos-text-secondary)]">{g.target_market}</span></div>}
+              {g.key_messages && <div><span className="text-[var(--mos-text-faint)]">Key Messages:</span> <span className="text-[var(--mos-text-secondary)]">{g.key_messages}</span></div>}
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-3 text-sm">
               {g.do_list?.length > 0 && (
                 <div className="bg-green-500/5 rounded-lg p-3 border border-green-500/10">
-                  <p className="text-green-400 font-medium mb-1">✅ DO</p>
-                  <ul className="text-gray-400 space-y-1">{g.do_list.map((d, i) => <li key={i}>• {d}</li>)}</ul>
+                  <p className="text-green-400 font-medium mb-1">Do</p>
+                  <ul className="text-[var(--mos-text-muted)] space-y-1">{g.do_list.map((d, i) => <li key={i}>• {d}</li>)}</ul>
                 </div>
               )}
               {g.dont_list?.length > 0 && (
                 <div className="bg-red-500/5 rounded-lg p-3 border border-red-500/10">
-                  <p className="text-red-400 font-medium mb-1">❌ DON&apos;T</p>
-                  <ul className="text-gray-400 space-y-1">{g.dont_list.map((d, i) => <li key={i}>• {d}</li>)}</ul>
+                  <p className="text-red-400 font-medium mb-1">Don&apos;t</p>
+                  <ul className="text-[var(--mos-text-muted)] space-y-1">{g.dont_list.map((d, i) => <li key={i}>• {d}</li>)}</ul>
                 </div>
               )}
             </div>
             {g.examples && (
-              <div className="mt-3 bg-gray-900/50 rounded-lg p-3">
-                <p className="text-xs text-gray-500 mb-1">Example Style:</p>
-                <p className="text-gray-400 text-sm">{g.examples}</p>
+              <div className="mt-3 bg-[var(--mos-surface)] rounded-lg p-3">
+                <p className="text-xs text-[var(--mos-text-faint)] mb-1">Example Style:</p>
+                <p className="text-[var(--mos-text-muted)] text-sm">{g.examples}</p>
               </div>
             )}
-          </div>
+          </Panel>
         ))}
       </div>
     </PageStack>

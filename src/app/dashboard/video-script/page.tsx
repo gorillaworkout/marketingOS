@@ -1,6 +1,19 @@
 'use client';
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { PageHeader, PageStack } from '@/components/ui/dashboard';
+import {
+  Button,
+  EmptyState,
+  FormField,
+  Panel,
+  PageHeader,
+  PageStack,
+  SectionHeader,
+  Select,
+  StatusBadge,
+  TextArea,
+  TextInput,
+  Toolbar,
+} from '@/components/ui/dashboard';
 
 interface ProgressState {
   step: string;
@@ -45,10 +58,10 @@ const STEP_ICONS: Record<string, string> = {
   error: '!',
 };
 
-const STYLE_COLORS: Record<string, { border: string; bg: string; accent: string }> = {
-  'high-energy': { border: 'border-orange-500/40', bg: 'from-orange-600/10 to-red-600/10', accent: 'text-orange-400' },
-  professional: { border: 'border-blue-500/40', bg: 'from-blue-600/10 to-indigo-600/10', accent: 'text-blue-400' },
-  cinematic: { border: 'border-purple-500/40', bg: 'from-purple-600/10 to-pink-600/10', accent: 'text-purple-400' },
+const STYLE_COLORS: Record<string, { border: string; accent: string }> = {
+  'high-energy': { border: 'border-orange-500/40', accent: 'text-orange-400' },
+  professional: { border: 'border-blue-500/40', accent: 'text-blue-400' },
+  cinematic: { border: 'border-purple-500/40', accent: 'text-purple-400' },
 };
 
 export default function VideoScriptPage() {
@@ -135,7 +148,7 @@ export default function VideoScriptPage() {
     setStep('preview');
     setKnowledgeSaved(false);
     setTaskId(null);
-    setProgress({ step: 'preview', progress: 0, message: '🚀 Starting preview generation...', elapsed: 0 });
+    setProgress({ step: 'preview', progress: 0, message: 'Starting preview generation...', elapsed: 0 });
 
     abortControllerRef.current?.abort();
     const controller = new AbortController();
@@ -190,7 +203,7 @@ export default function VideoScriptPage() {
                 setTokenUsage(r.usage);
                 setStep('preview');
               }
-              setProgress({ step: 'done', progress: 100, message: '✅ Preview complete!', elapsed });
+              setProgress({ step: 'done', progress: 100, message: 'Preview complete!', elapsed });
               stopElapsedTimer();
               setTimeout(() => setProgress(null), 3000);
               setLoading(false);
@@ -249,7 +262,7 @@ export default function VideoScriptPage() {
     setError('');
     setResult(null);
     setStep('full');
-    setProgress({ step: 'full', progress: 0, message: '🎬 Starting full script generation...', elapsed: 0 });
+    setProgress({ step: 'full', progress: 0, message: 'Starting full script generation...', elapsed: 0 });
 
     abortControllerRef.current?.abort();
     const controller = new AbortController();
@@ -316,7 +329,7 @@ export default function VideoScriptPage() {
                 setTokenUsage(r.usage);
                 fetchScripts();
               }
-              setProgress({ step: 'done', progress: 100, message: '✅ Full script complete!', elapsed });
+              setProgress({ step: 'done', progress: 100, message: 'Full script complete!', elapsed });
               stopElapsedTimer();
               setTimeout(() => setProgress(null), 3000);
               setLoading(false);
@@ -387,7 +400,7 @@ export default function VideoScriptPage() {
       });
       if (res.ok) {
         const msgs = ['', '👎 Saved', '😐 Saved', '', '👍 Saved', '⭐ Saved'];
-        setRatingMessage(msgs[rating] || '✅ Rated');
+        setRatingMessage(msgs[rating] || 'Rated');
         setTimeout(() => setRatingMessage(''), 3000);
       }
     } catch {}
@@ -471,54 +484,47 @@ export default function VideoScriptPage() {
         <div className="lg:col-span-2 space-y-6">
           {/* Step Tracker */}
           {step !== 'form' && (
-            <div className="bg-gray-800/50 rounded-xl p-4 border border-gray-700/50">
+            <Toolbar>
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
                   <div className={`flex items-center gap-1.5 ${step === 'preview' || step === 'edit' || step === 'full' ? 'text-green-400' : 'text-gray-600'}`}>
-                    <span className="text-sm">1️⃣</span>
+                    <span className="text-xs">01</span>
                     <span className="text-xs font-medium">Preview</span>
                   </div>
                   <span className="text-gray-600">—</span>
                   <div className={`flex items-center gap-1.5 ${step === 'edit' || step === 'full' ? 'text-green-400' : 'text-gray-600'}`}>
-                    <span className="text-sm">2️⃣</span>
+                    <span className="text-xs">02</span>
                     <span className="text-xs font-medium">Edit</span>
                   </div>
                   <span className="text-gray-600">—</span>
                   <div className={`flex items-center gap-1.5 ${step === 'full' && result ? 'text-green-400' : 'text-gray-600'}`}>
-                    <span className="text-sm">3️⃣</span>
+                    <span className="text-xs">03</span>
                     <span className="text-xs font-medium">Generate</span>
                   </div>
                 </div>
-                <button onClick={handleStartOver}
-                  className="text-xs px-3 py-1.5 bg-gray-700/50 hover:bg-gray-700 text-gray-400 rounded-lg transition-colors">
-                  🔄 Start Over
-                </button>
+                <Button size="sm" onClick={handleStartOver}>Start over</Button>
               </div>
-            </div>
+            </Toolbar>
           )}
 
           {/* Step 1: Input Form */}
           {step === 'form' && (
-            <form onSubmit={handleGeneratePreview} className="bg-gray-800/50 rounded-xl p-6 border border-gray-700/50 space-y-4">
+            <Panel>
+            <form onSubmit={handleGeneratePreview} className="space-y-5">
+              <SectionHeader title="Video brief" description="Set the format and audience before comparing creative directions." />
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-300 mb-1">Platform</label>
-                  <select value={platform} onChange={e => setPlatform(e.target.value)}
-                    className="w-full px-3 py-2 bg-gray-700/50 border border-gray-600 rounded-lg text-white focus:ring-2 focus:ring-blue-500">
+                <FormField label="Platform">
+                  <Select value={platform} onChange={e => setPlatform(e.target.value)}>
                     <option>Instagram Reels</option><option>TikTok</option><option>YouTube Shorts</option><option>YouTube</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-300 mb-1">Duration</label>
-                  <select value={duration} onChange={e => setDuration(e.target.value)}
-                    className="w-full px-3 py-2 bg-gray-700/50 border border-gray-600 rounded-lg text-white focus:ring-2 focus:ring-blue-500">
+                  </Select>
+                </FormField>
+                <FormField label="Duration">
+                  <Select value={duration} onChange={e => setDuration(e.target.value)}>
                     <option>15-30 seconds</option><option>30-45 seconds</option><option>45-60 seconds</option><option>1-3 minutes</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-300 mb-1">Target Audience</label>
-                  <select value={targetAudience} onChange={e => setTargetAudience(e.target.value)}
-                    className="w-full px-3 py-2 bg-gray-700/50 border border-gray-600 rounded-lg text-white focus:ring-2 focus:ring-blue-500">
+                  </Select>
+                </FormField>
+                <FormField label="Target audience">
+                  <Select value={targetAudience} onChange={e => setTargetAudience(e.target.value)}>
                     <option value="">Pilih audience...</option>
                     <option value="Trader Pemula">Trader Pemula</option>
                     <option value="Trader Aktif">Trader Aktif</option>
@@ -529,48 +535,40 @@ export default function VideoScriptPage() {
                     <option value="Pengusaha">Pengusaha</option>
                     <option value="Karyawan & Profesional Muda">Karyawan & Profesional Muda</option>
                     <option value="General Public">General Public</option>
-                  </select>
-                </div>
+                  </Select>
+                </FormField>
               </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-300 mb-1">Event / Topic</label>
-                <textarea value={event} onChange={e => setEvent(e.target.value)} rows={3}
-                  className="w-full px-3 py-2 bg-gray-700/50 border border-gray-600 rounded-lg text-white placeholder-gray-500 focus:ring-2 focus:ring-blue-500"
+              <FormField label="Event / topic" required>
+                <TextArea value={event} onChange={e => setEvent(e.target.value)} rows={3}
                   placeholder="Describe the event or topic for the video..." required />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-300 mb-1">Reference Links (optional)</label>
-                <input type="text" value={references} onChange={e => setReferences(e.target.value)}
-                  className="w-full px-3 py-2 bg-gray-700/50 border border-gray-600 rounded-lg text-white placeholder-gray-500 focus:ring-2 focus:ring-blue-500"
+              </FormField>
+              <FormField label="Reference links" hint="Optional">
+                <TextInput type="text" value={references} onChange={e => setReferences(e.target.value)}
                   placeholder="e.g., TikTok/IG links for inspiration" />
-              </div>
+              </FormField>
               <div className="flex items-center gap-3">
-                <button type="submit" disabled={loading || !event}
-                  className="px-6 py-2.5 bg-green-600 hover:bg-green-700 disabled:bg-green-800/50 disabled:cursor-not-allowed text-white font-medium rounded-lg transition-colors">
-                  {loading ? '⏳ Generating 3 previews...' : '🎬 Generate 3 Preview Options'}
-                </button>
+                <Button type="submit" variant="primary" disabled={loading || !event}>
+                  {loading ? 'Generating three previews…' : 'Generate three preview options'}
+                </Button>
               </div>
             </form>
+            </Panel>
           )}
 
           {/* Streaming Progress Indicator */}
           {progress && loading && (
-            <div className="bg-gray-800/80 rounded-xl p-6 border border-gray-700/50 space-y-4">
-              <h3 className="text-lg font-semibold text-white">
-                {step === 'full' ? '🤖 Generating Full Script...' : '🤖 Generating 3 Preview Options...'}
-              </h3>
+            <Panel className="space-y-4">
+              <SectionHeader title={step === 'full' ? 'Generating full script' : 'Generating preview options'} description={progress.message} action={<StatusBadge tone="info" dot>{progress.progress}%</StatusBadge>} />
 
-              <div className="relative h-3 bg-gray-700 rounded-full overflow-hidden">
+              <div className="relative h-3 bg-[var(--mos-raised)] rounded-full overflow-hidden">
                 <div
-                  className="h-full bg-gradient-to-r from-green-500 to-emerald-500 rounded-full transition-all duration-700 ease-out"
+                  className="h-full rounded-full bg-[var(--mos-accent)] transition-all duration-700 ease-out"
                   style={{ width: `${progress.progress}%` }}
                 />
-                <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/10 to-transparent animate-[shimmer_2s_infinite]"
-                  style={{ animation: 'shimmer 2s infinite' }} />
               </div>
 
               <div className="flex items-center justify-between">
-                <p className="text-sm text-gray-300">{progress.message}</p>
+                <p className="text-sm text-[var(--mos-text-secondary)]">{progress.message}</p>
                 <span className="text-sm font-mono text-green-400">{progress.progress}%</span>
               </div>
 
@@ -584,7 +582,7 @@ export default function VideoScriptPage() {
                       <span className={`text-sm ${
                         status === 'completed' ? 'text-green-400' : status === 'active' ? 'text-green-400' : 'text-gray-600'
                       }`}>
-                        {status === 'completed' ? '✅' : status === 'active' ? `${STEP_ICONS[stepName]}` : '⬚'}
+                        {status === 'completed' ? '●' : status === 'active' ? `${STEP_ICONS[stepName]}` : '○'}
                       </span>
                       <span className={`text-sm ${
                         status === 'completed' ? 'text-green-400' : status === 'active' ? 'text-white font-medium' : 'text-gray-600'
@@ -599,13 +597,13 @@ export default function VideoScriptPage() {
                 })}
               </div>
 
-              <div className="flex items-center gap-2 pt-2 border-t border-gray-700/50">
-                <span className="text-xs text-gray-500">⏱️ Elapsed: {progress.elapsed}s</span>
+              <div className="flex items-center gap-2 pt-2 border-t border-[var(--mos-border)]">
+                <span className="text-xs text-[var(--mos-text-faint)]">Elapsed: {progress.elapsed}s</span>
                 {progress.elapsed > 30 && (
                   <span className="text-xs text-yellow-500/70">— {step === 'full' ? 'generating full script' : 'generating 3 previews in parallel'}</span>
                 )}
               </div>
-            </div>
+            </Panel>
           )}
 
           {error && <div className="bg-red-500/10 border border-red-500/20 text-red-400 px-4 py-3 rounded-lg">{error}</div>}
@@ -614,10 +612,10 @@ export default function VideoScriptPage() {
           {previewOptions && previewOptions.length > 0 && step !== 'form' && !loading && step !== 'full' && (
             <div className="space-y-4">
               <div className="flex items-center justify-between">
-                <h3 className="text-lg font-semibold text-white">🎯 Pick Your Favorite Style</h3>
+                <SectionHeader title="Select a preferred style" description="Choose one direction to refine into the full script." />
                 {step === 'edit' && selectedIndex !== null && (
                   <button onClick={handleBackToPreview}
-                    className="text-xs px-3 py-1.5 bg-gray-700/50 hover:bg-gray-700 text-gray-300 rounded-lg transition-colors">
+                    className="text-xs px-3 py-1.5 bg-[var(--mos-raised)] hover:bg-[var(--mos-raised)] text-[var(--mos-text-secondary)] rounded-lg transition-colors">
                     ← Back to options
                   </button>
                 )}
@@ -631,14 +629,15 @@ export default function VideoScriptPage() {
                   const isDisabled = step === 'edit' && selectedIndex !== null && !isSelected;
 
                   return (
-                    <div
+                    <Panel
+                      padding="none"
                       key={index}
-                      className={`bg-gradient-to-br ${colors.bg} rounded-xl border transition-all ${
+                      className={`transition-all ${
                         isDisabled
-                          ? 'opacity-40 cursor-default border-gray-700/30'
+                          ? 'opacity-40 cursor-default border-[var(--mos-border)]'
                           : isSelected
-                          ? `${colors.border} ring-2 ring-offset-2 ring-offset-gray-900 ${colors.border.replace('/40', '/60')} cursor-pointer`
-                          : 'border-gray-700/50 hover:border-gray-600/50 cursor-pointer'
+                          ? 'border-[var(--mos-accent-border)] ring-2 ring-[var(--mos-accent-ring)] cursor-pointer'
+                          : 'border-[var(--mos-border)] hover:border-[var(--mos-border)] cursor-pointer'
                       }`}
                       onClick={() => !isDisabled && !isSelected && handleSelectPreview(index)}
                     >
@@ -646,7 +645,7 @@ export default function VideoScriptPage() {
                         {/* Style Label */}
                         <div className="flex items-center justify-between mb-3">
                           <span className={`text-sm font-bold ${colors.accent}`}>{opt.styleLabel}</span>
-                          {isSelected && <span className="text-xs px-2 py-0.5 bg-green-500/20 text-green-400 rounded-full">✅ Selected</span>}
+                          {isSelected && <StatusBadge tone="success" dot>Selected</StatusBadge>}
                         </div>
 
                         {/* Hook preview */}
@@ -656,59 +655,59 @@ export default function VideoScriptPage() {
 
                         {/* Context */}
                         {opt.context && (
-                          <p className="text-gray-400 text-xs leading-relaxed mb-3 line-clamp-3">{opt.context}</p>
+                          <p className="text-[var(--mos-text-muted)] text-xs leading-relaxed mb-3 line-clamp-3">{opt.context}</p>
                         )}
 
                         {/* Tags */}
                         <div className="flex flex-wrap gap-1.5 mb-3">
-                          {opt.hook && <span className="text-[10px] px-1.5 py-0.5 bg-gray-700/50 text-green-300 rounded">🎣 Hook</span>}
-                          {opt.context && <span className="text-[10px] px-1.5 py-0.5 bg-gray-700/50 text-blue-300 rounded">📖 Context</span>}
-                          {opt.highlight && <span className="text-[10px] px-1.5 py-0.5 bg-gray-700/50 text-purple-300 rounded">✨ Highlight</span>}
-                          {opt.brandTieIn && <span className="text-[10px] px-1.5 py-0.5 bg-gray-700/50 text-green-300 rounded">🔗 Brand</span>}
-                          {opt.cta && <span className="text-[10px] px-1.5 py-0.5 bg-gray-700/50 text-yellow-300 rounded">🎯 CTA</span>}
+                          {opt.hook && <span className="text-[10px] px-1.5 py-0.5 bg-[var(--mos-raised)] text-green-300 rounded">Hook</span>}
+                          {opt.context && <span className="text-[10px] px-1.5 py-0.5 bg-[var(--mos-raised)] text-blue-300 rounded">Context</span>}
+                          {opt.highlight && <span className="text-[10px] px-1.5 py-0.5 bg-[var(--mos-raised)] text-purple-300 rounded">Highlight</span>}
+                          {opt.brandTieIn && <span className="text-[10px] px-1.5 py-0.5 bg-[var(--mos-raised)] text-green-300 rounded">Brand</span>}
+                          {opt.cta && <span className="text-[10px] px-1.5 py-0.5 bg-[var(--mos-raised)] text-yellow-300 rounded">CTA</span>}
                         </div>
 
                         {/* Select button */}
                         {!isSelected && !isDisabled && (
                           <button
                             onClick={(e) => { e.stopPropagation(); handleSelectPreview(index); }}
-                            className="w-full mt-2 px-4 py-2 bg-gray-700/50 hover:bg-gray-600/50 text-white text-sm font-medium rounded-lg transition-colors border border-gray-600/50"
+                            className="w-full mt-2 px-4 py-2 bg-[var(--mos-raised)] hover:bg-[var(--mos-raised)] text-white text-sm font-medium rounded-lg transition-colors border border-[var(--mos-border)]"
                           >
-                            📌 Pilih & Edit
+                            Pilih & Edit
                           </button>
                         )}
 
                         {isDisabled && (
-                          <div className="w-full mt-2 px-4 py-2 bg-gray-800/50 text-gray-500 text-sm font-medium rounded-lg border border-gray-700/30 text-center">
+                          <div className="w-full mt-2 px-4 py-2 bg-[var(--mos-raised)] text-[var(--mos-text-faint)] text-sm font-medium rounded-lg border border-[var(--mos-border)] text-center">
                             🔒 Already selected
                           </div>
                         )}
 
                         {/* Expanded preview details when selected */}
                         {isSelected && (
-                          <div className="mt-4 space-y-3 pt-4 border-t border-gray-600/30">
+                          <div className="mt-4 space-y-3 pt-4 border-t border-[var(--mos-border)]">
                             {opt.highlight && (
                               <div>
-                                <label className="text-xs text-gray-500 uppercase tracking-wide">✨ Highlight</label>
-                                <p className="text-gray-300 mt-1 bg-gray-700/30 p-2.5 rounded-lg text-sm">{opt.highlight}</p>
+                                <label className="text-xs text-[var(--mos-text-faint)] uppercase tracking-wide">Highlight</label>
+                                <p className="text-[var(--mos-text-secondary)] mt-1 bg-[var(--mos-raised)] p-2.5 rounded-lg text-sm">{opt.highlight}</p>
                               </div>
                             )}
                             {opt.brandTieIn && (
                               <div>
-                                <label className="text-xs text-gray-500 uppercase tracking-wide">🔗 Brand Tie-In</label>
-                                <p className="text-gray-300 mt-1 bg-gray-700/30 p-2.5 rounded-lg text-sm">{opt.brandTieIn}</p>
+                                <label className="text-xs text-[var(--mos-text-faint)] uppercase tracking-wide">Brand Tie-In</label>
+                                <p className="text-[var(--mos-text-secondary)] mt-1 bg-[var(--mos-raised)] p-2.5 rounded-lg text-sm">{opt.brandTieIn}</p>
                               </div>
                             )}
                             {opt.cta && (
                               <div>
-                                <label className="text-xs text-gray-500 uppercase tracking-wide">🎯 CTA</label>
-                                <p className="text-blue-400 mt-1 bg-gray-700/30 p-2.5 rounded-lg text-sm">{opt.cta}</p>
+                                <label className="text-xs text-[var(--mos-text-faint)] uppercase tracking-wide">CTA</label>
+                                <p className="text-blue-400 mt-1 bg-[var(--mos-raised)] p-2.5 rounded-lg text-sm">{opt.cta}</p>
                               </div>
                             )}
                           </div>
                         )}
                       </div>
-                    </div>
+                    </Panel>
                   );
                 })}
               </div>
@@ -717,80 +716,72 @@ export default function VideoScriptPage() {
 
           {/* Step 2.5: Editable Prompt + Generate Full Button */}
           {step === 'edit' && selectedPreview && !loading && (
-            <div className="bg-gray-800/50 rounded-xl p-6 border border-gray-700/50 space-y-4">
-              <div>
-                <h3 className="text-lg font-semibold text-white mb-1">✏️ Edit Prompt Before Generating Full Script</h3>
-                <p className="text-sm text-gray-400">
-                  You can customize the instructions below before generating the complete script. The preview details are pre-filled — add your own direction.
-                </p>
-              </div>
+            <Panel className="space-y-4">
+              <SectionHeader title="Refine the full-script prompt" description="Customize the pre-filled direction before generating the complete script." />
 
-              <div className="bg-gray-700/20 rounded-lg p-3 border border-gray-600/30">
+              <div className="bg-[var(--mos-raised)] rounded-lg p-3 border border-[var(--mos-border)]">
                 <div className="flex items-center gap-2 mb-2">
-                  <span className="text-xs font-medium text-gray-400">Selected Style:</span>
-                  <span className="text-xs px-2 py-0.5 bg-blue-500/15 text-blue-400 rounded-full">{selectedPreview.styleLabel}</span>
+                  <span className="text-xs font-medium text-[var(--mos-text-muted)]">Selected Style:</span>
+                  <StatusBadge tone="info">{selectedPreview.styleLabel}</StatusBadge>
                 </div>
-                <p className="text-xs text-gray-500">
-                  Hook: <span className="text-gray-300">{selectedPreview.hook}</span>
+                <p className="text-xs text-[var(--mos-text-faint)]">
+                  Hook: <span className="text-[var(--mos-text-secondary)]">{selectedPreview.hook}</span>
                 </p>
-                <p className="text-xs text-gray-500 mt-1">
-                  Context: <span className="text-gray-300">{selectedPreview.context}</span>
+                <p className="text-xs text-[var(--mos-text-faint)] mt-1">
+                  Context: <span className="text-[var(--mos-text-secondary)]">{selectedPreview.context}</span>
                 </p>
               </div>
 
-              <textarea
+              <TextArea
                 value={editedPrompt}
                 onChange={e => setEditedPrompt(e.target.value)}
                 rows={12}
-                className="w-full px-4 py-3 bg-gray-700/50 border border-gray-600 rounded-lg text-white placeholder-gray-500 focus:ring-2 focus:ring-blue-500 font-mono text-sm leading-relaxed"
+                className="font-mono"
                 placeholder="Edit the prompt for the full script generation..."
               />
 
               <div className="flex items-center gap-3">
-                <button
+                <Button
+                  variant="primary"
                   onClick={handleGenerateFull}
                   disabled={loading || !editedPrompt}
-                  className="px-6 py-2.5 bg-green-600 hover:bg-green-700 disabled:bg-green-800/50 disabled:cursor-not-allowed text-white font-medium rounded-lg transition-colors"
                 >
-                  {loading ? '⏳ Generating full script...' : '🎬 Generate Full Script'}
-                </button>
-                <button onClick={handleBackToPreview}
-                  className="px-4 py-2.5 bg-gray-700/50 hover:bg-gray-700 text-gray-300 font-medium rounded-lg transition-colors">
-                  ← Choose different style
-                </button>
+                  {loading ? 'Generating full script…' : 'Generate full script'}
+                </Button>
+                <Button onClick={handleBackToPreview}>Choose different style</Button>
               </div>
-            </div>
+            </Panel>
           )}
 
           {/* Step 3: Full Script Result */}
           {fullScriptOption && step === 'full' && !loading && (
             <div className="space-y-4">
               <div className="flex items-center justify-between">
-                <h3 className="text-lg font-semibold text-white">📜 Generated Script</h3>
+                <SectionHeader title="Generated script" description="Final script based on the selected and edited direction." />
                 <div className="flex gap-2">
                   <button onClick={handleStartOver}
-                    className="text-xs px-3 py-1.5 bg-gray-700/50 hover:bg-gray-700 text-gray-300 rounded-lg transition-colors">
-                    🔄 Generate New
+                    className="text-xs px-3 py-1.5 bg-[var(--mos-raised)] hover:bg-[var(--mos-raised)] text-[var(--mos-text-secondary)] rounded-lg transition-colors">
+                      Generate new
                   </button>
                 </div>
               </div>
 
-              <div className="bg-gradient-to-br from-green-600/10 to-emerald-600/10 rounded-xl border border-green-500/20 overflow-hidden">
+              <Panel padding="none">
                 {/* Style header */}
-                <div className="px-5 py-3 bg-green-500/5 border-b border-green-500/10 flex items-center justify-between">
+                <div className="flex items-center justify-between border-b border-[var(--mos-border-subtle)] px-5 py-3">
                   <span className="text-sm font-bold text-green-400">
                     {fullScriptOption.styleLabel || 'Script'}
                   </span>
                   <div className="flex gap-2">
                     <button onClick={() => copyToClipboard(fullScriptOption.fullScript || JSON.stringify(fullScriptOption))}
-                      className="text-xs px-2.5 py-1 bg-gray-700/50 hover:bg-gray-700 text-gray-300 rounded-lg transition-colors">
-                      📋 Copy
+                      className="text-xs px-2.5 py-1 bg-[var(--mos-raised)] hover:bg-[var(--mos-raised)] text-[var(--mos-text-secondary)] rounded-lg transition-colors">
+                      Copy
                     </button>
                     <button onClick={() => copyToClipboard(
                       `Hook: ${fullScriptOption.hook}\n\nContext: ${fullScriptOption.context}\n\nHighlight: ${fullScriptOption.highlight}\n\nBrand Tie-In: ${fullScriptOption.brandTieIn}\n\nCTA: ${fullScriptOption.cta}\n\n---\n\nFull Script:\n${fullScriptOption.fullScript}`
                     )}
-                      className="text-xs px-2.5 py-1 bg-gray-700/50 hover:bg-gray-700 text-gray-300 rounded-lg transition-colors">
-                      📋 Copy All
+                      className="text-xs px-2.5 py-1 bg-[var(--mos-raised)] hover:bg-[var(--mos-raised)] text-[var(--mos-text-secondary)] rounded-lg transition-colors">
+                      Copy all
                     </button>
                   </div>
                 </div>
@@ -799,86 +790,84 @@ export default function VideoScriptPage() {
                   {/* Hook */}
                   {fullScriptOption.hook && (
                     <div>
-                      <label className="text-xs text-gray-500 uppercase tracking-wide">🎣 Hook</label>
-                      <p className="text-white font-semibold mt-1 bg-gray-700/30 p-3 rounded-lg">"{fullScriptOption.hook}"</p>
+                      <label className="text-xs text-[var(--mos-text-faint)] uppercase tracking-wide">Hook</label>
+                      <p className="text-white font-semibold mt-1 bg-[var(--mos-raised)] p-3 rounded-lg">"{fullScriptOption.hook}"</p>
                     </div>
                   )}
 
                   {/* Context */}
                   {fullScriptOption.context && (
                     <div>
-                      <label className="text-xs text-gray-500 uppercase tracking-wide">📖 Context</label>
-                      <p className="text-gray-300 mt-1 bg-gray-700/30 p-3 rounded-lg">{fullScriptOption.context}</p>
+                      <label className="text-xs text-[var(--mos-text-faint)] uppercase tracking-wide">Context</label>
+                      <p className="text-[var(--mos-text-secondary)] mt-1 bg-[var(--mos-raised)] p-3 rounded-lg">{fullScriptOption.context}</p>
                     </div>
                   )}
 
                   {/* Highlight */}
                   {fullScriptOption.highlight && (
                     <div>
-                      <label className="text-xs text-gray-500 uppercase tracking-wide">✨ Highlight</label>
-                      <p className="text-gray-300 mt-1 bg-gray-700/30 p-3 rounded-lg">{fullScriptOption.highlight}</p>
+                      <label className="text-xs text-[var(--mos-text-faint)] uppercase tracking-wide">Highlight</label>
+                      <p className="text-[var(--mos-text-secondary)] mt-1 bg-[var(--mos-raised)] p-3 rounded-lg">{fullScriptOption.highlight}</p>
                     </div>
                   )}
 
                   {/* Brand Tie-In */}
                   {fullScriptOption.brandTieIn && (
                     <div>
-                      <label className="text-xs text-gray-500 uppercase tracking-wide">🔗 Brand Tie-In</label>
-                      <p className="text-gray-300 mt-1 bg-gray-700/30 p-3 rounded-lg">{fullScriptOption.brandTieIn}</p>
+                      <label className="text-xs text-[var(--mos-text-faint)] uppercase tracking-wide">Brand Tie-In</label>
+                      <p className="text-[var(--mos-text-secondary)] mt-1 bg-[var(--mos-raised)] p-3 rounded-lg">{fullScriptOption.brandTieIn}</p>
                     </div>
                   )}
 
                   {/* CTA */}
                   {fullScriptOption.cta && (
                     <div>
-                      <label className="text-xs text-gray-500 uppercase tracking-wide">🎯 CTA</label>
-                      <p className="text-blue-400 mt-1 bg-gray-700/30 p-3 rounded-lg">{fullScriptOption.cta}</p>
+                      <label className="text-xs text-[var(--mos-text-faint)] uppercase tracking-wide">CTA</label>
+                      <p className="text-blue-400 mt-1 bg-[var(--mos-raised)] p-3 rounded-lg">{fullScriptOption.cta}</p>
                     </div>
                   )}
 
                   {/* Full Script */}
                   {fullScriptOption.fullScript && (
                     <div>
-                      <label className="text-xs text-gray-500 uppercase tracking-wide">📜 Full Script</label>
-                      <p className="text-white mt-1 bg-gray-700/50 p-4 rounded-lg whitespace-pre-wrap font-mono text-sm leading-relaxed">{fullScriptOption.fullScript}</p>
+                      <label className="text-xs text-[var(--mos-text-faint)] uppercase tracking-wide">Full Script</label>
+                      <p className="text-white mt-1 bg-[var(--mos-raised)] p-4 rounded-lg whitespace-pre-wrap font-mono text-sm leading-relaxed">{fullScriptOption.fullScript}</p>
                     </div>
                   )}
                 </div>
-              </div>
+              </Panel>
 
               {/* Knowledge saved notification */}
               {knowledgeSaved && (
                 <div className="bg-green-500/10 border border-green-500/20 text-green-400 px-4 py-3 rounded-lg flex items-center gap-2">
-                  <span>✅</span>
                   <span>Knowledge saved! Style profile updated. This helps future generations match your preferences.</span>
                 </div>
               )}
 
               {/* Save Knowledge Button */}
               <div className="flex items-center gap-3">
-                <button onClick={handleSaveKnowledge} disabled={savingKnowledge || knowledgeSaved}
-                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-800/50 disabled:cursor-not-allowed text-white text-sm font-medium rounded-lg transition-colors">
-                  {savingKnowledge ? '⏳ Saving...' : knowledgeSaved ? '✅ Saved to Knowledge' : '💾 Save to Knowledge Graph'}
-                </button>
+                <Button variant="primary" onClick={handleSaveKnowledge} disabled={savingKnowledge || knowledgeSaved}>
+                  {savingKnowledge ? 'Saving…' : knowledgeSaved ? 'Saved to Knowledge' : 'Save to Knowledge'}
+                </Button>
               </div>
             </div>
           )}
 
           {/* Token Usage + Download + Rating */}
           {(result || (fullScriptOption && step === 'full')) && tokenUsage && (
-            <div className="bg-gray-800/50 rounded-xl p-6 border border-gray-700/50">
+            <Panel>
               <div className="flex items-center justify-between flex-wrap gap-4">
                 <div className="flex-1 min-w-[200px]">
-                  <h3 className="text-lg font-semibold text-white mb-2">💰 Token Usage</h3>
+                  <h3 className="text-sm font-semibold text-white mb-2">Token usage</h3>
                   {tokenUsage && (
                     <div className="space-y-1 text-sm">
                       {tokenUsage.videoScript && (
                         <>
-                          <p className="text-gray-400">
+                          <p className="text-[var(--mos-text-muted)]">
                             Video Script: <span className="text-white">{(tokenUsage.videoScript?.inputTokens || 0) + (tokenUsage.videoScript?.outputTokens || 0)}</span> tokens · <span className="text-green-400">${(tokenUsage.videoScript?.cost || 0).toFixed(6)}</span>
                           </p>
-                          <div className="pt-2 mt-2 border-t border-gray-700/50 flex items-center gap-3">
-                            <span className="text-gray-300 font-medium">
+                          <div className="pt-2 mt-2 border-t border-[var(--mos-border)] flex items-center gap-3">
+                            <span className="text-[var(--mos-text-secondary)] font-medium">
                               Total: <span className="text-white">{(tokenUsage.videoScript?.inputTokens || 0) + (tokenUsage.videoScript?.outputTokens || 0)}</span> tokens
                             </span>
                             <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
@@ -892,7 +881,7 @@ export default function VideoScriptPage() {
                             </span>
                           </div>
                           {tokenUsage.videoScript?.model && (
-                            <p className="text-xs text-gray-500 pt-1">
+                            <p className="text-xs text-[var(--mos-text-faint)] pt-1">
                               Model: <span className="text-blue-400">{tokenUsage.videoScript.model}</span>
                               {tokenUsage.videoScript.model.includes('codex') && (
                                 <span className="ml-2 px-1.5 py-0.5 bg-emerald-500/15 text-emerald-400 rounded text-xs">ChatGPT Plus</span>
@@ -905,54 +894,54 @@ export default function VideoScriptPage() {
                   )}
                 </div>
                 <div className="flex items-center gap-2">
-                  <span className="text-xs text-gray-500">Rate this:</span>
-                  <button onClick={() => rateResult(5)} className="px-2 py-1 text-lg hover:bg-gray-700 rounded transition-colors" title="Excellent">⭐</button>
-                  <button onClick={() => rateResult(4)} className="px-2 py-1 text-lg hover:bg-gray-700 rounded transition-colors" title="Good">👍</button>
-                  <button onClick={() => rateResult(3)} className="px-2 py-1 text-lg hover:bg-gray-700 rounded transition-colors" title="Okay">😐</button>
-                  <button onClick={() => rateResult(1)} className="px-2 py-1 text-lg hover:bg-gray-700 rounded transition-colors" title="Bad">👎</button>
-                  <div className="w-px h-6 bg-gray-700 mx-2"></div>
-                  <button onClick={downloadJSON} className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white text-sm font-medium rounded-lg flex items-center gap-1">⬇️ Download JSON</button>
+                  <span className="text-xs text-[var(--mos-text-faint)]">Rate this:</span>
+                  <button onClick={() => rateResult(5)} className="px-2 py-1 text-lg hover:bg-[var(--mos-raised)] rounded transition-colors" title="Excellent">⭐</button>
+                  <button onClick={() => rateResult(4)} className="px-2 py-1 text-lg hover:bg-[var(--mos-raised)] rounded transition-colors" title="Good">👍</button>
+                  <button onClick={() => rateResult(3)} className="px-2 py-1 text-lg hover:bg-[var(--mos-raised)] rounded transition-colors" title="Okay">😐</button>
+                  <button onClick={() => rateResult(1)} className="px-2 py-1 text-lg hover:bg-[var(--mos-raised)] rounded transition-colors" title="Bad">👎</button>
+                  <div className="w-px h-6 bg-[var(--mos-raised)] mx-2"></div>
+                  <Button onClick={downloadJSON}>Download JSON</Button>
                 </div>
               </div>
               {ratingMessage && <p className="text-xs text-green-400 mt-2">{ratingMessage}</p>}
-            </div>
+            </Panel>
           )}
 
           {/* Viewing script from history */}
           {viewingScript && !previewOptions && !result && (
             <div className="space-y-4">
               <div className="flex items-center justify-between">
-                <h3 className="text-lg font-semibold text-white">📜 Historical Script</h3>
+                <SectionHeader title="Historical script" description="Previously generated output." />
                 <button onClick={() => setViewingScript(null)}
-                  className="text-xs px-3 py-1.5 bg-gray-700/50 hover:bg-gray-700 text-gray-300 rounded-lg">
+                  className="text-xs px-3 py-1.5 bg-[var(--mos-raised)] hover:bg-[var(--mos-raised)] text-[var(--mos-text-secondary)] rounded-lg">
                   ✕ Close
                 </button>
               </div>
-              <div className="bg-gray-800/50 rounded-xl p-6 border border-gray-700/50">
-                <p className="text-gray-400 text-sm whitespace-pre-wrap">{viewingScript.output_data}</p>
-              </div>
+              <Panel>
+                <p className="text-[var(--mos-text-muted)] text-sm whitespace-pre-wrap">{viewingScript.output_data}</p>
+              </Panel>
             </div>
           )}
         </div>
 
         {/* Right: Recent Scripts */}
         <div className="lg:col-span-1">
-          <div className="bg-gray-800/50 rounded-xl border border-gray-700/50 overflow-hidden sticky top-8">
-            <div className="p-4 border-b border-gray-700/50">
-              <h3 className="text-lg font-semibold text-white">📋 Recent Scripts</h3>
-              <p className="text-xs text-gray-500 mt-1">Click to view previous generations</p>
+          <Panel padding="none" className="sticky top-8">
+            <div className="p-4 border-b border-[var(--mos-border)]">
+              <h3 className="text-sm font-semibold text-white">Recent scripts</h3>
+              <p className="text-xs text-[var(--mos-text-faint)] mt-1">Click to view previous generations</p>
             </div>
             <div className="max-h-[60vh] overflow-y-auto">
               {recentScripts.length > 0 ? recentScripts.map((script: any) => (
                 <div key={script.id}
                   onClick={() => viewScript(script)}
-                  className={`p-3 border-b border-gray-800/50 cursor-pointer hover:bg-gray-700/30 transition-colors ${viewingScript?.id === script.id ? 'bg-green-600/10 border-l-2 border-l-green-500' : ''}`}>
-                  <p className="text-sm text-gray-300 truncate">{script.title}</p>
+                  className={`p-3 border-b border-[var(--mos-border)] cursor-pointer hover:bg-[var(--mos-raised)] transition-colors ${viewingScript?.id === script.id ? 'bg-green-600/10 border-l-2 border-l-green-500' : ''}`}>
+                  <p className="text-sm text-[var(--mos-text-secondary)] truncate">{script.title}</p>
                   <p className="text-xs text-gray-600 mt-1">{new Date(script.created_at).toLocaleDateString()}</p>
                 </div>
-              )) : <p className="text-gray-500 p-4 text-center text-sm">No scripts yet</p>}
+              )) : <EmptyState title="No scripts yet" description="Generated scripts will appear here." className="min-h-40" />}
             </div>
-          </div>
+          </Panel>
         </div>
       </div>
 

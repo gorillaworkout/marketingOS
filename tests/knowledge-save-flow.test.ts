@@ -8,7 +8,7 @@ const page = readFileSync(path.join(process.cwd(), 'src/app/dashboard/social-pos
 test('Social Post explains that generation alone does not train Knowledge', () => {
   assert.match(page, /Belum masuk Knowledge/);
   assert.match(page, /Pilih satu output yang disetujui/);
-  assert.match(page, /Pilih & simpan ke Knowledge/);
+  assert.match(page, /Pilih (?:&|dan) simpan ke Knowledge/i);
 });
 
 test('Knowledge save failures are visible and can be retried', () => {

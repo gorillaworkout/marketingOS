@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { LoadingState, MetricCard, PageHeader, PageStack } from '@/components/ui/dashboard';
+import { DataTableFrame, EmptyState, LoadingState, MetricCard, Panel, PageHeader, PageStack, SectionHeader, StatusBadge } from '@/components/ui/dashboard';
 
 type TokenLog = {
   id: string;
@@ -52,7 +52,7 @@ export default function TokensPage() {
   }, []);
 
   if (loading) return <LoadingState label="Loading token usage" />;
-  if (data?.error) return <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-red-300">{data.error}</div>;
+  if (data?.error) return <div className="rounded-[var(--mos-radius-panel)] border border-red-500/30 bg-red-500/10 p-4 text-red-300">{data.error}</div>;
 
   return (
     <PageStack>
@@ -64,35 +64,33 @@ export default function TokensPage() {
         <MetricCard label="Tasks generated" value={data?.totalTasks || 0} note="Usage-bearing tasks" />
       </div>
 
-      <section className="bg-gray-800/50 rounded-xl p-6 border border-gray-700/50">
-        <h2 className="text-lg font-semibold text-white mb-4">Usage by User Account</h2>
+      <Panel>
+        <SectionHeader className="mb-4" title="Usage by user account" />
         {data?.accountBreakdown?.length ? (
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
             {data.accountBreakdown.map((account) => (
-              <div key={`${account.username}-${account.provider}`} className="rounded-lg border border-gray-700 bg-gray-900/50 p-4">
+              <Panel key={`${account.username}-${account.provider}`} padding="compact">
                 <div>
                   <div className="font-semibold text-white">{account.username}</div>
-                  {account.user_name !== account.username && <div className="text-xs text-gray-400">{account.user_name}</div>}
+                  {account.user_name !== account.username && <div className="text-xs text-[var(--mos-text-muted)]">{account.user_name}</div>}
                 </div>
-                <div className="mt-3 text-xs text-gray-400">{providerNames[account.provider] || account.provider}</div>
+                <StatusBadge className="mt-3">{providerNames[account.provider] || account.provider}</StatusBadge>
                 <div className="mt-2 text-xl font-semibold text-white">{account.total_tokens.toLocaleString()} tokens</div>
-                <div className="mt-1 flex justify-between text-xs text-gray-400">
+                <div className="mt-1 flex justify-between text-xs text-[var(--mos-text-muted)]">
                   <span>{account.request_count.toLocaleString()} requests</span>
                   <span>${account.total_cost.toFixed(6)}</span>
                 </div>
-              </div>
+              </Panel>
             ))}
           </div>
-        ) : <p className="text-gray-500">No user account usage data yet.</p>}
-      </section>
+        ) : <EmptyState title="No account usage data yet" />}
+      </Panel>
 
-      <section className="bg-gray-800/50 rounded-xl p-6 border border-gray-700/50">
-        <h2 className="text-lg font-semibold text-white mb-4">Recent Usage</h2>
+      <DataTableFrame title="Recent usage">
         {data?.logs?.length ? (
-          <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className="text-gray-500 border-b border-gray-700/50">
+                <tr className="text-[var(--mos-text-faint)] border-b border-[var(--mos-border)]">
                   <th className="text-left py-2 px-2">Date</th>
                   <th className="text-left py-2 px-2">User Account</th>
                   <th className="text-left py-2 px-2">Provider</th>
@@ -104,11 +102,11 @@ export default function TokensPage() {
                 </tr>
               </thead>
               <tbody>{data.logs.map((log) => (
-                <tr key={log.id} className="border-b border-gray-800/50 text-gray-300">
+                <tr key={log.id} className="border-b border-[var(--mos-border)] text-[var(--mos-text-secondary)]">
                   <td className="py-2 px-2 whitespace-nowrap">{new Date(log.created_at).toLocaleDateString()}</td>
                   <td className="py-2 px-2 whitespace-nowrap">
                     <div className="font-medium text-white">{log.username}</div>
-                    {log.user_name !== log.username && <div className="text-xs text-gray-500">{log.user_name}</div>}
+                    {log.user_name !== log.username && <div className="text-xs text-[var(--mos-text-faint)]">{log.user_name}</div>}
                   </td>
                   <td className="py-2 px-2 whitespace-nowrap">{providerNames[log.provider] || log.provider}</td>
                   <td className="py-2 px-2 text-xs max-w-64 truncate" title={log.model}>{log.model}</td>
@@ -119,9 +117,8 @@ export default function TokensPage() {
                 </tr>
               ))}</tbody>
             </table>
-          </div>
-        ) : <p className="text-gray-500">No token usage data yet.</p>}
-      </section>
+        ) : <EmptyState title="No token usage data yet" />}
+      </DataTableFrame>
     </PageStack>
   );
 }

@@ -55,7 +55,7 @@ test('download builder emits a safe DUPOIN name and Word-compatible human-readab
 
 test('page exposes both client-only download actions, disclaimer, and only renders linked contacts', async () => {
   const page = await readFile(resolve(root, 'src/app/dashboard/event-plan/page.tsx'), 'utf8');
-  assert.match(page, /Download Event Plan \(\.doc\)/);
+  assert.match(page, /Download event plan \(\.doc\)/i);
   assert.match(page, /Download JSON/);
   assert.match(page, /new Blob\(/);
   assert.match(page, /Harga di bawah adalah estimasi AI, bukan quotation vendor/);

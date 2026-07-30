@@ -1,6 +1,6 @@
 'use client';
 import { useState, useEffect, useCallback } from 'react';
-import { PageHeader, PageStack } from '@/components/ui/dashboard';
+import { Button, EmptyState, FormField, Panel, PageHeader, PageStack, SectionHeader, Select, TextArea, TextInput, Toolbar } from '@/components/ui/dashboard';
 
 interface CalendarItem {
   id: string;
@@ -127,19 +127,19 @@ export default function CalendarPage() {
     <PageStack>
       <PageHeader eyebrow="Library / Publishing" title="Content calendar" description="Schedule and manage content publishing across channels." />
 
-      <div className="flex gap-6">
+      <div className="flex flex-col gap-6 xl:flex-row">
         {/* Calendar Grid */}
-        <div className="flex-1">
-          <div className="bg-gray-800/50 rounded-xl border border-gray-700/50 p-6">
-            <div className="flex items-center justify-between mb-6">
-              <button onClick={handlePrev} className="text-gray-400 hover:text-white p-2 rounded-lg hover:bg-gray-700/50">← Prev</button>
+        <div className="min-w-0 flex-1 overflow-x-auto">
+          <Panel>
+            <Toolbar className="mb-6 border-0 bg-transparent p-0">
+              <Button size="sm" onClick={handlePrev}>Previous</Button>
               <h2 className="text-lg font-semibold text-white">{monthName} {year}</h2>
-              <button onClick={handleNext} className="text-gray-400 hover:text-white p-2 rounded-lg hover:bg-gray-700/50">Next →</button>
-            </div>
+              <Button size="sm" onClick={handleNext}>Next</Button>
+            </Toolbar>
 
-            <div className="grid grid-cols-7 gap-1">
+            <div className="grid min-w-[680px] grid-cols-7 gap-1">
               {dayNames.map(d => (
-                <div key={d} className="text-center text-xs font-medium text-gray-500 py-2">{d}</div>
+                <div key={d} className="text-center text-xs font-medium text-[var(--mos-text-faint)] py-2">{d}</div>
               ))}
               {Array.from({ length: firstDay }).map((_, i) => <div key={`empty-${i}`} />)}
               {Array.from({ length: daysInMonth }).map((_, i) => {
@@ -156,10 +156,10 @@ export default function CalendarPage() {
                     className={`min-h-[80px] p-2 rounded-lg cursor-pointer border transition-colors ${
                       isSelected ? 'border-blue-500 bg-blue-500/10' :
                       isToday ? 'border-purple-500/50 bg-purple-500/5' :
-                      'border-gray-700/30 hover:border-gray-600/50 hover:bg-gray-700/20'
+                      'border-[var(--mos-border)] hover:border-[var(--mos-border)] hover:bg-[var(--mos-raised)]'
                     }`}
                   >
-                    <span className={`text-sm ${isToday ? 'text-purple-400 font-bold' : 'text-gray-300'}`}>{day}</span>
+                    <span className={`text-sm ${isToday ? 'text-purple-400 font-bold' : 'text-[var(--mos-text-secondary)]'}`}>{day}</span>
                     <div className="flex gap-1 mt-1 flex-wrap">
                       {dayItems.slice(0, 3).map(item => (
                         <div
@@ -168,7 +168,7 @@ export default function CalendarPage() {
                           title={`${item.platform || 'No platform'} - ${item.status}`}
                         />
                       ))}
-                      {dayItems.length > 3 && <span className="text-[10px] text-gray-500">+{dayItems.length - 3}</span>}
+                      {dayItems.length > 3 && <span className="text-[10px] text-[var(--mos-text-faint)]">+{dayItems.length - 3}</span>}
                     </div>
                   </div>
                 );
@@ -176,96 +176,93 @@ export default function CalendarPage() {
             </div>
 
             {/* Legend */}
-            <div className="flex gap-4 mt-4 pt-4 border-t border-gray-700/30">
+            <div className="flex gap-4 mt-4 pt-4 border-t border-[var(--mos-border)]">
               {Object.entries(STATUS_COLORS).map(([status, color]) => (
                 <div key={status} className="flex items-center gap-1.5">
                   <div className={`w-2.5 h-2.5 rounded-full ${color}`} />
-                  <span className="text-xs text-gray-400 capitalize">{status}</span>
+                  <span className="text-xs text-[var(--mos-text-muted)] capitalize">{status}</span>
                 </div>
               ))}
             </div>
-          </div>
+          </Panel>
         </div>
 
         {/* Side Panel */}
-        <div className="w-80">
-          <div className="bg-gray-800/50 rounded-xl border border-gray-700/50 p-6">
+        <div className="w-full xl:w-80 xl:shrink-0">
+          <Panel>
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-white font-medium">
                 {selectedDate ? new Date(selectedDate + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' }) : 'Select a date'}
               </h3>
               {selectedDate && (
-                <button onClick={() => handleAdd(selectedDate)} className="text-blue-400 hover:text-blue-300 text-sm">+ Add</button>
+                <Button size="sm" onClick={() => handleAdd(selectedDate)}>Add</Button>
               )}
             </div>
 
-            {!selectedDate && <p className="text-gray-500 text-sm">Click on a day to see scheduled items</p>}
+            {!selectedDate && <p className="text-[var(--mos-text-faint)] text-sm">Click on a day to see scheduled items</p>}
 
             {selectedDate && selectedItems.length === 0 && !showForm && (
-              <p className="text-gray-500 text-sm">No items scheduled. Click + Add to create one.</p>
+              <EmptyState title="No items scheduled" description="Add an item for this date." className="min-h-32 px-2 py-8" />
             )}
 
             {selectedItems.map(item => (
-              <div key={item.id} className="bg-gray-700/30 rounded-lg p-3 mb-2 border border-gray-600/30">
+              <div key={item.id} className="bg-[var(--mos-raised)] rounded-lg p-3 mb-2 border border-[var(--mos-border)]">
                 <div className="flex items-center justify-between mb-1">
                   <span className="text-sm text-white">{item.platform || 'No platform'}</span>
                   <span className={`text-xs px-2 py-0.5 rounded-full ${
                     item.status === 'published' ? 'bg-green-500/20 text-green-400' :
                     item.status === 'scheduled' ? 'bg-blue-500/20 text-blue-400' :
                     item.status === 'cancelled' ? 'bg-red-500/20 text-red-400' :
-                    'bg-gray-500/20 text-gray-400'
+                    'bg-gray-500/20 text-[var(--mos-text-muted)]'
                   }`}>{item.status}</span>
                 </div>
-                {item.scheduled_time && <p className="text-xs text-gray-400">⏰ {item.scheduled_time}</p>}
+                {item.scheduled_time && <p className="text-xs text-[var(--mos-text-muted)]">⏰ {item.scheduled_time}</p>}
                 {item.task_title && <p className="text-xs text-blue-400 mt-1">📎 {item.task_title}</p>}
-                {item.notes && <p className="text-xs text-gray-400 mt-1">{item.notes}</p>}
+                {item.notes && <p className="text-xs text-[var(--mos-text-muted)] mt-1">{item.notes}</p>}
                 <div className="flex gap-2 mt-2">
-                  <select
+                  <Select
                     value={item.status}
                     onChange={(e) => handleStatusChange(item.id, e.target.value)}
-                    className="text-xs bg-gray-700 border border-gray-600 rounded px-2 py-1 text-gray-300"
+                    className="text-xs bg-[var(--mos-raised)] border border-[var(--mos-border)] rounded px-2 py-1 text-[var(--mos-text-secondary)]"
                   >
                     <option value="draft">Draft</option>
                     <option value="scheduled">Scheduled</option>
                     <option value="published">Published</option>
                     <option value="cancelled">Cancelled</option>
-                  </select>
-                  <button onClick={() => handleEdit(item)} className="text-xs text-blue-400 hover:text-blue-300">Edit</button>
-                  <button onClick={() => handleDelete(item.id)} className="text-xs text-red-400 hover:text-red-300">Delete</button>
+                  </Select>
+                  <Button size="sm" onClick={() => handleEdit(item)}>Edit</Button>
+                  <Button size="sm" variant="danger" onClick={() => handleDelete(item.id)}>Delete</Button>
                 </div>
               </div>
             ))}
 
             {/* Add/Edit Form */}
             {showForm && selectedDate && (
-              <div className="mt-4 pt-4 border-t border-gray-700/30 space-y-3">
-                <h4 className="text-sm font-medium text-white">{editingItem ? 'Edit Item' : 'New Item'}</h4>
-                <div>
-                  <label className="text-xs text-gray-400 mb-1 block">Platform</label>
-                  <select
+              <div className="mt-4 pt-4 border-t border-[var(--mos-border)] space-y-3">
+                <SectionHeader title={editingItem ? 'Edit item' : 'New item'} />
+                <FormField label="Platform">
+                  <Select
                     value={form.platform}
                     onChange={(e) => setForm({ ...form, platform: e.target.value })}
-                    className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white"
+                    className="w-full bg-[var(--mos-raised)] border border-[var(--mos-border)] rounded-lg px-3 py-2 text-sm text-white"
                   >
                     <option value="">Select platform</option>
                     {PLATFORMS.map(p => <option key={p} value={p}>{p}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label className="text-xs text-gray-400 mb-1 block">Time</label>
-                  <input
+                  </Select>
+                </FormField>
+                <FormField label="Time">
+                  <TextInput
                     type="time"
                     value={form.scheduled_time}
                     onChange={(e) => setForm({ ...form, scheduled_time: e.target.value })}
-                    className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white"
                   />
-                </div>
+                </FormField>
                 <div>
-                  <label className="text-xs text-gray-400 mb-1 block">Status</label>
+                  <label className="text-xs text-[var(--mos-text-muted)] mb-1 block">Status</label>
                   <select
                     value={form.status}
                     onChange={(e) => setForm({ ...form, status: e.target.value })}
-                    className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white"
+                    className="w-full bg-[var(--mos-raised)] border border-[var(--mos-border)] rounded-lg px-3 py-2 text-sm text-white"
                   >
                     <option value="draft">Draft</option>
                     <option value="scheduled">Scheduled</option>
@@ -274,36 +271,35 @@ export default function CalendarPage() {
                   </select>
                 </div>
                 <div>
-                  <label className="text-xs text-gray-400 mb-1 block">Link to Task</label>
+                  <label className="text-xs text-[var(--mos-text-muted)] mb-1 block">Link to Task</label>
                   <select
                     value={form.task_id}
                     onChange={(e) => setForm({ ...form, task_id: e.target.value })}
-                    className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white"
+                    className="w-full bg-[var(--mos-raised)] border border-[var(--mos-border)] rounded-lg px-3 py-2 text-sm text-white"
                   >
                     <option value="">None</option>
                     {tasks.map(t => <option key={t.id} value={t.id}>{t.title}</option>)}
                   </select>
                 </div>
                 <div>
-                  <label className="text-xs text-gray-400 mb-1 block">Notes</label>
-                  <textarea
+                  <label className="text-xs text-[var(--mos-text-muted)] mb-1 block">Notes</label>
+                  <TextArea
                     value={form.notes}
                     onChange={(e) => setForm({ ...form, notes: e.target.value })}
                     rows={2}
-                    className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white"
                   />
                 </div>
                 <div className="flex gap-2">
-                  <button onClick={handleSave} className="flex-1 bg-blue-600 hover:bg-blue-700 text-white text-sm py-2 rounded-lg">
+                  <Button variant="primary" className="flex-1" onClick={handleSave}>
                     {editingItem ? 'Update' : 'Add'}
-                  </button>
-                  <button onClick={() => { setShowForm(false); setEditingItem(null); }} className="px-4 bg-gray-700 hover:bg-gray-600 text-gray-300 text-sm py-2 rounded-lg">
+                  </Button>
+                  <Button onClick={() => { setShowForm(false); setEditingItem(null); }}>
                     Cancel
-                  </button>
+                  </Button>
                 </div>
               </div>
             )}
-          </div>
+          </Panel>
         </div>
       </div>
     </PageStack>

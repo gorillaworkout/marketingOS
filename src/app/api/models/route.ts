@@ -1,5 +1,6 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { AVAILABLE_MODELS } from '@/lib/openai';
+import { requireAdmin } from '@/lib/auth';
 
 type ProviderStatus = {
   label: string;
@@ -48,7 +49,9 @@ export async function getOpenRouterLivePrice(modelId: string): Promise<LivePrice
   }
 }
 
-export async function GET() {
+export async function GET(request: NextRequest) {
+  const admin = await requireAdmin(request);
+  if (admin instanceof NextResponse) return admin;
   const providers: Record<string, ProviderStatus> = {
     openrouter: { label: 'OpenRouter', icon: '📡', credits: null, status: 'unknown' },
     codex: { label: 'Codex (ChatGPT Plus)', icon: '🤖', credits: null, status: 'available' },

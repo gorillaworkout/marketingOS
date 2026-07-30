@@ -10,6 +10,7 @@ interface DashboardStats {
   totalTokens: number;
   totalCost: number;
   recentTasks: { id: string; title: string; type: string; status: string; created_at: string }[];
+  enabledFeatures: string[];
 }
 
 const typeLabels: Record<string, string> = {
@@ -59,7 +60,7 @@ export default function DashboardPage() {
       <section>
         <SectionHeader title="Start new work" description="Choose a production workflow. Your brief and generated output remain within that workflow." />
         <div className="mt-3 grid gap-3 md:grid-cols-3">
-          {quickActions.map(action => (
+          {quickActions.filter(action => stats?.enabledFeatures?.includes(action.href.split('/').pop() || '')).map(action => (
             <Link key={action.href} href={action.href} className="group rounded-[var(--mos-radius-panel)] border border-[var(--mos-border)] bg-[var(--mos-panel)] p-5 transition hover:border-[var(--mos-border-strong)] hover:bg-[var(--mos-raised)]">
               <div className="flex items-center justify-between">
                 <span className="font-mono text-[10px] text-[var(--mos-text-faint)]">{action.index}</span>

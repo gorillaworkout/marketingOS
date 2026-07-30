@@ -111,7 +111,7 @@ export default function KnowledgePage() {
     if (sim >= 0.85) return 'text-green-400 bg-green-500/15 border-green-500/30';
     if (sim >= 0.7) return 'text-blue-400 bg-blue-500/15 border-blue-500/30';
     if (sim >= 0.5) return 'text-yellow-400 bg-yellow-500/15 border-yellow-500/30';
-    return 'text-gray-400 bg-gray-500/15 border-gray-500/30';
+    return 'text-[var(--mos-text-muted)] bg-gray-500/15 border-[var(--mos-border)]';
   };
 
   // --- Style Distribution ---
@@ -124,9 +124,9 @@ export default function KnowledgePage() {
   const totalStyles = styleCounts.bold + styleCounts.professional + styleCounts.creative + styleCounts.unclassified;
 
   const styleBars = [
-    { label: 'Bold & Catchy', count: styleCounts.bold, color: 'bg-orange-500', textColor: 'text-orange-300', icon: '🔥', pct: totalStyles ? Math.round((styleCounts.bold / totalStyles) * 100) : 0 },
+    { label: 'Bold & Catchy', count: styleCounts.bold, color: 'bg-orange-500', textColor: 'text-orange-300', icon: '', pct: totalStyles ? Math.round((styleCounts.bold / totalStyles) * 100) : 0 },
     { label: 'Professional', count: styleCounts.professional, color: 'bg-blue-500', textColor: 'text-blue-300', icon: '💼', pct: totalStyles ? Math.round((styleCounts.professional / totalStyles) * 100) : 0 },
-    { label: 'Creative', count: styleCounts.creative, color: 'bg-purple-500', textColor: 'text-purple-300', icon: '✨', pct: totalStyles ? Math.round((styleCounts.creative / totalStyles) * 100) : 0 },
+    { label: 'Creative', count: styleCounts.creative, color: 'bg-purple-500', textColor: 'text-purple-300', icon: '', pct: totalStyles ? Math.round((styleCounts.creative / totalStyles) * 100) : 0 },
   ].filter(s => s.count > 0 || totalStyles === 0);
 
   // --- Selection Timeline (last 14 days) ---
@@ -174,18 +174,12 @@ export default function KnowledgePage() {
   const platformEntries = Object.entries(platformCounts).sort((a, b) => b[1] - a[1]);
 
   const getStyleIcon = (style: string) => {
-    if (style === 'bold') return '🔥';
+    if (style === 'bold') return '';
     if (style === 'professional') return '💼';
-    if (style === 'creative') return '✨';
-    return '📌';
+    if (style === 'creative') return '';
+    return '';
   };
 
-  const getStyleGradient = (style: string) => {
-    if (style === 'bold') return 'from-orange-600/15 to-red-600/10 border-orange-500/20';
-    if (style === 'professional') return 'from-blue-600/15 to-indigo-600/10 border-blue-500/20';
-    if (style === 'creative') return 'from-purple-600/15 to-pink-600/10 border-purple-500/20';
-    return 'from-gray-700/30 to-gray-800/30 border-gray-600/20';
-  };
 
   return (
     <PageStack className="max-w-6xl">
@@ -195,36 +189,36 @@ export default function KnowledgePage() {
       <Toolbar className="w-fit"><FilterGroup>
         <button
           onClick={() => setActiveTab('analytics')}
-          className={`px-4 py-2 text-sm rounded-lg transition-all ${activeTab === 'analytics' ? 'bg-blue-600/30 text-blue-300 font-medium' : 'text-gray-400 hover:text-white'}`}
+          className={`px-4 py-2 text-sm rounded-lg transition-all ${activeTab === 'analytics' ? 'bg-blue-600/30 text-blue-300 font-medium' : 'text-[var(--mos-text-muted)] hover:text-white'}`}
         >
-          📈 Analytics
+          Analytics
         </button>
         <button
           onClick={() => setActiveTab('entries')}
-          className={`px-4 py-2 text-sm rounded-lg transition-all ${activeTab === 'entries' ? 'bg-blue-600/30 text-blue-300 font-medium' : 'text-gray-400 hover:text-white'}`}
+          className={`px-4 py-2 text-sm rounded-lg transition-all ${activeTab === 'entries' ? 'bg-blue-600/30 text-blue-300 font-medium' : 'text-[var(--mos-text-muted)] hover:text-white'}`}
         >
-          📋 All Entries
+          All Entries
         </button>
         <button
           onClick={() => setActiveTab('search')}
-          className={`px-4 py-2 text-sm rounded-lg transition-all ${activeTab === 'search' ? 'bg-blue-600/30 text-blue-300 font-medium' : 'text-gray-400 hover:text-white'}`}
+          className={`px-4 py-2 text-sm rounded-lg transition-all ${activeTab === 'search' ? 'bg-blue-600/30 text-blue-300 font-medium' : 'text-[var(--mos-text-muted)] hover:text-white'}`}
         >
-          🔍 Search
+          Search
         </button>
       </FilterGroup></Toolbar>
 
       {!loading && entries.length === 0 && (
-        <div className="rounded-xl border border-blue-500/20 bg-blue-500/10 p-6">
+        <div className="rounded-[var(--mos-radius-panel)] border border-blue-500/20 bg-blue-500/10 p-6">
           <h2 className="font-semibold text-blue-200">Knowledge belum memiliki selection</h2>
-          <p className="mt-2 text-sm text-gray-300">
+          <p className="mt-2 text-sm text-[var(--mos-text-secondary)]">
             Knowledge terbentuk otomatis saat Anda memilih output di Social Post atau Video Script. Sistem menyimpan pilihan nyata untuk mempelajari tone, hook, platform, dan style yang Anda sukai.
           </p>
-          <p className="mt-2 text-xs text-gray-400">
+          <p className="mt-2 text-xs text-[var(--mos-text-muted)]">
             MarketingOS tidak membuat data contoh palsu. Karena akun ini belum menyimpan pilihan, analytics masih kosong.
           </p>
           <div className="mt-4 flex flex-wrap gap-2">
             <a href="/dashboard/social-post" className="rounded-lg bg-blue-600 px-3 py-2 text-sm text-white hover:bg-blue-500">Buka Social Post</a>
-            <a href="/dashboard/video-script" className="rounded-lg bg-gray-700 px-3 py-2 text-sm text-gray-200 hover:bg-gray-600">Buka Video Script</a>
+            <a href="/dashboard/video-script" className="rounded-lg bg-[var(--mos-raised)] px-3 py-2 text-sm text-[var(--mos-text-secondary)] hover:bg-[var(--mos-raised)]">Buka Video Script</a>
           </div>
         </div>
       )}
@@ -237,37 +231,37 @@ export default function KnowledgePage() {
         <>
           {/* Summary Stats */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <div className="bg-gray-800/50 rounded-xl p-5 border border-gray-700/50">
+            <div className="bg-[var(--mos-raised)] rounded-[var(--mos-radius-panel)] p-5 border border-[var(--mos-border)]">
               <div className="text-2xl mb-2">📝</div>
               <div className="text-2xl font-bold text-white">{entries.length}</div>
-              <div className="text-xs text-gray-400 mt-1">Total Selections</div>
+              <div className="text-xs text-[var(--mos-text-muted)] mt-1">Total Selections</div>
             </div>
-            <div className="bg-gray-800/50 rounded-xl p-5 border border-gray-700/50">
-              <div className="text-2xl mb-2">🏷️</div>
+            <div className="bg-[var(--mos-raised)] rounded-[var(--mos-radius-panel)] p-5 border border-[var(--mos-border)]">
+              <div className="text-2xl mb-2">🏷</div>
               <div className="text-2xl font-bold text-white">{Object.keys(platformCounts).length}</div>
-              <div className="text-xs text-gray-400 mt-1">Platforms Used</div>
+              <div className="text-xs text-[var(--mos-text-muted)] mt-1">Platforms Used</div>
             </div>
-            <div className="bg-gray-800/50 rounded-xl p-5 border border-gray-700/50">
+            <div className="bg-[var(--mos-raised)] rounded-[var(--mos-radius-panel)] p-5 border border-[var(--mos-border)]">
               <div className="text-2xl mb-2">⭐</div>
               <div className="text-2xl font-bold text-white">
                 {stylePrefs?.total_selections || entries.length}
               </div>
-              <div className="text-xs text-gray-400 mt-1">Style Profile Score</div>
+              <div className="text-xs text-[var(--mos-text-muted)] mt-1">Style Profile Score</div>
             </div>
-            <div className="bg-gray-800/50 rounded-xl p-5 border border-gray-700/50">
-              <div className="text-2xl mb-2">🔗</div>
+            <div className="bg-[var(--mos-raised)] rounded-[var(--mos-radius-panel)] p-5 border border-[var(--mos-border)]">
+              <div className="text-2xl mb-2"></div>
               <div className="text-2xl font-bold text-white">{clusters.length}</div>
-              <div className="text-xs text-gray-400 mt-1">Style Clusters</div>
+              <div className="text-xs text-[var(--mos-text-muted)] mt-1">Style Clusters</div>
             </div>
           </div>
 
           {/* Style Distribution Chart */}
-          <div className="bg-gray-800/50 rounded-xl p-6 border border-gray-700/50">
-            <h3 className="text-lg font-semibold text-white mb-1">🎨 Style Distribution</h3>
-            <p className="text-xs text-gray-500 mb-5">Your content style preferences across all selections</p>
+          <div className="bg-[var(--mos-raised)] rounded-[var(--mos-radius-panel)] p-6 border border-[var(--mos-border)]">
+            <h3 className="text-lg font-semibold text-white mb-1">Style Distribution</h3>
+            <p className="text-xs text-[var(--mos-text-faint)] mb-5">Your content style preferences across all selections</p>
 
             {totalStyles === 0 ? (
-              <div className="text-center py-8 text-gray-500">
+              <div className="text-center py-8 text-[var(--mos-text-faint)]">
                 <p className="text-lg mb-1">No selections yet</p>
                 <p className="text-sm">Generate social posts and pick options to see your style distribution</p>
               </div>
@@ -303,7 +297,7 @@ export default function KnowledgePage() {
                     </svg>
                     <div className="absolute inset-0 flex flex-col items-center justify-center">
                       <span className="text-2xl font-bold text-white">{totalStyles}</span>
-                      <span className="text-xs text-gray-400">total</span>
+                      <span className="text-xs text-[var(--mos-text-muted)]">total</span>
                     </div>
                   </div>
 
@@ -313,9 +307,9 @@ export default function KnowledgePage() {
                       <div key={bar.label}>
                         <div className="flex items-center justify-between mb-1">
                           <span className={`text-sm font-medium ${bar.textColor}`}>{bar.icon} {bar.label}</span>
-                          <span className="text-sm text-gray-300 font-mono">{bar.count} <span className="text-gray-500">({bar.pct}%)</span></span>
+                          <span className="text-sm text-[var(--mos-text-secondary)] font-mono">{bar.count} <span className="text-[var(--mos-text-faint)]">({bar.pct}%)</span></span>
                         </div>
-                        <div className="h-3 bg-gray-700/50 rounded-full overflow-hidden">
+                        <div className="h-3 bg-[var(--mos-raised)] rounded-full overflow-hidden">
                           <div
                             className={`h-full rounded-full ${bar.color} transition-all duration-700`}
                             style={{ width: `${bar.pct}%` }}
@@ -328,13 +322,13 @@ export default function KnowledgePage() {
 
                 {/* Platform Breakdown */}
                 {platformEntries.length > 0 && (
-                  <div className="pt-4 mt-4 border-t border-gray-700/30">
-                    <h4 className="text-sm font-medium text-gray-300 mb-3">📱 Platform Breakdown</h4>
+                  <div className="pt-4 mt-4 border-t border-[var(--mos-border)]">
+                    <h4 className="text-sm font-medium text-[var(--mos-text-secondary)] mb-3">Platform Breakdown</h4>
                     <div className="flex flex-wrap gap-2">
                       {platformEntries.map(([platform, count]) => (
-                        <div key={platform} className="flex items-center gap-2 bg-gray-700/30 rounded-lg px-3 py-1.5">
-                          <span className="text-sm text-gray-300">{platform}</span>
-                          <span className="text-xs bg-gray-600/50 text-gray-400 px-1.5 py-0.5 rounded-full font-mono">{count}</span>
+                        <div key={platform} className="flex items-center gap-2 bg-[var(--mos-raised)] rounded-lg px-3 py-1.5">
+                          <span className="text-sm text-[var(--mos-text-secondary)]">{platform}</span>
+                          <span className="text-xs bg-[var(--mos-raised)] text-[var(--mos-text-muted)] px-1.5 py-0.5 rounded-full font-mono">{count}</span>
                         </div>
                       ))}
                     </div>
@@ -345,12 +339,12 @@ export default function KnowledgePage() {
           </div>
 
           {/* Selection Timeline */}
-          <div className="bg-gray-800/50 rounded-xl p-6 border border-gray-700/50">
-            <h3 className="text-lg font-semibold text-white mb-1">📅 Selection Timeline</h3>
-            <p className="text-xs text-gray-500 mb-5">Daily selection activity over the last 14 days</p>
+          <div className="bg-[var(--mos-raised)] rounded-[var(--mos-radius-panel)] p-6 border border-[var(--mos-border)]">
+            <h3 className="text-lg font-semibold text-white mb-1">Selection Timeline</h3>
+            <p className="text-xs text-[var(--mos-text-faint)] mb-5">Daily selection activity over the last 14 days</p>
 
             {entries.length === 0 ? (
-              <div className="text-center py-8 text-gray-500">
+              <div className="text-center py-8 text-[var(--mos-text-faint)]">
                 <p>No timeline data yet</p>
               </div>
             ) : (
@@ -363,11 +357,11 @@ export default function KnowledgePage() {
                     return (
                       <div key={i} className="flex-1 flex flex-col items-center group relative">
                         {/* Tooltip */}
-                        <div className="absolute bottom-full mb-2 bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-xs opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10 whitespace-nowrap">
+                        <div className="absolute bottom-full mb-2 bg-[var(--mos-surface)] border border-[var(--mos-border)] rounded-lg px-3 py-2 text-xs opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10 whitespace-nowrap">
                           <div className="text-white font-medium mb-1">{new Date(bucket.date + 'T00:00:00').toLocaleDateString('id-ID', { day: 'numeric', month: 'short' })}</div>
-                          {bucket.bold > 0 && <div className="text-orange-400">🔥 Bold: {bucket.bold}</div>}
+                          {bucket.bold > 0 && <div className="text-orange-400">Bold: {bucket.bold}</div>}
                           {bucket.professional > 0 && <div className="text-blue-400">💼 Professional: {bucket.professional}</div>}
-                          {bucket.creative > 0 && <div className="text-purple-400">✨ Creative: {bucket.creative}</div>}
+                          {bucket.creative > 0 && <div className="text-purple-400">Creative: {bucket.creative}</div>}
                         </div>
                         {/* Stacked bars */}
                         <div className="w-full flex flex-col-reverse rounded-t-md overflow-hidden" style={{ height: `${Math.max(heightPct, total > 0 ? 8 : 0)}%` }}>
@@ -387,21 +381,21 @@ export default function KnowledgePage() {
                 </div>
                 {/* Legend */}
                 <div className="flex items-center justify-center gap-4 pt-2">
-                  <div className="flex items-center gap-1.5"><div className="w-3 h-3 rounded-sm bg-orange-500"></div><span className="text-xs text-gray-400">Bold</span></div>
-                  <div className="flex items-center gap-1.5"><div className="w-3 h-3 rounded-sm bg-blue-500"></div><span className="text-xs text-gray-400">Professional</span></div>
-                  <div className="flex items-center gap-1.5"><div className="w-3 h-3 rounded-sm bg-purple-500"></div><span className="text-xs text-gray-400">Creative</span></div>
+                  <div className="flex items-center gap-1.5"><div className="w-3 h-3 rounded-sm bg-orange-500"></div><span className="text-xs text-[var(--mos-text-muted)]">Bold</span></div>
+                  <div className="flex items-center gap-1.5"><div className="w-3 h-3 rounded-sm bg-blue-500"></div><span className="text-xs text-[var(--mos-text-muted)]">Professional</span></div>
+                  <div className="flex items-center gap-1.5"><div className="w-3 h-3 rounded-sm bg-purple-500"></div><span className="text-xs text-[var(--mos-text-muted)]">Creative</span></div>
                 </div>
               </div>
             )}
           </div>
 
           {/* Top Examples per Style */}
-          <div className="bg-gray-800/50 rounded-xl p-6 border border-gray-700/50">
-            <h3 className="text-lg font-semibold text-white mb-1">🏆 Top Examples</h3>
-            <p className="text-xs text-gray-500 mb-5">Your most recent selections from each style category</p>
+          <div className="bg-[var(--mos-raised)] rounded-[var(--mos-radius-panel)] p-6 border border-[var(--mos-border)]">
+            <h3 className="text-lg font-semibold text-white mb-1">Top Examples</h3>
+            <p className="text-xs text-[var(--mos-text-faint)] mb-5">Your most recent selections from each style category</p>
 
             {entries.length === 0 ? (
-              <div className="text-center py-8 text-gray-500">
+              <div className="text-center py-8 text-[var(--mos-text-faint)]">
                 <p className="text-lg mb-1">No examples yet</p>
                 <p className="text-sm">Start generating content to build your example library</p>
               </div>
@@ -410,14 +404,14 @@ export default function KnowledgePage() {
                 {['bold', 'professional', 'creative'].map(style => {
                   const examples = getTopExamples(style);
                   return (
-                    <div key={style} className={`bg-gradient-to-br ${getStyleGradient(style)} rounded-xl p-4 border`}>
+                    <div key={style} className={`bg-[var(--mos-panel)] rounded-[var(--mos-radius-panel)] p-4 border`}>
                       <div className="flex items-center gap-2 mb-3">
                         <span className="text-lg">{getStyleIcon(style)}</span>
                         <h4 className="text-sm font-semibold text-white capitalize">{style}</h4>
-                        <span className="text-xs text-gray-500 ml-auto">{styleCounts[style as keyof typeof styleCounts]} picks</span>
+                        <span className="text-xs text-[var(--mos-text-faint)] ml-auto">{styleCounts[style as keyof typeof styleCounts]} picks</span>
                       </div>
                       {examples.length === 0 ? (
-                        <p className="text-xs text-gray-500 italic">No {style} selections yet</p>
+                        <p className="text-xs text-[var(--mos-text-faint)] italic">No {style} selections yet</p>
                       ) : (
                         <div className="space-y-2">
                           {examples.map((ex, i) => {
@@ -425,12 +419,12 @@ export default function KnowledgePage() {
                             return (
                               <div key={ex.id} className="bg-black/20 rounded-lg p-3">
                                 <div className="flex items-center gap-2 mb-1">
-                                  <span className="text-[10px] bg-gray-700/50 text-gray-400 px-1.5 py-0.5 rounded-full">#{i + 1}</span>
+                                  <span className="text-[10px] bg-[var(--mos-raised)] text-[var(--mos-text-muted)] px-1.5 py-0.5 rounded-full">#{i + 1}</span>
                                   {ex.platform && <span className="text-[10px] bg-blue-500/15 text-blue-400 px-1.5 py-0.5 rounded-full">{ex.platform}</span>}
                                 </div>
-                                <p className="text-xs text-gray-300 font-medium truncate">{ex.brief}</p>
+                                <p className="text-xs text-[var(--mos-text-secondary)] font-medium truncate">{ex.brief}</p>
                                 {output.hook && (
-                                  <p className="text-xs text-gray-400 mt-1 italic truncate">&quot;{output.hook}&quot;</p>
+                                  <p className="text-xs text-[var(--mos-text-muted)] mt-1 italic truncate">&quot;{output.hook}&quot;</p>
                                 )}
                                 <p className="text-[10px] text-gray-600 mt-1">
                                   {new Date(ex.created_at).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })}
@@ -449,10 +443,10 @@ export default function KnowledgePage() {
 
           {/* Style Profile Summary */}
           {stylePrefs?.style_summary && (
-            <div className="bg-gray-800/50 rounded-xl p-6 border border-gray-700/50">
-              <h3 className="text-lg font-semibold text-white mb-1">🎯 Style Profile Summary</h3>
-              <p className="text-xs text-gray-500 mb-4">AI-generated summary of your content preferences</p>
-              <div className="bg-gray-900/50 rounded-lg p-4 text-sm text-gray-300 leading-relaxed whitespace-pre-wrap">
+            <div className="bg-[var(--mos-raised)] rounded-[var(--mos-radius-panel)] p-6 border border-[var(--mos-border)]">
+              <h3 className="text-lg font-semibold text-white mb-1">Style Profile Summary</h3>
+              <p className="text-xs text-[var(--mos-text-faint)] mb-4">AI-generated summary of your content preferences</p>
+              <div className="bg-[var(--mos-surface)] rounded-lg p-4 text-sm text-[var(--mos-text-secondary)] leading-relaxed whitespace-pre-wrap">
                 {stylePrefs.style_summary}
               </div>
             </div>
@@ -462,11 +456,11 @@ export default function KnowledgePage() {
         /* Semantic Search Tab */
         <div className="space-y-4">
           {/* Search Input */}
-          <div className="bg-gray-800/50 rounded-xl p-5 border border-gray-700/50">
+          <div className="bg-[var(--mos-raised)] rounded-[var(--mos-radius-panel)] p-5 border border-[var(--mos-border)]">
             <div className="flex items-center gap-3 mb-3">
-              <span className="text-lg">🔍</span>
+              <span className="text-lg"></span>
               <h3 className="text-sm font-semibold text-white">Semantic Search</h3>
-              <span className="text-xs text-gray-500">AI-powered search through your knowledge base</span>
+              <span className="text-xs text-[var(--mos-text-faint)]">AI-powered search through your knowledge base</span>
             </div>
             <div className="relative">
               <input
@@ -474,20 +468,20 @@ export default function KnowledgePage() {
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder="Search by meaning, not just keywords... e.g. 'trading tips for beginners' or 'motivational post about finance'"
-                className="w-full px-4 py-3 bg-gray-900/60 border border-gray-700/50 rounded-xl text-white placeholder-gray-500 focus:outline-none focus:border-blue-500/50 focus:ring-1 focus:ring-blue-500/25 text-sm"
+                className="w-full px-4 py-3 bg-[var(--mos-surface)] border border-[var(--mos-border)] rounded-[var(--mos-radius-panel)] text-white placeholder:text-[var(--mos-text-faint)] focus:outline-none focus:border-[var(--mos-accent-border)] focus:ring-1 focus:ring-[var(--mos-accent-ring)] text-sm"
                 autoFocus
               />
               {searchQuery && (
                 <button
                   onClick={() => { setSearchQuery(''); setSearchResults(null); setSearchError(''); }}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-300 transition-colors"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-[var(--mos-text-faint)] hover:text-[var(--mos-text-secondary)] transition-colors"
                 >
                   ✕
                 </button>
               )}
             </div>
             {searchError && (
-              <p className="text-xs text-red-400 mt-2">⚠️ {searchError}</p>
+              <p className="text-xs text-red-400 mt-2">{searchError}</p>
             )}
           </div>
 
@@ -495,24 +489,24 @@ export default function KnowledgePage() {
           {searchQuery.trim() ? (
             <div className="space-y-3">
               <div className="flex items-center justify-between">
-                <h3 className="text-sm font-semibold text-gray-300">
+                <h3 className="text-sm font-semibold text-[var(--mos-text-secondary)]">
                   Results for &quot;{searchQuery}&quot;
-                  {searchResults && <span className="text-gray-500 ml-2">({searchResults.length} found)</span>}
+                  {searchResults && <span className="text-[var(--mos-text-faint)] ml-2">({searchResults.length} found)</span>}
                 </h3>
                 {searchResults && searchResults.length > 0 && (
-                  <span className="text-xs text-gray-500">Sorted by relevance</span>
+                  <span className="text-xs text-[var(--mos-text-faint)]">Sorted by relevance</span>
                 )}
               </div>
 
               {searchLoading ? (
                 <div className="text-center py-16">
                   <div className="inline-block w-8 h-8 border-2 border-blue-500/30 border-t-blue-500 rounded-full animate-spin mb-3"></div>
-                  <p className="text-gray-500">Searching with AI embeddings...</p>
+                  <p className="text-[var(--mos-text-faint)]">Searching with AI embeddings...</p>
                   <p className="text-xs text-gray-600 mt-1">Comparing semantic vectors</p>
                 </div>
               ) : searchResults && searchResults.length === 0 ? (
-                <div className="text-center py-16 text-gray-500">
-                  <p className="text-2xl mb-2">🔍</p>
+                <div className="text-center py-16 text-[var(--mos-text-faint)]">
+                  <p className="text-2xl mb-2"></p>
                   <p className="text-lg mb-1">No matches found</p>
                   <p className="text-sm">Try different keywords or broader terms</p>
                 </div>
@@ -522,7 +516,7 @@ export default function KnowledgePage() {
                   try { output = JSON.parse(result.selectedOutput); } catch { output = { caption: result.selectedOutput }; }
                   const simPercent = Math.round(result.similarity * 100);
                   return (
-                    <div key={result.id} className="bg-gray-800/50 rounded-xl p-5 border border-gray-700/50 hover:border-blue-500/30 transition-colors">
+                    <div key={result.id} className="bg-[var(--mos-raised)] rounded-[var(--mos-radius-panel)] p-5 border border-[var(--mos-border)] hover:border-[var(--mos-accent-border)] transition-colors">
                       <div className="flex items-start justify-between gap-4">
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2 mb-2 flex-wrap">
@@ -531,7 +525,7 @@ export default function KnowledgePage() {
                               {simPercent}% match
                             </span>
                             {result.styleCluster && (
-                              <span className="text-xs px-2 py-0.5 rounded-full bg-gray-700/50 text-gray-300">
+                              <span className="text-xs px-2 py-0.5 rounded-full bg-[var(--mos-raised)] text-[var(--mos-text-secondary)]">
                                 {result.styleCluster}
                               </span>
                             )}
@@ -541,24 +535,24 @@ export default function KnowledgePage() {
                               </span>
                             )}
                             {result.taskType && (
-                              <span className="text-xs px-2 py-0.5 rounded-full bg-gray-600/30 text-gray-400">
+                              <span className="text-xs px-2 py-0.5 rounded-full bg-[var(--mos-raised)] text-[var(--mos-text-muted)]">
                                 {result.taskType}
                               </span>
                             )}
                           </div>
-                          <p className="text-sm text-gray-300 font-medium mb-1">{result.brief}</p>
+                          <p className="text-sm text-[var(--mos-text-secondary)] font-medium mb-1">{result.brief}</p>
                           {output.hook && (
                             <p className="text-sm text-white mt-2 italic">&quot;{output.hook}&quot;</p>
                           )}
                           {output.caption && (
-                            <p className="text-xs text-gray-400 mt-2 line-clamp-2">{output.caption}</p>
+                            <p className="text-xs text-[var(--mos-text-muted)] mt-2 line-clamp-2">{output.caption}</p>
                           )}
                         </div>
                         <div className="flex-shrink-0 w-16 text-center">
                           <div className={`text-xl font-bold ${result.similarity >= 0.85 ? 'text-green-400' : result.similarity >= 0.7 ? 'text-blue-400' : 'text-yellow-400'}`}>
                             {simPercent}
                           </div>
-                          <div className="text-[10px] text-gray-500 uppercase tracking-wider">score</div>
+                          <div className="text-[10px] text-[var(--mos-text-faint)] uppercase tracking-wider">score</div>
                         </div>
                       </div>
                     </div>
@@ -567,8 +561,8 @@ export default function KnowledgePage() {
               ) : null}
             </div>
           ) : (
-            <div className="text-center py-16 text-gray-500">
-              <p className="text-3xl mb-3">🔍</p>
+            <div className="text-center py-16 text-[var(--mos-text-faint)]">
+              <p className="text-3xl mb-3"></p>
               <p className="text-lg mb-1">Search your knowledge base</p>
               <p className="text-sm">Type a query to find semantically similar content from your past selections</p>
             </div>
@@ -578,27 +572,27 @@ export default function KnowledgePage() {
         /* All Entries Tab */
         <div className="space-y-3">
           {entries.length === 0 ? (
-            <div className="text-center py-16 text-gray-500">
-              <p className="text-xl mb-2">📚 No knowledge entries yet</p>
+            <div className="text-center py-16 text-[var(--mos-text-faint)]">
+              <p className="text-xl mb-2">No knowledge entries yet</p>
               <p className="text-sm">Generate social posts and click &quot;Pilih ini&quot; to start building your style profile!</p>
             </div>
           ) : (
             entries.map(entry => {
               const output = parseOutput(entry.selected_output);
               return (
-                <div key={entry.id} className="bg-gray-800/50 rounded-xl p-5 border border-gray-700/50 hover:border-gray-600/50 transition-colors">
+                <div key={entry.id} className="bg-[var(--mos-raised)] rounded-[var(--mos-radius-panel)] p-5 border border-[var(--mos-border)] hover:border-[var(--mos-border)] transition-colors">
                   <div className="flex items-start justify-between gap-4">
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 mb-2 flex-wrap">
                         <span className="text-lg">{getStyleIcon(entry.style_cluster || '')}</span>
-                        <span className="text-xs px-2 py-0.5 rounded-full bg-gray-700/50 text-gray-300">{entry.style_cluster || 'default'}</span>
+                        <span className="text-xs px-2 py-0.5 rounded-full bg-[var(--mos-raised)] text-[var(--mos-text-secondary)]">{entry.style_cluster || 'default'}</span>
                         {entry.platform && <span className="text-xs px-2 py-0.5 rounded-full bg-blue-500/15 text-blue-400">{entry.platform}</span>}
                         {entry.audience && <span className="text-xs px-2 py-0.5 rounded-full bg-purple-500/15 text-purple-400">{entry.audience}</span>}
                         <span className="text-xs text-gray-600 ml-auto">{new Date(entry.created_at).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })}</span>
                       </div>
-                      <p className="text-sm text-gray-300 font-medium mb-1">{entry.brief}</p>
+                      <p className="text-sm text-[var(--mos-text-secondary)] font-medium mb-1">{entry.brief}</p>
                       {output.hook && <p className="text-sm text-white mt-2 italic">&quot;{output.hook}&quot;</p>}
-                      {output.caption && !output.hook && <p className="text-xs text-gray-400 mt-2 line-clamp-2">{output.caption}</p>}
+                      {output.caption && !output.hook && <p className="text-xs text-[var(--mos-text-muted)] mt-2 line-clamp-2">{output.caption}</p>}
                     </div>
                   </div>
                 </div>

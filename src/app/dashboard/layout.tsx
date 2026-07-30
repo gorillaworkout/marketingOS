@@ -91,6 +91,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const [mobileOpen, setMobileOpen] = useState(false);
   const [taskModelPreferences, setTaskModelPreferences] = useState<Record<string, string>>({});
   const [expandedTask, setExpandedTask] = useState<string | null>(null);
+  const [modelError, setModelError] = useState('');
   const dropdownRef = useRef<HTMLDivElement>(null);
   const router = useRouter();
   const pathname = usePathname();
@@ -105,7 +106,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       if (data.authenticated) {
         setUser(data.user);
         const generationFeature = pathname.split('/').pop() || '';
-        const adminOnlyPages = ['/dashboard/tokens', '/dashboard/analytics', '/dashboard/accounts', '/dashboard/templates', '/dashboard/calendar', '/dashboard/images', '/dashboard/knowledge', '/dashboard/knowledge-graph', '/dashboard/brand-guidelines', '/dashboard/history', '/dashboard/sop', '/dashboard/market-research'];
+        const adminOnlyPages = ['/dashboard/tokens', '/dashboard/analytics', '/dashboard/accounts', '/dashboard/models', '/dashboard/templates', '/dashboard/calendar', '/dashboard/images', '/dashboard/knowledge', '/dashboard/knowledge-graph', '/dashboard/brand-guidelines', '/dashboard/history', '/dashboard/sop', '/dashboard/market-research'];
         if (data.user.role !== 'admin' && (adminOnlyPages.includes(pathname) || (['social-post', 'video-script', 'event-plan'].includes(generationFeature) && !data.user.enabledFeatures?.includes(generationFeature)))) {
           router.replace('/dashboard');
         }
@@ -148,24 +149,32 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const handleModelSelect = async (modelId: string) => {
     setModelDropdownOpen(false);
     if (modelId === currentModel) return;
+    setModelError('');
     const response = await fetch('/api/settings/model', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ model: modelId }),
     });
     if (response.ok) setCurrentModel(modelId);
+    else setModelError('Model preference could not be saved. Try again.');
   };
 
-  const handleTaskModelSelect = async (taskType: string, modelId: string) => {
+  const handleTaskModelSelect = async (taskType: string, modelId: string | null) => {
+    setModelError('');
     const response = await fetch('/api/settings/model', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ model: modelId, taskType }),
     });
     if (response.ok) {
-      setTaskModelPreferences(previous => ({ ...previous, [taskType]: modelId }));
+      setTaskModelPreferences(previous => {
+        const next = { ...previous };
+        if (modelId) next[taskType] = modelId;
+        else delete next[taskType];
+        return next;
+      });
       setExpandedTask(null);
-    }
+    } else setModelError('Task override could not be saved. Try again.');
   };
 
   if (loading) {
@@ -252,6 +261,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
               <p className="mt-0.5 text-[10px] text-[var(--mos-text-faint)]">Providers and billing paths are shown separately.</p>
             </div>
             <div className="max-h-[48vh] overflow-y-auto p-2">
+              {modelError && <p role="alert" className="mx-2 mb-2 rounded-[6px] border border-red-400/20 bg-red-400/10 px-3 py-2 text-[10px] text-red-300">{modelError}</p>}
               {(Object.keys(providers) as Array<keyof typeof providers>).map(provider => {
                 const providerModels = models.filter(model => model.provider === provider);
                 if (!providerModels.length) return null;
@@ -292,6 +302,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                       <span className="max-w-44 truncate text-[10px] text-[var(--mos-text-faint)]">{taskModel?.name || 'Use default'}</span>
                     </button>
                     {expanded && <div className="mb-1 ml-3 max-h-32 overflow-y-auto border-l border-[var(--mos-border)] pl-2">
+                      <button onClick={() => handleTaskModelSelect(task.key, null)} className="block w-full rounded-[4px] px-2 py-1 text-left text-[10px] text-[var(--mos-accent-soft)] hover:bg-white/[0.035]">Use default model</button>
                       {models.map(model => <button key={model.id} onClick={() => handleTaskModelSelect(task.key, model.id)} className="block w-full truncate rounded-[4px] px-2 py-1 text-left text-[10px] text-[var(--mos-text-muted)] hover:bg-white/[0.035] hover:text-[var(--mos-text-secondary)]">{providers[model.provider].label} · {model.name}</button>)}
                     </div>}
                   </div>

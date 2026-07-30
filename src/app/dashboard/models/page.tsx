@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { PageHeader, PageStack } from '@/components/ui/dashboard';
+import { DataTableFrame, LoadingState, Panel, PageHeader, PageStack, SectionHeader, StatusBadge } from '@/components/ui/dashboard';
 
 interface ModelInfo {
   id: string;
@@ -71,15 +71,13 @@ export default function ModelsPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-900 p-6 flex items-center justify-center">
-        <p className="text-gray-400">Memuat informasi model...</p>
-      </div>
+      <LoadingState label="Memuat informasi model" />
     );
   }
 
   if (!data) {
     return (
-      <div className="min-h-screen bg-gray-900 p-6">
+      <div className="min-h-screen bg-[var(--mos-surface)] p-6">
         <p className="text-red-400">Gagal memuat data model.</p>
       </div>
     );
@@ -99,27 +97,26 @@ export default function ModelsPage() {
             const p = provider[pk];
             const s = statusConfig[p.status] || statusConfig.unknown;
             return (
-              <div key={pk} className="bg-gray-800 rounded-xl border border-gray-700 p-4">
+              <Panel key={pk} padding="compact">
                 <div className="flex items-center justify-between mb-2">
                   <div className="flex items-center gap-2">
-                    <span className="text-lg">{p.icon}</span>
                     <h3 className="text-sm font-semibold text-white">{p.label}</h3>
                   </div>
                   <span className={`w-2.5 h-2.5 rounded-full ${s.dot}`}></span>
                 </div>
                 <p className={`text-xs ${s.dot.replace('bg-', 'text-')}`}>{s.label}</p>
                 {p.credits !== null && (
-                  <p className="text-xs text-gray-400 mt-1">
-                    💰 ${p.credits} tersisa
+                  <p className="text-xs text-[var(--mos-text-muted)] mt-1">
+                    ${p.credits} tersisa
                   </p>
                 )}
-                <p className="text-[10px] text-gray-500 mt-2">
+                <p className="text-[10px] text-[var(--mos-text-faint)] mt-2">
                   {pk === 'codex' && 'Termasuk langganan ChatGPT Plus · Tidak ada biaya per token'}
                   {pk === 'claude-code' && 'Termasuk langganan Claude · Tidak ada biaya per token'}
                   {pk === 'openrouter' && 'Bayar per token via saldo OpenRouter'}
                   {pk === 'gorillaworkout' && 'Model tersedia melalui llm.gorillaworkout.id API'}
                 </p>
-              </div>
+              </Panel>
             );
           })}
         </div>
@@ -132,21 +129,15 @@ export default function ModelsPage() {
 
           return (
             <div key={pk} className="mb-8">
-              <h2 className="text-lg font-semibold text-white mb-3 flex items-center gap-2">
-                <span>{p.icon}</span>
-                <span>{providerNames[pk] || p.label}</span>
-                <span className="text-xs text-gray-500 font-normal">— {models.length} model</span>
-              </h2>
-
-              <div className="overflow-x-auto">
+              <DataTableFrame title={providerNames[pk] || p.label} description={`${models.length} model`}>
                 <table className="w-full text-sm">
                   <thead>
-                    <tr className="border-b border-gray-700 text-left">
-                      <th className="py-2.5 px-3 text-gray-400 font-medium text-xs uppercase tracking-wider">Model</th>
-                      <th className="py-2.5 px-3 text-gray-400 font-medium text-xs uppercase tracking-wider">Tier</th>
-                      <th className="py-2.5 px-3 text-gray-400 font-medium text-xs uppercase tracking-wider">Input mulai / 1M</th>
-                      <th className="py-2.5 px-3 text-gray-400 font-medium text-xs uppercase tracking-wider">Output mulai / 1M</th>
-                      <th className="py-2.5 px-3 text-gray-400 font-medium text-xs uppercase tracking-wider">Keterangan</th>
+                    <tr className="border-b border-[var(--mos-border)] text-left">
+                      <th className="py-2.5 px-3 text-[var(--mos-text-muted)] font-medium text-xs uppercase tracking-wider">Model</th>
+                      <th className="py-2.5 px-3 text-[var(--mos-text-muted)] font-medium text-xs uppercase tracking-wider">Tier</th>
+                      <th className="py-2.5 px-3 text-[var(--mos-text-muted)] font-medium text-xs uppercase tracking-wider">Input mulai / 1M</th>
+                      <th className="py-2.5 px-3 text-[var(--mos-text-muted)] font-medium text-xs uppercase tracking-wider">Output mulai / 1M</th>
+                      <th className="py-2.5 px-3 text-[var(--mos-text-muted)] font-medium text-xs uppercase tracking-wider">Keterangan</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -154,19 +145,16 @@ export default function ModelsPage() {
                       const tc = tierConfig[m.tier];
                       const isFree = m.input === 0 && m.output === 0;
                       return (
-                        <tr key={m.id} className="border-b border-gray-800 hover:bg-gray-800/50 transition-colors">
+                        <tr key={m.id} className="border-b border-[var(--mos-border)] hover:bg-[var(--mos-raised)] transition-colors">
                           <td className="py-3 px-3">
                             <div className="text-white font-medium">{m.name}</div>
-                            <div className="text-[10px] text-gray-500 font-mono mt-0.5">{m.id}</div>
+                            <div className="text-[10px] text-[var(--mos-text-faint)] font-mono mt-0.5">{m.id}</div>
                           </td>
                           <td className="py-3 px-3">
-                            <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium ${tc.bg} ${tc.text}`}>
-                              <span className={`w-1.5 h-1.5 rounded-full ${tc.dot}`}></span>
-                              {tc.label}
-                            </span>
+                            <StatusBadge tone={m.tier === 'budget' ? 'success' : m.tier === 'balanced' ? 'warning' : 'info'} dot>{tc.label}</StatusBadge>
                           </td>
                           <td className="py-3 px-3">
-                            <span className="text-gray-300">
+                            <span className="text-[var(--mos-text-secondary)]">
                               {isFree ? (
                                 <span className="text-emerald-400">✓ Included</span>
                               ) : m.inputPricePerM > 0 ? (
@@ -175,7 +163,7 @@ export default function ModelsPage() {
                             </span>
                           </td>
                           <td className="py-3 px-3">
-                            <span className="text-gray-300">
+                            <span className="text-[var(--mos-text-secondary)]">
                               {isFree ? (
                                 <span className="text-emerald-400">✓ Included</span>
                               ) : m.outputPricePerM > 0 ? (
@@ -183,7 +171,7 @@ export default function ModelsPage() {
                               ) : '< $0.01'}
                             </span>
                           </td>
-                          <td className="py-3 px-3 text-xs text-gray-400">
+                          <td className="py-3 px-3 text-xs text-[var(--mos-text-muted)]">
                             {isFree
                               ? pk === 'codex'
                                 ? 'Sumber: Codex · Paket ChatGPT Plus'
@@ -210,31 +198,31 @@ export default function ModelsPage() {
                     })}
                   </tbody>
                 </table>
-              </div>
+              </DataTableFrame>
             </div>
           );
         })}
 
         {/* Pricing Note */}
-        <div className="bg-gray-800/50 border border-gray-700 rounded-xl p-4 mt-4">
-          <h3 className="text-sm font-semibold text-white mb-2">💡 Catatan Biaya</h3>
-          <ul className="text-xs text-gray-400 space-y-1.5">
-            <li>• <strong className="text-gray-300">OpenRouter</strong> — bayar per token dari saldo akun. Harga diambil dari endpoint provider resmi OpenRouter.</li>
-            <li>• <strong className="text-gray-300">Harga dapat berbeda antar-provider</strong> — angka yang tampil adalah harga termurah dari provider aktif saat data dimuat, bukan quotation tetap.</li>
-            <li>• <strong className="text-gray-300">Codex (ChatGPT Plus)</strong> — termasuk dalam langganan ChatGPT Plus $20/bulan. Tidak ada biaya per token.</li>
-            <li>• <strong className="text-gray-300">Claude Code</strong> — termasuk dalam langganan Claude. Tidak ada biaya per token.</li>
+        <Panel padding="compact" className="mt-4">
+          <SectionHeader className="mb-3" title="Catatan biaya" />
+          <ul className="text-xs text-[var(--mos-text-muted)] space-y-1.5">
+            <li>• <strong className="text-[var(--mos-text-secondary)]">OpenRouter</strong> — bayar per token dari saldo akun. Harga diambil dari endpoint provider resmi OpenRouter.</li>
+            <li>• <strong className="text-[var(--mos-text-secondary)]">Harga dapat berbeda antar-provider</strong> — angka yang tampil adalah harga termurah dari provider aktif saat data dimuat, bukan quotation tetap.</li>
+            <li>• <strong className="text-[var(--mos-text-secondary)]">Codex (ChatGPT Plus)</strong> — termasuk dalam langganan ChatGPT Plus $20/bulan. Tidak ada biaya per token.</li>
+            <li>• <strong className="text-[var(--mos-text-secondary)]">Claude Code</strong> — termasuk dalam langganan Claude. Tidak ada biaya per token.</li>
             <li>• Model budget cocok untuk tugas sederhana & testing. Premium untuk kualitas terbaik.</li>
           </ul>
-        </div>
+        </Panel>
 
         {/* Hermes Config Note */}
-        <div className="bg-gray-800/50 border border-gray-700 rounded-xl p-4 mt-4">
-          <h3 className="text-sm font-semibold text-white mb-2">⚙️ Model Default Hermes Agent</h3>
-          <p className="text-xs text-gray-400">
+        <Panel padding="compact" className="mt-4">
+          <SectionHeader className="mb-3" title="Model default Hermes Agent" />
+          <p className="text-xs text-[var(--mos-text-muted)]">
             Hermes Agent (asisten Telegram) dikonfigurasi terpisah via terminal: <code className="text-emerald-400">hermes config set model &lt;id&gt;</code> dan <code className="text-emerald-400">hermes config set provider &lt;provider&gt;</code>.
             Provider yang tersedia: <code className="text-cyan-400">openai-codex</code>, <code className="text-cyan-400">openrouter</code>, <code className="text-cyan-400">anthropic</code>.
           </p>
-        </div>
+        </Panel>
     </PageStack>
   );
 }

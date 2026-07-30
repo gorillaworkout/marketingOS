@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { queryOne, queryAll, execute } from '@/lib/database';
-import { getSession } from '@/lib/auth';
+import { queryOne, queryAll } from '@/lib/database';
+import { getAuthorizedUser } from '@/lib/auth';
 
 export async function GET(request: NextRequest) {
-  const auth = await getSession(request);
-  if (auth.error) return NextResponse.json({ error: auth.error }, { status: auth.status });
-  const userId = auth.userId;
+  const auth = await getAuthorizedUser(request);
+  if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status });
+  const userId = auth.id;
 
   const totalTasks = (await queryOne('SELECT COUNT(*) as c FROM tasks WHERE user_id = ?', [userId]) as { c: number }).c;
 
@@ -20,6 +20,7 @@ export async function GET(request: NextRequest) {
     tasksByType: tasksByType.map(r => ({ type: r.type, count: r.c })),
     totalTokens: tokenRow.t,
     totalCost: tokenRow.c,
-    recentTasks
+    recentTasks,
+    enabledFeatures: auth.features,
   });
 }
