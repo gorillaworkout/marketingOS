@@ -1,3 +1,5 @@
+import { parseGatewayCompletion } from '@/lib/gateway-response';
+
 const GORILLAWORKOUT_API_BASE = process.env.GORILLAWORKOUT_API_BASE || 'https://llm.gorillaworkout.id/v1';
 const GORILLAWORKOUT_API_KEY = process.env.GORILLAWORKOUT_API_KEY || '';
 
@@ -147,8 +149,8 @@ async function callApi(
     throw new Error(`API error ${response.status}: ${errText}`);
   }
 
-  const data = await response.json();
-  const content = data.choices?.[0]?.message?.content || '';
+  const responseBody = await response.text();
+  const content = parseGatewayCompletion(responseBody, response.headers.get('content-type'));
   return { content, model };
 }
 
