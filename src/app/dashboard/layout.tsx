@@ -311,7 +311,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       <div className="fixed inset-y-0 left-0 z-40 hidden lg:block">{sidebar}</div>
       {mobileOpen && <div className="fixed inset-0 z-50 lg:hidden"><button aria-label="Close navigation overlay" className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={() => setMobileOpen(false)} /><div className="relative h-full">{sidebar}</div></div>}
       <header className="sticky top-0 z-30 flex h-14 items-center border-b border-[var(--mos-border-subtle)] bg-[var(--mos-bg)]/90 px-4 backdrop-blur-xl lg:hidden">
-        <button aria-label="Open navigation" className="mr-3 rounded-[6px] border border-[var(--mos-border)] p-2 text-[var(--mos-text-muted)]" onClick={() => setMobileOpen(true)}>
+        <button aria-label="Open navigation" className="mr-3 flex h-11 w-11 items-center justify-center rounded-[6px] border border-[var(--mos-border)] text-[var(--mos-text-muted)]" onClick={() => setMobileOpen(true)}>
           <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" d="M4 7h16M4 12h16M4 17h16" /></svg>
         </button>
         <p className="text-sm font-medium text-[var(--mos-text)]">MarketingOS</p>
