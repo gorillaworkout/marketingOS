@@ -127,7 +127,7 @@ export default function CalendarPage() {
     <PageStack>
       <PageHeader eyebrow="Library / Publishing" title="Content calendar" description="Schedule and manage content publishing across channels." />
 
-      <div className="flex flex-col gap-6 xl:flex-row">
+      <div className="flex flex-col gap-6 2xl:flex-row">
         {/* Calendar Grid */}
         <div className="min-w-0 flex-1 overflow-x-auto">
           <Panel>
@@ -188,7 +188,7 @@ export default function CalendarPage() {
         </div>
 
         {/* Side Panel */}
-        <div className="w-full xl:w-80 xl:shrink-0">
+        <div className="w-full 2xl:w-80 2xl:shrink-0">
           <Panel>
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-white font-medium">

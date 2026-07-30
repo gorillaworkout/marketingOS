@@ -99,7 +99,7 @@ test('admin model data, entitlement actions, model reset, and mobile calendar ar
   assert.match(settingsRoute, /DELETE FROM task_model_preferences/);
   assert.match(layout, /Use default model/);
   assert.match(layout, /modelError/);
-  assert.match(calendar, /flex-col gap-6 xl:flex-row/);
+  assert.match(calendar, /flex-col gap-6 2xl:flex-row/);
   assert.match(calendar, /min-w-\[680px\]/);
 });
 
