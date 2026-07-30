@@ -4,6 +4,12 @@ import { passwordInputType } from '@/lib/password-visibility';
 import { Button, DataTableFrame, EmptyState, LoadingState, MetricCard, Panel, PageHeader, PageStack, SectionHeader, StatusBadge, TextInput } from '@/components/ui/dashboard';
 import { GENERATION_FEATURES } from '@/lib/authorization';
 
+const ASSIGNABLE_FEATURES = ['social-post', 'video-script', 'event-plan', 'article-market-news', 'market-research'] as const;
+// Sanity assertion; keeps the array above and the authorization source of truth in sync.
+if (process.env.NODE_ENV !== 'production' && ASSIGNABLE_FEATURES.length !== GENERATION_FEATURES.length) {
+  console.warn('ASSIGNABLE_FEATURES drift vs GENERATION_FEATURES', { ASSIGNABLE_FEATURES, GENERATION_FEATURES });
+}
+
 interface User {
   id: string;
   username: string;
@@ -31,7 +37,7 @@ export default function AccountsPage() {
   const [users, setUsers] = useState<User[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
   const [departmentName, setDepartmentName] = useState('');
-  const [departmentFeatures, setDepartmentFeatures] = useState<string[]>([...GENERATION_FEATURES]);
+  const [departmentFeatures, setDepartmentFeatures] = useState<string[]>([...ASSIGNABLE_FEATURES]);
   const [loading, setLoading] = useState(true);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [showAddModal, setShowAddModal] = useState(false);
@@ -214,7 +220,7 @@ export default function AccountsPage() {
     const response = await fetch('/api/admin/departments', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: departmentName, features: departmentFeatures }) });
     const data = await response.json();
     if (!response.ok) return showToast(data.error || 'Failed to create department', 'error');
-    setDepartmentName(''); setDepartmentFeatures([...GENERATION_FEATURES]); fetchDepartments(); showToast('Department created', 'success');
+    setDepartmentName(''); setDepartmentFeatures([...ASSIGNABLE_FEATURES]); fetchDepartments(); showToast('Department created', 'success');
   };
   const toggleDepartmentFeature = async (department: Department, feature: string) => {
     const features = department.permitted_features.includes(feature) ? department.permitted_features.filter(value => value !== feature) : [...department.permitted_features, feature];
@@ -320,10 +326,10 @@ export default function AccountsPage() {
         <SectionHeader title="Departments" description="Choose which generation modules each department can use." />
         <div className="flex flex-wrap gap-3 mt-4">
           <TextInput value={departmentName} onChange={e => setDepartmentName(e.target.value)} placeholder="Department name" className="max-w-xs" />
-          {GENERATION_FEATURES.map(feature => <label key={feature} className="text-sm text-[var(--mos-text-secondary)] flex items-center gap-1"><input type="checkbox" checked={departmentFeatures.includes(feature)} onChange={() => setDepartmentFeatures(current => current.includes(feature) ? current.filter(value => value !== feature) : [...current, feature])} /> {feature}</label>)}
+          {ASSIGNABLE_FEATURES.map(feature => <label key={feature} className="text-sm text-[var(--mos-text-secondary)] flex items-center gap-1"><input type="checkbox" checked={departmentFeatures.includes(feature)} onChange={() => setDepartmentFeatures(current => current.includes(feature) ? current.filter(value => value !== feature) : [...current, feature])} /> {feature}</label>)}
           <Button variant="primary" onClick={createDepartment}>Create department</Button>
         </div>
-        <div className="mt-4 text-sm text-[var(--mos-text-secondary)] space-y-3">{departments.map(department => <div key={department.id} className="flex flex-wrap items-center gap-3"><span className="font-medium min-w-28">{department.name}</span>{GENERATION_FEATURES.map(feature => <label key={feature} className="flex items-center gap-1 text-[var(--mos-text-muted)]"><input type="checkbox" checked={department.permitted_features.includes(feature)} onChange={() => toggleDepartmentFeature(department, feature)} /> {feature}</label>)}</div>)}</div>
+        <div className="mt-4 text-sm text-[var(--mos-text-secondary)] space-y-3">{departments.map(department => <div key={department.id} className="flex flex-wrap items-center gap-3"><span className="font-medium min-w-28">{department.name}</span>{ASSIGNABLE_FEATURES.map(feature => <label key={feature} className="flex items-center gap-1 text-[var(--mos-text-muted)]"><input type="checkbox" checked={department.permitted_features.includes(feature)} onChange={() => toggleDepartmentFeature(department, feature)} /> {feature}</label>)}</div>)}</div>
       </Panel>
 
       {/* Add User Modal */}
