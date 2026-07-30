@@ -25,6 +25,14 @@ test('reads a full message content from an SSE frame', () => {
   assert.equal(parseGatewayCompletion(body, 'text/event-stream; charset=utf-8'), 'finished');
 });
 
+test('assembles concatenated JSON frames without data delimiters', () => {
+  const body = [
+    JSON.stringify({ choices: [{ delta: { content: '{"ok":' } }] }),
+    JSON.stringify({ choices: [{ delta: { content: 'true}' } }] }),
+  ].join('');
+  assert.equal(parseGatewayCompletion(body, 'text/event-stream'), '{"ok":true}');
+});
+
 test('rejects an SSE response without completion content', () => {
   assert.throws(
     () => parseGatewayCompletion('data: {"choices":[{"delta":{}}]}\n\ndata: [DONE]\n\n', 'text/event-stream'),
