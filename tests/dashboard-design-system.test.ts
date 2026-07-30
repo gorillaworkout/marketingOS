@@ -75,7 +75,7 @@ test('dashboard shell is responsive and separates every model provider', async (
   const layout = await readFile('src/app/dashboard/layout.tsx', 'utf8');
   assert.match(layout, /mobileOpen/);
   assert.match(layout, /Open navigation/);
-  assert.match(layout, /min-h-0 flex-1 space-y-5 overflow-y-auto/);
+  assert.match(layout, /min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain/);
   assert.match(layout, /GorillaWorkout LLM API/);
   assert.match(layout, /Codex/);
   assert.match(layout, /Claude Code/);

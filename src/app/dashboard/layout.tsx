@@ -225,7 +225,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         <button aria-label="Close navigation" className="ml-auto p-2 text-[var(--mos-text-muted)] lg:hidden" onClick={() => setMobileOpen(false)}>×</button>
       </div>
 
-      <nav className="min-h-0 flex-1 space-y-5 overflow-y-auto px-3 py-4">
+      <nav className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain px-3 py-3 [scrollbar-gutter:stable]">
         {visibleSections.map((section, sectionIndex) => (
           <div key={section.label || sectionIndex}>
             {section.label && <p className="mb-1.5 px-2 text-[10px] font-medium uppercase tracking-[0.12em] text-[var(--mos-text-faint)]">{section.label}</p>}
