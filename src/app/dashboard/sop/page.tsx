@@ -2,6 +2,7 @@
 
 import ArticleMarketNewsGenerator from './ArticleMarketNewsGenerator';
 import { PageHeader, PageStack, Panel, StatusBadge } from '@/components/ui/dashboard';
+import InlineModelSelector from '@/components/InlineModelSelector';
 
 const steps = [
   {
@@ -54,6 +55,7 @@ export default function SopPage() {
   return (
     <PageStack>
       <PageHeader eyebrow="Create / Standar editorial" title="Article market news" description="Riset mengikuti SOP, lalu generate draf artikel yang source-gated dan siap diekspor ke DOCX." actions={<StatusBadge tone="warning">Manual review required</StatusBadge>} />
+      <InlineModelSelector feature="article-market-news" />
       <Panel padding="compact" className="border-amber-400/15 bg-amber-400/[0.045] text-sm leading-6 text-amber-100"><span className="font-semibold">Tindakan SOP manual:</span> riset dan originality check tetap dikerjakan operator. Generator hanya menulis dari fakta dan struktur yang sudah dimasukkan.</Panel>
 
       <ArticleMarketNewsGenerator />

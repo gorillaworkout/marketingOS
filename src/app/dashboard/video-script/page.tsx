@@ -14,6 +14,7 @@ import {
   TextInput,
   Toolbar,
 } from '@/components/ui/dashboard';
+import InlineModelSelector from '@/components/InlineModelSelector';
 
 interface ProgressState {
   step: string;
@@ -478,6 +479,7 @@ export default function VideoScriptPage() {
   return (
     <PageStack className="max-w-6xl">
       <PageHeader eyebrow="Create / Video" title="Video script" description="Compare three directions, refine the selected concept, then generate the full script." />
+      <InlineModelSelector feature="video-script" />
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Left: Form + Result */}

@@ -5,6 +5,7 @@ import { useState } from 'react';
 import { buildMarketResearchDocxBlob, marketResearchDocxFilename } from '@/lib/market-research-docx';
 import type { MarketResearchInput, MarketResearchItem } from '@/lib/market-research';
 import { Button, FormField, Panel, PageHeader, PageStack, SectionHeader, StatusBadge, TextArea, TextInput, Toolbar } from '@/components/ui/dashboard';
+import InlineModelSelector from '@/components/InlineModelSelector';
 
 interface MarketResearchResult {
   items: MarketResearchItem[];
@@ -86,6 +87,7 @@ export default function MarketResearchPage() {
   return (
     <PageStack>
       <PageHeader eyebrow="Create / Market intelligence" title="Market research" description="Berikan brief. MarketingOS memindai Forex, Gold, Oil, dan US Indices secara terpisah, lalu memilih maksimal lima berita faktual dan high-impact yang diterbitkan hari ini." actions={<Link href="/dashboard/history" className="inline-flex h-9 items-center rounded-[var(--mos-radius-control)] border border-[var(--mos-border)] bg-[var(--mos-raised)] px-3.5 text-sm font-medium text-[var(--mos-text-secondary)] hover:border-[var(--mos-border-strong)]">Buka history</Link>} />
+      <InlineModelSelector feature="market-research" />
 
       <Panel>
         <SectionHeader title="Research brief" description="Tanggal riset dikunci otomatis ke hari ini dalam WIB." action={<Button size="sm" onClick={fillExample}>Isi contoh</Button>} />

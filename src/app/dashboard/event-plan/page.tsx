@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { buildEventPlanDownload, eventPlanDownloadFilename } from '@/lib/event-plan-download';
 import type { EventPlanResearch } from '@/lib/event-plan-research';
 import { Button, DataTableFrame, FormField, Panel, PageHeader, PageStack, SectionHeader, StatusBadge, TextArea, TextInput, Toolbar } from '@/components/ui/dashboard';
+import InlineModelSelector from '@/components/InlineModelSelector';
 
 type BudgetItem = { category: string; estimatedCost: number; notes: string };
 type Budget = { currency: 'IDR'; total?: number; items: BudgetItem[]; contingency?: number; preliminary?: boolean };
@@ -170,6 +171,7 @@ export default function EventPlanPage() {
   return (
     <PageStack className="max-w-5xl">
       <PageHeader eyebrow="Create / Events" title="Event plan" description="Riset, proposal, dan budgeting dalam satu workflow dengan kontrol sumber yang jelas." />
+      <InlineModelSelector feature="event-plan" />
 
       <Panel>
       <form onSubmit={handleGenerate} className="space-y-5">

@@ -13,6 +13,7 @@ import {
   TextArea,
   Toolbar,
 } from '@/components/ui/dashboard';
+import InlineModelSelector from '@/components/InlineModelSelector';
 
 interface QCCheck {
   name: string;
@@ -553,6 +554,7 @@ export default function SocialPostPage() {
   return (
     <PageStack className="max-w-6xl">
       <PageHeader eyebrow="Create / Social" title="Social media post" description="Generate three structured options with research, quality control, naming, and delivery review." />
+      <InlineModelSelector feature="social-post" />
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Left: Form + Result */}
