@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { requireAdmin } from '@/lib/auth';
 import { execute } from '@/lib/database';
 import { rateLimit } from '@/lib/rate-limit';
-import { generateContent, getModelProvider, getUserPreferredModel } from '@/lib/openai';
+import { generateContent, getUserPreferredModel } from '@/lib/openai';
 import { buildArticleMarketNewsPrompts, normalizeArticleMarketNewsInput, validateGeneratedArticle } from '@/lib/article-market-news';
 import { researchArticleMarketNews } from '@/lib/article-market-news-research';
 
@@ -37,11 +37,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: error instanceof Error ? error.message : 'Invalid article request.' }, { status: 400 });
   }
 
-  const preferredModel = await getUserPreferredModel(auth.id, 'article-market-news');
-  const model = getModelProvider(preferredModel) === 'codex' ? preferredModel : 'gpt-5.6-sol';
-  if (getModelProvider(model) !== 'codex') {
-    return NextResponse.json({ error: 'Article generation requires an office Codex subscription model.' }, { status: 400 });
-  }
+  const model = await getUserPreferredModel(auth.id, 'article-market-news');
 
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
@@ -73,7 +69,6 @@ export async function POST(request: NextRequest) {
               temperature: 0.45,
               maxTokens: 7_000,
               taskType: 'article-market-news',
-              codexTextOnly: true,
               jsonRepairAttempts: 0,
             });
             article = parseGeneratedArticle(generated.content);

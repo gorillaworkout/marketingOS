@@ -17,9 +17,16 @@ interface ModelInfo {
   id: string;
   name: string;
   tier: 'budget' | 'balanced' | 'premium';
-  provider: 'openrouter' | 'codex' | 'claude-code' | 'gorillaworkout';
-  inputPrice: number;
-  outputPrice: number;
+  provider: 'gorillaworkout';
+}
+
+interface FeatureModelPreference {
+  feature: 'social-post' | 'video-script' | 'event-plan' | 'article-market-news' | 'market-research';
+  label: string;
+  description: string;
+  allowedModels: ModelInfo[];
+  currentModel: string;
+  defaultModel: string;
 }
 
 type IconName =
@@ -51,20 +58,6 @@ function NavIcon({ name }: { name: IconName }) {
   return <svg aria-hidden="true" className="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d={iconPaths[name]} /></svg>;
 }
 
-const providers = {
-  gorillaworkout: { label: 'GorillaWorkout LLM API', detail: 'Via llm.gorillaworkout.id' },
-  codex: { label: 'Codex', detail: 'ChatGPT subscription' },
-  'claude-code': { label: 'Claude Code', detail: 'Claude subscription' },
-  openrouter: { label: 'OpenRouter', detail: 'Provider marketplace' },
-} as const;
-
-const taskTypes = [
-  { key: 'caption', label: 'Caption' },
-  { key: 'image-prompt', label: 'Image prompt' },
-  { key: 'video-script', label: 'Video script' },
-  { key: 'event-plan', label: 'Event plan' },
-];
-
 const generateItems = [
   { href: '/dashboard/social-post', label: 'Social post', icon: 'social' },
   { href: '/dashboard/video-script', label: 'Video script', icon: 'video' },
@@ -85,12 +78,10 @@ const resourceItems = [
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
-  const [currentModel, setCurrentModel] = useState('deepseek/deepseek-v4-flash');
-  const [models, setModels] = useState<ModelInfo[]>([]);
+  const [featurePreferences, setFeaturePreferences] = useState<FeatureModelPreference[]>([]);
   const [modelDropdownOpen, setModelDropdownOpen] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [taskModelPreferences, setTaskModelPreferences] = useState<Record<string, string>>({});
-  const [expandedTask, setExpandedTask] = useState<string | null>(null);
+  const [expandedFeature, setExpandedFeature] = useState<string | null>(null);
   const [modelError, setModelError] = useState('');
   const dropdownRef = useRef<HTMLDivElement>(null);
   const router = useRouter();
@@ -120,11 +111,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   useEffect(() => {
     fetch('/api/settings/model').then(async response => {
       const data = await response.json();
-      if (data.models) {
-        setCurrentModel(data.currentModel);
-        setModels(data.models);
-        if (data.taskModelPreferences) setTaskModelPreferences(data.taskModelPreferences);
-      }
+      if (data.features) setFeaturePreferences(data.features);
     });
   }, []);
 
@@ -146,35 +133,20 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     router.push('/');
   };
 
-  const handleModelSelect = async (modelId: string) => {
-    setModelDropdownOpen(false);
-    if (modelId === currentModel) return;
+  const handleFeatureModelSelect = async (feature: string, modelId: string | null) => {
     setModelError('');
     const response = await fetch('/api/settings/model', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: modelId }),
-    });
-    if (response.ok) setCurrentModel(modelId);
-    else setModelError('Model preference could not be saved. Try again.');
-  };
-
-  const handleTaskModelSelect = async (taskType: string, modelId: string | null) => {
-    setModelError('');
-    const response = await fetch('/api/settings/model', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: modelId, taskType }),
+      body: JSON.stringify({ feature, model: modelId }),
     });
     if (response.ok) {
-      setTaskModelPreferences(previous => {
-        const next = { ...previous };
-        if (modelId) next[taskType] = modelId;
-        else delete next[taskType];
-        return next;
-      });
-      setExpandedTask(null);
-    } else setModelError('Task override could not be saved. Try again.');
+      const data = await response.json() as { currentModel: string };
+      setFeaturePreferences(previous => previous.map(item => (
+        item.feature === feature ? { ...item, currentModel: data.currentModel } : item
+      )));
+      setExpandedFeature(null);
+    } else setModelError('Feature preference could not be saved. Try again.');
   };
 
   if (loading) {
@@ -212,7 +184,19 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     }),
   })).filter(section => section.items.length);
 
-  const currentModelInfo = models.find(model => model.id === currentModel);
+  const routeFeature = pathname.startsWith('/dashboard/social-post')
+    ? 'social-post'
+    : pathname.startsWith('/dashboard/video-script')
+      ? 'video-script'
+      : pathname.startsWith('/dashboard/event-plan')
+        ? 'event-plan'
+        : pathname.startsWith('/dashboard/sop')
+          ? 'article-market-news'
+          : pathname.startsWith('/dashboard/market-research')
+            ? 'market-research'
+            : null;
+  const currentPreference = featurePreferences.find(item => item.feature === routeFeature);
+  const currentModelInfo = currentPreference?.allowedModels.find(model => model.id === currentPreference.currentModel);
 
   const sidebar = (
     <aside className="flex h-full w-[264px] flex-col border-r border-[var(--mos-border-subtle)] bg-[var(--mos-sidebar)]">
@@ -248,8 +232,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         <button onClick={() => setModelDropdownOpen(open => !open)} className="flex w-full items-center gap-3 rounded-[7px] border border-[var(--mos-border)] bg-[var(--mos-panel)] p-2.5 text-left transition hover:border-[var(--mos-border-strong)]">
           <span className="flex h-7 w-7 items-center justify-center rounded-[6px] bg-indigo-400/10 text-indigo-200"><NavIcon name="models" /></span>
           <span className="min-w-0 flex-1">
-            <span className="block truncate text-xs font-medium text-[var(--mos-text-secondary)]">{currentModelInfo?.name || currentModel}</span>
-            <span className="mt-0.5 block text-[10px] text-[var(--mos-text-faint)]">{currentModelInfo ? providers[currentModelInfo.provider].label : 'Default model'}</span>
+            <span className="block truncate text-xs font-medium text-[var(--mos-text-secondary)]">{currentModelInfo?.name || 'Feature preferences'}</span>
+            <span className="mt-0.5 block text-[10px] text-[var(--mos-text-faint)]">{currentPreference?.label || 'Models by workflow'}</span>
           </span>
           <svg className="h-3.5 w-3.5 text-[var(--mos-text-faint)]" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path d="m7 10 5 5 5-5" /></svg>
         </button>
@@ -257,54 +241,50 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         {modelDropdownOpen && (
           <div className="absolute bottom-[calc(100%-4px)] left-3 z-50 w-[360px] max-w-[calc(100vw-24px)] overflow-hidden rounded-[8px] border border-[var(--mos-border-strong)] bg-[var(--mos-raised)] shadow-2xl">
             <div className="border-b border-[var(--mos-border-subtle)] px-4 py-3">
-              <p className="text-xs font-medium text-[var(--mos-text)]">Generation model</p>
-              <p className="mt-0.5 text-[10px] text-[var(--mos-text-faint)]">Providers and billing paths are shown separately.</p>
+              <p className="text-xs font-medium text-[var(--mos-text)]">Feature model preferences</p>
+              <p className="mt-0.5 text-[10px] text-[var(--mos-text-faint)]">Choose from the models enabled by an administrator.</p>
             </div>
-            <div className="max-h-[48vh] overflow-y-auto p-2">
+            <div className="max-h-[62vh] overflow-y-auto p-2">
               {modelError && <p role="alert" className="mx-2 mb-2 rounded-[6px] border border-red-400/20 bg-red-400/10 px-3 py-2 text-[10px] text-red-300">{modelError}</p>}
-              {(Object.keys(providers) as Array<keyof typeof providers>).map(provider => {
-                const providerModels = models.filter(model => model.provider === provider);
-                if (!providerModels.length) return null;
+              {featurePreferences.map(preference => {
+                const expanded = expandedFeature === preference.feature;
+                const selectedModel = preference.allowedModels.find(model => model.id === preference.currentModel);
                 return (
-                  <div key={provider} className="mb-3 last:mb-0">
-                    <div className="flex items-baseline justify-between px-2 py-1.5">
-                      <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--mos-text-muted)]">{providers[provider].label}</span>
-                      <span className="text-[10px] text-[var(--mos-text-faint)]">{providers[provider].detail}</span>
-                    </div>
-                    {providerModels.map(model => {
-                      const selected = model.id === currentModel;
-                      return (
-                        <button key={model.id} onClick={() => handleModelSelect(model.id)} className={`flex w-full items-start gap-2.5 rounded-[6px] px-2.5 py-2 text-left ${selected ? 'bg-indigo-400/10' : 'hover:bg-white/[0.035]'}`}>
-                          <span className={`mt-1.5 h-1.5 w-1.5 rounded-full ${selected ? 'bg-indigo-300' : 'bg-[var(--mos-text-faint)]'}`} />
-                          <span className="min-w-0 flex-1">
-                            <span className={`block truncate text-xs ${selected ? 'text-indigo-100' : 'text-[var(--mos-text-secondary)]'}`}>{model.name}</span>
-                            <span className="mt-0.5 block text-[10px] text-[var(--mos-text-faint)]">
-                              {model.inputPrice === 0 && model.outputPrice === 0 ? 'Included with provider access' : `$${(model.inputPrice * 1_000_000).toFixed(2)} / $${(model.outputPrice * 1_000_000).toFixed(2)} per 1M tokens`}
-                            </span>
-                          </span>
-                          <StatusBadge>{model.tier}</StatusBadge>
-                        </button>
-                      );
-                    })}
-                  </div>
-                );
-              })}
-            </div>
-            <div className="border-t border-[var(--mos-border-subtle)] p-2">
-              <p className="px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--mos-text-faint)]">Task overrides</p>
-              {taskTypes.map(task => {
-                const taskModel = models.find(model => model.id === taskModelPreferences[task.key]);
-                const expanded = expandedTask === task.key;
-                return (
-                  <div key={task.key}>
-                    <button onClick={() => setExpandedTask(expanded ? null : task.key)} className="flex w-full items-center justify-between rounded-[5px] px-2 py-1.5 text-xs hover:bg-white/[0.035]">
-                      <span className="text-[var(--mos-text-muted)]">{task.label}</span>
-                      <span className="max-w-44 truncate text-[10px] text-[var(--mos-text-faint)]">{taskModel?.name || 'Use default'}</span>
+                  <div key={preference.feature} className="mb-1 rounded-[6px] border border-transparent last:mb-0">
+                    <button
+                      onClick={() => setExpandedFeature(expanded ? null : preference.feature)}
+                      className="flex w-full items-center justify-between gap-3 rounded-[6px] px-2.5 py-2.5 text-left hover:bg-white/[0.035]"
+                    >
+                      <span className="min-w-0">
+                        <span className="block text-xs font-medium text-[var(--mos-text-secondary)]">{preference.label}</span>
+                        <span className="mt-0.5 block truncate text-[10px] text-[var(--mos-text-faint)]">{selectedModel?.name || preference.defaultModel}</span>
+                      </span>
+                      <svg className={`h-3.5 w-3.5 shrink-0 text-[var(--mos-text-faint)] transition ${expanded ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path d="m7 10 5 5 5-5" /></svg>
                     </button>
-                    {expanded && <div className="mb-1 ml-3 max-h-32 overflow-y-auto border-l border-[var(--mos-border)] pl-2">
-                      <button onClick={() => handleTaskModelSelect(task.key, null)} className="block w-full rounded-[4px] px-2 py-1 text-left text-[10px] text-[var(--mos-accent-soft)] hover:bg-white/[0.035]">Use default model</button>
-                      {models.map(model => <button key={model.id} onClick={() => handleTaskModelSelect(task.key, model.id)} className="block w-full truncate rounded-[4px] px-2 py-1 text-left text-[10px] text-[var(--mos-text-muted)] hover:bg-white/[0.035] hover:text-[var(--mos-text-secondary)]">{providers[model.provider].label} · {model.name}</button>)}
-                    </div>}
+                    {expanded && (
+                      <div className="mb-2 ml-3 border-l border-[var(--mos-border)] pl-2">
+                        <button
+                          onClick={() => void handleFeatureModelSelect(preference.feature, null)}
+                          className="block w-full rounded-[4px] px-2 py-1.5 text-left text-[10px] text-[var(--mos-accent-soft)] hover:bg-white/[0.035]"
+                        >
+                          Use assignment default
+                        </button>
+                        {preference.allowedModels.map(model => {
+                          const selected = model.id === preference.currentModel;
+                          return (
+                            <button
+                              key={model.id}
+                              onClick={() => void handleFeatureModelSelect(preference.feature, model.id)}
+                              className={`flex w-full items-center gap-2 rounded-[4px] px-2 py-1.5 text-left text-[10px] ${selected ? 'bg-indigo-400/10 text-indigo-100' : 'text-[var(--mos-text-muted)] hover:bg-white/[0.035] hover:text-[var(--mos-text-secondary)]'}`}
+                            >
+                              <span className={`h-1.5 w-1.5 rounded-full ${selected ? 'bg-indigo-300' : 'bg-[var(--mos-text-faint)]'}`} />
+                              <span className="min-w-0 flex-1 truncate">{model.name}</span>
+                              <StatusBadge>{model.tier}</StatusBadge>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
                 );
               })}
@@ -335,7 +315,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" d="M4 7h16M4 12h16M4 17h16" /></svg>
         </button>
         <p className="text-sm font-medium text-[var(--mos-text)]">MarketingOS</p>
-        <span className="ml-auto max-w-40 truncate text-[11px] text-[var(--mos-text-faint)]">{currentModelInfo?.name || currentModel}</span>
+        <span className="ml-auto max-w-40 truncate text-[11px] text-[var(--mos-text-faint)]">{currentModelInfo?.name || currentPreference?.label || ''}</span>
       </header>
       <main className="min-h-screen lg:pl-[264px]">
         <div className="mx-auto w-full max-w-[1544px] px-4 py-5 sm:px-6 sm:py-7 lg:px-8">{children}</div>

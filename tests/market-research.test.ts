@@ -127,15 +127,15 @@ test('prompt treats brief and publisher text as untrusted data and requires exac
   assert.match(prompts.userPrompt, /candidate-a/);
 });
 
-test('Market Research is admin-only, Codex-only, persisted, downloadable, and additively migrated', async () => {
+test('Market Research is admin-only, gateway-routed, persisted, downloadable, and additively migrated', async () => {
   assert.match(layout, /\/dashboard\/market-research/);
   assert.match(page, /Market research/i);
   assert.match(page, /Research brief/i);
   assert.match(page, /Latest Update Time/);
   assert.match(page, /Download DOCX/);
   assert.match(route, /requireAdmin\(request\)/);
-  assert.match(route, /codexTextOnly: true/);
-  assert.match(route, /gpt-5\.6-sol/);
+  assert.match(route, /getUserPreferredModel\(auth\.id, 'market-research'\)/);
+  assert.doesNotMatch(route, /codexTextOnly|getModelProvider|gpt-5\.6-sol/);
   assert.match(route, /researchLatestMarketNews/);
   assert.match(route, /validateAndHydrateMarketResearchSelection/);
   assert.match(route, /INSERT INTO tasks/);

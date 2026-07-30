@@ -1,15 +1,11 @@
 /**
- * Hybrid embedding system with three-tier fallback:
- * 1. OpenAI text-embedding-3-small via OpenRouter (best quality)
- * 2. TF-IDF local computation (free, no API)
- * 3. Hash-based embedding (always works, lower quality)
+ * Local embedding system. Knowledge similarity stays inside MarketingOS and
+ * does not open a second external model-provider path.
  */
 
 import { queryOne, queryAll, execute } from './database';
 import { v4 as uuidv4 } from 'uuid';
 
-const API_BASE = process.env.OPENAI_BASE_URL || 'https://openrouter.ai/api/v1';
-const API_KEY = process.env.OPENROUTER_API_KEY || process.env.OPENAI_API_KEY || '';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -28,37 +24,7 @@ interface KnowledgeEntry {
   created_at: string;
 }
 
-// ─── OpenAI Embedding (Tier 1) ──────────────────────────────────────────────
-
-async function getOpenAIEmbedding(text: string): Promise<number[] | null> {
-  if (!API_KEY) return null;
-
-  try {
-    const response = await fetch(`${API_BASE}/embeddings`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${API_KEY}`,
-        'HTTP-Referer': 'https://marketingos.local',
-        'X-Title': 'MarketingOS',
-      },
-      body: JSON.stringify({
-        model: 'openai/text-embedding-3-small',
-        input: text,
-      }),
-    });
-
-    if (!response.ok) return null;
-
-    const data = await response.json();
-    const embedding = data?.data?.[0]?.embedding;
-    return Array.isArray(embedding) ? embedding : null;
-  } catch {
-    return null;
-  }
-}
-
-// ─── TF-IDF Embedding (Tier 2) ─────────────────────────────────────────────
+// ─── TF-IDF Embedding ───────────────────────────────────────────────────────
 
 const TFIDF_DIM = 256;
 
@@ -107,46 +73,12 @@ function getTFIDFEmbedding(text: string): number[] {
   return vector;
 }
 
-// ─── Hash-based Embedding (Tier 3) ──────────────────────────────────────────
-
-const HASH_DIM = 128;
-
-function getHashEmbedding(text: string): number[] {
-  const vector = new Array(HASH_DIM).fill(0);
-
-  // Use multiple hash seeds for dimensionality
-  for (let dim = 0; dim < HASH_DIM; dim++) {
-    let hash = dim * 2654435761; // Knuth multiplicative hash
-    for (let i = 0; i < text.length; i++) {
-      hash = ((hash << 5) - hash + text.charCodeAt(i) + dim) | 0;
-    }
-    // Normalize to [-1, 1]
-    vector[dim] = (Math.abs(hash) % 2001 - 1000) / 1000;
-  }
-
-  // L2 normalize
-  let norm = 0;
-  for (const v of vector) norm += v * v;
-  norm = Math.sqrt(norm);
-  if (norm > 0) {
-    for (let i = 0; i < vector.length; i++) vector[i] /= norm;
-  }
-
-  return vector;
-}
-
 // ─── Public API ─────────────────────────────────────────────────────────────
 
 /**
- * Get an embedding for text using the best available method.
- * Fallback chain: OpenAI → TF-IDF → Hash
+ * Get a deterministic local embedding without an external provider call.
  */
 export async function getEmbedding(text: string): Promise<number[]> {
-  // Tier 1: OpenAI via OpenRouter
-  const openai = await getOpenAIEmbedding(text);
-  if (openai) return openai;
-
-  // Tier 2: TF-IDF (no API needed)
   return getTFIDFEmbedding(text);
 }
 
@@ -178,7 +110,6 @@ export async function findSimilarEntries(
   limit: number = 5
 ): Promise<KnowledgeEntry[]> {
   const queryEmbedding = await getEmbedding(text);
-  const queryStr = JSON.stringify(queryEmbedding);
 
   // Fetch all entries with embeddings
   const entries = await queryAll<KnowledgeEntry>('SELECT * FROM knowledge_entries WHERE embedding IS NOT NULL');

@@ -2,13 +2,12 @@ import { NextRequest } from 'next/server';
 import { queryOne, queryAll, execute } from '@/lib/database';
 import { requireFeature } from '@/lib/auth';
 import { rateLimit } from '@/lib/rate-limit';
-import { generateContent, generateMultiStep, getSmartSystemPrompt, fetchContextMemory, fetchStyleContext, getUserPreferredModel, runQC, generateDupoinFileName, type BrandGuidelines, type QCResult } from '@/lib/openai';
+import { generateContent, getSmartSystemPrompt, fetchContextMemory, fetchStyleContext, getUserPreferredModel, runQC, generateDupoinFileName, type BrandGuidelines, type QCResult } from '@/lib/openai';
 import { v4 as uuidv4 } from 'uuid';
 import fs from 'fs';
 import path from 'path';
 
 const TIMEOUT_MS = 300_000; // 5 min for 3 parallel options
-const CODEX_TIMEOUT_MS = 300_000; // 5 min for Codex
 
 function sseEvent(data: Record<string, unknown>) {
   return `data: ${JSON.stringify(data)}\n\n`;
@@ -71,7 +70,7 @@ export async function POST(request: NextRequest) {
     });
   }
 
-  const preferredModel = await getUserPreferredModel(userId, 'caption');
+  const preferredModel = await getUserPreferredModel(userId, 'social-post');
 
   // Fetch brand guidelines if specified
   let brandGuidelines: BrandGuidelines | undefined;
@@ -126,10 +125,8 @@ export async function POST(request: NextRequest) {
 
   const stream = new ReadableStream({
     async start(controller) {
-      const isCodex = preferredModel.startsWith('gpt-5.6');
-      const timeout = isCodex ? CODEX_TIMEOUT_MS : TIMEOUT_MS;
       const timeoutPromise = new Promise<never>((_, reject) => {
-        timeoutId = setTimeout(() => reject(new Error(`Generation timed out after ${timeout / 1000}s`)), timeout);
+        timeoutId = setTimeout(() => reject(new Error(`Generation timed out after ${TIMEOUT_MS / 1000}s`)), TIMEOUT_MS);
       });
 
       try {
@@ -219,24 +216,14 @@ Follow the SOP strictly. Output JSON format with: { "hook": "...", "caption": ".
               message: `${variant.styleLabel} — generating...`,
             })));
 
-            if (isCodex) {
-              // Codex: single step
-              const result = await generateContent(smartSystem, stylePrompt, userId, taskId, {
-                brandGuidelines,
-                model: preferredModel,
-                temperature: variant.temperature,
-              });
-              return { variant, result: result.content, usage: result.usage };
-            } else {
-              // OpenRouter: single-step with style-specific temperature
-              const result = await generateContent(smartSystem, stylePrompt, userId, taskId, {
-                brandGuidelines,
-                responseFormat: { type: 'json_object' },
-                model: preferredModel,
-                temperature: variant.temperature,
-              });
-              return { variant, result: result.content, usage: result.usage };
-            }
+            const result = await generateContent(smartSystem, stylePrompt, userId, taskId, {
+              brandGuidelines,
+              responseFormat: { type: 'json_object' },
+              model: preferredModel,
+              temperature: variant.temperature,
+              taskType: 'social-post',
+            });
+            return { variant, result: result.content, usage: result.usage };
           });
 
           const optionResults = await Promise.all(optionPromises);
@@ -287,7 +274,6 @@ Follow the SOP strictly. Output JSON format with: { "hook": "...", "caption": ".
             message: '🎨 Generating image prompt...',
           })));
 
-          const imagePromptModel = await getUserPreferredModel(userId, 'image-prompt');
           const smartImageSystem = getSmartSystemPrompt('image-prompt', platform, brandGuidelines, undefined, styleContext);
           const imagePrompt = await generateContent(
             smartImageSystem,
@@ -299,7 +285,7 @@ Target: ${targetAudience || 'General'}
 Tulis deskripsi visual saja. JANGAN tulis hashtag, caption, atau teks apapun di gambar. Cukup deskripsi visualnya.`,
             userId,
             taskId,
-            { brandGuidelines, model: imagePromptModel }
+            { brandGuidelines, model: preferredModel, taskType: 'social-post' }
           );
 
           // Set imagePrompt on all options

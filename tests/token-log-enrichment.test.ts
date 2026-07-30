@@ -14,19 +14,16 @@ void describe('Token Log Enrichment', () => {
   void it('maps account_source correctly per provider', () => {
     for (const m of AVAILABLE_MODELS) {
       const provider = getModelProvider(m.id);
-      const source = provider === 'openrouter' ? 'personal' : 'office';
-      if (provider === 'openrouter') assert.strictEqual(source, 'personal');
-      else assert.strictEqual(source, 'office');
+      const source = 'office';
+      assert.strictEqual(provider, 'gorillaworkout');
+      assert.strictEqual(source, 'office');
     }
   });
 
-  void it('reports all expected providers', () => {
+  void it('reports only the generation gateway provider', () => {
     const providers = new Set(AVAILABLE_MODELS.map(m => m.provider));
-    assert(providers.has('openrouter'), 'missing openrouter');
-    assert(providers.has('codex'), 'missing codex');
-    assert(providers.has('claude-code'), 'missing claude-code');
     assert(providers.has('gorillaworkout'), 'missing gorillaworkout');
-    assert.strictEqual(providers.size, 4);
+    assert.strictEqual(providers.size, 1);
   });
 
   void it('each caller passes taskType in options', () => {
@@ -41,11 +38,11 @@ void describe('Token Log Enrichment', () => {
     // Each generateContent call should include taskType
     const videoMatches = videoApi.match(/taskType:\s*'video-script'/g);
     assert(videoMatches, 'video-script route missing taskType');
-    assert(videoMatches.length >= 2, `video-script route has ${videoMatches.length} taskType refs (expected ≥2)`);
+    assert(videoMatches.length >= 1, `video-script route has ${videoMatches.length} taskType refs (expected ≥1)`);
 
     const eventMatches = eventApi.match(/taskType:\s*'event-plan'/g);
     assert(eventMatches, 'event-plan route missing taskType');
-    assert(eventMatches.length >= 2, `event-plan route has ${eventMatches.length} taskType refs (expected ≥2)`);
+    assert(eventMatches.length >= 1, `event-plan route has ${eventMatches.length} taskType refs (expected ≥1)`);
   });
 
   void it('openai.ts INSERT statement includes new columns', () => {

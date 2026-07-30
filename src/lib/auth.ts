@@ -42,7 +42,7 @@ export async function getSession(request: NextRequest): Promise<AuthResult | Aut
     const adminOnlyPaths = [
       '/api/dashboard/tokens', '/api/admin/users', '/api/admin/departments',
       '/api/templates', '/api/calendar', '/api/images', '/api/generated-images', '/api/generate-image', '/api/knowledge',
-      '/api/brand-guidelines', '/api/settings/model', '/api/dashboard/history',
+      '/api/brand-guidelines', '/api/dashboard/history',
     ];
     if (adminOnlyPaths.some(path => request.nextUrl.pathname === path || request.nextUrl.pathname.startsWith(`${path}/`))) {
       const user = await queryOne<{ role: string }>('SELECT role FROM users WHERE id = ?', [userId]);

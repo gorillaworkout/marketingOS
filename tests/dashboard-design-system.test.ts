@@ -71,15 +71,14 @@ test('shared primitives are used across reporting, creation, and library page gr
   assert.match(article, /<Panel/);
 });
 
-test('dashboard shell is responsive and separates every model provider', async () => {
+test('dashboard shell is responsive and exposes feature-scoped model preferences', async () => {
   const layout = await readFile('src/app/dashboard/layout.tsx', 'utf8');
   assert.match(layout, /mobileOpen/);
   assert.match(layout, /Open navigation/);
   assert.match(layout, /min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain/);
-  assert.match(layout, /GorillaWorkout LLM API/);
-  assert.match(layout, /Codex/);
-  assert.match(layout, /Claude Code/);
-  assert.match(layout, /OpenRouter/);
+  assert.match(layout, /Feature model preferences/);
+  assert.match(layout, /Use assignment default/);
+  assert.doesNotMatch(layout, /OpenRouter|Claude Code/);
   assert.doesNotMatch(layout, /📊|📱|🎬|📋|📰|🧠/);
 });
 
@@ -97,7 +96,7 @@ test('admin model data, entitlement actions, model reset, and mobile calendar ar
   assert.match(statsRoute, /enabledFeatures: auth\.features/);
   assert.match(home, /stats\?\.enabledFeatures\?\.includes/);
   assert.match(settingsRoute, /DELETE FROM task_model_preferences/);
-  assert.match(layout, /Use default model/);
+  assert.match(layout, /Use assignment default/);
   assert.match(layout, /modelError/);
   assert.match(calendar, /flex-col gap-6 2xl:flex-row/);
   assert.match(calendar, /min-w-\[680px\]/);

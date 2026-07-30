@@ -1,12 +1,9 @@
-const API_BASE = process.env.OPENAI_BASE_URL || 'https://openrouter.ai/api/v1';
-const API_KEY = process.env.OPENROUTER_API_KEY || process.env.OPENAI_API_KEY || '';
 const GORILLAWORKOUT_API_BASE = process.env.GORILLAWORKOUT_API_BASE || 'https://llm.gorillaworkout.id/v1';
 const GORILLAWORKOUT_API_KEY = process.env.GORILLAWORKOUT_API_KEY || '';
 
-const PRIMARY_MODEL = process.env.AI_MODEL || 'deepseek/deepseek-v4-flash';
-const FALLBACK_MODEL = 'deepseek/deepseek-v4-pro';
+const PRIMARY_MODEL = 'pecut-free';
 
-export type ModelProvider = 'openrouter' | 'codex' | 'claude-code' | 'gorillaworkout';
+export type ModelProvider = 'gorillaworkout';
 
 export interface ModelInfo {
   id: string;
@@ -17,22 +14,8 @@ export interface ModelInfo {
   output: number;
 }
 
-// All available models with metadata
+// Catalog IDs exposed by the OpenAI-compatible GorillaWorkout LLM gateway.
 export const AVAILABLE_MODELS: ModelInfo[] = [
-  // OpenRouter fallback prices are USD per token. The Models API replaces these
-  // with live minimum provider prices when OpenRouter is reachable.
-  { id: 'deepseek/deepseek-v4-flash', name: 'DeepSeek V4 Flash', tier: 'budget', provider: 'openrouter', input: 0.00000009, output: 0.00000018 },
-  { id: 'deepseek/deepseek-v4-pro', name: 'DeepSeek V4 Pro', tier: 'balanced', provider: 'openrouter', input: 0.000000435, output: 0.00000087 },
-  { id: 'openai/gpt-4o-mini', name: 'GPT-4o Mini', tier: 'balanced', provider: 'openrouter', input: 0.00000015, output: 0.0000006 },
-  { id: 'openai/gpt-5.4-pro', name: 'GPT-5.4 Pro', tier: 'premium', provider: 'openrouter', input: 0.000015, output: 0.00009 },
-  { id: 'gpt-5.6-sol', name: 'GPT-5.6 Sol (Codex)', tier: 'premium', provider: 'codex', input: 0, output: 0 },
-  { id: 'gpt-5.6-terra', name: 'GPT-5.6 Terra (Codex)', tier: 'balanced', provider: 'codex', input: 0, output: 0 },
-  { id: 'gpt-5.6-luna', name: 'GPT-5.6 Luna (Codex)', tier: 'budget', provider: 'codex', input: 0, output: 0 },
-  // Claude Code OAuth subscription models — no per-token dollar cost.
-  { id: 'haiku', name: 'Claude Haiku (Claude Code)', tier: 'budget', provider: 'claude-code', input: 0, output: 0 },
-  { id: 'sonnet', name: 'Claude Sonnet (Claude Code)', tier: 'balanced', provider: 'claude-code', input: 0, output: 0 },
-  { id: 'opus', name: 'Claude Opus (Claude Code)', tier: 'premium', provider: 'claude-code', input: 0, output: 0 },
-  // GorillaWorkout OpenAI-compatible gateway. Pricing is managed by the gateway.
   { id: 'pecut-free', name: 'Pecut Free (GorillaWorkout)', tier: 'budget', provider: 'gorillaworkout', input: 0, output: 0 },
   { id: 'ag/gemini-3-flash-agent', name: 'Gemini 3 Flash Agent', tier: 'budget', provider: 'gorillaworkout', input: 0, output: 0 },
   { id: 'ag/gemini-3.5-flash-low', name: 'Gemini 3.5 Flash Low', tier: 'budget', provider: 'gorillaworkout', input: 0, output: 0 },
@@ -62,11 +45,25 @@ export const AVAILABLE_MODELS: ModelInfo[] = [
   { id: 'cx/gpt-5.4-mini-review', name: 'GPT-5.4 Mini Review', tier: 'budget', provider: 'gorillaworkout', input: 0, output: 0 },
   { id: 'cx/gpt-5.3-codex-spark', name: 'GPT-5.3 Codex Spark', tier: 'budget', provider: 'gorillaworkout', input: 0, output: 0 },
   { id: 'cx/gpt-5.3-codex-spark-review', name: 'GPT-5.3 Codex Spark Review', tier: 'budget', provider: 'gorillaworkout', input: 0, output: 0 },
+  { id: 'kimi/k3', name: 'Kimi K3', tier: 'balanced', provider: 'gorillaworkout', input: 0, output: 0 },
+  { id: 'kimi/kimi-for-coding', name: 'Kimi for Coding', tier: 'balanced', provider: 'gorillaworkout', input: 0, output: 0 },
+  { id: 'kimi/kimi-for-coding-highspeed', name: 'Kimi for Coding High Speed', tier: 'premium', provider: 'gorillaworkout', input: 0, output: 0 },
+  { id: 'kimi/kimi-k2.5', name: 'Kimi K2.5', tier: 'balanced', provider: 'gorillaworkout', input: 0, output: 0 },
+  { id: 'kimi/kimi-k2.5-thinking', name: 'Kimi K2.5 Thinking', tier: 'premium', provider: 'gorillaworkout', input: 0, output: 0 },
+  { id: 'kimi/kimi-k2.6', name: 'Kimi K2.6', tier: 'balanced', provider: 'gorillaworkout', input: 0, output: 0 },
+  { id: 'kimi/kimi-k2.7-code', name: 'Kimi K2.7 Code', tier: 'balanced', provider: 'gorillaworkout', input: 0, output: 0 },
+  { id: 'kimi/kimi-k2.7-code-highspeed', name: 'Kimi K2.7 Code High Speed', tier: 'premium', provider: 'gorillaworkout', input: 0, output: 0 },
+  { id: 'kimi/kimi-k3', name: 'Kimi K3 Latest', tier: 'balanced', provider: 'gorillaworkout', input: 0, output: 0 },
+  { id: 'kimi/kimi-latest', name: 'Kimi Latest', tier: 'balanced', provider: 'gorillaworkout', input: 0, output: 0 },
+  { id: 'tr/moonshotai/kimi-k3', name: 'Kimi K3 (Together)', tier: 'balanced', provider: 'gorillaworkout', input: 0, output: 0 },
+  { id: 'tr/moonshotai/kimi-k3-free', name: 'Kimi K3 Free (Together)', tier: 'budget', provider: 'gorillaworkout', input: 0, output: 0 },
 ];
 
 export function getModelProvider(modelId: string): ModelProvider {
-  const model = AVAILABLE_MODELS.find(m => m.id === modelId);
-  return model?.provider || 'openrouter';
+  if (!AVAILABLE_MODELS.some(model => model.id === modelId)) {
+    throw new Error(`Unknown GorillaWorkout model: ${modelId}`);
+  }
+  return 'gorillaworkout';
 }
 
 export function getModelTier(modelId: string): 'budget' | 'balanced' | 'premium' {
@@ -74,43 +71,18 @@ export function getModelTier(modelId: string): 'budget' | 'balanced' | 'premium'
   return model?.tier || 'budget';
 }
 
-export async function getUserPreferredModel(userId: string, taskType?: string): Promise<string> {
-  try {
-    const { queryOne } = await import('@/lib/database');
-
-    // Check per-task preference first
-    if (taskType) {
-      const taskPreference = await queryOne<{ model: string }>('SELECT model FROM task_model_preferences WHERE user_id = ? AND task_type = ?', [userId, taskType]);
-      if (taskPreference) return taskPreference.model;
-    }
-
-    // Fall back to global preference
-    const preference = await queryOne<{ preferred_model: string }>('SELECT preferred_model FROM user_preferences WHERE user_id = ?', [userId]);
-    const pref = preference?.preferred_model;
-    return pref || PRIMARY_MODEL;
-  } catch {
-    return PRIMARY_MODEL;
-  }
+export async function getUserPreferredModel(
+  userId: string,
+  feature: import('@/lib/model-routing').GenerationFeature,
+): Promise<string> {
+  const { resolveFeatureModel } = await import('@/lib/model-routing');
+  return resolveFeatureModel(userId, feature);
 }
 
-// Dynamic pricing based on model
-const MODEL_PRICING: Record<string, { input: number; output: number }> = {
-  'deepseek/deepseek-v4-flash': { input: 0.00000009, output: 0.00000018 },
-  'deepseek/deepseek-v4-pro': { input: 0.000000435, output: 0.00000087 },
-  'openai/gpt-4o-mini': { input: 0.00000015, output: 0.0000006 },
-  'openai/gpt-5.4-pro': { input: 0.000015, output: 0.00009 },
-  // Codex models — included in ChatGPT Plus, no per-token cost
-  'gpt-5.6-sol': { input: 0, output: 0 },
-  'gpt-5.6-terra': { input: 0, output: 0 },
-  'gpt-5.6-luna': { input: 0, output: 0 },
-  // Claude Code OAuth subscription models — included in the Claude subscription.
-  'haiku': { input: 0, output: 0 },
-  'sonnet': { input: 0, output: 0 },
-  'opus': { input: 0, output: 0 },
-};
-
 function getPricing(model: string) {
-  return MODEL_PRICING[model] || { input: 0.00000009, output: 0.00000018 };
+  const catalogModel = AVAILABLE_MODELS.find(candidate => candidate.id === model);
+  if (!catalogModel) throw new Error(`Unknown GorillaWorkout model: ${model}`);
+  return { input: catalogModel.input, output: catalogModel.output };
 }
 
 export interface TokenUsage {
@@ -131,274 +103,9 @@ export interface BrandGuidelines {
   examples?: string;
 }
 
-interface GenerateOptions {
-  systemPrompt: string;
-  userPrompt: string;
-  userId: string;
-  taskId?: string;
-  brandGuidelines?: BrandGuidelines;
-  responseFormat?: { type: 'json_object' };
-  model?: string;
-  temperature?: number;
-  maxTokens?: number;
-}
 
 /**
- * Call Codex CLI for Codex-provided models.
- * Runs `env -u OPENAI_API_KEY codex exec "<prompt>" -m <model> --sandbox danger-full-access`
- * and strips CLI banner/metadata from the output.
- */
-async function callCodex(prompt: string, model: string): Promise<string> {
-  const { exec } = await import('child_process');
-  const { promisify } = await import('util');
-  const execAsync = promisify(exec);
-
-  // Escape prompt for shell - write to temp file to avoid shell escaping issues
-  const fs = await import('fs');
-  const os = await import('os');
-  const path = await import('path');
-  const tmpFile = path.join(os.tmpdir(), `codex-prompt-${Date.now()}.txt`);
-  fs.writeFileSync(tmpFile, prompt);
-
-  try {
-    const { stdout } = await execAsync(
-      `env -u OPENAI_API_KEY codex exec "$(cat '${tmpFile}')" -m ${model} --sandbox danger-full-access < /dev/null`,
-      {
-        cwd: process.cwd() || '/Users/bayudarmawan/marketingos',
-        timeout: 180_000,
-        maxBuffer: 1024 * 1024 * 10,
-        shell: '/bin/bash',
-      }
-    );
-
-  // Strip Codex CLI banner/metadata lines
-  const lines = stdout.split('\n');
-  const filtered = lines.filter(line => {
-    const trimmed = line.trim();
-    if (!trimmed) return false;
-    // Skip known banner/metadata lines
-    if (/^OpenAI Codex\s/i.test(trimmed)) return false;
-    if (/^[-]{3,}$/.test(trimmed)) return false;
-    if (/^workdir:\s/i.test(trimmed)) return false;
-    if (/^model:\s/i.test(trimmed)) return false;
-    if (/^tokens used/i.test(trimmed)) return false;
-    if (/^Reading additional input/i.test(trimmed)) return false;
-    if (/^sandbox/i.test(trimmed)) return false;
-    if (/^provider:\s/i.test(trimmed)) return false;
-    if (/^session/i.test(trimmed)) return false;
-    if (/^approval/i.test(trimmed)) return false;
-    if (/^reasoning/i.test(trimmed)) return false;
-    if (/^user$/i.test(trimmed)) return false;
-    if (/^codex$/i.test(trimmed)) return false;
-    if (/^\d{1,3}(,\d{3})*$/.test(trimmed)) return false; // token count like "2,026"
-    return true;
-  });
-
-  // Deduplicate: if the same content appears twice, take only the first
-  const seen = new Set<string>();
-  const deduped = filtered.filter(line => {
-    const trimmed = line.trim();
-    if (seen.has(trimmed)) return false;
-    seen.add(trimmed);
-    return true;
-  });
-
-  const result = deduped.join('\n').trim();
-
-  // Try to extract JSON from the output (Codex may include non-JSON text)
-  const jsonMatch = result.match(/\{[\s\S]*\}/);
-  return jsonMatch ? jsonMatch[0] : result;
-  } finally {
-    // Clean up temp file
-    try { fs.unlinkSync(tmpFile); } catch {}
-  }
-}
-
-const CODEX_TEXT_ONLY_DISABLED_FEATURES = [
-  'shell_tool', 'shell_snapshot', 'unified_exec', 'browser_use', 'browser_use_external',
-  'browser_use_full_cdp_access', 'in_app_browser', 'standalone_web_search', 'network_proxy',
-  'computer_use', 'apps', 'plugins', 'plugin_sharing', 'remote_plugin', 'multi_agent',
-  'image_generation', 'auth_elicitation', 'hooks', 'code_mode_host', 'tool_suggest',
-  'tool_call_mcp_elicitation', 'skill_mcp_dependency_install', 'workspace_dependencies',
-] as const;
-
-export function buildCodexTextOnlyArgs(model: string, workingDirectory: string): string[] {
-  if (getModelProvider(model) !== 'codex') throw new Error(`Unsupported Codex model: ${model}`);
-  return [
-    'exec', '--ignore-user-config', '--ignore-rules', '--ephemeral',
-    ...CODEX_TEXT_ONLY_DISABLED_FEATURES.flatMap(feature => ['--disable', feature]),
-    '--sandbox', 'read-only', '--skip-git-repo-check', '-C', workingDirectory,
-    '--json', '-m', model, '-',
-  ];
-}
-
-/** Tool-disabled Codex mode for prompts containing operator-provided data. */
-async function callCodexTextOnly(prompt: string, model: string): Promise<string> {
-  const fsPromises = await import('fs/promises');
-  const os = await import('os');
-  const path = await import('path');
-  const { spawn } = await import('child_process');
-  const tempDirectory = await fsPromises.mkdtemp(path.join(os.tmpdir(), 'marketingos-codex-text-'));
-
-  try {
-    const args = buildCodexTextOnlyArgs(model, tempDirectory);
-    const stdout = await new Promise<string>((resolve, reject) => {
-      const env = { ...process.env };
-      delete env.OPENAI_API_KEY;
-      const child = spawn('codex', args, { cwd: tempDirectory, env, shell: false, stdio: ['pipe', 'pipe', 'pipe'] });
-      const chunks: Buffer[] = [];
-      let outputLength = 0;
-      let timedOut = false;
-      const timeout = setTimeout(() => { timedOut = true; child.kill('SIGKILL'); }, 180_000);
-      const finish = () => clearTimeout(timeout);
-      child.stderr.resume();
-      child.on('error', error => { finish(); reject(error); });
-      child.stdout.on('data', (chunk: Buffer) => {
-        outputLength += chunk.length;
-        if (outputLength > 10 * 1024 * 1024) child.kill('SIGKILL');
-        else chunks.push(chunk);
-      });
-      child.on('close', code => {
-        finish();
-        if (timedOut) reject(new Error('Codex text-only generation timed out after 180 seconds.'));
-        else if (outputLength > 10 * 1024 * 1024) reject(new Error('Codex text-only output exceeded 10 MB.'));
-        else if (code !== 0) reject(new Error(`Codex text-only CLI exited with code ${code ?? 'unknown'}.`));
-        else resolve(Buffer.concat(chunks).toString('utf8'));
-      });
-      child.stdin.end(prompt, 'utf8');
-    });
-
-    let answer = '';
-    for (const line of stdout.split('\n').filter(Boolean)) {
-      let event: unknown;
-      try { event = JSON.parse(line); } catch { throw new Error('Codex text-only CLI returned malformed event output.'); }
-      if (!event || typeof event !== 'object') continue;
-      const record = event as { type?: string; item?: { type?: string; text?: string } };
-      if (record.type === 'item.completed') {
-        if (record.item?.type !== 'agent_message' || typeof record.item.text !== 'string') {
-          throw new Error('Codex text-only mode rejected a non-message tool event.');
-        }
-        answer = record.item.text;
-      }
-    }
-    if (!answer) throw new Error('Codex text-only CLI returned no answer.');
-    return answer;
-  } finally {
-    await fsPromises.rm(tempDirectory, { recursive: true, force: true });
-  }
-}
-
-const CLAUDE_CODE_MODEL_IDS = new Set(
-  AVAILABLE_MODELS.filter(model => model.provider === 'claude-code').map(model => model.id),
-);
-
-/**
- * Build arguments for the locally authenticated Claude Code CLI. Keeping the
- * model allowlist here prevents a saved model preference from becoming a CLI
- * argument injection vector.
- */
-export function buildClaudeCliArgs(model: string): string[] {
-  if (!CLAUDE_CODE_MODEL_IDS.has(model)) {
-    throw new Error(`Unsupported Claude Code model: ${model}`);
-  }
-
-  return ['--print', '--output-format', 'json', '--model', model];
-}
-
-function getClaudeAnswer(stdout: string): string {
-  let response: unknown;
-  try {
-    response = JSON.parse(stdout);
-  } catch {
-    throw new Error('Claude CLI returned an unexpected response.');
-  }
-
-  if (!response || typeof response !== 'object' || typeof (response as { result?: unknown }).result !== 'string') {
-    throw new Error('Claude CLI returned no generated answer.');
-  }
-
-  return (response as { result: string }).result;
-}
-
-/**
- * Call Claude Code through its server user's existing OAuth session. The
- * prompt is passed over stdin from a private temporary file; no shell, API
- * key, or OAuth credential is involved.
- */
-export async function callClaude(prompt: string, model: string): Promise<string> {
-  const fs = await import('fs');
-  const fsPromises = await import('fs/promises');
-  const os = await import('os');
-  const path = await import('path');
-  const { spawn } = await import('child_process');
-
-  const tempDirectory = await fsPromises.mkdtemp(path.join(os.tmpdir(), 'marketingos-claude-'));
-  const tempFile = path.join(tempDirectory, 'prompt.txt');
-  await fsPromises.writeFile(tempFile, prompt, { encoding: 'utf8', mode: 0o600 });
-
-  try {
-    const args = buildClaudeCliArgs(model);
-    const stdout = await new Promise<string>((resolve, reject) => {
-      const child = spawn('claude', args, {
-        cwd: process.cwd(),
-        shell: false,
-        stdio: ['pipe', 'pipe', 'pipe'],
-      });
-      const input = fs.createReadStream(tempFile);
-      const chunks: Buffer[] = [];
-      let outputLength = 0;
-      let timedOut = false;
-      const timeout = setTimeout(() => {
-        timedOut = true;
-        child.kill('SIGKILL');
-      }, 180_000);
-
-      const finish = () => clearTimeout(timeout);
-      // Drain diagnostics so a large CLI error cannot block the child. Do not
-      // retain or print them because they may include session information.
-      child.stderr.resume();
-      input.on('error', error => {
-        child.kill('SIGTERM');
-        finish();
-        reject(error);
-      });
-      child.on('error', error => {
-        finish();
-        reject(error);
-      });
-      child.stdout.on('data', (chunk: Buffer) => {
-        outputLength += chunk.length;
-        if (outputLength > 10 * 1024 * 1024) {
-          child.kill('SIGTERM');
-          return;
-        }
-        chunks.push(chunk);
-      });
-      child.on('close', code => {
-        finish();
-        if (timedOut) {
-          reject(new Error('Claude CLI timed out after 180 seconds.'));
-        } else if (outputLength > 10 * 1024 * 1024) {
-          reject(new Error('Claude CLI output exceeded 10 MB.'));
-        } else if (code !== 0) {
-          // Deliberately do not include stderr: CLI diagnostics may contain sensitive session details.
-          reject(new Error(`Claude CLI exited with code ${code ?? 'unknown'}.`));
-        } else {
-          resolve(Buffer.concat(chunks).toString('utf8'));
-        }
-      });
-      input.pipe(child.stdin);
-    });
-
-    return getClaudeAnswer(stdout);
-  } finally {
-    await fsPromises.rm(tempDirectory, { recursive: true, force: true });
-  }
-}
-
-/**
- * Core API call with structured output support, retry on JSON parse failure,
- * and model fallback (primary -> fallback model).
+ * Core generation call through the single OpenAI-compatible gateway.
  */
 async function callApi(
   messages: Array<{ role: string; content: string }>,
@@ -407,32 +114,10 @@ async function callApi(
     responseFormat?: { type: 'json_object' } | undefined;
     temperature?: number;
     maxTokens?: number;
-    codexTextOnly?: boolean;
   } = {}
 ): Promise<{ content: string; model: string }> {
   const model = options.model || PRIMARY_MODEL;
-
-  // Route CLI-backed models through their locally authenticated CLIs.
-  const provider = getModelProvider(model);
-  if (provider === 'codex') {
-    // Combine messages into a single prompt for Codex exec
-    const prompt = messages.map(m => {
-      const role = m.role.charAt(0).toUpperCase() + m.role.slice(1);
-      return `[${role}]: ${m.content}`;
-    }).join('\n\n');
-    const content = options.codexTextOnly
-      ? await callCodexTextOnly(prompt, model)
-      : await callCodex(prompt, model);
-    return { content, model };
-  }
-  if (provider === 'claude-code') {
-    const prompt = messages.map(m => {
-      const role = m.role.charAt(0).toUpperCase() + m.role.slice(1);
-      return `[${role}]: ${m.content}`;
-    }).join('\n\n');
-    const content = await callClaude(prompt, model);
-    return { content, model };
-  }
+  getModelProvider(model);
 
   const body: Record<string, unknown> = {
     model,
@@ -444,15 +129,13 @@ async function callApi(
     body.response_format = options.responseFormat;
   }
 
-  const apiBase = provider === 'gorillaworkout' ? GORILLAWORKOUT_API_BASE : API_BASE;
-  const apiKey = provider === 'gorillaworkout' ? GORILLAWORKOUT_API_KEY : API_KEY;
-  if (!apiKey) throw new Error(`${provider === 'gorillaworkout' ? 'GORILLAWORKOUT_API_KEY' : 'OPENROUTER_API_KEY'} is not configured.`);
+  if (!GORILLAWORKOUT_API_KEY) throw new Error('GORILLAWORKOUT_API_KEY is not configured.');
 
-  const response = await fetch(`${apiBase}/chat/completions`, {
+  const response = await fetch(`${GORILLAWORKOUT_API_BASE}/chat/completions`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'Authorization': `Bearer ${apiKey}`,
+      'Authorization': `Bearer ${GORILLAWORKOUT_API_KEY}`,
       'HTTP-Referer': 'https://marketingos.local',
       'X-Title': 'MarketingOS',
     },
@@ -470,9 +153,9 @@ async function callApi(
 }
 
 /**
- * Call API with retry on JSON parse failure and model fallback.
+ * Call the selected gateway model with one optional JSON-repair retry.
  */
-async function callApiWithFallback(
+async function callApiWithRetry(
   messages: Array<{ role: string; content: string }>,
   options: {
     model?: string;
@@ -480,7 +163,6 @@ async function callApiWithFallback(
     temperature?: number;
     maxTokens?: number;
     parseJson?: boolean;
-    codexTextOnly?: boolean;
     jsonRepairAttempts?: 0 | 1;
   } = {}
 ): Promise<{ content: string; parsed?: unknown; model: string; retried: boolean }> {
@@ -508,19 +190,18 @@ async function callApiWithFallback(
           const parsed = JSON.parse(retryResult.content);
           return { ...retryResult, parsed, retried };
         } catch {
-          // Fall through to fallback model
+          return { ...retryResult, retried };
         }
       }
     }
     return { ...result, retried };
-  } catch (primaryError) {
-    // No silent fallback — if the selected model fails, report the error
-    throw primaryError;
+  } catch (generationError) {
+    throw generationError;
   }
 }
 
 /**
- * Generate content with brand guidelines, structured output, retry, and fallback.
+ * Generate content with brand guidelines and structured-output repair.
  */
 export async function generateContent(
   systemPrompt: string,
@@ -534,7 +215,6 @@ export async function generateContent(
     temperature?: number;
     maxTokens?: number;
     taskType?: string;
-    codexTextOnly?: boolean;
     jsonRepairAttempts?: 0 | 1;
   }
 ): Promise<{ content: string; usage: TokenUsage }> {
@@ -552,13 +232,12 @@ export async function generateContent(
   ];
 
   const model = options?.model || PRIMARY_MODEL;
-  const result = await callApiWithFallback(messages, {
+  const result = await callApiWithRetry(messages, {
     model,
     responseFormat: options?.responseFormat,
     temperature: options?.temperature,
     maxTokens: options?.maxTokens,
     parseJson: !!options?.responseFormat,
-    codexTextOnly: options?.codexTextOnly,
     jsonRepairAttempts: options?.jsonRepairAttempts,
   });
 
@@ -578,7 +257,7 @@ export async function generateContent(
     // respecting PostgreSQL's foreign-key constraint during that pre-save phase.
     const task = taskId ? await queryOne('SELECT id FROM tasks WHERE id = ?', [taskId]) : null;
     const provider = getModelProvider(result.model);
-    const accountSource = provider === 'openrouter' ? 'personal' : 'office';
+    const accountSource = 'office';
     const deptRow = await queryOne<{ department_id: string | null }>('SELECT department_id FROM users WHERE id = ?', [userId]);
     const departmentId = deptRow?.department_id || null;
     await execute('INSERT INTO token_logs (id, user_id, task_id, model, provider, account_source, department_id, task_type, input_tokens, output_tokens, cost) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
@@ -615,7 +294,7 @@ export async function generateMultiStep(
   usage: TokenUsage;
 }> {
   const drafts: Array<{ step: string; content: string; model: string }> = [];
-  const totalUsage: TokenUsage = { inputTokens: 0, outputTokens: 0, model: PRIMARY_MODEL, cost: 0 };
+  const totalUsage: TokenUsage = { inputTokens: 0, outputTokens: 0, model: model || PRIMARY_MODEL, cost: 0 };
 
   const bgPrompt = brandGuidelines ? buildBrandGuidelinesPrompt(brandGuidelines) : '';
   const contextSection = contextMemory ? '\n\n' + contextMemory : '';
@@ -623,7 +302,7 @@ export async function generateMultiStep(
   // Step 1: Draft
   onProgress?.({ step: 'draft', progress: 5, message: '📝 Writing draft caption...' });
   const draftSystem = getSmartSystemPrompt(module, undefined, brandGuidelines) + contextSection;
-  const draftResult = await callApiWithFallback(
+  const draftResult = await callApiWithRetry(
     [
       { role: 'system', content: draftSystem },
       { role: 'user', content: userPrompt },
@@ -650,7 +329,7 @@ ${bgPrompt || 'No specific brand guidelines provided. Review for general marketi
 
 Output JSON: { "score": <1-10>, "issues": ["..."], "suggestions": ["..."], "passes_brand_check": <true|false> }`;
 
-  const reviewResult = await callApiWithFallback(
+  const reviewResult = await callApiWithRetry(
     [
       { role: 'system', content: reviewSystem },
       { role: 'user', content: reviewPrompt },
@@ -690,7 +369,7 @@ ${reviewFeedback}
 
 Output the same JSON structure as the draft, but improved. Output valid JSON only.`;
 
-  const refineResult = await callApiWithFallback(
+  const refineResult = await callApiWithRetry(
     [
       { role: 'system', content: refineSystem },
       { role: 'user', content: refinePrompt },
@@ -706,10 +385,10 @@ Output the same JSON structure as the draft, but improved. Output valid JSON onl
 
   // Log total usage
   try {
-    const { queryOne, queryAll, execute } = await import('@/lib/database');
+    const { queryOne, execute } = await import('@/lib/database');
     const { v4: uuidv4 } = await import('uuid');
     const provider = getModelProvider(totalUsage.model);
-    const accountSource = provider === 'openrouter' ? 'personal' : 'office';
+    const accountSource = 'office';
     const deptRow = await queryOne<{ department_id: string | null }>('SELECT department_id FROM users WHERE id = ?', [userId]);
     const departmentId = deptRow?.department_id || null;
     await execute('INSERT INTO token_logs (id, user_id, task_id, model, provider, account_source, department_id, task_type, input_tokens, output_tokens, cost) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
@@ -1024,6 +703,7 @@ export function runQC(caption: string, hashtags: string[], platform?: string): Q
  * Example: DUPOIN_JFXOlympic_SocialPost_V1_20260716
  */
 export function generateDupoinFileName(brief: string, platform?: string): string {
+  void platform; // Retained for backward-compatible callers; naming is always SocialPost.
   // Extract meaningful name from brief (first 2-3 significant words, PascalCase)
   const words = brief
     .replace(/[^a-zA-Z0-9\s]/g, '')

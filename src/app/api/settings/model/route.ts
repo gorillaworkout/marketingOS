@@ -1,75 +1,75 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { queryOne, queryAll, execute } from '@/lib/database';
-import { getSession } from '@/lib/auth';
-import { AVAILABLE_MODELS } from '@/lib/openai';
+import { execute } from '@/lib/database';
+import { getAuthorizedUser } from '@/lib/auth';
+import {
+  GENERATION_FEATURES,
+  getFeatureModelOptions,
+  isGenerationFeature,
+  resolveFeatureModel,
+} from '@/lib/model-routing';
 import { v4 as uuidv4 } from 'uuid';
 
-// GET: Return current user's preferred model + per-task preferences + available models
 export async function GET(request: NextRequest) {
-  const auth = await getSession(request);
-  if (auth.error) return NextResponse.json({ error: auth.error }, { status: auth.status });
-  const userId = auth.userId;
-  const pref = await queryOne('SELECT preferred_model FROM user_preferences WHERE user_id = ?', [userId]) as { preferred_model: string } | undefined;
+  const auth = await getAuthorizedUser(request);
+  if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status });
 
-  const currentModel = pref?.preferred_model || 'deepseek/deepseek-v4-flash';
+  const visibleFeatures = GENERATION_FEATURES.filter(feature => (
+    auth.role === 'admin'
+    || (!['article-market-news', 'market-research'].includes(feature)
+      && auth.features.some(enabledFeature => enabledFeature === feature))
+  ));
 
-  // Fetch per-task preferences
-  const taskPrefs = await queryAll('SELECT task_type, model FROM task_model_preferences WHERE user_id = ?', [userId]) as { task_type: string; model: string }[];
+  const features = await Promise.all(visibleFeatures.map(async feature => {
+    const options = await getFeatureModelOptions(feature);
+    const currentModel = await resolveFeatureModel(auth.id, feature);
+    return {
+      feature,
+      label: options.metadata.label,
+      description: options.metadata.description,
+      allowedModels: options.allowedModels,
+      currentModel,
+      defaultModel: options.defaultModel,
+    };
+  }));
 
-  const taskModelPreferences: Record<string, string> = {};
-  for (const row of taskPrefs) {
-    taskModelPreferences[row.task_type] = row.model;
-  }
-
-  return NextResponse.json({
-    currentModel,
-    models: AVAILABLE_MODELS.map(m => ({
-      id: m.id,
-      name: m.name,
-      tier: m.tier,
-      provider: m.provider,
-      inputPrice: m.input,
-      outputPrice: m.output,
-    })),
-    taskModelPreferences,
-  });
+  return NextResponse.json({ features });
 }
 
-// PUT: Save user's preferred model (global or per-task)
 export async function PUT(request: NextRequest) {
-  const auth = await getSession(request);
-  if (auth.error) return NextResponse.json({ error: auth.error }, { status: auth.status });
-  const userId = auth.userId;
+  const auth = await getAuthorizedUser(request);
+  if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status });
 
-  const body = await request.json();
-  const { model, taskType } = body;
-
-  if (taskType) {
-    // Save per-task preference
-    const validTaskTypes = ['caption', 'image-prompt', 'video-script', 'event-plan'];
-    if (!validTaskTypes.includes(taskType)) {
-      return NextResponse.json({ error: 'Invalid task type' }, { status: 400 });
-    }
-    if (model === null) {
-      await execute('DELETE FROM task_model_preferences WHERE user_id = ? AND task_type = ?', [userId, taskType]);
-      return NextResponse.json({ success: true, model: null, taskType });
-    }
-    if (!model || !AVAILABLE_MODELS.find(m => m.id === model)) {
-      return NextResponse.json({ error: 'Invalid model' }, { status: 400 });
-    }
-    const modelInfo = AVAILABLE_MODELS.find(m => m.id === model);
-    await execute(`INSERT INTO task_model_preferences (id, user_id, task_type, model, provider, updated_at)
-       VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-       ON CONFLICT(user_id, task_type) DO UPDATE SET model = excluded.model, provider = excluded.provider, updated_at = CURRENT_TIMESTAMP`, [uuidv4(), userId, taskType, model, modelInfo?.provider || 'openrouter']);
-  } else {
-    if (!model || !AVAILABLE_MODELS.find(m => m.id === model)) {
-      return NextResponse.json({ error: 'Invalid model' }, { status: 400 });
-    }
-    // Save global preference
-    await execute(`INSERT INTO user_preferences (id, user_id, preferred_model, updated_at)
-       VALUES (?, ?, ?, CURRENT_TIMESTAMP)
-       ON CONFLICT(user_id) DO UPDATE SET preferred_model = excluded.preferred_model, updated_at = CURRENT_TIMESTAMP`, [uuidv4(), userId, model]);
+  const { feature, model } = await request.json() as { feature?: unknown; model?: unknown };
+  if (!isGenerationFeature(feature)) {
+    return NextResponse.json({ error: 'Invalid feature' }, { status: 400 });
+  }
+  if (auth.role !== 'admin' && !auth.features.some(enabledFeature => enabledFeature === feature)) {
+    return NextResponse.json({ error: 'Forbidden: feature is not enabled for this user' }, { status: 403 });
   }
 
-  return NextResponse.json({ success: true, model, taskType: taskType || null });
+  if (model === null) {
+    await execute(
+      'DELETE FROM task_model_preferences WHERE user_id = ? AND task_type = ?',
+      [auth.id, feature],
+    );
+    const currentModel = await resolveFeatureModel(auth.id, feature);
+    return NextResponse.json({ success: true, feature, currentModel, reset: true });
+  }
+
+  const options = await getFeatureModelOptions(feature);
+  if (typeof model !== 'string' || !options.allowedModels.some(option => option.id === model)) {
+    return NextResponse.json({ error: 'Model is not enabled for this feature' }, { status: 400 });
+  }
+
+  await execute(
+    `INSERT INTO task_model_preferences (id, user_id, task_type, model, provider, updated_at)
+     VALUES (?, ?, ?, ?, 'gorillaworkout', CURRENT_TIMESTAMP)
+     ON CONFLICT(user_id, task_type) DO UPDATE SET
+       model = excluded.model,
+       provider = 'gorillaworkout',
+       updated_at = CURRENT_TIMESTAMP`,
+    [uuidv4(), auth.id, feature, model],
+  );
+
+  return NextResponse.json({ success: true, feature, currentModel: model });
 }

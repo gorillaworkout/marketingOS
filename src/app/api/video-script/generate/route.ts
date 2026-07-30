@@ -8,7 +8,6 @@ import fs from 'fs';
 import path from 'path';
 
 const TIMEOUT_MS = 300_000; // 5 min for 3 parallel options
-const CODEX_TIMEOUT_MS = 300_000;
 
 function sseEvent(data: Record<string, unknown>) {
   return `data: ${JSON.stringify(data)}\n\n`;
@@ -162,10 +161,8 @@ async function handlePreview(
         }
       }
 
-      const isCodex = preferredModel.startsWith('gpt-5.6');
-      const timeout = isCodex ? CODEX_TIMEOUT_MS : TIMEOUT_MS;
       const timeoutPromise = new Promise<never>((_, reject) => {
-        timeoutId = setTimeout(() => reject(new Error(`Generation timed out after ${timeout / 1000}s`)), timeout);
+        timeoutId = setTimeout(() => reject(new Error(`Generation timed out after ${TIMEOUT_MS / 1000}s`)), TIMEOUT_MS);
       });
 
       try {
@@ -361,10 +358,8 @@ async function handleFull(
 
   const stream = new ReadableStream({
     async start(controller) {
-      const isCodex = preferredModel.startsWith('gpt-5.6');
-      const timeout = isCodex ? CODEX_TIMEOUT_MS : TIMEOUT_MS;
       const timeoutPromise = new Promise<never>((_, reject) => {
-        timeoutId = setTimeout(() => reject(new Error(`Generation timed out after ${timeout / 1000}s`)), timeout);
+        timeoutId = setTimeout(() => reject(new Error(`Generation timed out after ${TIMEOUT_MS / 1000}s`)), TIMEOUT_MS);
       });
 
       try {

@@ -2,12 +2,14 @@ import { NextRequest, NextResponse } from 'next/server';
 import { queryOne, queryAll, execute } from '@/lib/database';
 import { getSession } from '@/lib/auth';
 import { getEmbedding, cosineSimilarity } from '@/lib/embeddings';
+import { getUserPreferredModel } from '@/lib/openai';
+import { isGenerationFeature } from '@/lib/model-routing';
 import { v4 as uuidv4 } from 'uuid';
 
 export async function POST(request: NextRequest) {
   const auth = await getSession(request);
   if (auth.error) return NextResponse.json({ error: auth.error }, { status: auth.status });
-  const userId = auth.userId;
+  const userId = auth.userId as string;
 
   const { brief, taskType, selectedOutput, rejectedOutputs, platform, audience } = await request.json();
   if (!brief || !taskType || !selectedOutput) {
@@ -62,13 +64,14 @@ export async function POST(request: NextRequest) {
       const samples = recent.map((r, i) => `${i + 1}. [${r.task_type}/${r.platform}] ${r.selected_output}`).join('\n');
 
       const { generateContent } = await import('@/lib/openai');
-      const model = 'deepseek/deepseek-v4-flash';
+      const analysisFeature = isGenerationFeature(taskType) ? taskType : 'social-post';
+      const model = await getUserPreferredModel(userId, analysisFeature);
       const { content: analysis } = await generateContent(
         'Analyze these marketing content selections and identify style patterns. Return JSON: { "styleSummary": string, "tonePreferences": {tone: count}, "hookPreferences": {hookType: count} }',
         samples,
         userId as string,
         undefined,
-        { model, responseFormat: { type: 'json_object' } }
+        { model, responseFormat: { type: 'json_object' }, taskType: analysisFeature }
       );
 
       const parsed = JSON.parse(analysis);

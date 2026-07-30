@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { requireAdmin } from '@/lib/auth';
 import { execute } from '@/lib/database';
 import { rateLimit } from '@/lib/rate-limit';
-import { generateContent, getModelProvider, getUserPreferredModel } from '@/lib/openai';
+import { generateContent, getUserPreferredModel } from '@/lib/openai';
 import { buildMarketResearchPrompts, normalizeMarketResearchInput, validateAndHydrateMarketResearchSelection } from '@/lib/market-research';
 import { researchLatestMarketNews } from '@/lib/market-research-sources';
 
@@ -36,9 +36,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: error instanceof Error ? error.message : 'Invalid market research request.' }, { status: 400 });
   }
 
-  const preferredModel = await getUserPreferredModel(auth.id, 'market-research');
-  const model = getModelProvider(preferredModel) === 'codex' ? preferredModel : 'gpt-5.6-sol';
-  if (getModelProvider(model) !== 'codex') return NextResponse.json({ error: 'Market Research requires an office Codex subscription model.' }, { status: 400 });
+  const model = await getUserPreferredModel(auth.id, 'market-research');
 
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
@@ -60,7 +58,6 @@ export async function POST(request: NextRequest) {
               temperature: 0.2,
               maxTokens: 4_000,
               taskType: 'market-research',
-              codexTextOnly: true,
               jsonRepairAttempts: 0,
             });
             report = validateAndHydrateMarketResearchSelection(parseSelection(generated.content), research.candidates);

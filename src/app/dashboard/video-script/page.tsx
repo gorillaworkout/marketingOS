@@ -883,9 +883,7 @@ export default function VideoScriptPage() {
                           {tokenUsage.videoScript?.model && (
                             <p className="text-xs text-[var(--mos-text-faint)] pt-1">
                               Model: <span className="text-blue-400">{tokenUsage.videoScript.model}</span>
-                              {tokenUsage.videoScript.model.includes('codex') && (
-                                <span className="ml-2 px-1.5 py-0.5 bg-emerald-500/15 text-emerald-400 rounded text-xs">ChatGPT Plus</span>
-                              )}
+                              <span className="ml-2 px-1.5 py-0.5 bg-indigo-500/15 text-indigo-300 rounded text-xs">GorillaWorkout LLM</span>
                             </p>
                           )}
                         </>

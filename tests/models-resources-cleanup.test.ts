@@ -15,23 +15,22 @@ const templatesPage = read('src/app/dashboard/templates/page.tsx');
 const templatesRoute = read('src/app/api/templates/route.ts');
 const openai = read('src/lib/openai.ts');
 
-// Pricing must be sourced from OpenRouter's provider endpoint rather than a misleading hardcoded display.
-test('Models API loads live provider pricing from the official OpenRouter endpoints API', () => {
-  assert.match(modelsRoute, /openrouter\.ai\/api\/v1\/models\/.*\/endpoints/);
-  assert.match(modelsRoute, /pricingSource/);
-  assert.match(modelsRoute, /openrouter-live/);
+test('Models API exposes only the configured GorillaWorkout gateway catalog', () => {
+  assert.match(modelsRoute, /GorillaWorkout LLM/);
+  assert.match(modelsRoute, /AVAILABLE_MODELS/);
+  assert.doesNotMatch(modelsRoute, /OpenRouter|openrouter\.ai|credits/);
 });
 
-test('Models page labels variable provider prices as starting prices and links the source', () => {
-  assert.match(modelsPage, /Mulai dari/);
-  assert.match(modelsPage, /Harga dapat berbeda antar-provider/);
-  assert.match(modelsPage, /m\.sourceUrl/);
-  assert.doesNotMatch(modelsPage, /\$77\.00/);
+test('Models page manages feature allowlists and defaults', () => {
+  assert.match(modelsPage, /Allowed models/);
+  assert.match(modelsPage, /Default model/);
+  assert.match(modelsPage, /Save assignment/);
+  assert.doesNotMatch(modelsPage, /OpenRouter|sourceUrl/);
 });
 
-test('fallback pricing and token-cost calculation use the same per-token unit', () => {
-  assert.match(openai, /deepseek\/deepseek-v4-flash'.*input: 0\.00000009, output: 0\.00000018/);
-  assert.doesNotMatch(openai, /input: 0\.000077/);
+test('gateway pricing metadata and token-cost calculation use the same per-token unit', () => {
+  assert.match(openai, /provider: 'gorillaworkout', input: 0, output: 0/);
+  assert.doesNotMatch(openai, /deepseek\/deepseek-v4-flash|OPENROUTER_API_KEY/);
   assert.match(openai, /inputTokens \* pricing\.input \+ outputTokens \* pricing\.output/);
 });
 

@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { queryOne, queryAll, execute } from '@/lib/database';
 import { getSession } from '@/lib/auth';
-import { kMeans, labelClusters, STYLE_LABELS } from '@/lib/clustering';
+import { kMeans, labelClusters } from '@/lib/clustering';
+import { getUserPreferredModel } from '@/lib/openai';
 import { v4 as uuidv4 } from 'uuid';
 
 export async function POST(request: NextRequest) {
@@ -78,7 +79,7 @@ export async function POST(request: NextRequest) {
       .join('\n\n');
 
     const { generateContent } = await import('@/lib/openai');
-    const model = 'deepseek/deepseek-v4-flash';
+    const model = await getUserPreferredModel(userId, 'social-post');
 
     const { content: analysisJson } = await generateContent(
       `Analyze these marketing content selections to identify the user's style patterns.
@@ -92,7 +93,7 @@ Return JSON with this exact structure:
       `Analyze these ${entries.length} content selections:\n\n${samples}`,
       userId,
       undefined,
-      { model, responseFormat: { type: 'json_object' } }
+      { model, responseFormat: { type: 'json_object' }, taskType: 'social-post' }
     );
 
     const parsed = JSON.parse(analysisJson);

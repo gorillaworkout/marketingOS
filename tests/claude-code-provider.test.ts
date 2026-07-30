@@ -1,34 +1,18 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {
-  AVAILABLE_MODELS,
-  buildClaudeCliArgs,
-  getModelProvider,
-} from '../src/lib/openai';
+import { readFileSync } from 'node:fs';
+import { AVAILABLE_MODELS, getModelProvider } from '../src/lib/openai';
 
-test('exposes Claude Code subscription models with transparent metadata', () => {
-  const claudeModels = AVAILABLE_MODELS.filter(model => model.provider === 'claude-code');
-
-  assert.deepEqual(
-    claudeModels.map(({ id, name, tier, input, output }) => ({ id, name, tier, input, output })),
-    [
-      { id: 'haiku', name: 'Claude Haiku (Claude Code)', tier: 'budget', input: 0, output: 0 },
-      { id: 'sonnet', name: 'Claude Sonnet (Claude Code)', tier: 'balanced', input: 0, output: 0 },
-      { id: 'opus', name: 'Claude Opus (Claude Code)', tier: 'premium', input: 0, output: 0 },
-    ],
-  );
-  assert.equal(getModelProvider('sonnet'), 'claude-code');
+test('Claude-family catalog IDs are exposed only through GorillaWorkout', () => {
+  const claudeFamily = AVAILABLE_MODELS.filter(model => model.id.startsWith('cc/') || model.id.includes('claude'));
+  assert.ok(claudeFamily.length > 0);
+  assert.ok(claudeFamily.every(model => model.provider === 'gorillaworkout'));
+  assert.equal(getModelProvider('cc/claude-sonnet-5'), 'gorillaworkout');
+  assert.equal(AVAILABLE_MODELS.some(model => ['haiku', 'sonnet', 'opus'].includes(model.id)), false);
 });
 
-test('constructs a non-interactive Claude CLI invocation from an allowlisted model', () => {
-  const args = buildClaudeCliArgs('sonnet');
-  assert.deepEqual(args, [
-    '--print',
-    '--output-format',
-    'json',
-    '--model',
-    'sonnet',
-  ]);
-  assert.equal(args.includes('--bare'), false);
-  assert.throws(() => buildClaudeCliArgs('sonnet; echo leaked'), /Unsupported Claude Code model/);
+test('no local Claude CLI generation path remains', () => {
+  const source = readFileSync('src/lib/openai.ts', 'utf8');
+  assert.doesNotMatch(source, /buildClaudeCliArgs|callClaude|spawn\('claude'|claude-code/);
+  assert.match(source, /GORILLAWORKOUT_API_BASE/);
 });

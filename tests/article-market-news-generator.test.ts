@@ -4,7 +4,6 @@ import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { normalizeArticleMarketNewsInput, normalizeResearchUrl, validateGeneratedArticle } from '../src/lib/article-market-news';
 import { articleDocxFilename, buildArticleDocxBlob } from '../src/lib/article-market-news-docx';
-import { buildCodexTextOnlyArgs } from '../src/lib/openai';
 
 const read = (relative: string) => {
   const file = path.join(process.cwd(), relative);
@@ -62,11 +61,10 @@ test('page exposes the admin Article Market News generation workflow', () => {
   assert.match(generator, /Verified Facts/);
 });
 
-test('route is admin-only, Codex-only, tool-disabled, and never fetches submitted URLs', () => {
+test('route is admin-only, gateway-routed, evidence-gated, and never fetches submitted URLs', () => {
   assert.match(route, /requireAdmin\(request\)/);
-  assert.match(route, /getModelProvider\(model\) !== 'codex'/);
-  assert.match(route, /gpt-5\.6-sol/);
-  assert.match(route, /codexTextOnly: true/);
+  assert.match(route, /getUserPreferredModel\(auth\.id, 'article-market-news'\)/);
+  assert.doesNotMatch(route, /getModelProvider|codexTextOnly|gpt-5\.6-sol/);
   assert.match(route, /jsonRepairAttempts: 0/);
   assert.match(route, /attempt <= 3/);
   assert.match(openai, /jsonRepairAttempts \?\? 1\) === 0/);
@@ -74,14 +72,8 @@ test('route is admin-only, Codex-only, tool-disabled, and never fetches submitte
   assert.match(route, /metaDescription\.length > 155/);
   assert.match(route, /validateGeneratedArticle/);
   assert.doesNotMatch(route, /fetchResearchSource|fetch\(source\.url/);
-  const args = buildCodexTextOnlyArgs('gpt-5.6-sol', '/tmp/empty');
-  for (const feature of ['shell_tool', 'unified_exec', 'browser_use', 'computer_use', 'apps', 'plugins', 'tool_call_mcp_elicitation']) {
-    assert.ok(args.some((value, index) => value === '--disable' && args[index + 1] === feature));
-  }
-  assert.ok(args.includes('--ignore-user-config'));
-  assert.ok(args.includes('--ignore-rules'));
-  assert.ok(args.includes('--ephemeral'));
-  assert.ok(args.includes('read-only'));
+  assert.match(openai, /GORILLAWORKOUT_API_BASE/);
+  assert.doesNotMatch(openai, /child_process|OPENROUTER_API_KEY/);
 });
 
 test('input gate requires same-day WIB-local sources and five competitor structures', () => {
