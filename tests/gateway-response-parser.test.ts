@@ -33,6 +33,12 @@ test('assembles concatenated JSON frames without data delimiters', () => {
   assert.equal(parseGatewayCompletion(body, 'text/event-stream'), '{"ok":true}');
 });
 
+test('accepts repeated SSE control tokens on one physical line', () => {
+  const first = JSON.stringify({ choices: [{ delta: { content: '{"ok":' } }] });
+  const second = JSON.stringify({ choices: [{ delta: { content: 'true}' } }] });
+  assert.equal(parseGatewayCompletion(`data: ${first} data: ${second} data: [DONE]`, 'text/event-stream'), '{"ok":true}');
+});
+
 test('rejects an SSE response without completion content', () => {
   assert.throws(
     () => parseGatewayCompletion('data: {"choices":[{"delta":{}}]}\n\ndata: [DONE]\n\n', 'text/event-stream'),

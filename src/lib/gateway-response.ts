@@ -22,6 +22,20 @@ function splitConcatenatedJson(input: string): string[] {
     const character = input[index];
     if (start < 0) {
       if (/\s/.test(character)) continue;
+      if (input.startsWith('data:', index)) {
+        index += 'data:'.length - 1;
+        continue;
+      }
+      if (input.startsWith('[DONE]', index)) {
+        index += '[DONE]'.length - 1;
+        continue;
+      }
+      if (input.startsWith('event:', index)) {
+        const eventEnd = input.indexOf('\n', index);
+        if (eventEnd < 0) break;
+        index = eventEnd;
+        continue;
+      }
       if (character !== '{' && character !== '[') {
         throw new Error('Gateway SSE response contained an invalid frame.');
       }
