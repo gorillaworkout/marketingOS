@@ -23,7 +23,7 @@ export default function KnowledgeGraphCanvas({ nodes, edges, selectedId, onSelec
   onSelect: (node: CanvasNode) => void;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const stateRef = useRef({ rotationX: -0.18, rotationY: 0.48, zoom: 1, dragging: false, x: 0, y: 0 });
+  const stateRef = useRef({ rotationX: -0.18, rotationY: 0.48, zoom: 1.32, dragging: false, x: 0, y: 0 });
   const projectedRef = useRef<Projected[]>([]);
   const frameRef = useRef(0);
   const [dragging, setDragging] = useState(false);
@@ -96,13 +96,13 @@ export default function KnowledgeGraphCanvas({ nodes, edges, selectedId, onSelec
         const source = projectedById.get(edge.source);
         const target = projectedById.get(edge.target);
         if (!source || !target) return;
-        const alpha = Math.max(edge.sourceType === 'stored' ? 0.14 : 0.1, Math.min(0.3, ((source.scale + target.scale) / 2 - 0.45) * 0.28));
+        const alpha = Math.max(edge.sourceType === 'stored' ? 0.34 : 0.26, Math.min(0.58, ((source.scale + target.scale) / 2 - 0.2) * 0.36));
         context.beginPath();
         context.moveTo(source.sx, source.sy);
         context.lineTo(target.sx, target.sy);
         context.setLineDash(edge.sourceType === 'derived' ? [4, 5] : []);
-        context.strokeStyle = edge.sourceType === 'stored' ? `rgba(164,168,194,${alpha})` : `rgba(119,118,229,${alpha})`;
-        context.lineWidth = Math.max(0.75, edge.weight * 0.9);
+        context.strokeStyle = edge.sourceType === 'stored' ? `rgba(186,190,216,${alpha})` : `rgba(139,137,255,${alpha})`;
+        context.lineWidth = Math.max(edge.sourceType === 'stored' ? 1.25 : 1.05, edge.weight * 1.35);
         context.stroke();
         context.setLineDash([]);
 
