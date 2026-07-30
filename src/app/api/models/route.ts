@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { AVAILABLE_MODELS } from '@/lib/openai';
-import { requireAdmin } from '@/lib/auth';
+import { getAuthorizedUser } from '@/lib/auth';
 
 export async function GET(request: NextRequest) {
-  const admin = await requireAdmin(request);
-  if (admin instanceof NextResponse) return admin;
+  const viewer = await getAuthorizedUser(request);
+  if ('error' in viewer) return NextResponse.json({ error: viewer.error }, { status: viewer.status });
 
   const status = process.env.GORILLAWORKOUT_API_KEY ? 'available' : 'not_configured';
   return NextResponse.json({

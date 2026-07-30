@@ -71,18 +71,18 @@ test('shared primitives are used across reporting, creation, and library page gr
   assert.match(article, /<Panel/);
 });
 
-test('dashboard shell is responsive and exposes feature-scoped model preferences', async () => {
+test('dashboard shell is responsive and links to the dedicated Models workspace', async () => {
   const layout = await readFile('src/app/dashboard/layout.tsx', 'utf8');
   assert.match(layout, /mobileOpen/);
   assert.match(layout, /Open navigation/);
   assert.match(layout, /min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain/);
-  assert.match(layout, /Feature model preferences/);
-  assert.match(layout, /Use assignment default/);
+  assert.match(layout, /href: '\/dashboard\/models', label: 'Models'/);
+  assert.doesNotMatch(layout, /Feature model preferences|Use assignment default|modelDropdownOpen/);
   assert.doesNotMatch(layout, /OpenRouter|Claude Code/);
   assert.doesNotMatch(layout, /📊|📱|🎬|📋|📰|🧠/);
 });
 
-test('admin model data, entitlement actions, model reset, and mobile calendar are protected', async () => {
+test('authenticated model data, entitlement actions, model reset, and mobile calendar are protected', async () => {
   const [layout, modelsRoute, statsRoute, home, settingsRoute, calendar] = await Promise.all([
     readFile('src/app/dashboard/layout.tsx', 'utf8'),
     readFile('src/app/api/models/route.ts', 'utf8'),
@@ -92,12 +92,11 @@ test('admin model data, entitlement actions, model reset, and mobile calendar ar
     readFile('src/app/dashboard/calendar/page.tsx', 'utf8'),
   ]);
   assert.match(layout, /'\/dashboard\/models'/);
-  assert.match(modelsRoute, /requireAdmin\(request\)/);
+  assert.match(modelsRoute, /getAuthorizedUser\(request\)/);
   assert.match(statsRoute, /enabledFeatures: auth\.features/);
   assert.match(home, /stats\?\.enabledFeatures\?\.includes/);
   assert.match(settingsRoute, /DELETE FROM task_model_preferences/);
-  assert.match(layout, /Use assignment default/);
-  assert.match(layout, /modelError/);
+  assert.doesNotMatch(layout, /Use assignment default|modelError/);
   assert.match(calendar, /flex-col gap-6 2xl:flex-row/);
   assert.match(calendar, /min-w-\[680px\]/);
 });

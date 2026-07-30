@@ -23,8 +23,8 @@ test('Models API exposes only the configured GorillaWorkout gateway catalog', ()
 
 test('Models page manages feature allowlists and defaults', () => {
   assert.match(modelsPage, /Allowed models/);
-  assert.match(modelsPage, /Default model/);
-  assert.match(modelsPage, /Save assignment/);
+  assert.match(modelsPage, /Organization default/);
+  assert.match(modelsPage, /Save organization policy/);
   assert.doesNotMatch(modelsPage, /OpenRouter|sourceUrl/);
 });
 

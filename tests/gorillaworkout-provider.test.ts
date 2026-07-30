@@ -26,7 +26,8 @@ test('presents one gateway with feature-scoped model assignment controls', async
     fs.readFile('src/app/dashboard/layout.tsx', 'utf8'),
     fs.readFile('src/app/dashboard/models/page.tsx', 'utf8'),
   ]);
-  assert.match(layout, /Feature model preferences/);
+  assert.match(layout, /href: '\/dashboard\/models', label: 'Models'/);
+  assert.doesNotMatch(layout, /Feature model preferences/);
   assert.match(modelsPage, /Generation gateway/);
   assert.match(modelsPage, /Allowed models/);
   assert.doesNotMatch(layout, /OpenRouter|Claude Code/);

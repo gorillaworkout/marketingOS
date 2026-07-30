@@ -1,9 +1,9 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { Button, StatusBadge } from '@/components/ui/dashboard';
+import { Button } from '@/components/ui/dashboard';
 
 interface User {
   id: string;
@@ -13,21 +13,6 @@ interface User {
   enabledFeatures: string[];
 }
 
-interface ModelInfo {
-  id: string;
-  name: string;
-  tier: 'budget' | 'balanced' | 'premium';
-  provider: 'gorillaworkout';
-}
-
-interface FeatureModelPreference {
-  feature: 'social-post' | 'video-script' | 'event-plan' | 'article-market-news' | 'market-research';
-  label: string;
-  description: string;
-  allowedModels: ModelInfo[];
-  currentModel: string;
-  defaultModel: string;
-}
 
 type IconName =
   | 'home' | 'social' | 'video' | 'event' | 'article' | 'research'
@@ -78,12 +63,7 @@ const resourceItems = [
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
-  const [featurePreferences, setFeaturePreferences] = useState<FeatureModelPreference[]>([]);
-  const [modelDropdownOpen, setModelDropdownOpen] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [expandedFeature, setExpandedFeature] = useState<string | null>(null);
-  const [modelError, setModelError] = useState('');
-  const dropdownRef = useRef<HTMLDivElement>(null);
   const router = useRouter();
   const pathname = usePathname();
 
@@ -97,7 +77,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       if (data.authenticated) {
         setUser(data.user);
         const generationFeature = pathname.split('/').pop() || '';
-        const adminOnlyPages = ['/dashboard/tokens', '/dashboard/analytics', '/dashboard/accounts', '/dashboard/models', '/dashboard/templates', '/dashboard/calendar', '/dashboard/images', '/dashboard/knowledge', '/dashboard/knowledge-graph', '/dashboard/brand-guidelines', '/dashboard/history', '/dashboard/sop', '/dashboard/market-research'];
+        const adminOnlyPages = ['/dashboard/tokens', '/dashboard/analytics', '/dashboard/accounts', '/dashboard/templates', '/dashboard/calendar', '/dashboard/images', '/dashboard/knowledge', '/dashboard/knowledge-graph', '/dashboard/brand-guidelines', '/dashboard/history', '/dashboard/sop', '/dashboard/market-research'];
         if (data.user.role !== 'admin' && (adminOnlyPages.includes(pathname) || (['social-post', 'video-script', 'event-plan'].includes(generationFeature) && !data.user.enabledFeatures?.includes(generationFeature)))) {
           router.replace('/dashboard');
         }
@@ -108,21 +88,6 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     });
   }, [router, pathname]);
 
-  useEffect(() => {
-    fetch('/api/settings/model').then(async response => {
-      const data = await response.json();
-      if (data.features) setFeaturePreferences(data.features);
-    });
-  }, []);
-
-
-  useEffect(() => {
-    const close = (event: MouseEvent) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) setModelDropdownOpen(false);
-    };
-    document.addEventListener('mousedown', close);
-    return () => document.removeEventListener('mousedown', close);
-  }, []);
 
   const handleLogout = async () => {
     await fetch('/api/auth', {
@@ -133,21 +98,6 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     router.push('/');
   };
 
-  const handleFeatureModelSelect = async (feature: string, modelId: string | null) => {
-    setModelError('');
-    const response = await fetch('/api/settings/model', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ feature, model: modelId }),
-    });
-    if (response.ok) {
-      const data = await response.json() as { currentModel: string };
-      setFeaturePreferences(previous => previous.map(item => (
-        item.feature === feature ? { ...item, currentModel: data.currentModel } : item
-      )));
-      setExpandedFeature(null);
-    } else setModelError('Feature preference could not be saved. Try again.');
-  };
 
   if (loading) {
     return <div className="flex min-h-screen items-center justify-center bg-[var(--mos-bg)]"><span className="h-5 w-5 animate-spin rounded-full border border-[var(--mos-border-strong)] border-t-[var(--mos-accent)]" /></div>;
@@ -164,13 +114,16 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       items: resourceItems,
     },
     {
+      label: 'AI workspace',
+      items: [{ href: '/dashboard/models', label: 'Models', icon: 'models' }],
+    },
+    {
       label: 'Administration',
       items: [
         { href: '/dashboard/knowledge-graph', label: 'Knowledge Graph', icon: 'graph', adminOnly: true },
         { href: '/dashboard/tokens', label: 'Token usage', icon: 'tokens', adminOnly: true },
         { href: '/dashboard/analytics', label: 'Analytics', icon: 'analytics', adminOnly: true },
         { href: '/dashboard/accounts', label: 'Accounts', icon: 'accounts', adminOnly: true },
-        { href: '/dashboard/models', label: 'Models', icon: 'models', adminOnly: true },
       ],
     },
   ];
@@ -184,19 +137,6 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     }),
   })).filter(section => section.items.length);
 
-  const routeFeature = pathname.startsWith('/dashboard/social-post')
-    ? 'social-post'
-    : pathname.startsWith('/dashboard/video-script')
-      ? 'video-script'
-      : pathname.startsWith('/dashboard/event-plan')
-        ? 'event-plan'
-        : pathname.startsWith('/dashboard/sop')
-          ? 'article-market-news'
-          : pathname.startsWith('/dashboard/market-research')
-            ? 'market-research'
-            : null;
-  const currentPreference = featurePreferences.find(item => item.feature === routeFeature);
-  const currentModelInfo = currentPreference?.allowedModels.find(model => model.id === currentPreference.currentModel);
 
   const sidebar = (
     <aside className="flex h-full w-[264px] flex-col border-r border-[var(--mos-border-subtle)] bg-[var(--mos-sidebar)]">
@@ -228,70 +168,6 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         ))}
       </nav>
 
-      <div ref={dropdownRef} className="relative border-t border-[var(--mos-border-subtle)] p-3">
-        <button onClick={() => setModelDropdownOpen(open => !open)} className="flex w-full items-center gap-3 rounded-[7px] border border-[var(--mos-border)] bg-[var(--mos-panel)] p-2.5 text-left transition hover:border-[var(--mos-border-strong)]">
-          <span className="flex h-7 w-7 items-center justify-center rounded-[6px] bg-indigo-400/10 text-indigo-200"><NavIcon name="models" /></span>
-          <span className="min-w-0 flex-1">
-            <span className="block truncate text-xs font-medium text-[var(--mos-text-secondary)]">{currentModelInfo?.name || 'Feature preferences'}</span>
-            <span className="mt-0.5 block text-[10px] text-[var(--mos-text-faint)]">{currentPreference?.label || 'Models by workflow'}</span>
-          </span>
-          <svg className="h-3.5 w-3.5 text-[var(--mos-text-faint)]" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path d="m7 10 5 5 5-5" /></svg>
-        </button>
-
-        {modelDropdownOpen && (
-          <div className="absolute bottom-[calc(100%-4px)] left-3 z-50 w-[360px] max-w-[calc(100vw-24px)] overflow-hidden rounded-[8px] border border-[var(--mos-border-strong)] bg-[var(--mos-raised)] shadow-2xl">
-            <div className="border-b border-[var(--mos-border-subtle)] px-4 py-3">
-              <p className="text-xs font-medium text-[var(--mos-text)]">Feature model preferences</p>
-              <p className="mt-0.5 text-[10px] text-[var(--mos-text-faint)]">Choose from the models enabled by an administrator.</p>
-            </div>
-            <div className="max-h-[62vh] overflow-y-auto p-2">
-              {modelError && <p role="alert" className="mx-2 mb-2 rounded-[6px] border border-red-400/20 bg-red-400/10 px-3 py-2 text-[10px] text-red-300">{modelError}</p>}
-              {featurePreferences.map(preference => {
-                const expanded = expandedFeature === preference.feature;
-                const selectedModel = preference.allowedModels.find(model => model.id === preference.currentModel);
-                return (
-                  <div key={preference.feature} className="mb-1 rounded-[6px] border border-transparent last:mb-0">
-                    <button
-                      onClick={() => setExpandedFeature(expanded ? null : preference.feature)}
-                      className="flex w-full items-center justify-between gap-3 rounded-[6px] px-2.5 py-2.5 text-left hover:bg-white/[0.035]"
-                    >
-                      <span className="min-w-0">
-                        <span className="block text-xs font-medium text-[var(--mos-text-secondary)]">{preference.label}</span>
-                        <span className="mt-0.5 block truncate text-[10px] text-[var(--mos-text-faint)]">{selectedModel?.name || preference.defaultModel}</span>
-                      </span>
-                      <svg className={`h-3.5 w-3.5 shrink-0 text-[var(--mos-text-faint)] transition ${expanded ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path d="m7 10 5 5 5-5" /></svg>
-                    </button>
-                    {expanded && (
-                      <div className="mb-2 ml-3 border-l border-[var(--mos-border)] pl-2">
-                        <button
-                          onClick={() => void handleFeatureModelSelect(preference.feature, null)}
-                          className="block w-full rounded-[4px] px-2 py-1.5 text-left text-[10px] text-[var(--mos-accent-soft)] hover:bg-white/[0.035]"
-                        >
-                          Use assignment default
-                        </button>
-                        {preference.allowedModels.map(model => {
-                          const selected = model.id === preference.currentModel;
-                          return (
-                            <button
-                              key={model.id}
-                              onClick={() => void handleFeatureModelSelect(preference.feature, model.id)}
-                              className={`flex w-full items-center gap-2 rounded-[4px] px-2 py-1.5 text-left text-[10px] ${selected ? 'bg-indigo-400/10 text-indigo-100' : 'text-[var(--mos-text-muted)] hover:bg-white/[0.035] hover:text-[var(--mos-text-secondary)]'}`}
-                            >
-                              <span className={`h-1.5 w-1.5 rounded-full ${selected ? 'bg-indigo-300' : 'bg-[var(--mos-text-faint)]'}`} />
-                              <span className="min-w-0 flex-1 truncate">{model.name}</span>
-                              <StatusBadge>{model.tier}</StatusBadge>
-                            </button>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
-      </div>
 
       <div className="flex items-center gap-3 border-t border-[var(--mos-border-subtle)] p-3">
         <div className="flex h-8 w-8 items-center justify-center rounded-full border border-indigo-300/15 bg-indigo-400/10 text-xs font-medium text-indigo-100">{user?.name?.charAt(0) || '?'}</div>
@@ -315,7 +191,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" d="M4 7h16M4 12h16M4 17h16" /></svg>
         </button>
         <p className="text-sm font-medium text-[var(--mos-text)]">MarketingOS</p>
-        <span className="ml-auto max-w-40 truncate text-[11px] text-[var(--mos-text-faint)]">{currentModelInfo?.name || currentPreference?.label || ''}</span>
+        <Link href="/dashboard/models" className="ml-auto flex min-h-11 items-center px-2 text-[11px] font-medium text-[var(--mos-accent-soft)]">Models</Link>
       </header>
       <main className="min-h-screen lg:pl-[264px]">
         <div className="mx-auto w-full max-w-[1544px] px-4 py-5 sm:px-6 sm:py-7 lg:px-8">{children}</div>

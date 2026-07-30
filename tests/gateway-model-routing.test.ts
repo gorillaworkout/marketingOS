@@ -59,12 +59,14 @@ test('user model preference API only returns and accepts models allowed for that
   assert.doesNotMatch(settingsRoute, /preferred_model/);
 });
 
-test('models page is a dedicated assignment workspace and layout exposes feature preferences', () => {
-  assert.match(modelsPage, /Model assignment/i);
+test('models page is a dedicated learning and assignment workspace while layout stays navigation-only', () => {
+  assert.match(modelsPage, /Model library/i);
   assert.match(modelsPage, /Allowed models/i);
-  assert.match(modelsPage, /Default model/i);
+  assert.match(modelsPage, /Organization default/i);
   assert.match(modelsPage, /Social Post/);
-  assert.match(layout, /Feature model preferences/i);
+  assert.match(modelsPage, /Video Script/);
+  assert.match(layout, /href: '\/dashboard\/models', label: 'Models'/);
+  assert.doesNotMatch(layout, /Feature model preferences/i);
   assert.doesNotMatch(layout, /Generation model/);
 });
 
