@@ -117,6 +117,7 @@ export default function SocialPostPage() {
   const [generatedImage, setGeneratedImage] = useState<string | null>(null);
   const [editableImagePrompt, setEditableImagePrompt] = useState('');
   const [imageModel, setImageModel] = useState('gpt-5.6-terra');
+  const [availableImageModels, setAvailableImageModels] = useState<Array<{ id: string; name: string; description: string }>>([]);
   const [imageProgress, setImageProgress] = useState<ImageProgressState | null>(null);
   const imageProgressTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const imagePollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -148,6 +149,19 @@ export default function SocialPostPage() {
     const params = new URLSearchParams(window.location.search);
     const template = params.get('template');
     if (template) setBrief(template);
+    
+    // Fetch available image models
+    fetch('/api/image-models')
+      .then(res => res.json())
+      .then(data => {
+        if (data.models && Array.isArray(data.models)) {
+          setAvailableImageModels(data.models);
+          if (data.defaultModel) {
+            setImageModel(data.defaultModel);
+          }
+        }
+      })
+      .catch(err => console.error('Failed to load image models:', err));
   }, []);
 
   // Load recent posts on mount
@@ -913,8 +927,18 @@ export default function SocialPostPage() {
                 <div className="space-y-2">
                   <label className="block text-xs text-[var(--mos-text-faint)] uppercase tracking-wide">Image Generation Model</label>
                   <Select value={imageModel} onChange={(e) => setImageModel(e.target.value)}>
-                    <option value="gpt-5.6-terra">gpt-5.6-terra (Codex · High Quality)</option>
-                    <option value="gpt-image-2">gpt-image-2 (Codex · Fast)</option>
+                    {availableImageModels.length > 0 ? (
+                      availableImageModels.map(model => (
+                        <option key={model.id} value={model.id}>
+                          {model.name} — {model.description}
+                        </option>
+                      ))
+                    ) : (
+                      <>
+                        <option value="gpt-5.6-terra">gpt-5.6-terra — High quality, slower generation</option>
+                        <option value="gpt-image-2">gpt-image-2 — Fast generation, good quality</option>
+                      </>
+                    )}
                   </Select>
                   <p className="text-xs text-[var(--mos-text-faint)]">Model digunakan melalui Codex CLI (ChatGPT Plus office account)</p>
                 </div>
