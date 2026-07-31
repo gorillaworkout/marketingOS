@@ -116,6 +116,7 @@ export default function SocialPostPage() {
   const [generatingImage, setGeneratingImage] = useState(false);
   const [generatedImage, setGeneratedImage] = useState<string | null>(null);
   const [editableImagePrompt, setEditableImagePrompt] = useState('');
+  const [imageModel, setImageModel] = useState('gpt-5.6-terra');
   const [imageProgress, setImageProgress] = useState<ImageProgressState | null>(null);
   const imageProgressTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const imagePollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -423,7 +424,7 @@ export default function SocialPostPage() {
       const res = await fetch('/api/generate-image', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt: editableImagePrompt, taskId, type: 'social-post', brief: brief || editableImagePrompt.substring(0, 100) }),
+        body: JSON.stringify({ prompt: editableImagePrompt, taskId, type: 'social-post', brief: brief || editableImagePrompt.substring(0, 100), model: imageModel }),
       });
 
       const startup = await readImageJobResponse(res);
@@ -908,11 +909,20 @@ export default function SocialPostPage() {
                   </div>
                 )}
 
+                {/* Image Model Selector */}
+                <div className="space-y-2">
+                  <label className="block text-xs text-[var(--mos-text-faint)] uppercase tracking-wide">Image Generation Model</label>
+                  <Select value={imageModel} onChange={(e) => setImageModel(e.target.value)}>
+                    <option value="gpt-5.6-terra">gpt-5.6-terra (Codex · High Quality)</option>
+                    <option value="gpt-image-2">gpt-image-2 (Codex · Fast)</option>
+                  </Select>
+                  <p className="text-xs text-[var(--mos-text-faint)]">Model digunakan melalui Codex CLI (ChatGPT Plus office account)</p>
+                </div>
+
                 {/* Generate button */}
                 <Button variant="primary" className="w-full" onClick={generateImage} disabled={generatingImage || !editableImagePrompt.trim()}>
                   {generatingImage ? 'Generating image…' : 'Generate image'}
                 </Button>
-                <p className="text-xs text-[var(--mos-text-faint)] mt-1">Model: gpt-image-2 (Codex) · Quality: High · Resolution: 1024x1536</p>
 
                 {/* Image Generation Progress */}
                 {imageProgress && generatingImage && (

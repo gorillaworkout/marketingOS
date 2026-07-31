@@ -19,7 +19,7 @@ export async function POST(request: NextRequest) {
   const userId = auth.userId;
   if (!userId) return jsonError('Unauthorized', 401);
 
-  let body: { prompt?: unknown; type?: unknown; brief?: unknown };
+  let body: { prompt?: unknown; type?: unknown; brief?: unknown; model?: unknown };
   try {
     body = await request.json();
   } catch {
@@ -33,10 +33,11 @@ export async function POST(request: NextRequest) {
   const prompt = body.prompt.trim();
   const type = typeof body.type === 'string' ? body.type : 'social-post';
   const brief = typeof body.brief === 'string' ? body.brief : prompt;
+  const model = typeof body.model === 'string' && body.model.trim() ? body.model.trim() : 'gpt-5.6-terra';
   const job = imageJobs.create(userId);
 
   // Deliberately detached from the HTTP request: tunnel/browser disconnects must not stop the job.
-  void runImageJob(job, prompt, brief, type);
+  void runImageJob(job, prompt, brief, type, model);
 
   return NextResponse.json({ jobId: job.id, status: job.status }, { status: 202 });
 }
@@ -58,7 +59,7 @@ export async function GET(request: NextRequest) {
   });
 }
 
-async function runImageJob(job: ImageJob, prompt: string, brief: string, type: string) {
+async function runImageJob(job: ImageJob, prompt: string, brief: string, type: string, model: string) {
   const cwd = process.cwd() || '/Users/bayudarmawan/marketingos';
   const sopName = generateSOPFileName(brief || prompt, type);
   const tmpFile = path.join(os.tmpdir(), `codex-prompt-${job.id}.txt`);
@@ -66,12 +67,12 @@ async function runImageJob(job: ImageJob, prompt: string, brief: string, type: s
   try {
     fs.writeFileSync(tmpFile, prompt, 'utf8');
     imageJobs.update(job.id, job.ownerId, {
-      status: 'generating', progress: 30, message: '🤖 Codex generating image (30-90s)...',
+      status: 'generating', progress: 30, message: `🤖 Codex generating image with ${model} (30-90s)...`,
     });
     try { fs.unlinkSync(path.join(cwd, 'output.png')); } catch {}
 
     const script = path.join(cwd, 'scripts', 'codex-image-gen.sh');
-    const command = `bash "${script}" "${tmpFile}" "${cwd}"`;
+    const command = `bash "${script}" "${tmpFile}" "${cwd}" "${model}"`;
     exec(command, {
       cwd,
       timeout: 300_000,

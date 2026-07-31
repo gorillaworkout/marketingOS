@@ -1,6 +1,6 @@
 #!/bin/bash
 # Codex Image Generator via tmux
-# Usage: ./codex-image-gen.sh /path/to/prompt.txt /path/to/cwd
+# Usage: ./codex-image-gen.sh /path/to/prompt.txt /path/to/cwd [model]
 #
 # This script:
 # 1. Kills any leftover codex tmux sessions
@@ -14,6 +14,7 @@
 
 PROMPT_FILE="$1"
 CWD="${2:-$(pwd)}"
+MODEL="${3:-gpt-5.6-terra}"
 SESSION="codex-img-$$"
 MARKER="CODEX_DONE_$$"
 IMAGE_FOUND=0
@@ -99,10 +100,11 @@ file_size() {
 # Build the codex command - use stdin to avoid escaping issues
 # Use --dangerously-bypass-approvals-and-sandbox to avoid interactive prompts
 # Escape single quotes in variables for safe shell embedding
-CWD_SAFE=$(printf '%s' "$CWD" | sed "s/'/'\\\\''/g")
-INST_SAFE=$(printf '%s' "$INSTRUCTION_FILE" | sed "s/'/'\\\\''/g")
-CODEX_SAFE=$(printf '%s' "$CODEX_BIN" | sed "s/'/'\\\\''/g")
-CODEX_CMD="cd '$CWD_SAFE' && '$CODEX_SAFE' exec - -m gpt-5.6-terra --sandbox danger-full-access --dangerously-bypass-approvals-and-sandbox --skip-git-repo-check < '$INST_SAFE'; echo '$MARKER'"
+CWD_SAFE=$(printf '%s' "$CWD" | sed "s/'/'\\\\\\\\''/g")
+INST_SAFE=$(printf '%s' "$INSTRUCTION_FILE" | sed "s/'/'\\\\\\\\''/g")
+CODEX_SAFE=$(printf '%s' "$CODEX_BIN" | sed "s/'/'\\\\\\\\''/g")
+MODEL_SAFE=$(printf '%s' "$MODEL" | sed "s/'/'\\\\\\\\''/g")
+CODEX_CMD="cd '$CWD_SAFE' && '$CODEX_SAFE' exec - -m '$MODEL_SAFE' --sandbox danger-full-access --dangerously-bypass-approvals-and-sandbox --skip-git-repo-check < '$INST_SAFE'; echo '$MARKER'"
 
 # Start tmux session with Codex
 tmux new-session -d -s "$SESSION" -x 200 -y 50 "$CODEX_CMD"
