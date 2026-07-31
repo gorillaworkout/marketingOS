@@ -5,7 +5,7 @@
 BEGIN;
 
 CREATE TABLE IF NOT EXISTS image_model_assignments (
-  id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+  id TEXT PRIMARY KEY,
   allowed_models TEXT NOT NULL DEFAULT '["gpt-5.6-terra","gpt-image-2"]', -- JSON array of allowed model IDs
   default_model TEXT NOT NULL DEFAULT 'gpt-5.6-terra',
   updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
