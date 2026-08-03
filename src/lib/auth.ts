@@ -41,10 +41,15 @@ export async function getSession(request: NextRequest): Promise<AuthResult | Aut
 
     const adminOnlyPaths = [
       '/api/dashboard/tokens', '/api/admin/users', '/api/admin/departments',
-      '/api/templates', '/api/calendar', '/api/images', '/api/generated-images', '/api/generate-image', '/api/knowledge',
+      '/api/templates', '/api/calendar', '/api/images', '/api/generated-images', '/api/knowledge',
       '/api/brand-guidelines', '/api/dashboard/history',
     ];
-    if (adminOnlyPaths.some(path => request.nextUrl.pathname === path || request.nextUrl.pathname.startsWith(`${path}/`))) {
+    // Steps inside a member's own generation run. Feature access is still gated
+    // per-department by requireFeature on the generation routes themselves.
+    const memberAllowedPaths = ['/api/knowledge/save'];
+    const pathname = request.nextUrl.pathname;
+    const isMemberAllowed = memberAllowedPaths.includes(pathname);
+    if (!isMemberAllowed && adminOnlyPaths.some(path => pathname === path || pathname.startsWith(`${path}/`))) {
       const user = await queryOne<{ role: string }>('SELECT role FROM users WHERE id = ?', [userId]);
       if (user?.role !== 'admin') return { error: 'Forbidden: admin only', status: 403 };
     }

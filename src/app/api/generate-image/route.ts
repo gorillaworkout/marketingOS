@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSession } from '@/lib/auth';
+import { getAuthorizedUser, getSession } from '@/lib/auth';
 import { rateLimit } from '@/lib/rate-limit';
 import { createImageJobStore, type ImageJob, type ImageJobResult } from '@/lib/image-job-status';
 import { exec } from 'child_process';
@@ -14,9 +14,11 @@ export async function POST(request: NextRequest) {
   const rl = rateLimit(request);
   if (rl) return rl;
 
-  const auth = await getSession(request);
-  if (auth.error) return jsonError(auth.error, auth.status);
-  const userId = auth.userId;
+  const auth = await getAuthorizedUser(request);
+  if ('error' in auth) return jsonError(auth.error, auth.status);
+  // Any user with at least one generation feature may render images for it.
+  if (auth.features.length === 0) return jsonError('Forbidden: no generation feature enabled for your department', 403);
+  const userId = auth.id;
   if (!userId) return jsonError('Unauthorized', 401);
 
   let body: { prompt?: unknown; type?: unknown; brief?: unknown; model?: unknown };
