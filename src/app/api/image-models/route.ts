@@ -2,9 +2,11 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth';
 import { queryOne } from '@/lib/database';
 
+// Codex chat models that can drive the built-in image_gen tool. gpt-image-2 is the
+// tool's own name, not a selectable model: Codex rejects it on a ChatGPT account
+// ("model is not supported when using Codex with a ChatGPT account").
 const AVAILABLE_IMAGE_MODELS = [
-  { id: 'gpt-5.6-terra', name: 'gpt-5.6-terra', description: 'High quality, slower generation' },
-  { id: 'gpt-image-2', name: 'gpt-image-2', description: 'Fast generation, good quality' },
+  { id: 'gpt-5.6-terra', name: 'gpt-5.6-terra', description: 'Codex · image_gen tool · high quality' },
 ];
 
 export async function GET(request: NextRequest) {

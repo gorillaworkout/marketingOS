@@ -162,7 +162,7 @@ export default function ImageModelsPage() {
         </p>
         <ul className="mt-3 space-y-1 text-xs text-[var(--mos-text-muted)]">
           <li>• <strong>gpt-5.6-terra:</strong> Quality tertinggi, processing ~60-90 detik</li>
-          <li>• <strong>gpt-image-2:</strong> Lebih cepat (~30-60 detik), quality masih bagus</li>
+          <li>• <strong>Catatan:</strong> <code>gpt-image-2</code> adalah nama tool image generation di dalam Codex, bukan model yang bisa dipilih — akun ChatGPT menolaknya sebagai model chat.</li>
         </ul>
       </Panel>
 

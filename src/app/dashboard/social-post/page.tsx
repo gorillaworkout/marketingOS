@@ -959,10 +959,7 @@ export default function SocialPostPage() {
                         </option>
                       ))
                     ) : (
-                      <>
-                        <option value="gpt-5.6-terra">gpt-5.6-terra — High quality, slower generation</option>
-                        <option value="gpt-image-2">gpt-image-2 — Fast generation, good quality</option>
-                      </>
+                      <option value="gpt-5.6-terra">gpt-5.6-terra — Codex · image_gen tool</option>
                     )}
                   </Select>
                   <p className="text-xs text-[var(--mos-text-faint)]">Model digunakan melalui Codex CLI (ChatGPT Plus office account)</p>
