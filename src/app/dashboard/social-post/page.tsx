@@ -64,7 +64,7 @@ interface ImageJobResponse {
   progress?: number;
   message?: string;
   error?: string;
-  result?: { success?: boolean; imageUrl?: string };
+  result?: { success?: boolean; imageUrl?: string; fileName?: string; sopName?: string; model?: string };
 }
 
 async function readImageJobResponse(response: Response): Promise<ImageJobResponse> {
@@ -124,6 +124,7 @@ export default function SocialPostPage() {
   const imageRunRef = useRef(0);
   const [ratingMessage, setRatingMessage] = useState('');
   const [recentPosts, setRecentPosts] = useState<any[]>([]);
+  const [imageHistory, setImageHistory] = useState<any[]>([]);
   const [recentPostsError, setRecentPostsError] = useState('');
   const [viewingPost, setViewingPost] = useState<any>(null);
 
@@ -225,6 +226,7 @@ export default function SocialPostPage() {
     setOptions(null);
     setResult(null);
     setGeneratedImage(null);
+    setImageHistory([]);
     setTokenUsage(null);
     setViewingPost(null);
     setSelectedIndex(null);
@@ -470,6 +472,18 @@ export default function SocialPostPage() {
             setGeneratedImage(status.result.imageUrl);
             setGeneratingImage(false);
             stopImageTracking();
+            // The image is now attached to the task row; refresh history views.
+            fetchPosts();
+            if (taskId) {
+              setImageHistory(prev => [...prev, {
+                imageUrl: status.result!.imageUrl,
+                fileName: status.result!.fileName,
+                sopName: status.result!.sopName,
+                model: imageModel,
+                prompt: editableImagePrompt,
+                generatedAt: new Date().toISOString(),
+              }]);
+            }
             setTimeout(() => {
               if (imageRunRef.current === runId) setImageProgress(null);
             }, 3000);
@@ -540,6 +554,12 @@ export default function SocialPostPage() {
       if (data.qcResults) setQcResults(data.qcResults);
       if (data.dupoinFileName) setDupoinFileName(data.dupoinFileName);
       if (data.researchPosts) setResearchPosts(data.researchPosts);
+      // Replay previously generated images for this post
+      const history = Array.isArray(data.images) ? data.images : [];
+      setImageHistory(history);
+      const latest = history[history.length - 1];
+      const restoredUrl = latest?.imageUrl || data.imageUrl || null;
+      if (restoredUrl) setGeneratedImage(restoredUrl);
     } catch {}
   };
 
@@ -987,6 +1007,28 @@ export default function SocialPostPage() {
               </div>
               <div className="bg-[var(--mos-surface)] rounded-lg p-2 flex items-center justify-center">
                 <img src={generatedImage} alt="Generated" className="max-w-full max-h-[500px] rounded-lg" />
+              </div>
+            </Panel>
+          )}
+
+          {/* Image generation history for this post */}
+          {imageHistory.length > 0 && (
+            <Panel>
+              <SectionHeader title="Image history" description={`${imageHistory.length} image(s) generated for this post.`} />
+              <div className="mt-4 space-y-2">
+                {imageHistory.slice().reverse().map((img: any, i: number) => (
+                  <div key={`${img.fileName || img.imageUrl}-${i}`} className="flex items-center gap-3 rounded-[var(--mos-radius-control)] border border-[var(--mos-border)] bg-[var(--mos-surface)] p-2">
+                    <img src={img.imageUrl} alt={img.sopName || 'Generated'} className="h-14 w-14 rounded object-cover shrink-0" />
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-xs text-[var(--mos-text-secondary)]">{img.sopName || img.fileName}</p>
+                      <p className="text-[10px] text-[var(--mos-text-faint)]">
+                        {img.model || 'unknown model'}
+                        {img.generatedAt ? ` · ${new Date(img.generatedAt).toLocaleString('id-ID')}` : ''}
+                      </p>
+                    </div>
+                    <button type="button" onClick={() => setGeneratedImage(img.imageUrl)} className="shrink-0 text-[10px] text-[var(--mos-text-secondary)] underline">View</button>
+                  </div>
+                ))}
               </div>
             </Panel>
           )}

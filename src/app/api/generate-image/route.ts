@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAuthorizedUser, getSession } from '@/lib/auth';
+import { queryOne, execute } from '@/lib/database';
 import { rateLimit } from '@/lib/rate-limit';
 import { createImageJobStore, type ImageJob, type ImageJobResult } from '@/lib/image-job-status';
 import { exec } from 'child_process';
@@ -21,7 +22,7 @@ export async function POST(request: NextRequest) {
   const userId = auth.id;
   if (!userId) return jsonError('Unauthorized', 401);
 
-  let body: { prompt?: unknown; type?: unknown; brief?: unknown; model?: unknown };
+  let body: { prompt?: unknown; type?: unknown; brief?: unknown; model?: unknown; taskId?: unknown };
   try {
     body = await request.json();
   } catch {
@@ -36,10 +37,11 @@ export async function POST(request: NextRequest) {
   const type = typeof body.type === 'string' ? body.type : 'social-post';
   const brief = typeof body.brief === 'string' ? body.brief : prompt;
   const model = typeof body.model === 'string' && body.model.trim() ? body.model.trim() : 'gpt-5.6-terra';
+  const taskId = typeof body.taskId === 'string' && body.taskId.trim() ? body.taskId.trim() : null;
   const job = imageJobs.create(userId);
 
   // Deliberately detached from the HTTP request: tunnel/browser disconnects must not stop the job.
-  void runImageJob(job, prompt, brief, type, model);
+  void runImageJob(job, prompt, brief, type, model, taskId);
 
   return NextResponse.json({ jobId: job.id, status: job.status }, { status: 202 });
 }
@@ -61,7 +63,7 @@ export async function GET(request: NextRequest) {
   });
 }
 
-async function runImageJob(job: ImageJob, prompt: string, brief: string, type: string, model: string) {
+async function runImageJob(job: ImageJob, prompt: string, brief: string, type: string, model: string, taskId: string | null) {
   const cwd = process.cwd() || '/Users/bayudarmawan/marketingos';
   const sopName = generateSOPFileName(brief || prompt, type);
   const tmpFile = path.join(os.tmpdir(), `codex-prompt-${job.id}.txt`);
@@ -81,7 +83,7 @@ async function runImageJob(job: ImageJob, prompt: string, brief: string, type: s
       env: { ...process.env, TERM: 'xterm' } as NodeJS.ProcessEnv,
       maxBuffer: 10 * 1024 * 1024,
     }, (executionError, stdout, stderr) => {
-      finishImageJob(job, cwd, sopName, executionError, String(stdout || ''), String(stderr || ''));
+      finishImageJob(job, cwd, sopName, executionError, String(stdout || ''), String(stderr || ''), { model, prompt, taskId });
       try { fs.unlinkSync(tmpFile); } catch {}
     });
   } catch (error) {
@@ -93,7 +95,15 @@ async function runImageJob(job: ImageJob, prompt: string, brief: string, type: s
   }
 }
 
-function finishImageJob(job: ImageJob, cwd: string, sopName: string, executionError: Error | null, stdout: string, stderr: string) {
+function finishImageJob(
+  job: ImageJob,
+  cwd: string,
+  sopName: string,
+  executionError: Error | null,
+  stdout: string,
+  stderr: string,
+  meta: { model: string; prompt: string; taskId: string | null },
+) {
   imageJobs.update(job.id, job.ownerId, {
     status: 'processing', progress: 80, message: '📦 Processing image...',
   });
@@ -107,15 +117,19 @@ function finishImageJob(job: ImageJob, cwd: string, sopName: string, executionEr
       const fileName = `${sopName}.png`;
       fs.copyFileSync(source, path.join(directory, fileName));
       try { fs.unlinkSync(source); } catch {}
+      const imageUrl = `/api/generated-images/${encodeURIComponent(fileName)}`;
       const result: ImageJobResult = {
         success: true,
-        imageUrl: `/api/generated-images/${encodeURIComponent(fileName)}`,
+        imageUrl,
         fileName,
         sopName,
-        model: 'gpt-image-2 (Codex)',
+        model: `${meta.model} (Codex)`,
       };
       imageJobs.update(job.id, job.ownerId, {
         status: 'done', progress: 100, message: '✅ Image generated!', result,
+      });
+      void recordImageOnTask(meta.taskId, job.ownerId, {
+        imageUrl, fileName, sopName, model: meta.model, prompt: meta.prompt,
       });
       return;
     }
@@ -130,6 +144,42 @@ function finishImageJob(job: ImageJob, cwd: string, sopName: string, executionEr
   imageJobs.update(job.id, job.ownerId, {
     status: 'error', progress: 0, message: '❌ Image generation failed. Please try again.', error: 'Image generation failed. Please try again.',
   });
+}
+
+/**
+ * Append the generated image to its task's output_data so Recent posts / History
+ * can replay it later. Best-effort: a failure here must not fail the image job.
+ */
+async function recordImageOnTask(
+  taskId: string | null,
+  userId: string,
+  entry: { imageUrl: string; fileName: string; sopName: string; model: string; prompt: string },
+) {
+  if (!taskId) return;
+  try {
+    const row = await queryOne<{ output_data: string | null }>(
+      'SELECT output_data FROM tasks WHERE id = ? AND user_id = ?',
+      [taskId, userId],
+    );
+    if (!row) return;
+
+    let data: Record<string, unknown> = {};
+    if (row.output_data) {
+      const parsed = typeof row.output_data === 'string' ? JSON.parse(row.output_data) : row.output_data;
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) data = parsed as Record<string, unknown>;
+    }
+
+    const existing = Array.isArray(data.images) ? data.images : [];
+    const record = { ...entry, generatedAt: new Date().toISOString() };
+
+    await execute('UPDATE tasks SET output_data = ? WHERE id = ? AND user_id = ?', [
+      JSON.stringify({ ...data, images: [...existing, record], imageUrl: entry.imageUrl }),
+      taskId,
+      userId,
+    ]);
+  } catch (error) {
+    console.error('[generate-image] Failed to record image on task:', error);
+  }
 }
 
 function toPublicJob(job: ImageJob) {
