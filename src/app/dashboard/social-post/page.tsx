@@ -124,6 +124,7 @@ export default function SocialPostPage() {
   const imageRunRef = useRef(0);
   const [ratingMessage, setRatingMessage] = useState('');
   const [recentPosts, setRecentPosts] = useState<any[]>([]);
+  const [recentPostsError, setRecentPostsError] = useState('');
   const [viewingPost, setViewingPost] = useState<any>(null);
 
   // Selected option state
@@ -173,8 +174,12 @@ export default function SocialPostPage() {
     try {
       const res = await fetch('/api/dashboard/history?type=social-post');
       const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || `History request failed (${res.status})`);
       if (data.tasks) setRecentPosts(data.tasks);
-    } catch {}
+      setRecentPostsError('');
+    } catch (err) {
+      setRecentPostsError(err instanceof Error ? err.message : 'Unable to load recent posts');
+    }
   };
 
   const startElapsedTimer = useCallback(() => {
@@ -1099,6 +1104,9 @@ export default function SocialPostPage() {
               <p className="text-xs text-[var(--mos-text-faint)] mt-1">Click to view previous generations</p>
             </div>
             <div className="max-h-[60vh] overflow-y-auto">
+              {recentPostsError && (
+                <p className="p-3 text-xs text-red-300 border-b border-[var(--mos-border)]">{recentPostsError}</p>
+              )}
               {recentPosts.length > 0 ? recentPosts.map((post: any) => (
                 <div key={post.id}
                   onClick={() => viewPost(post)}
