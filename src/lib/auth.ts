@@ -41,7 +41,7 @@ export async function getSession(request: NextRequest): Promise<AuthResult | Aut
 
     const adminOnlyPaths = [
       '/api/dashboard/tokens', '/api/admin/users', '/api/admin/departments',
-      '/api/templates', '/api/calendar', '/api/images', '/api/generated-images', '/api/knowledge',
+      '/api/templates', '/api/calendar', '/api/knowledge',
       '/api/brand-guidelines',
     ];
     // Steps inside a member's own generation run. Feature access is still gated

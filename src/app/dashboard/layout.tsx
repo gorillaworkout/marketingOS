@@ -54,7 +54,7 @@ const generateItems = [
 
 const resourceItems = [
   { href: '/dashboard/brand-guidelines', label: 'Brand guidelines', icon: 'brand', adminOnly: true },
-  { href: '/dashboard/images', label: 'Image Gallery', icon: 'image', adminOnly: true },
+  { href: '/dashboard/images', label: 'Image Gallery', icon: 'image' },
   { href: '/dashboard/calendar', label: 'Calendar', icon: 'calendar', adminOnly: true },
   { href: '/dashboard/templates', label: 'Templates', icon: 'template', adminOnly: true },
   { href: '/dashboard/knowledge', label: 'Knowledge', icon: 'knowledge', adminOnly: true },
@@ -78,7 +78,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       if (data.authenticated) {
         setUser(data.user);
         const generationFeature = pathname.split('/').pop() || '';
-        const adminOnlyPages = ['/dashboard/tokens', '/dashboard/analytics', '/dashboard/accounts', '/dashboard/templates', '/dashboard/calendar', '/dashboard/images', '/dashboard/knowledge', '/dashboard/knowledge-graph', '/dashboard/brand-guidelines', '/dashboard/history'];
+        const adminOnlyPages = ['/dashboard/tokens', '/dashboard/analytics', '/dashboard/accounts', '/dashboard/templates', '/dashboard/calendar', '/dashboard/knowledge', '/dashboard/knowledge-graph', '/dashboard/brand-guidelines', '/dashboard/history'];
         if (data.user.role !== 'admin' && (adminOnlyPages.includes(pathname) || (GENERATION_FEATURES.includes(generationFeature as typeof GENERATION_FEATURES[number]) && !data.user.enabledFeatures?.includes(generationFeature)))) {
           router.replace('/dashboard');
         }
