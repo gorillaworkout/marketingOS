@@ -7,6 +7,7 @@ export const GENERATION_FEATURES = [
   'event-plan',
   'article-market-news',
   'market-research',
+  'ai-research',
 ] as const;
 
 export type GenerationFeature = typeof GENERATION_FEATURES[number];
@@ -49,6 +50,12 @@ export const FEATURE_METADATA: Record<GenerationFeature, FeatureMetadata> = {
     description: 'Market-news selection and research reports.',
     adminOnly: true,
   },
+  'ai-research': {
+    key: 'ai-research',
+    label: 'AI Research Assistant',
+    description: 'Ask anything — research, analysis, and Q&A powered by GorillaWorkout LLM.',
+    adminOnly: false,
+  },
 };
 
 const DEFAULT_FEATURE_ASSIGNMENTS: Record<GenerationFeature, {
@@ -74,6 +81,10 @@ const DEFAULT_FEATURE_ASSIGNMENTS: Record<GenerationFeature, {
   'market-research': {
     allowedModels: ['ag/claude-sonnet-4-6', 'cc/claude-sonnet-5', 'cx/gpt-5.6-sol'],
     defaultModel: 'cx/gpt-5.6-sol',
+  },
+  'ai-research': {
+    allowedModels: ['pecut-free', 'ag/gemini-3-flash-agent', 'cc/claude-sonnet-5'],
+    defaultModel: 'ag/gemini-3-flash-agent',
   },
 };
 

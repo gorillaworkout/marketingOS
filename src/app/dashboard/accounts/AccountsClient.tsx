@@ -4,7 +4,7 @@ import { passwordInputType } from '@/lib/password-visibility';
 import { Button, DataTableFrame, EmptyState, LoadingState, MetricCard, Panel, PageHeader, PageStack, SectionHeader, StatusBadge, TextInput } from '@/components/ui/dashboard';
 import { GENERATION_FEATURES } from '@/lib/authorization';
 
-const ASSIGNABLE_FEATURES = ['social-post', 'video-script', 'event-plan', 'article-market-news', 'market-research'] as const;
+const ASSIGNABLE_FEATURES = ['social-post', 'video-script', 'event-plan', 'article-market-news', 'market-research', 'ai-research'] as const;
 // Sanity assertion; keeps the array above and the authorization source of truth in sync.
 if (process.env.NODE_ENV !== 'production' && ASSIGNABLE_FEATURES.length !== GENERATION_FEATURES.length) {
   console.warn('ASSIGNABLE_FEATURES drift vs GENERATION_FEATURES', { ASSIGNABLE_FEATURES, GENERATION_FEATURES });

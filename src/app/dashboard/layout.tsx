@@ -50,6 +50,7 @@ const generateItems = [
   { href: '/dashboard/event-plan', label: 'Event plan', icon: 'event' },
   { href: '/dashboard/sop', label: 'Article Market News', icon: 'article' },
   { href: '/dashboard/market-research', label: 'Market research', icon: 'research' },
+  { href: '/dashboard/ai-research', label: 'AI Research', icon: 'research' },
 ] satisfies Array<{ href: string; label: string; icon: IconName; adminOnly?: boolean }>;
 
 const resourceItems = [

@@ -4,6 +4,7 @@ export const GENERATION_FEATURES = [
   'event-plan',
   'article-market-news',
   'market-research',
+  'ai-research',
 ] as const;
 export type GenerationFeature = typeof GENERATION_FEATURES[number];
 

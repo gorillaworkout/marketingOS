@@ -20,6 +20,7 @@ const BASE_FIT: Record<GenerationFeature, GuidanceLevel> = {
   'event-plan': 'good',
   'article-market-news': 'good',
   'market-research': 'good',
+  'ai-research': 'good',
 };
 
 function fit(overrides: Partial<Record<GenerationFeature, GuidanceLevel>>): Record<GenerationFeature, GuidanceLevel> {
@@ -165,6 +166,7 @@ export const FIT_LABELS: Record<GuidanceLevel, string> = {
 export const GUIDANCE_FEATURE_LABELS: Record<GenerationFeature, string> = {
   'social-post': 'Social Post', 'video-script': 'Video Script', 'event-plan': 'Event Plan',
   'article-market-news': 'Article Market News', 'market-research': 'Market Research',
+  'ai-research': 'AI Research Assistant',
 };
 
 export const MODEL_GUIDANCE_DISCLAIMER = 'Operational guidance for MarketingOS; not a vendor benchmark or universal quality ranking.';
