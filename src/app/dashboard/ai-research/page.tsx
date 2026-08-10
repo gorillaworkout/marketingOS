@@ -168,6 +168,7 @@ export default function AIResearchPage() {
         eyebrow="AI Research"
         title="AI Research Assistant"
         description="Ask questions, research topics, analyze data — powered by GorillaWorkout LLM"
+        actions={<InlineModelSelector feature="ai-research" />}
       />
 
       <div className="flex gap-0 min-h-[calc(100vh-220px)]">
@@ -360,10 +361,7 @@ export default function AIResearchPage() {
         </div>
       </div>
 
-      {/* Model selector at bottom */}
-      <div className="mt-4">
-        <InlineModelSelector feature="ai-research" />
-      </div>
+    </div>
     </PageStack>
   );
 }
