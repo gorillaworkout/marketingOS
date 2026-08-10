@@ -361,7 +361,6 @@ export default function AIResearchPage() {
         </div>
       </div>
 
-    </div>
     </PageStack>
   );
 }
