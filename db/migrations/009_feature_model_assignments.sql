@@ -30,6 +30,6 @@ VALUES
   ('social-post', '["pecut-free","ag/gemini-3-flash-agent","cc/claude-sonnet-5"]'::jsonb, 'pecut-free'),
   ('video-script', '["pecut-free","ag/gemini-3-flash-agent","cc/claude-sonnet-5"]'::jsonb, 'ag/gemini-3-flash-agent'),
   ('event-plan', '["pecut-free","ag/gemini-3-flash-agent","cc/claude-sonnet-5"]'::jsonb, 'ag/gemini-3-flash-agent'),
-  ('article-market-news', '["ag/claude-sonnet-4-6","cc/claude-sonnet-5","cx/gpt-5.6-sol"]'::jsonb, 'cx/gpt-5.6-sol'),
-  ('market-research', '["ag/claude-sonnet-4-6","cc/claude-sonnet-5","cx/gpt-5.6-sol"]'::jsonb, 'cx/gpt-5.6-sol')
+  ('article-market-news', '["ag/claude-sonnet-4-6","cc/claude-sonnet-5"]'::jsonb, 'cc/claude-sonnet-5'),
+  ('market-research', '["ag/claude-sonnet-4-6","cc/claude-sonnet-5"]'::jsonb, 'cc/claude-sonnet-5')
 ON CONFLICT (feature_key) DO NOTHING;

@@ -75,12 +75,12 @@ const DEFAULT_FEATURE_ASSIGNMENTS: Record<GenerationFeature, {
     defaultModel: 'ag/gemini-3-flash-agent',
   },
   'article-market-news': {
-    allowedModels: ['ag/claude-sonnet-4-6', 'cc/claude-sonnet-5', 'cx/gpt-5.6-sol'],
-    defaultModel: 'cx/gpt-5.6-sol',
+    allowedModels: ['ag/claude-sonnet-4-6', 'cc/claude-sonnet-5'],
+    defaultModel: 'cc/claude-sonnet-5',
   },
   'market-research': {
-    allowedModels: ['ag/claude-sonnet-4-6', 'cc/claude-sonnet-5', 'cx/gpt-5.6-sol'],
-    defaultModel: 'cx/gpt-5.6-sol',
+    allowedModels: ['ag/claude-sonnet-4-6', 'cc/claude-sonnet-5'],
+    defaultModel: 'cc/claude-sonnet-5',
   },
   'ai-research': {
     allowedModels: ['pecut-free', 'ag/gemini-3-flash-agent', 'cc/claude-sonnet-5'],
