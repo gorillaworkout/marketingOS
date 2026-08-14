@@ -3,13 +3,22 @@ import { getAuthorizedUser, getSession } from '@/lib/auth';
 import { queryOne, execute } from '@/lib/database';
 import { rateLimit } from '@/lib/rate-limit';
 import { createImageJobStore, type ImageJob, type ImageJobResult } from '@/lib/image-job-status';
-import { exec } from 'child_process';
 import fs from 'fs';
 import path from 'path';
-import os from 'os';
 
 const imageJobs = createImageJobStore();
 const JOB_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+// Image generation now flows through the single GorillaWorkout LLM gateway
+// (llm.gorillaworkout.id) instead of spawning the Codex CLI directly, so every
+// generate feature is one-door. The gateway maps cx/* image models to the
+// connected Codex (ChatGPT) account on the 9router host.
+const GORILLAWORKOUT_API_BASE = process.env.GORILLAWORKOUT_API_BASE || 'https://llm.gorillaworkout.id/v1';
+const GORILLAWORKOUT_API_KEY = process.env.GORILLAWORKOUT_API_KEY || '';
+
+// Codex image models served by the gateway. gpt-5.3-image is rejected on a
+// ChatGPT account, so only 5.5 and 5.4 are offered.
+const IMAGE_MODELS = ['cx/gpt-5.5-image', 'cx/gpt-5.4-image'];
 
 export async function POST(request: NextRequest) {
   const rl = rateLimit(request);
@@ -36,7 +45,7 @@ export async function POST(request: NextRequest) {
   const prompt = body.prompt.trim();
   const type = typeof body.type === 'string' ? body.type : 'social-post';
   const brief = typeof body.brief === 'string' ? body.brief : prompt;
-  const model = typeof body.model === 'string' && body.model.trim() ? body.model.trim() : 'gpt-5.6-terra';
+  const model = typeof body.model === 'string' && body.model.trim() ? body.model.trim() : 'cx/gpt-5.5-image';
   const taskId = typeof body.taskId === 'string' && body.taskId.trim() ? body.taskId.trim() : null;
   const job = imageJobs.create(userId);
 
@@ -66,84 +75,84 @@ export async function GET(request: NextRequest) {
 async function runImageJob(job: ImageJob, prompt: string, brief: string, type: string, model: string, taskId: string | null) {
   const cwd = process.cwd() || '/Users/bayudarmawan/marketingos';
   const sopName = generateSOPFileName(brief || prompt, type);
-  const tmpFile = path.join(os.tmpdir(), `codex-prompt-${job.id}.txt`);
 
   try {
-    fs.writeFileSync(tmpFile, prompt, 'utf8');
     imageJobs.update(job.id, job.ownerId, {
       status: 'generating', progress: 30, message: `🤖 Codex generating image with ${model} (30-90s)...`,
     });
-    try { fs.unlinkSync(path.join(cwd, 'output.png')); } catch {}
 
-    const script = path.join(cwd, 'scripts', 'codex-image-gen.sh');
-    const command = `bash "${script}" "${tmpFile}" "${cwd}" "${model}"`;
-    exec(command, {
-      cwd,
-      timeout: 300_000,
-      env: { ...process.env, TERM: 'xterm' } as NodeJS.ProcessEnv,
-      maxBuffer: 10 * 1024 * 1024,
-    }, (executionError, stdout, stderr) => {
-      finishImageJob(job, cwd, sopName, executionError, String(stdout || ''), String(stderr || ''), { model, prompt, taskId });
-      try { fs.unlinkSync(tmpFile); } catch {}
+    if (!GORILLAWORKOUT_API_KEY) {
+      throw new Error('GORILLAWORKOUT_API_KEY is not configured.');
+    }
+
+    // Fall back to the gateway's default image model when an unknown one is requested.
+    const safeModel = IMAGE_MODELS.includes(model) ? model : 'cx/gpt-5.5-image';
+
+    const response = await fetch(`${GORILLAWORKOUT_API_BASE}/images/generations`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${GORILLAWORKOUT_API_KEY}`,
+        'HTTP-Referer': 'https://marketingos.local',
+        'X-Title': 'MarketingOS',
+      },
+      body: JSON.stringify({
+        model: safeModel,
+        prompt,
+        n: 1,
+        size: '1024x1024',
+      }),
+      signal: AbortSignal.timeout(240_000),
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      throw new Error(`Image API error ${response.status}: ${errText.slice(0, 500)}`);
+    }
+
+    const payload = await response.json() as { data?: Array<{ b64_json?: string; url?: string }> };
+    const first = payload?.data?.[0];
+    if (!first) throw new Error('Image API returned no image.');
+
+    let imageBytes: Buffer;
+    if (first.b64_json) {
+      imageBytes = Buffer.from(first.b64_json, 'base64');
+    } else if (first.url) {
+      const imgRes = await fetch(first.url);
+      if (!imgRes.ok) throw new Error(`Failed to download image: ${imgRes.status}`);
+      imageBytes = Buffer.from(await imgRes.arrayBuffer());
+    } else {
+      throw new Error('Image API returned an empty result.');
+    }
+
+    if (imageBytes.length < 10_000) throw new Error('Image API returned a suspiciously small image.');
+
+    const directory = path.join(cwd, 'public', 'outputs', 'images');
+    if (!fs.existsSync(directory)) fs.mkdirSync(directory, { recursive: true });
+    const fileName = `${sopName}.png`;
+    fs.writeFileSync(path.join(directory, fileName), imageBytes);
+
+    const imageUrl = `/api/generated-images/${encodeURIComponent(fileName)}`;
+    const result: ImageJobResult = {
+      success: true,
+      imageUrl,
+      fileName,
+      sopName,
+      model: `${safeModel} (Codex)`,
+    };
+    imageJobs.update(job.id, job.ownerId, {
+      status: 'done', progress: 100, message: '✅ Image generated!', result,
+    });
+    void recordImageOnTask(taskId, job.ownerId, {
+      imageUrl, fileName, sopName, model: safeModel, prompt,
     });
   } catch (error) {
-    console.error('[generate-image] Failed to start image job:', error);
+    const reason = error instanceof Error ? error.message : 'unknown error';
+    console.error('[generate-image] Image job failed:', reason);
     imageJobs.update(job.id, job.ownerId, {
-      status: 'error', progress: 0, message: '❌ Unable to start image generation.', error: 'Unable to start image generation.',
+      status: 'error', progress: 0, message: '❌ Image generation failed. Please try again.', error: 'Image generation failed. Please try again.',
     });
-    try { fs.unlinkSync(tmpFile); } catch {}
   }
-}
-
-function finishImageJob(
-  job: ImageJob,
-  cwd: string,
-  sopName: string,
-  executionError: Error | null,
-  stdout: string,
-  stderr: string,
-  meta: { model: string; prompt: string; taskId: string | null },
-) {
-  imageJobs.update(job.id, job.ownerId, {
-    status: 'processing', progress: 80, message: '📦 Processing image...',
-  });
-
-  if (stdout.includes('IMAGE_SUCCESS:')) {
-    const match = stdout.match(/IMAGE_SUCCESS:(\S+)/);
-    const source = match ? path.join(cwd, match[1]) : path.join(cwd, 'output.png');
-    if (fs.existsSync(source)) {
-      const directory = path.join(cwd, 'public', 'outputs', 'images');
-      if (!fs.existsSync(directory)) fs.mkdirSync(directory, { recursive: true });
-      const fileName = `${sopName}.png`;
-      fs.copyFileSync(source, path.join(directory, fileName));
-      try { fs.unlinkSync(source); } catch {}
-      const imageUrl = `/api/generated-images/${encodeURIComponent(fileName)}`;
-      const result: ImageJobResult = {
-        success: true,
-        imageUrl,
-        fileName,
-        sopName,
-        model: `${meta.model} (Codex)`,
-      };
-      imageJobs.update(job.id, job.ownerId, {
-        status: 'done', progress: 100, message: '✅ Image generated!', result,
-      });
-      void recordImageOnTask(meta.taskId, job.ownerId, {
-        imageUrl, fileName, sopName, model: meta.model, prompt: meta.prompt,
-      });
-      return;
-    }
-    imageJobs.update(job.id, job.ownerId, {
-      status: 'error', progress: 0, message: '❌ Image file not found.', error: 'Image file not found.',
-    });
-    return;
-  }
-
-  const reason = stdout.match(/IMAGE_FAILED:(.+)/)?.[1]?.trim() || executionError?.message || 'unknown error';
-  console.error(`[generate-image] Image job failed: ${reason} | stderr: ${stderr.slice(0, 500)}`);
-  imageJobs.update(job.id, job.ownerId, {
-    status: 'error', progress: 0, message: '❌ Image generation failed. Please try again.', error: 'Image generation failed. Please try again.',
-  });
 }
 
 /**

@@ -116,7 +116,7 @@ export default function SocialPostPage() {
   const [generatingImage, setGeneratingImage] = useState(false);
   const [generatedImage, setGeneratedImage] = useState<string | null>(null);
   const [editableImagePrompt, setEditableImagePrompt] = useState('');
-  const [imageModel, setImageModel] = useState('gpt-5.6-terra');
+  const [imageModel, setImageModel] = useState('cx/gpt-5.5-image');
   const [availableImageModels, setAvailableImageModels] = useState<Array<{ id: string; name: string; description: string }>>([]);
   const [imageProgress, setImageProgress] = useState<ImageProgressState | null>(null);
   const imageProgressTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -959,10 +959,10 @@ export default function SocialPostPage() {
                         </option>
                       ))
                     ) : (
-                      <option value="gpt-5.6-terra">gpt-5.6-terra — Codex · image_gen tool</option>
+                      <option value="cx/gpt-5.5-image">GPT-5.5 Image — Codex · image generation</option>
                     )}
                   </Select>
-                  <p className="text-xs text-[var(--mos-text-faint)]">Model digunakan melalui Codex CLI (ChatGPT Plus office account)</p>
+                  <p className="text-xs text-[var(--mos-text-faint)]">Model di-generate melalui GorillaWorkout gateway (llm.gorillaworkout.id)</p>
                 </div>
 
                 {/* Generate button */}

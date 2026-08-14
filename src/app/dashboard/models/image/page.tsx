@@ -156,13 +156,14 @@ export default function ImageModelsPage() {
       <Panel className="border-amber-400/15 bg-amber-400/[0.035]">
         <h3 className="text-sm font-medium text-amber-100">ℹ️ About Codex Image Models</h3>
         <p className="mt-2 text-xs leading-5 text-[var(--mos-text-muted)]">
-          Image generation menggunakan <strong>Codex CLI</strong> yang terhubung ke{' '}
-          <strong>ChatGPT Plus office account</strong>. Model yang dipilih di sini akan muncul sebagai dropdown
-          di Social Post page saat user mau generate image.
+          Image generation mengalir lewat <strong>GorillaWorkout gateway</strong> (llm.gorillaworkout.id) satu pintu,
+          yang meneruskan ke akun <strong>Codex (ChatGPT)</strong> yang terhubung. Model yang dipilih di sini akan muncul
+          sebagai dropdown di Social Post page saat user mau generate image.
         </p>
         <ul className="mt-3 space-y-1 text-xs text-[var(--mos-text-muted)]">
-          <li>• <strong>gpt-5.6-terra:</strong> Quality tertinggi, processing ~60-90 detik</li>
-          <li>• <strong>Catatan:</strong> <code>gpt-image-2</code> adalah nama tool image generation di dalam Codex, bukan model yang bisa dipilih — akun ChatGPT menolaknya sebagai model chat.</li>
+          <li>• <strong>GPT-5.5 Image:</strong> Quality tertinggi, processing ~60-90 detik</li>
+          <li>• <strong>GPT-5.4 Image:</strong> Balanced, lebih cepat</li>
+          <li>• <strong>Catatan:</strong> GPT-5.3 Image ditolak akun ChatGPT, jadi tidak disediakan.</li>
         </ul>
       </Panel>
 
