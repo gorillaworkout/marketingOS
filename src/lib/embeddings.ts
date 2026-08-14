@@ -29,7 +29,8 @@ interface KnowledgeEntry {
 const TFIDF_DIM = 256;
 
 function tokenize(text: string): string[] {
-  return text
+  const safe = typeof text === 'string' ? text : String(text ?? '');
+  return safe
     .toLowerCase()
     .replace(/[^a-z0-9\s]/g, ' ')
     .split(/\s+/)

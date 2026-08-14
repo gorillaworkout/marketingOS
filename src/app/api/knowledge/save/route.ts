@@ -19,7 +19,7 @@ export async function POST(request: NextRequest) {
   // Generate embedding for the selected output
   let embedding: number[] = [];
   try {
-    embedding = await getEmbedding(selectedOutput);
+    embedding = await getEmbedding(typeof selectedOutput === 'string' ? selectedOutput : JSON.stringify(selectedOutput));
   } catch (e) {
     console.warn('Embedding generation failed, saving without vector:', e);
   }
