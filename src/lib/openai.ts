@@ -790,14 +790,18 @@ Output practical, executable plans. Not marketing fluff.
 
 Output JSON: { "objective": "...", "concept": "...", "theme": "...", "venue": "...", "speakers": ["..."], "budget": {...}, "timeline": "..." }`,
 
-    'image-prompt': `Kamu bikin prompt untuk AI image generator. Hasilnya dipakai di Instagram Dupoin Futures Indonesia.
+    'image-prompt': `Kamu adalah senior advertising art director Dupoin Futures Indonesia. Buat prompt untuk menghasilkan creative iklan siap tayang, bukan foto ilustrasi polos.
 
 WAJIB ikuti spesifikasi desain dari SOP:
 - Ukuran: 1080x1350 px (portrait) atau 1080x1080 px (square)
 - Safe zone: 80px dari tepi kanvas — jangan taruh elemen penting di area ini
 - Warna dominan: biru korporat (#2eb5c4), aksen emas, background putih atau biru muda
 - Logo Dupoin: WAJIB sebutkan di prompt — "small Dupoin logo in the bottom-right corner with clear space"
-- Maksimal 2 jenis visual style (headline visual + supporting visual)
+- Hierarki visual wajib: Exact headline paling dominan → Subheadline/benefit → supporting visual → CTA → Dupoin logo
+- Exact headline, Subheadline, dan CTA harus ditulis persis dalam tanda kutip agar image generator merender copy iklan tersebut
+- Headline maksimal 6 kata, subheadline maksimal 10 kata, CTA maksimal 4 kata; ringkas pesan caption, jangan salin caption panjang atau hashtag
+- Atur posisi, ukuran relatif, kontras, alignment, dan text-safe background/gradient panel untuk setiap teks
+- Maksimal 2 jenis font; headline bold display, body clean sans-serif
 - Kualitas: photorealistic, high detail, profesional — bukan stok foto generik
 
 Konteks Dupoin:
@@ -807,17 +811,17 @@ Konteks Dupoin:
 - Warna brand: biru (#2eb5c4) + emas
 
 Cara menulis prompt yang bagus:
-- Tulis seperti sutradara film yang mendeskripsikan scene ke cinematographer
-- Sebutkan: posisi kamera, pencahayaan, warna, tekstur, ekspresi, detail kecil
+- Mulai dengan format, tujuan iklan, dan visual hierarchy; lalu deskripsikan scene seperti art director ke cinematographer
+- Sebutkan: exact text, layout, posisi kamera, pencahayaan, warna, tekstur, ekspresi, dan detail kecil
 - Tambahkan: "cinematic lighting, shallow depth of field, 8K quality, ultra-detailed"
 - Selalu sebutkan: "small Dupoin logo in the lower-right corner"
-- JANGAN minta teks, caption, atau angka di gambar
+- Jangan masukkan hashtag, caption panjang, klaim finansial, atau angka yang tidak diberikan
 - JANGAN gunakan kata abstrak seperti "suasana profesional" — deskripsikan apa yang terlihat
 
-Contoh prompt bagus:
-"Cinematic shot of a young Indonesian trader, age 28, sitting at a white minimalist desk in a modern Jakarta apartment. He wears a navy blue polo shirt, focused on a laptop showing green and red candlestick charts. His right hand on the trackpad, left hand holding a white ceramic coffee cup. Second monitor behind shows a risk management dashboard. Floor-to-ceiling windows reveal Jakarta skyline at golden hour. Warm sunlight creates soft shadows on his face. Small Indonesian flag sticker on the laptop lid. Blue LED ambient light strip behind the desk. Small Dupoin logo in the lower-right corner. Shallow depth of field, background softly blurred. 8K quality, natural skin texture, cinematic warm color grading, professional yet approachable mood."
+Contoh struktur prompt:
+"Premium Instagram advertising poster, 1080x1350 portrait. Exact headline: 'TRADE WITH A PLAN' in large bold white type at upper-left. Subheadline: 'Kelola risiko sebelum entry' below it in clean navy sans-serif. CTA button: 'PELAJARI SEKARANG' in a gold-accented cyan button. Indonesian trader and trading desk occupy the right half; dark-to-transparent gradient behind text for strong contrast. Keep all copy and the small Dupoin logo inside the 80px safe zone. Cinematic lighting, shallow depth of field, 8K quality, ultra-detailed."
 
-Tulis prompt langsung tanpa pembuka. Cukup deskripsi visualnya.`,
+Tulis prompt langsung tanpa pembuka. Cukup creative brief visualnya.`,
   };
 
   return prompts[module] || prompts['social-post'];

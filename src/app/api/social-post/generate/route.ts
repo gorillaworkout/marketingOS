@@ -267,31 +267,30 @@ Follow the SOP strictly. Output JSON format with: { "hook": "...", "caption": ".
           // Generate DUPOIN naming convention
           const dupoinFileName = generateDupoinFileName(brief, platform);
 
-          // Generate image prompt (single, for the overall brief)
+          // Generate one advertising creative prompt per caption option.
           controller.enqueue(encoder.encode(sseEvent({
             step: 'image-prompt',
             progress: 80,
-            message: '🎨 Generating image prompt...',
+            message: '🎨 Building advertising creative directions...',
           })));
 
           const smartImageSystem = getSmartSystemPrompt('image-prompt', platform, brandGuidelines, undefined, styleContext);
-          const imagePrompt = await generateContent(
+          const imagePrompts = await Promise.all(options.map(async selectedCaption => generateContent(
             smartImageSystem,
-            `Buat prompt untuk generate gambar yang berkaitan dengan post ini.
+            `Buat advertising creative prompt yang menerjemahkan post ini menjadi iklan siap tayang.
 Brief: ${brief}
 Platform: ${platform || 'Instagram'}
 Target: ${targetAudience || 'General'}
+Selected hook: ${selectedCaption.hook}
+Selected caption: ${selectedCaption.caption}
 
-Tulis deskripsi visual saja. JANGAN tulis hashtag, caption, atau teks apapun di gambar. Cukup deskripsi visualnya.`,
+Tentukan Exact headline, Subheadline, CTA, visual hierarchy, layout, supporting scene, text contrast, safe zone 80px, dan posisi Dupoin logo. Jangan masukkan hashtag atau caption panjang ke gambar.`,
             userId,
             taskId,
             { brandGuidelines, model: preferredModel, taskType: 'social-post' }
-          );
+          )));
 
-          // Set imagePrompt on all options
-          for (const opt of options) {
-            opt.imagePrompt = imagePrompt.content;
-          }
+          options.forEach((option, index) => { option.imagePrompt = imagePrompts[index].content; });
 
           // Aggregate usage
           const totalUsage = {
@@ -301,13 +300,18 @@ Tulis deskripsi visual saja. JANGAN tulis hashtag, caption, atau teks apapun di 
               model: optionResults[0]?.usage?.model || preferredModel,
               cost: optionResults.reduce((sum, r) => sum + (r.usage?.cost || 0), 0),
             },
-            imagePrompt: imagePrompt.usage,
+            imagePrompt: {
+              inputTokens: imagePrompts.reduce((sum, result) => sum + result.usage.inputTokens, 0),
+              outputTokens: imagePrompts.reduce((sum, result) => sum + result.usage.outputTokens, 0),
+              model: imagePrompts[0]?.usage.model || preferredModel,
+              cost: imagePrompts.reduce((sum, result) => sum + result.usage.cost, 0),
+            },
           };
 
           // Save output data
           const outputData = {
             options,
-            imagePrompt: imagePrompt.content,
+            imagePrompt: imagePrompts[0].content,
           };
 
           const dateStr = new Date().toISOString().split('T')[0];
@@ -328,7 +332,7 @@ Tulis deskripsi visual saja. JANGAN tulis hashtag, caption, atau teks apapun di 
               success: true,
               taskId,
               options,
-              imagePrompt: imagePrompt.content,
+              imagePrompt: imagePrompts[0].content,
               outputFile: `/outputs/social-posts/${fileName}`,
               usage: totalUsage,
               qcResults,
