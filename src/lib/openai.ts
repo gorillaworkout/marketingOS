@@ -20,8 +20,9 @@ export interface ModelInfo {
 export const AVAILABLE_MODELS: ModelInfo[] = [
   { id: 'pecut-free', name: 'Pecut Free (GorillaWorkout)', tier: 'budget', provider: 'gorillaworkout', input: 0, output: 0 },
   { id: 'ag/gemini-3-flash-agent', name: 'Gemini 3 Flash Agent', tier: 'budget', provider: 'gorillaworkout', input: 0, output: 0 },
-  { id: 'ag/gemini-3.5-flash-low', name: 'Gemini 3.5 Flash Low', tier: 'budget', provider: 'gorillaworkout', input: 0, output: 0 },
-  { id: 'ag/gemini-3.5-flash-extra-low', name: 'Gemini 3.5 Flash Extra Low', tier: 'budget', provider: 'gorillaworkout', input: 0, output: 0 },
+  { id: 'ag/gemini-3.7-flash-low', name: 'Gemini 3.7 Flash Low', tier: 'budget', provider: 'gorillaworkout', input: 0, output: 0 },
+  { id: 'ag/gemini-3.7-flash-medium', name: 'Gemini 3.7 Flash Medium', tier: 'balanced', provider: 'gorillaworkout', input: 0, output: 0 },
+  { id: 'ag/gemini-3.7-flash-high', name: 'Gemini 3.7 Flash High', tier: 'premium', provider: 'gorillaworkout', input: 0, output: 0 },
   { id: 'ag/gemini-pro-agent', name: 'Gemini Pro Agent', tier: 'balanced', provider: 'gorillaworkout', input: 0, output: 0 },
   { id: 'ag/gemini-3.1-pro-low', name: 'Gemini 3.1 Pro Low', tier: 'balanced', provider: 'gorillaworkout', input: 0, output: 0 },
   { id: 'ag/claude-sonnet-4-6', name: 'Claude Sonnet 4.6', tier: 'balanced', provider: 'gorillaworkout', input: 0, output: 0 },
