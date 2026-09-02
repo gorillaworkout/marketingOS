@@ -52,3 +52,5 @@ scripts/test-linear-api.mjs
 docs/USER-GUIDE.md
 docs/API.md
 backups/
+
+.worktrees/
