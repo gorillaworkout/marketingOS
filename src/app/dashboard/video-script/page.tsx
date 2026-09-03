@@ -414,17 +414,45 @@ export default function VideoScriptPage() {
     setSelectedIndex(null);
     setKnowledgeSaved(false);
     setError('');
-    setStep('form');
     try {
-      const data = JSON.parse(script.output_data || '{}');
-      if (data.options && Array.isArray(data.options)) {
-        setResult({ ...data, taskId: script.id });
-        setTaskId(script.id);
+      const raw = typeof script.output_data === 'string'
+        ? JSON.parse(script.output_data || '{}')
+        : (script.output_data || {});
+
+      // Saved scripts hold the three generated directions under `options`.
+      // Restore them into the same preview UI a fresh generation uses, and put
+      // the wizard on a step that actually renders results -- setStep('form')
+      // used to hide everything that had just been loaded.
+      if (Array.isArray(raw.options) && raw.options.length > 0) {
+        const hasFinal = raw.options.some((o: any) => o && o.fullScript);
+        setResult({ ...raw, taskId: script.id });
+        if (hasFinal) {
+          // Saved scripts are finished scripts: the full view reads
+          // result.options[0], so land on 'full' rather than a preview grid
+          // that would offer a single card leading nowhere.
+          setStep('full');
+        } else {
+          setPreviewOptions(raw.options);
+          setSelectedIndex(raw.selectedIndex ?? 0);
+          setStep('preview');
+        }
+      } else if (Object.keys(raw).length > 0) {
+        setResult({ ...raw, taskId: script.id });
+        setStep('full');
       } else {
-        setResult({ ...data, taskId: script.id });
-        setTaskId(script.id);
+        setStep('form');
       }
-    } catch {}
+      setTaskId(script.id);
+
+      // Replay the original brief so the form is not blank when reopened.
+      if (typeof raw.event === 'string' && raw.event) setEvent(raw.event);
+      else if (typeof script.brief === 'string' && script.brief) setEvent(script.brief);
+      if (typeof raw.platform === 'string' && raw.platform) setPlatform(raw.platform);
+      if (typeof raw.duration === 'string' && raw.duration) setDuration(raw.duration);
+      if (typeof raw.targetAudience === 'string' && raw.targetAudience) setTargetAudience(raw.targetAudience);
+    } catch {
+      setStep('form');
+    }
   };
 
   const copyToClipboard = (text: string) => navigator.clipboard.writeText(text);
@@ -918,7 +946,22 @@ export default function VideoScriptPage() {
                 </button>
               </div>
               <Panel>
-                <p className="text-[var(--mos-text-muted)] text-sm whitespace-pre-wrap">{viewingScript.output_data}</p>
+                <p className="text-[var(--mos-text-faint)] text-sm">
+                  This script was saved in an older format and cannot be shown in the
+                  editor. The raw output is below.
+                </p>
+                <pre className="mt-3 max-h-80 overflow-auto text-xs text-[var(--mos-text-muted)] whitespace-pre-wrap">
+{(() => {
+  try {
+    const raw = typeof viewingScript.output_data === 'string'
+      ? JSON.parse(viewingScript.output_data)
+      : viewingScript.output_data;
+    return JSON.stringify(raw, null, 2);
+  } catch {
+    return String(viewingScript.output_data ?? '');
+  }
+})()}
+                </pre>
               </Panel>
             </div>
           )}
