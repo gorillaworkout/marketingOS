@@ -149,10 +149,58 @@ async function runImageJob(job: ImageJob, prompt: string, brief: string, type: s
   } catch (error) {
     const reason = error instanceof Error ? error.message : 'unknown error';
     console.error('[generate-image] Image job failed:', reason);
+    // Report WHY it failed. A blanket "please try again" sent users retrying a
+    // quota or an expired upstream token forever, with the real cause only ever
+    // visible in the server log.
+    const explained = explainImageFailure(reason, model);
     imageJobs.update(job.id, job.ownerId, {
-      status: 'error', progress: 0, message: '❌ Image generation failed. Please try again.', error: 'Image generation failed. Please try again.',
+      status: 'error', progress: 0, message: `❌ ${explained}`, error: explained,
     });
   }
+}
+
+/**
+ * Translate an upstream failure into something the user can act on.
+ *
+ * The gateway wraps provider errors as `Image API error <status>: {...}`, so the
+ * HTTP status plus a few marker strings are enough to tell "wait and retry"
+ * apart from "tell an admin".
+ */
+export function explainImageFailure(reason: string, model: string): string {
+  const status = Number(/Image API error (\d{3})/.exec(reason)?.[1] ?? 0);
+  const lower = reason.toLowerCase();
+  const reset = /reset after ([^)"]+)/i.exec(reason)?.[1]?.trim();
+  const waitHint = reset ? ` Try again in ${reset}.` : ' Try again in a few minutes.';
+
+  if (lower.includes('is not configured')) {
+    return 'Image generation is not configured on the server (missing API key). Please contact the administrator.';
+  }
+  if (status === 429 || lower.includes('usage limit') || lower.includes('rate limit') || lower.includes('quota')) {
+    return `Usage limit reached for ${model}.${waitHint} You can also pick a different image model.`;
+  }
+  if (status === 401 || lower.includes('token is expired') || lower.includes('authentication')) {
+    return `The image service rejected our credentials for ${model} (expired or invalid token). This needs an administrator to reconnect the account — retrying will not help.`;
+  }
+  if (status === 403) {
+    return `This account is not allowed to use ${model}. Please choose another image model or contact the administrator.`;
+  }
+  if (status === 404 || lower.includes('model not found') || lower.includes('unknown model')) {
+    return `Image model ${model} is unavailable right now. Please choose another model.`;
+  }
+  if (status === 402 || lower.includes('insufficient credit') || lower.includes('billing')) {
+    return `The image service has run out of credit for ${model}. Please contact the administrator.`;
+  }
+  if (status >= 500 || lower.includes('bad gateway') || lower.includes('service unavailable')) {
+    return `The image service is temporarily down (${status || 'upstream error'}).${waitHint}`;
+  }
+  if (lower.includes('timeout') || lower.includes('aborted') || lower.includes('timed out')) {
+    return `${model} took too long to respond and the request timed out. Please try again, or use a simpler prompt.`;
+  }
+  if (lower.includes('no image') || lower.includes('empty result') || lower.includes('suspiciously small')) {
+    return `${model} returned no usable image — the prompt may have been rejected by its safety filter. Try rewording the prompt.`;
+  }
+  // Nothing matched: show the upstream text rather than hiding it.
+  return `Image generation failed: ${reason.slice(0, 300)}`;
 }
 
 /**
