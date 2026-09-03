@@ -169,7 +169,7 @@ async function runImageJob(job: ImageJob, prompt: string, brief: string, type: s
 export function explainImageFailure(reason: string, model: string): string {
   const status = Number(/Image API error (\d{3})/.exec(reason)?.[1] ?? 0);
   const lower = reason.toLowerCase();
-  const reset = /reset after ([^)"]+)/i.exec(reason)?.[1]?.trim();
+  const reset = /reset after\s+(\d+\s*(?:s|sec(?:ond)?s?|m|min(?:ute)?s?|h|hours?)(?:\s+\d+\s*(?:s|sec(?:ond)?s?|m|min(?:ute)?s?))?)/i.exec(reason)?.[1]?.trim();
   const waitHint = reset ? ` Try again in ${reset}.` : ' Try again in a few minutes.';
 
   if (lower.includes('is not configured')) {

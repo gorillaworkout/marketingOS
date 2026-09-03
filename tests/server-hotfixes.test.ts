@@ -8,6 +8,7 @@ import { restoreSavedVideoScript } from '../src/lib/video-script-history';
 test('image failures preserve actionable upstream causes without leaking unknown details', () => {
   const model = 'gpt-5.6-terra';
   assert.match(explainImageFailure('Image API error 429: usage limit (reset after 8m 56s)', model), /8m 56s/);
+  assert.doesNotMatch(explainImageFailure('Image API error 429: usage limit (reset after api_key=UPSTREAM_SECRET)', model), /UPSTREAM_SECRET|api_key/);
   assert.match(explainImageFailure('Image API error 401: token is expired', model), /retrying will not help/);
   assert.match(explainImageFailure('Image API error 402: insufficient credit', model), /administrator/);
   assert.match(explainImageFailure('Image API error 404: model not found', model), /unavailable/);

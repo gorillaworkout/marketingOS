@@ -57,6 +57,8 @@ test('parses article JSON wrapped in reasoning prose or markdown fences', () => 
   const json = JSON.stringify(article);
 
   assert.deepEqual(parseGeneratedArticle(json), article);
+  const withLiteralFence = { ...article, articleMarkdown: '# Harga Emas\n\n```json\n{"example":true}\n```' };
+  assert.deepEqual(parseGeneratedArticle(JSON.stringify(withLiteralFence)), withLiteralFence);
   assert.deepEqual(parseGeneratedArticle(`<think>draft analysis</think>\n\`\`\`json\n${json}\n\`\`\``), article);
   assert.deepEqual(parseGeneratedArticle(`Here is the revised draft:\n${json}\nDone.`), article);
   assert.deepEqual(parseGeneratedArticle(`Reasoning metadata: {}\nFinal answer:\n${json}`), article);

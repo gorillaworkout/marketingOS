@@ -14,13 +14,14 @@ export function parseGeneratedArticle(content: string): Record<string, unknown> 
     }
   };
 
-  const cleaned = content
-    .replace(/<think>[\s\S]*?<\/think>/gi, '')
-    .replace(/```(?:json)?\s*/gi, '')
-    .replace(/```/g, '')
-    .trim();
-  const direct = parseObject(cleaned);
+  const direct = parseObject(content.trim());
   if (direct) return direct;
+
+  let cleaned = content.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+  const outerFence = /^```(?:json)?\s*\n([\s\S]*)\n```$/i.exec(cleaned);
+  if (outerFence) cleaned = outerFence[1].trim();
+  const unwrapped = parseObject(cleaned);
+  if (unwrapped) return unwrapped;
 
   const candidates: Record<string, unknown>[] = [];
   for (let start = cleaned.indexOf('{'); start >= 0; start = cleaned.indexOf('{', start + 1)) {
