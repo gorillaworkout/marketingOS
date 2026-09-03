@@ -1,3 +1,47 @@
+export function parseGeneratedArticle(content: string): Record<string, unknown> {
+  const parseObject = (candidate: string): Record<string, unknown> | null => {
+    try {
+      const parsed: unknown = JSON.parse(candidate);
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+      const article = parsed as Record<string, unknown>;
+      return typeof article.title === 'string' &&
+        typeof article.metaDescription === 'string' &&
+        typeof article.articleMarkdown === 'string'
+        ? article
+        : null;
+    } catch {
+      return null;
+    }
+  };
+
+  const direct = parseObject(content.trim());
+  if (direct) return direct;
+
+  for (let start = content.indexOf('{'); start >= 0; start = content.indexOf('{', start + 1)) {
+    let depth = 0;
+    let quoted = false;
+    let escaped = false;
+    for (let index = start; index < content.length; index += 1) {
+      const character = content[index];
+      if (quoted) {
+        if (escaped) escaped = false;
+        else if (character === '\\') escaped = true;
+        else if (character === '"') quoted = false;
+        continue;
+      }
+      if (character === '"') quoted = true;
+      else if (character === '{') depth += 1;
+      else if (character === '}' && --depth === 0) {
+        const parsed = parseObject(content.slice(start, index + 1));
+        if (parsed) return parsed;
+        break;
+      }
+    }
+  }
+
+  throw new Error('AI returned an invalid article format. Please generate again.');
+}
+
 export const ELIGIBLE_KEYWORDS = [
   'emas', 'harga emas', 'xauusd', 'xau/usd', 'rupiah', 'dollar', 'dolar',
   'wall street', 'minyak', 'harga minyak',

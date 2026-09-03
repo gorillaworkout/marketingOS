@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
-import { normalizeArticleMarketNewsInput, normalizeResearchUrl, validateGeneratedArticle } from '../src/lib/article-market-news';
+import { normalizeArticleMarketNewsInput, normalizeResearchUrl, parseGeneratedArticle, validateGeneratedArticle } from '../src/lib/article-market-news';
 import { articleDocxFilename, buildArticleDocxBlob } from '../src/lib/article-market-news-docx';
 
 const read = (relative: string) => {
@@ -48,6 +48,25 @@ function compliantArticle(): string {
   return `# Harga Emas dan Permintaan Pasar\n\n${lead}\n\n## Analisis Pasar\n${body}\n\n${faqs}\n\n## Sources\nKontan — 2026-07-27 — https://investasi.kontan.co.id/news/harga-emas\n\nBuka akun Dupoin untuk memantau peluang pasar dengan pengelolaan risiko.`;
 }
 
+test('parses article JSON wrapped in reasoning prose or markdown fences', () => {
+  const article = {
+    title: 'Harga Emas Hari Ini',
+    metaDescription: 'Ringkasan harga emas.',
+    articleMarkdown: '# Harga Emas Hari Ini\n\nIsi dengan {kurung} literal.',
+  };
+  const json = JSON.stringify(article);
+
+  assert.deepEqual(parseGeneratedArticle(json), article);
+  assert.deepEqual(parseGeneratedArticle(`<think>draft analysis</think>\n\`\`\`json\n${json}\n\`\`\``), article);
+  assert.deepEqual(parseGeneratedArticle(`Here is the revised draft:\n${json}\nDone.`), article);
+  assert.deepEqual(parseGeneratedArticle(`Reasoning metadata: {}\nFinal answer:\n${json}`), article);
+
+  const escaped = { ...article, articleMarkdown: '# Harga Emas Hari Ini\n\nDia berkata "aman" di C:\\\\drafts\\{final\\}.' };
+  assert.deepEqual(parseGeneratedArticle(`<think>{"status":"ready"}</think>\n${JSON.stringify(escaped)}`), escaped);
+  assert.throws(() => parseGeneratedArticle('no JSON object here'), /invalid article format/i);
+  assert.throws(() => parseGeneratedArticle('metadata only: {"status":"ready"}'), /invalid article format/i);
+});
+
 test('page exposes the admin Article Market News generation workflow', () => {
   assert.match(generator, /Publication Time \(WIB\)/);
   assert.match(generator, /type="time"/);
@@ -61,8 +80,9 @@ test('page exposes the admin Article Market News generation workflow', () => {
   assert.match(generator, /Verified Facts/);
 });
 
-test('route is admin-only, gateway-routed, evidence-gated, and never fetches submitted URLs', () => {
-  assert.match(route, /requireAdmin\(request\)/);
+test('route is entitlement-gated, gateway-routed, evidence-gated, and never fetches submitted URLs', () => {
+  assert.match(route, /requireFeature\(request, 'article-market-news'\)/);
+  assert.match(route, /parseGeneratedArticle\(generated\.content\)/);
   assert.match(route, /getUserPreferredModel\(auth\.id, 'article-market-news'\)/);
   assert.doesNotMatch(route, /getModelProvider|codexTextOnly|gpt-5\.6-sol/);
   assert.match(route, /jsonRepairAttempts: 0/);

@@ -4,23 +4,13 @@ import { requireFeature } from '@/lib/auth';
 import { execute } from '@/lib/database';
 import { rateLimit } from '@/lib/rate-limit';
 import { generateContent, getUserPreferredModel } from '@/lib/openai';
-import { buildArticleMarketNewsPrompts, normalizeArticleMarketNewsInput, validateGeneratedArticle } from '@/lib/article-market-news';
+import { buildArticleMarketNewsPrompts, normalizeArticleMarketNewsInput, parseGeneratedArticle, validateGeneratedArticle } from '@/lib/article-market-news';
 import { researchArticleMarketNews } from '@/lib/article-market-news-research';
 
 export const maxDuration = 300;
 
 function sseEvent(data: Record<string, unknown>): string {
   return `data: ${JSON.stringify(data)}\n\n`;
-}
-
-function parseGeneratedArticle(content: string): Record<string, unknown> {
-  try {
-    const parsed = JSON.parse(content);
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('Generated article has an invalid shape.');
-    return parsed as Record<string, unknown>;
-  } catch {
-    throw new Error('AI returned an invalid article format. Please generate again.');
-  }
 }
 
 export async function POST(request: NextRequest) {
