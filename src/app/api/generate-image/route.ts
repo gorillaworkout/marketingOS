@@ -199,8 +199,7 @@ export function explainImageFailure(reason: string, model: string): string {
   if (lower.includes('no image') || lower.includes('empty result') || lower.includes('suspiciously small')) {
     return `${model} returned no usable image — the prompt may have been rejected by its safety filter. Try rewording the prompt.`;
   }
-  // Nothing matched: show the upstream text rather than hiding it.
-  return `Image generation failed: ${reason.slice(0, 300)}`;
+  return 'Image generation failed unexpectedly. Please contact the administrator if this continues.';
 }
 
 /**

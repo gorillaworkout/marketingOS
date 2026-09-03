@@ -15,6 +15,7 @@ import {
   Toolbar,
 } from '@/components/ui/dashboard';
 import InlineModelSelector from '@/components/InlineModelSelector';
+import { restoreSavedVideoScript } from '@/lib/video-script-history';
 
 interface ProgressState {
   step: string;
@@ -419,26 +420,14 @@ export default function VideoScriptPage() {
         ? JSON.parse(script.output_data || '{}')
         : (script.output_data || {});
 
-      // Saved scripts hold the three generated directions under `options`.
-      // Restore them into the same preview UI a fresh generation uses, and put
-      // the wizard on a step that actually renders results -- setStep('form')
-      // used to hide everything that had just been loaded.
-      if (Array.isArray(raw.options) && raw.options.length > 0) {
-        const hasFinal = raw.options.some((o: any) => o && o.fullScript);
-        setResult({ ...raw, taskId: script.id });
-        if (hasFinal) {
-          // Saved scripts are finished scripts: the full view reads
-          // result.options[0], so land on 'full' rather than a preview grid
-          // that would offer a single card leading nowhere.
-          setStep('full');
-        } else {
-          setPreviewOptions(raw.options);
-          setSelectedIndex(raw.selectedIndex ?? 0);
-          setStep('preview');
-        }
-      } else if (Object.keys(raw).length > 0) {
-        setResult({ ...raw, taskId: script.id });
+      const restored = restoreSavedVideoScript(raw);
+      if (restored.kind === 'full') {
+        setResult({ script: restored.script, taskId: script.id });
         setStep('full');
+      } else if (restored.kind === 'preview') {
+        setPreviewOptions(restored.options as unknown as PreviewOption[]);
+        setSelectedIndex(restored.selectedIndex);
+        setStep('preview');
       } else {
         setStep('form');
       }

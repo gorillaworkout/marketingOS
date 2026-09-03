@@ -62,7 +62,8 @@ test('parses article JSON wrapped in reasoning prose or markdown fences', () => 
   assert.deepEqual(parseGeneratedArticle(`Reasoning metadata: {}\nFinal answer:\n${json}`), article);
 
   const escaped = { ...article, articleMarkdown: '# Harga Emas Hari Ini\n\nDia berkata "aman" di C:\\\\drafts\\{final\\}.' };
-  assert.deepEqual(parseGeneratedArticle(`<think>{"status":"ready"}</think>\n${JSON.stringify(escaped)}`), escaped);
+  assert.deepEqual(parseGeneratedArticle(`<think>{"title":"Draft","metaDescription":"Draft","articleMarkdown":"# Draft"}</think>\nFinal answer:\n${JSON.stringify(escaped)}`), escaped);
+  assert.throws(() => parseGeneratedArticle(`${json}\n${JSON.stringify(escaped)}`), /ambiguous article format/i);
   assert.throws(() => parseGeneratedArticle('no JSON object here'), /invalid article format/i);
   assert.throws(() => parseGeneratedArticle('metadata only: {"status":"ready"}'), /invalid article format/i);
 });

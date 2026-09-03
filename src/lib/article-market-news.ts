@@ -14,15 +14,21 @@ export function parseGeneratedArticle(content: string): Record<string, unknown> 
     }
   };
 
-  const direct = parseObject(content.trim());
+  const cleaned = content
+    .replace(/<think>[\s\S]*?<\/think>/gi, '')
+    .replace(/```(?:json)?\s*/gi, '')
+    .replace(/```/g, '')
+    .trim();
+  const direct = parseObject(cleaned);
   if (direct) return direct;
 
-  for (let start = content.indexOf('{'); start >= 0; start = content.indexOf('{', start + 1)) {
+  const candidates: Record<string, unknown>[] = [];
+  for (let start = cleaned.indexOf('{'); start >= 0; start = cleaned.indexOf('{', start + 1)) {
     let depth = 0;
     let quoted = false;
     let escaped = false;
-    for (let index = start; index < content.length; index += 1) {
-      const character = content[index];
+    for (let index = start; index < cleaned.length; index += 1) {
+      const character = cleaned[index];
       if (quoted) {
         if (escaped) escaped = false;
         else if (character === '\\') escaped = true;
@@ -32,13 +38,16 @@ export function parseGeneratedArticle(content: string): Record<string, unknown> 
       if (character === '"') quoted = true;
       else if (character === '{') depth += 1;
       else if (character === '}' && --depth === 0) {
-        const parsed = parseObject(content.slice(start, index + 1));
-        if (parsed) return parsed;
+        const parsed = parseObject(cleaned.slice(start, index + 1));
+        if (parsed) candidates.push(parsed);
+        start = index;
         break;
       }
     }
   }
 
+  if (candidates.length === 1) return candidates[0];
+  if (candidates.length > 1) throw new Error('AI returned an ambiguous article format. Please generate again.');
   throw new Error('AI returned an invalid article format. Please generate again.');
 }
 
