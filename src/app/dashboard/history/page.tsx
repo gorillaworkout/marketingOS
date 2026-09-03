@@ -23,17 +23,39 @@ export default function HistoryPage() {
   const [typeFilter, setTypeFilter] = useState<'all' | 'social-post' | 'video-script' | 'event-plan' | 'article-market-news' | 'market-research'>('all');
   const [articleFactReviewConfirmed, setArticleFactReviewConfirmed] = useState(false);
   const [marketResearchReviewConfirmed, setMarketResearchReviewConfirmed] = useState(false);
+  const [historyError, setHistoryError] = useState('');
 
   useEffect(() => {
-    fetch('/api/dashboard/history').then(r => r.json()).then(d => { setTasks(d.tasks || []); setLoading(false); });
-  }, []);
+    // Fetch per type. The API caps at 50 rows, so filtering a mixed "all" list
+    // client-side used to hide Market Research entirely once newer tasks of
+    // other types filled that window.
+    let active = true;
+    const load = async () => {
+      const query = typeFilter === 'all' ? '' : `type=${encodeURIComponent(typeFilter)}`;
+      try {
+        const response = await fetch(`/api/dashboard/history${query ? `?${query}` : ''}`);
+        if (!response.ok) {
+          const data = await response.json().catch(() => ({}));
+          throw new Error(data.error || `History request failed with HTTP ${response.status}.`);
+        }
+        const data = await response.json();
+        if (!active) return;
+        setTasks(data.tasks || []);
+        setHistoryError('');
+      } catch (cause) {
+        if (!active) return;
+        setTasks([]);
+        setHistoryError(cause instanceof Error ? cause.message : 'Failed to load history.');
+      } finally {
+        if (active) setLoading(false);
+      }
+    };
+    void load();
+    return () => { active = false; };
+  }, [typeFilter]);
 
   const typeLabels: Record<string, string> = { 'social-post': 'Social Post', 'video-script': 'Video Script', 'event-plan': 'Event Plan', 'article-market-news': 'Article Market News', 'market-research': 'Market Research' };
-  const filteredTasks = typeFilter === 'all'
-    ? tasks
-    : typeFilter === 'event-plan'
-      ? tasks.filter(task => task.type === 'event-plan')
-      : tasks.filter(task => task.type === typeFilter);
+  const filteredTasks = tasks;
 
   const downloadJSON = (task: HistoryTask) => {
     const blob = new Blob([task.output_data || '{}'], { type: 'application/json' });
@@ -88,6 +110,8 @@ export default function HistoryPage() {
           </button>
         ))}
       </FilterGroup></Toolbar>
+
+      {historyError && <div className="rounded-[var(--mos-radius-panel)] border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-200">{historyError}</div>}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Task List */}
@@ -170,7 +194,7 @@ export default function HistoryPage() {
                           {Array.isArray(data.sourceStatus) && <div className="rounded-[var(--mos-radius-panel)] border border-[var(--mos-border)] bg-[var(--mos-surface)] p-4"><label className="text-xs text-[var(--mos-text-faint)] uppercase tracking-wide">Publisher Feed Status</label><div className="mt-2 space-y-1">{data.sourceStatus.map((source: { outlet: string; status: 'ok' | 'error'; candidateCount: number; error?: string }) => <p key={source.outlet} className={source.status === 'ok' ? 'text-xs text-emerald-400' : 'text-xs text-red-300'}>{source.outlet}: {source.status === 'ok' ? `OK · ${source.candidateCount} candidate` : `Failed · ${source.error || 'Unavailable'}`}</p>)}</div></div>}
                           <div className="space-y-3">
                             {items.map((item, index) => <article key={item.candidateId} className="rounded-[var(--mos-radius-panel)] border border-[var(--mos-border)] bg-[var(--mos-surface)] p-4">
-                              <p className="text-xs font-semibold text-cyan-400">#{index + 1} · {item.productCategory}</p>
+                              <p className="text-xs font-semibold text-cyan-400">#{index + 1} · {item.symbol || item.productCategory} · {item.productCategory}{item.importanceCategory ? ` · ${item.importanceCategory}` : ''}</p>
                               <h4 className="mt-1 font-semibold text-white">{item.articleTitle}</h4>
                               <p className="mt-1 text-xs text-[var(--mos-text-faint)]">{item.newsSource} · {item.publicationDate} {item.publicationTime} WIB · Latest Update Time: {item.latestUpdateTime ? `${item.latestUpdateTime} WIB` : 'Not provided'}</p>
                               <dl className="mt-3 space-y-2 text-sm"><div><dt className="text-[var(--mos-text-faint)]">Main Event</dt><dd className="text-[var(--mos-text-secondary)]">{item.mainEvent}</dd></div><div><dt className="text-[var(--mos-text-faint)]">Latest Factual Development</dt><dd className="text-[var(--mos-text-secondary)]">{item.latestFactualDevelopment}</dd></div><div><dt className="text-[var(--mos-text-faint)]">Market Relevance</dt><dd className="text-[var(--mos-text-secondary)]">{item.marketRelevance}</dd></div></dl>

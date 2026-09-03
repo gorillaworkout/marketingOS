@@ -2,9 +2,12 @@ import { createHash } from 'node:crypto';
 import { COMPETITOR_BROKERS, normalizeResearchUrl } from './article-market-news';
 import type { MarketNewsCandidate, MarketProductCategory } from './market-research';
 
+export type MarketResearchOrigin = 'indonesia' | 'international';
+
 export interface MarketResearchFeed {
   outlet: string;
   url: string;
+  origin: MarketResearchOrigin;
 }
 
 export interface MarketResearchSourceOptions {
@@ -21,19 +24,68 @@ export interface MarketResearchSourceResult {
   sourceStatus: Array<{ outlet: string; status: 'ok' | 'error'; candidateCount: number; error?: string }>;
 }
 
-export const MARKET_RESEARCH_GROUPS: MarketProductCategory[] = ['Forex', 'Gold', 'Oil', 'US Indices'];
+export const MARKET_RESEARCH_GROUPS: MarketProductCategory[] = ['Forex', 'Commodity', 'US Indices', 'US Stocks'];
+
+/** Sharpened instrument list. One article may only speak for one of these symbols. */
+export const MARKET_RESEARCH_SYMBOLS = {
+  Forex: ['AUD', 'CAD', 'CHF', 'EUR', 'GBP', 'JPY', 'NZD', 'USD', 'IDR'],
+  Commodity: ['XAUUSD', 'WTI'],
+  'US Indices': ['DJIA', 'SPX', 'NDX'],
+  'US Stocks': ['US Stocks'],
+} as const satisfies Record<MarketProductCategory, readonly string[]>;
+
 export const MARKET_RESEARCH_FEEDS: MarketResearchFeed[] = [
-  { outlet: 'CNBC Indonesia', url: 'https://www.cnbcindonesia.com/market/rss' },
-  { outlet: 'Detik Finance', url: 'https://finance.detik.com/rss' },
-  { outlet: 'ANTARA', url: 'https://www.antaranews.com/rss/ekonomi.xml' },
+  { outlet: 'Reuters Markets', url: 'https://www.reutersagency.com/feed/?taxonomy=best-topics&post_type=best', origin: 'international' },
+  { outlet: 'CNBC Economy', url: 'https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=20910258', origin: 'international' },
+  { outlet: 'CNBC Markets', url: 'https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=10000664', origin: 'international' },
+  { outlet: 'MarketWatch Top Stories', url: 'https://feeds.content.dowjones.io/public/rss/mw_topstories', origin: 'international' },
+  { outlet: 'Federal Reserve Press', url: 'https://www.federalreserve.gov/feeds/press_all.xml', origin: 'international' },
+  { outlet: 'Investing.com Economy', url: 'https://www.investing.com/rss/news_14.rss', origin: 'international' },
+  { outlet: 'Investing.com Commodities', url: 'https://www.investing.com/rss/news_11.rss', origin: 'international' },
+  { outlet: 'CNBC Indonesia', url: 'https://www.cnbcindonesia.com/market/rss', origin: 'indonesia' },
+  { outlet: 'Detik Finance', url: 'https://finance.detik.com/rss', origin: 'indonesia' },
 ];
 
-const GROUP_ALIASES: Record<MarketProductCategory, string[]> = {
-  Forex: ['aud', 'cad', 'chf', 'cny', 'eur', 'gbp', 'jpy', 'nzd', 'usd', 'rupiah', 'usd idr', 'us dollar', 'dolar as'],
-  Gold: ['gold', 'gold price', 'xauusd', 'xau usd', 'emas', 'harga emas'],
-  Oil: ['oil', 'crude oil', 'oil price', 'wti', 'brent', 'minyak', 'harga minyak'],
-  'US Indices': ['wall street', 'dow jones', 'djia', 's p 500', 'nasdaq', 'us stock index', 'indeks saham as'],
+/**
+ * Retail-gold pricing (Antam/Pegadaian) is a shop price list, not a market event.
+ * It must never enter the XAUUSD stream.
+ */
+const RETAIL_GOLD_MARKERS = ['antam', 'pegadaian', 'logam mulia', 'butik emas', 'emas batangan'];
+
+const SYMBOL_ALIASES: Record<string, string[]> = {
+  AUD: ['aud', 'aussie dollar', 'australian dollar', 'audusd', 'rba'],
+  CAD: ['cad', 'canadian dollar', 'usdcad', 'loonie', 'bank of canada'],
+  CHF: ['chf', 'swiss franc', 'usdchf', 'snb'],
+  EUR: ['eur', 'euro', 'eurusd', 'ecb', 'euro zone', 'eurozone'],
+  GBP: ['gbp', 'sterling', 'pound', 'gbpusd', 'bank of england', 'boe'],
+  JPY: ['jpy', 'yen', 'usdjpy', 'bank of japan', 'boj'],
+  NZD: ['nzd', 'kiwi dollar', 'new zealand dollar', 'nzdusd', 'rbnz'],
+  USD: ['usd', 'dollar', 'dollar index', 'dxy', 'greenback', 'federal reserve', 'fed', 'fomc', 'treasury'],
+  IDR: ['idr', 'rupiah', 'usdidr', 'bank indonesia'],
+  XAUUSD: ['xauusd', 'xau usd', 'xau', 'gold', 'bullion', 'emas'],
+  WTI: ['wti', 'us oil', 'crude', 'crude oil', 'oil price', 'opec', 'minyak'],
+  DJIA: ['djia', 'dow jones', 'dow'],
+  SPX: ['spx', 's p 500', 'sp 500', 's and p 500'],
+  NDX: ['ndx', 'nasdaq 100', 'nasdaq'],
+  'US Stocks': ['us stocks', 'wall street', 'earnings', 'shares of', 'stock jumped', 'stock fell'],
 };
+
+/** High Importance economic categories the SOP accepts. */
+const IMPORTANCE_CATEGORIES: Record<string, string[]> = {
+  Employment: ['payroll', 'nonfarm', 'non farm', 'unemployment', 'jobless', 'employment', 'jobs report', 'hiring', 'layoff'],
+  Growth: ['gdp', 'gross domestic product', 'growth', 'recession', 'industrial production', 'retail sales'],
+  Inflation: ['inflation', 'cpi', 'ppi', 'pce', 'consumer price', 'producer price', 'deflation'],
+  'Central Bank': ['fed', 'fomc', 'federal reserve', 'ecb', 'boj', 'bank of japan', 'boe', 'bank of england', 'rba', 'rbnz', 'snb', 'bank indonesia', 'bank of canada', 'interest rate', 'rate decision', 'rate cut', 'rate hike', 'monetary policy', 'suku bunga'],
+  Bonds: ['bond', 'yield', 'treasury', 'auction', 'sovereign debt', 'obligasi'],
+  Housing: ['housing', 'home sales', 'building permits', 'housing starts', 'mortgage'],
+  'Consumer Surveys': ['consumer confidence', 'consumer sentiment', 'michigan sentiment', 'consumer survey'],
+  'Business Surveys': ['pmi', 'ism', 'business confidence', 'manufacturing survey', 'services survey', 'business survey', 'tankan'],
+  Speeches: ['speech', 'testimony', 'remarks', 'press conference', 'said in a speech', 'told lawmakers', 'powell', 'governor said'],
+};
+
+/** Speculation is not a confirmed high-impact development. */
+const SPECULATION_MARKERS = ['predict', 'forecast to', 'could reach', 'may hit', 'analyst says', 'outlook for', 'prediksi', 'diperkirakan'];
+
 
 const DEFAULT_MAX_BYTES = 400_000;
 const DEFAULT_TIMEOUT_MS = 12_000;
@@ -57,9 +109,52 @@ function normalized(value: string): string {
   return ` ${value.toLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g, ' ').trim()} `;
 }
 
-function headlineMatchesGroup(title: string, group: MarketProductCategory): boolean {
+/**
+ * Map a headline to the exact instruments it speaks for.
+ * Retail-gold price lists are dropped: they are not tradable-market events.
+ */
+export function classifySymbols(title: string): string[] {
   const headline = normalized(title);
-  return GROUP_ALIASES[group].some(alias => headline.includes(` ${normalized(alias).trim()} `));
+  const isRetailGold = RETAIL_GOLD_MARKERS.some(marker => headline.includes(` ${normalized(marker).trim()} `));
+  const matched: string[] = [];
+  for (const [symbol, aliases] of Object.entries(SYMBOL_ALIASES)) {
+    if (symbol === 'XAUUSD' && isRetailGold) continue;
+    if (aliases.some(alias => headline.includes(` ${normalized(alias).trim()} `))) matched.push(symbol);
+  }
+  // Precedence: a specific instrument wins over the generic USD / "US Stocks"
+  // buckets, so "Gold XAU/USD after CPI" is XAUUSD only — not XAUUSD + USD.
+  const specific = matched.filter(symbol => symbol !== 'USD' && symbol !== 'US Stocks');
+  return specific.length > 0 ? specific : matched;
+}
+
+export function importanceCategoryOf(title: string): string | null {
+  const headline = normalized(title);
+  if (SPECULATION_MARKERS.some(marker => headline.includes(` ${normalized(marker).trim()} `))) return null;
+  for (const [category, keywords] of Object.entries(IMPORTANCE_CATEGORIES)) {
+    if (keywords.some(keyword => headline.includes(` ${normalized(keyword).trim()} `))) return category;
+  }
+  return null;
+}
+
+export function isHighImportanceHeadline(title: string): boolean {
+  return importanceCategoryOf(title) !== null;
+}
+
+/** At most ONE Indonesian-origin article may reach the selection pool. */
+export function limitIndonesianOrigin<T extends { origin: MarketResearchOrigin }>(rows: T[]): T[] {
+  let indonesian = 0;
+  return rows.filter(row => {
+    if (row.origin !== 'indonesia') return true;
+    indonesian += 1;
+    return indonesian === 1;
+  });
+}
+
+export function categoryOfSymbol(symbol: string): MarketProductCategory | null {
+  for (const [category, symbols] of Object.entries(MARKET_RESEARCH_SYMBOLS)) {
+    if ((symbols as readonly string[]).includes(symbol)) return category as MarketProductCategory;
+  }
+  return null;
 }
 
 function mentionsCompetitor(value: string): boolean {
@@ -136,29 +231,35 @@ function parseFeed(feed: MarketResearchFeed, xml: string, researchDate: string):
       return [];
     }
   });
-  const candidates = new Map<string, MarketNewsCandidate>();
-  for (const group of MARKET_RESEARCH_GROUPS) {
-    for (const item of parsedItems) {
-      if (!headlineMatchesGroup(item.title, group)) continue;
-      const existing = candidates.get(item.url);
-      if (existing) {
-        if (!existing.categories.includes(group)) existing.categories.push(group);
-        continue;
-      }
-      candidates.set(item.url, {
-        id: createHash('sha256').update(item.url).digest('hex').slice(0, 16),
-        outlet: feed.outlet,
-        title: item.title.slice(0, 300),
-        url: item.url,
-        publishedAt: item.publishedAt,
-        updatedAt: item.updatedAt,
-        categories: [group],
-        evidence: `Publisher RSS headline: ${item.title}. Publisher RSS summary: ${item.description || item.title}`.slice(0, 3_000),
-        evidenceLevel: 'publisher-metadata',
-      });
-    }
+
+  const candidates: MarketNewsCandidate[] = [];
+  const seen = new Set<string>();
+  for (const item of parsedItems) {
+    if (seen.has(item.url)) continue;
+    // Headline-level gates: exact instrument AND High Importance category.
+    const symbols = classifySymbols(item.title);
+    if (symbols.length === 0) continue;
+    const importanceCategory = importanceCategoryOf(item.title);
+    if (!importanceCategory) continue;
+    const categories = [...new Set(symbols.map(categoryOfSymbol).filter((value): value is MarketProductCategory => value !== null))];
+    if (categories.length === 0) continue;
+    seen.add(item.url);
+    candidates.push({
+      id: createHash('sha256').update(item.url).digest('hex').slice(0, 16),
+      outlet: feed.outlet,
+      title: item.title.slice(0, 300),
+      url: item.url,
+      publishedAt: item.publishedAt,
+      updatedAt: item.updatedAt,
+      categories,
+      symbols,
+      origin: feed.origin,
+      importanceCategory,
+      evidence: `Publisher RSS headline: ${item.title}. Publisher RSS summary: ${item.description || item.title}`.slice(0, 3_000),
+      evidenceLevel: 'publisher-metadata',
+    });
   }
-  return [...candidates.values()];
+  return candidates;
 }
 
 export async function researchLatestMarketNews(researchDate: string, options: MarketResearchSourceOptions = {}): Promise<MarketResearchSourceResult> {
@@ -175,10 +276,11 @@ export async function researchLatestMarketNews(researchDate: string, options: Ma
     if (result.status !== 'fulfilled') continue;
     for (const candidate of result.value) if (!unique.has(candidate.url)) unique.set(candidate.url, candidate);
   }
-  const candidates = [...unique.values()]
-    .sort((a, b) => (b.updatedAt || b.publishedAt).localeCompare(a.updatedAt || a.publishedAt))
-    .slice(0, 40);
-  if (candidates.length === 0) throw new Error('No relevant same-day market news was found across Forex, Gold, Oil, or US Indices. Try again when publishers release a new factual update.');
+  const ranked = [...unique.values()]
+    .sort((a, b) => (b.updatedAt || b.publishedAt).localeCompare(a.updatedAt || a.publishedAt));
+  // One Indonesian-origin article maximum; the rest must come from foreign media.
+  const candidates = limitIndonesianOrigin(ranked).slice(0, 60);
+  if (candidates.length === 0) throw new Error('No relevant same-day high-importance market news was found across Forex, Commodity, US Indices, or US Stocks. Try again when publishers release a new factual update.');
   const groupCandidateCounts = Object.fromEntries(MARKET_RESEARCH_GROUPS.map(group => [group, candidates.filter(candidate => candidate.categories.includes(group)).length])) as Record<MarketProductCategory, number>;
   return { candidates, groupsSearched: [...MARKET_RESEARCH_GROUPS], groupCandidateCounts, sourceStatus };
 }
