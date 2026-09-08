@@ -63,10 +63,26 @@ function splitConcatenatedJson(input: string): string[] {
   return values;
 }
 
+/**
+ * Some gateway models leak an empty or populated `<think>...</think>` block
+ * ahead of the actual JSON payload. Strip exactly one leading reasoning
+ * block (only when it appears at the very start of the trimmed content) so
+ * callers doing `JSON.parse` never see it. Content whose reasoning tag is
+ * never closed is treated as no usable content at all — better to fail loud
+ * than silently hand back a truncated/garbage string.
+ */
+function stripLeadingReasoningTag(content: string): string {
+  const trimmed = content.replace(/^\s+/, '');
+  if (!trimmed.startsWith('<think>')) return content;
+  const closeIndex = trimmed.indexOf('</think>');
+  if (closeIndex < 0) return '';
+  return trimmed.slice(closeIndex + '</think>'.length);
+}
+
 /** Parses either a standard OpenAI JSON response or OpenAI-compatible SSE frames. */
 export function parseGatewayCompletion(body: string, contentType: string | null): string {
   if (!contentType?.toLowerCase().includes('text/event-stream')) {
-    const content = completionContent(JSON.parse(body) as CompletionPayload);
+    const content = stripLeadingReasoningTag(completionContent(JSON.parse(body) as CompletionPayload));
     if (!content) throw new Error('Gateway response did not contain completion content.');
     return content;
   }
@@ -82,6 +98,7 @@ export function parseGatewayCompletion(body: string, contentType: string | null)
       content += completionContent(frame);
     }
   }
+  content = stripLeadingReasoningTag(content);
   if (!content) throw new Error('Gateway SSE response did not contain completion content.');
   return content;
 }
