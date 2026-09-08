@@ -3,6 +3,7 @@ import { getAuthorizedUser, getSession } from '@/lib/auth';
 import { queryOne, execute } from '@/lib/database';
 import { rateLimit } from '@/lib/rate-limit';
 import { createImageJobStore, type ImageJob, type ImageJobResult } from '@/lib/image-job-status';
+import { getImageGenerationSpec, parseImageAspectRatio, type ImageAspectRatio } from '@/lib/image-aspect-ratio';
 import fs from 'fs';
 import path from 'path';
 
@@ -31,7 +32,7 @@ export async function POST(request: NextRequest) {
   const userId = auth.id;
   if (!userId) return jsonError('Unauthorized', 401);
 
-  let body: { prompt?: unknown; type?: unknown; brief?: unknown; model?: unknown; taskId?: unknown };
+  let body: { prompt?: unknown; type?: unknown; brief?: unknown; model?: unknown; taskId?: unknown; aspectRatio?: unknown };
   try {
     body = await request.json();
   } catch {
@@ -47,10 +48,16 @@ export async function POST(request: NextRequest) {
   const brief = typeof body.brief === 'string' ? body.brief : prompt;
   const model = typeof body.model === 'string' && body.model.trim() ? body.model.trim() : 'cx/gpt-5.5-image';
   const taskId = typeof body.taskId === 'string' && body.taskId.trim() ? body.taskId.trim() : null;
+  let aspectRatio: ImageAspectRatio;
+  try {
+    aspectRatio = parseImageAspectRatio(body.aspectRatio);
+  } catch (error) {
+    return jsonError(error instanceof Error ? error.message : 'Invalid image aspect ratio', 400);
+  }
   const job = imageJobs.create(userId);
 
   // Deliberately detached from the HTTP request: tunnel/browser disconnects must not stop the job.
-  void runImageJob(job, prompt, brief, type, model, taskId);
+  void runImageJob(job, prompt, brief, type, model, taskId, aspectRatio);
 
   return NextResponse.json({ jobId: job.id, status: job.status }, { status: 202 });
 }
@@ -72,7 +79,7 @@ export async function GET(request: NextRequest) {
   });
 }
 
-async function runImageJob(job: ImageJob, prompt: string, brief: string, type: string, model: string, taskId: string | null) {
+async function runImageJob(job: ImageJob, prompt: string, brief: string, type: string, model: string, taskId: string | null, aspectRatio: ImageAspectRatio) {
   const cwd = process.cwd() || '/Users/bayudarmawan/marketingos';
   const sopName = generateSOPFileName(brief || prompt, type);
 
@@ -87,6 +94,8 @@ async function runImageJob(job: ImageJob, prompt: string, brief: string, type: s
 
     // Fall back to the gateway's default image model when an unknown one is requested.
     const safeModel = IMAGE_MODELS.includes(model) ? model : 'cx/gpt-5.5-image';
+    const generationSpec = getImageGenerationSpec(aspectRatio);
+    const gatewayPrompt = `${prompt}\n\n${generationSpec.promptSuffix}`;
 
     const response = await fetch(`${GORILLAWORKOUT_API_BASE}/images/generations`, {
       method: 'POST',
@@ -98,9 +107,9 @@ async function runImageJob(job: ImageJob, prompt: string, brief: string, type: s
       },
       body: JSON.stringify({
         model: safeModel,
-        prompt,
+        prompt: gatewayPrompt,
         n: 1,
-        size: '1024x1024',
+        size: generationSpec.size,
       }),
       signal: AbortSignal.timeout(240_000),
     });
@@ -139,12 +148,13 @@ async function runImageJob(job: ImageJob, prompt: string, brief: string, type: s
       fileName,
       sopName,
       model: `${safeModel} (Codex)`,
+      aspectRatio,
     };
     imageJobs.update(job.id, job.ownerId, {
       status: 'done', progress: 100, message: '✅ Image generated!', result,
     });
     void recordImageOnTask(taskId, job.ownerId, {
-      imageUrl, fileName, sopName, model: safeModel, prompt,
+      imageUrl, fileName, sopName, model: safeModel, prompt, aspectRatio,
     });
   } catch (error) {
     const reason = error instanceof Error ? error.message : 'unknown error';
@@ -210,7 +220,7 @@ export function explainImageFailure(reason: string, model: string): string {
 async function recordImageOnTask(
   taskId: string | null,
   userId: string,
-  entry: { imageUrl: string; fileName: string; sopName: string; model: string; prompt: string },
+  entry: { imageUrl: string; fileName: string; sopName: string; model: string; prompt: string; aspectRatio: ImageAspectRatio },
 ) {
   if (!taskId) return;
   try {

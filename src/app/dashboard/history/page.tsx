@@ -26,6 +26,13 @@ export default function HistoryPage() {
   const [historyError, setHistoryError] = useState('');
 
   useEffect(() => {
+    const requested = new URLSearchParams(window.location.search).get('type');
+    if (requested && ['social-post', 'video-script', 'event-plan', 'article-market-news', 'market-research'].includes(requested)) {
+      setTypeFilter(requested as typeof typeFilter);
+    }
+  }, []);
+
+  useEffect(() => {
     // Fetch per type. The API caps at 50 rows, so filtering a mixed "all" list
     // client-side used to hide Market Research entirely once newer tasks of
     // other types filled that window.

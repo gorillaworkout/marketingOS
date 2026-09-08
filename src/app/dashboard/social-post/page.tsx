@@ -14,6 +14,7 @@ import {
   Toolbar,
 } from '@/components/ui/dashboard';
 import InlineModelSelector from '@/components/InlineModelSelector';
+import { DEFAULT_IMAGE_ASPECT_RATIO, IMAGE_ASPECT_RATIOS, type ImageAspectRatio } from '@/lib/image-aspect-ratio';
 
 interface QCCheck {
   name: string;
@@ -64,7 +65,7 @@ interface ImageJobResponse {
   progress?: number;
   message?: string;
   error?: string;
-  result?: { success?: boolean; imageUrl?: string; fileName?: string; sopName?: string; model?: string };
+  result?: { success?: boolean; imageUrl?: string; fileName?: string; sopName?: string; model?: string; aspectRatio?: ImageAspectRatio };
 }
 
 async function readImageJobResponse(response: Response): Promise<ImageJobResponse> {
@@ -117,6 +118,7 @@ export default function SocialPostPage() {
   const [generatedImage, setGeneratedImage] = useState<string | null>(null);
   const [editableImagePrompt, setEditableImagePrompt] = useState('');
   const [imageModel, setImageModel] = useState('cx/gpt-5.5-image');
+  const [imageAspectRatio, setImageAspectRatio] = useState<ImageAspectRatio>(DEFAULT_IMAGE_ASPECT_RATIO);
   const [availableImageModels, setAvailableImageModels] = useState<Array<{ id: string; name: string; description: string }>>([]);
   const [imageProgress, setImageProgress] = useState<ImageProgressState | null>(null);
   const imageProgressTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -445,7 +447,7 @@ export default function SocialPostPage() {
       const res = await fetch('/api/generate-image', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt: editableImagePrompt, taskId, type: 'social-post', brief: brief || editableImagePrompt.substring(0, 100), model: imageModel }),
+        body: JSON.stringify({ prompt: editableImagePrompt, taskId, type: 'social-post', brief: brief || editableImagePrompt.substring(0, 100), model: imageModel, aspectRatio: imageAspectRatio }),
       });
 
       const startup = await readImageJobResponse(res);
@@ -480,6 +482,7 @@ export default function SocialPostPage() {
                 fileName: status.result!.fileName,
                 sopName: status.result!.sopName,
                 model: imageModel,
+                aspectRatio: status.result!.aspectRatio || imageAspectRatio,
                 prompt: editableImagePrompt,
                 generatedAt: new Date().toISOString(),
               }]);
@@ -558,6 +561,7 @@ export default function SocialPostPage() {
       const history = Array.isArray(data.images) ? data.images : [];
       setImageHistory(history);
       const latest = history[history.length - 1];
+      setImageAspectRatio(IMAGE_ASPECT_RATIOS.includes(latest?.aspectRatio) ? latest.aspectRatio : DEFAULT_IMAGE_ASPECT_RATIO);
       const restoredUrl = latest?.imageUrl || data.imageUrl || null;
       if (restoredUrl) setGeneratedImage(restoredUrl);
     } catch {}
@@ -965,6 +969,12 @@ export default function SocialPostPage() {
                   <p className="text-xs text-[var(--mos-text-faint)]">Model di-generate melalui GorillaWorkout gateway (llm.gorillaworkout.id)</p>
                 </div>
 
+                <FormField label="Image aspect ratio">
+                  <Select value={imageAspectRatio} onChange={(e) => setImageAspectRatio(e.target.value as ImageAspectRatio)}>
+                    {IMAGE_ASPECT_RATIOS.map(ratio => <option key={ratio} value={ratio}>{ratio}</option>)}
+                  </Select>
+                </FormField>
+
                 {/* Generate button */}
                 <Button variant="primary" className="w-full" onClick={generateImage} disabled={generatingImage || !editableImagePrompt.trim()}>
                   {generatingImage ? 'Generating image…' : 'Generate image'}
@@ -1020,6 +1030,7 @@ export default function SocialPostPage() {
                       <p className="truncate text-xs text-[var(--mos-text-secondary)]">{img.sopName || img.fileName}</p>
                       <p className="text-[10px] text-[var(--mos-text-faint)]">
                         {img.model || 'unknown model'}
+                        {img.aspectRatio ? ` · ${img.aspectRatio}` : ''}
                         {img.generatedAt ? ` · ${new Date(img.generatedAt).toLocaleString('id-ID')}` : ''}
                       </p>
                     </div>

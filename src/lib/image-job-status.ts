@@ -1,3 +1,5 @@
+import type { ImageAspectRatio } from '@/lib/image-aspect-ratio';
+
 export type ImageJobStatus = 'queued' | 'generating' | 'processing' | 'done' | 'error';
 
 export interface ImageJobResult {
@@ -6,6 +8,7 @@ export interface ImageJobResult {
   fileName?: string;
   sopName?: string;
   model?: string;
+  aspectRatio?: ImageAspectRatio;
 }
 
 export interface ImageJob {

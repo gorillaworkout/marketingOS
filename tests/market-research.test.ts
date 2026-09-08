@@ -138,6 +138,8 @@ test('Market Research is admin-only, gateway-routed, persisted, downloadable, an
   assert.match(page, /Research brief/i);
   assert.match(page, /Latest Update Time/);
   assert.match(page, /Download DOCX/);
+  assert.match(page, /Recent Generated/);
+  assert.match(page, /\/dashboard\/history\?type=market-research/);
   assert.match(route, /requireFeature\(request, 'market-research'\)/);
   assert.match(route, /getUserPreferredModel\(auth\.id, 'market-research'\)/);
   assert.doesNotMatch(route, /codexTextOnly|getModelProvider|gpt-5\.6-sol/);

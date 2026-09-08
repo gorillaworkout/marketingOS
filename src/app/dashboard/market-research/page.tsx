@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { buildMarketResearchDocxBlob, marketResearchDocxFilename } from '@/lib/market-research-docx';
 import type { MarketResearchInput, MarketResearchItem } from '@/lib/market-research';
 import { Button, FormField, Panel, PageHeader, PageStack, SectionHeader, StatusBadge, TextArea, TextInput, Toolbar } from '@/components/ui/dashboard';
@@ -18,6 +18,14 @@ interface MarketResearchResult {
   historyId: string;
 }
 
+interface MarketResearchHistoryTask {
+  id: string;
+  title: string;
+  brief?: string;
+  output_data?: string;
+  created_at: string;
+}
+
 function todayWib(): string {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jakarta', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
 }
@@ -31,6 +39,45 @@ export default function MarketResearchPage() {
   const [error, setError] = useState('');
   const [result, setResult] = useState<MarketResearchResult | null>(null);
   const [reviewConfirmed, setReviewConfirmed] = useState(false);
+  const [recent, setRecent] = useState<MarketResearchHistoryTask[]>([]);
+  const [recentError, setRecentError] = useState('');
+
+  const fetchRecent = useCallback(async () => {
+    try {
+      const response = await fetch('/api/dashboard/history?type=market-research');
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || `History request failed (${response.status}).`);
+      setRecent(Array.isArray(data.tasks) ? data.tasks.slice(0, 10) : []);
+      setRecentError('');
+    } catch (cause) {
+      setRecentError(cause instanceof Error ? cause.message : 'Failed to load recent Market Research.');
+    }
+  }, []);
+
+  useEffect(() => { void fetchRecent(); }, [fetchRecent]);
+
+  const restoreHistory = (task: MarketResearchHistoryTask) => {
+    try {
+      const stored = JSON.parse(task.output_data || '{}');
+      const items = stored.report?.items;
+      if (!stored.input || !Array.isArray(items) || items.length === 0) throw new Error('Saved report is incomplete.');
+      setBrief(stored.input.brief || task.brief || '');
+      setResult({
+        items,
+        input: stored.input,
+        model: stored.model || 'Unknown',
+        groupsSearched: stored.groupsSearched || [],
+        groupCandidateCounts: stored.groupCandidateCounts || {},
+        sourceStatus: stored.sourceStatus || [],
+        candidateCount: Number(stored.candidateCount || items.length),
+        historyId: task.id,
+      });
+      setReviewConfirmed(false);
+      setError('');
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Failed to restore saved report.');
+    }
+  };
 
   const fillExample = () => setBrief('Siapkan morning briefing untuk tim marketing Dupoin. Prioritaskan keputusan bank sentral, data ekonomi resmi, geopolitik, OPEC+, dan perkembangan faktual yang paling berdampak terhadap sentimen trading hari ini.');
 
@@ -62,7 +109,7 @@ export default function MarketResearchPage() {
           setProgress(Number(event.progress) || 0);
           setStatus(event.message || '');
           if (event.step === 'error') throw new Error(event.message || 'Market research failed.');
-          if (event.step === 'done') { setResult(event.result as MarketResearchResult); completed = true; }
+          if (event.step === 'done') { setResult(event.result as MarketResearchResult); void fetchRecent(); completed = true; }
         }
       }
       if (!completed) throw new Error('Research stream ended without a completed report.');
@@ -86,7 +133,7 @@ export default function MarketResearchPage() {
 
   return (
     <PageStack>
-      <PageHeader eyebrow="Create / Market intelligence" title="Market research" description="Berikan brief. MarketingOS memindai Forex majors, Commodity (XAUUSD/WTI), US Indices, dan US Stocks secara terpisah, lalu memilih maksimal sepuluh berita High Importance yang diterbitkan hari ini. Satu symbol hanya dibahas satu artikel." actions={<Link href="/dashboard/history" className="inline-flex h-9 items-center rounded-[var(--mos-radius-control)] border border-[var(--mos-border)] bg-[var(--mos-raised)] px-3.5 text-sm font-medium text-[var(--mos-text-secondary)] hover:border-[var(--mos-border-strong)]">Buka history</Link>} />
+      <PageHeader eyebrow="Create / Market intelligence" title="Market research" description="Berikan brief. MarketingOS memindai Forex majors, Commodity (XAUUSD/WTI), US Indices, dan US Stocks secara terpisah, lalu memilih maksimal sepuluh berita High Importance yang diterbitkan hari ini. Satu symbol hanya dibahas satu artikel." actions={<Link href="/dashboard/history?type=market-research" className="inline-flex h-9 items-center rounded-[var(--mos-radius-control)] border border-[var(--mos-border)] bg-[var(--mos-raised)] px-3.5 text-sm font-medium text-[var(--mos-text-secondary)] hover:border-[var(--mos-border-strong)]">Buka history</Link>} />
       <InlineModelSelector feature="market-research" />
 
       <Panel>
@@ -111,6 +158,14 @@ export default function MarketResearchPage() {
         {result.items.map((item, index) => <Panel key={item.candidateId}><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-xs font-semibold text-[var(--mos-accent-soft)]">#{index + 1} · {item.symbol || item.productCategory} · {item.productCategory}{item.importanceCategory ? ` · ${item.importanceCategory}` : ''}</p><h3 className="mt-1 text-base font-semibold text-white">{item.articleTitle}</h3><p className="mt-1 text-sm text-[var(--mos-text-muted)]">{item.newsSource}</p></div><div className="text-right text-xs text-[var(--mos-text-muted)]"><p>Published: {item.publicationDate} {item.publicationTime} WIB</p><p>Latest Update Time: {item.latestUpdateTime ? `${item.latestUpdateTime} WIB` : 'Not provided'}</p></div></div><dl className="mt-5 grid gap-4 divide-y divide-[var(--mos-border-subtle)] md:grid-cols-3 md:divide-x md:divide-y-0">{[['Main event', item.mainEvent], ['Latest factual development', item.latestFactualDevelopment], ['Market relevance', item.marketRelevance]].map(([label, value]) => <div key={label} className="py-3 md:px-4 md:py-0 first:pl-0"><dt className="text-xs uppercase tracking-wide text-[var(--mos-text-faint)]">{label}</dt><dd className="mt-2 text-sm leading-6 text-[var(--mos-text-secondary)]">{value}</dd></div>)}</dl><a href={item.articleUrl} target="_blank" rel="noreferrer" className="mt-4 block break-all text-sm text-[var(--mos-accent-soft)] hover:underline">Open publisher article: {item.articleUrl}</a></Panel>)}
         <label className="flex cursor-pointer gap-3 rounded-[var(--mos-radius-panel)] border border-amber-500/25 bg-amber-500/10 p-4 text-sm leading-6 text-amber-100"><input type="checkbox" checked={reviewConfirmed} onChange={event => setReviewConfirmed(event.target.checked)} className="mt-1 h-4 w-4 accent-emerald-500" /><span>Saya sudah membuka seluruh link, membaca artikel lengkap, dan memeriksa title, waktu, main event, factual development, serta market relevance. Aktifkan untuk Download DOCX.</span></label>
       </section>}
+
+      <Panel padding="none">
+        <div className="flex items-center justify-between border-b border-[var(--mos-border-subtle)] px-5 py-4">
+          <SectionHeader title="Recent Generated" description="Open a saved Market Research report without generating again." />
+          <Link href="/dashboard/history?type=market-research" className="text-sm text-[var(--mos-accent-soft)] hover:underline">View all history</Link>
+        </div>
+        {recentError ? <p className="p-5 text-sm text-red-300">{recentError}</p> : recent.length === 0 ? <p className="p-5 text-sm text-[var(--mos-text-muted)]">No saved Market Research yet.</p> : <div className="divide-y divide-[var(--mos-border-subtle)]">{recent.map(task => <button type="button" key={task.id} onClick={() => restoreHistory(task)} className="flex w-full items-center justify-between gap-4 px-5 py-4 text-left hover:bg-[var(--mos-raised)]"><span className="min-w-0"><span className="block truncate text-sm font-medium text-white">{task.title}</span><span className="block text-xs text-[var(--mos-text-faint)]">{new Date(task.created_at).toLocaleString()}</span></span><span className="text-xs text-[var(--mos-accent-soft)]">Open</span></button>)}</div>}
+      </Panel>
     </PageStack>
   );
 }

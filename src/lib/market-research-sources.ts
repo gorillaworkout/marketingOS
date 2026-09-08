@@ -8,6 +8,7 @@ export interface MarketResearchFeed {
   outlet: string;
   url: string;
   origin: MarketResearchOrigin;
+  defaultSymbols?: readonly string[];
 }
 
 export interface MarketResearchSourceOptions {
@@ -35,13 +36,14 @@ export const MARKET_RESEARCH_SYMBOLS = {
 } as const satisfies Record<MarketProductCategory, readonly string[]>;
 
 export const MARKET_RESEARCH_FEEDS: MarketResearchFeed[] = [
-  { outlet: 'Reuters Markets', url: 'https://www.reutersagency.com/feed/?taxonomy=best-topics&post_type=best', origin: 'international' },
   { outlet: 'CNBC Economy', url: 'https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=20910258', origin: 'international' },
   { outlet: 'CNBC Markets', url: 'https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=10000664', origin: 'international' },
-  { outlet: 'MarketWatch Top Stories', url: 'https://feeds.content.dowjones.io/public/rss/mw_topstories', origin: 'international' },
-  { outlet: 'Federal Reserve Press', url: 'https://www.federalreserve.gov/feeds/press_all.xml', origin: 'international' },
-  { outlet: 'Investing.com Economy', url: 'https://www.investing.com/rss/news_14.rss', origin: 'international' },
-  { outlet: 'Investing.com Commodities', url: 'https://www.investing.com/rss/news_11.rss', origin: 'international' },
+  { outlet: 'MarketWatch', url: 'https://feeds.content.dowjones.io/public/rss/mw_topstories', origin: 'international' },
+  { outlet: 'Federal Reserve', url: 'https://www.federalreserve.gov/feeds/press_all.xml', origin: 'international', defaultSymbols: ['USD'] },
+  { outlet: 'US BEA', url: 'https://apps.bea.gov/rss/rss.xml', origin: 'international', defaultSymbols: ['USD'] },
+  { outlet: 'ECB', url: 'https://www.ecb.europa.eu/rss/press.html', origin: 'international', defaultSymbols: ['EUR'] },
+  { outlet: 'Bank of England', url: 'https://www.bankofengland.co.uk/rss/news', origin: 'international', defaultSymbols: ['GBP'] },
+  { outlet: 'Nasdaq Markets', url: 'https://www.nasdaq.com/feed/rssoutbound?category=Markets', origin: 'international', defaultSymbols: ['US Stocks'] },
   { outlet: 'CNBC Indonesia', url: 'https://www.cnbcindonesia.com/market/rss', origin: 'indonesia' },
   { outlet: 'Detik Finance', url: 'https://finance.detik.com/rss', origin: 'indonesia' },
 ];
@@ -125,6 +127,15 @@ export function classifySymbols(title: string): string[] {
   // buckets, so "Gold XAU/USD after CPI" is XAUUSD only — not XAUUSD + USD.
   const specific = matched.filter(symbol => symbol !== 'USD' && symbol !== 'US Stocks');
   return specific.length > 0 ? specific : matched;
+}
+
+export function classifySymbolsForFeed(title: string, outlet: string, defaultSymbols: readonly string[] = []): string[] {
+  const explicit = classifySymbols(title);
+  if (explicit.length > 0) return explicit;
+  const configured = defaultSymbols.length > 0
+    ? defaultSymbols
+    : MARKET_RESEARCH_FEEDS.find(feed => feed.outlet === outlet)?.defaultSymbols || [];
+  return [...configured];
 }
 
 export function importanceCategoryOf(title: string): string | null {
@@ -237,7 +248,7 @@ function parseFeed(feed: MarketResearchFeed, xml: string, researchDate: string):
   for (const item of parsedItems) {
     if (seen.has(item.url)) continue;
     // Headline-level gates: exact instrument AND High Importance category.
-    const symbols = classifySymbols(item.title);
+    const symbols = classifySymbolsForFeed(item.title, feed.outlet, feed.defaultSymbols);
     if (symbols.length === 0) continue;
     const importanceCategory = importanceCategoryOf(item.title);
     if (!importanceCategory) continue;

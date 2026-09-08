@@ -3,8 +3,10 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import {
+  MARKET_RESEARCH_FEEDS,
   MARKET_RESEARCH_SYMBOLS,
   classifySymbols,
+  classifySymbolsForFeed,
   isHighImportanceHeadline,
   limitIndonesianOrigin,
 } from '../src/lib/market-research-sources';
@@ -32,6 +34,17 @@ test('keeps only high-importance economic categories', () => {
   assert.equal(isHighImportanceHeadline('10-year Treasury yields jump after auction'), true);
   assert.equal(isHighImportanceHeadline('Housing starts rebound in August'), true);
   assert.equal(isHighImportanceHeadline('Analyst predicts gold could reach 4000'), false);
+});
+
+test('production feeds are AWS-probed publishers and official releases inherit their market symbol', () => {
+  const urls = MARKET_RESEARCH_FEEDS.map(feed => feed.url);
+  assert.equal(urls.some(url => /reutersagency|investing\.com/.test(url)), false);
+  for (const expected of ['CNBC Economy', 'CNBC Markets', 'MarketWatch', 'Federal Reserve', 'US BEA', 'ECB', 'Bank of England', 'Nasdaq Markets', 'CNBC Indonesia', 'Detik Finance']) {
+    assert.ok(MARKET_RESEARCH_FEEDS.some(feed => feed.outlet === expected), `missing ${expected}`);
+  }
+  assert.deepEqual(classifySymbolsForFeed('GDP (Second Estimate) and Corporate Profits', 'US BEA'), ['USD']);
+  assert.deepEqual(classifySymbolsForFeed('Monetary policy statement', 'ECB'), ['EUR']);
+  assert.deepEqual(classifySymbolsForFeed('Governor speech on inflation', 'Bank of England'), ['GBP']);
 });
 
 test('allows at most one Indonesian-origin article', () => {
@@ -105,9 +118,20 @@ test('selection accepts up to ten items and rejects duplicate symbols', () => {
   );
 });
 
-test('history reads Market Research through a server-side type filter', async () => {
+test('history reads Market Research through a server-side type filter and URL query', async () => {
   const source = await readFile(resolve('src/app/dashboard/history/page.tsx'), 'utf8');
   assert.match(source, /type=\$\{encodeURIComponent\(typeFilter\)\}/);
   assert.doesNotMatch(source, /tasks\.filter\(task => task\.type === typeFilter\)/);
   assert.match(source, /res\.ok|response\.ok/);
+  assert.match(source, /URLSearchParams|useSearchParams/);
+});
+
+test('Market Research page exposes recent history and restores a usable saved report', async () => {
+  const source = await readFile(resolve('src/app/dashboard/market-research/page.tsx'), 'utf8');
+  assert.match(source, /Recent Generated/);
+  assert.match(source, /\/api\/dashboard\/history\?type=market-research/);
+  assert.match(source, /\/dashboard\/history\?type=market-research/);
+  assert.match(source, /restoreHistory/);
+  assert.match(source, /setResult/);
+  assert.match(source, /setReviewConfirmed\(false\)/);
 });

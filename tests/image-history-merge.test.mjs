@@ -12,8 +12,8 @@ function mergeImage(outputData, entry) {
   return JSON.stringify({ ...data, images: [...existing, entry], imageUrl: entry.imageUrl });
 }
 
-const img1 = { imageUrl: '/api/generated-images/a.png', fileName: 'a.png', model: 'gpt-5.6-terra' };
-const img2 = { imageUrl: '/api/generated-images/b.png', fileName: 'b.png', model: 'gpt-image-2' };
+const img1 = { imageUrl: '/api/generated-images/a.png', fileName: 'a.png', model: 'gpt-5.6-terra', aspectRatio: '16:9' };
+const img2 = { imageUrl: '/api/generated-images/b.png', fileName: 'b.png', model: 'gpt-image-2', aspectRatio: '9:16' };
 
 // 1. Existing generation fields survive the merge.
 const original = JSON.stringify({ options: [{ caption: 'hi' }], qcResults: ['ok'], researchPosts: [1, 2] });
@@ -29,6 +29,7 @@ const after2 = JSON.parse(mergeImage(JSON.stringify(after1), img2));
 assert.equal(after2.images.length, 2, 'images must accumulate');
 assert.equal(after2.images[0].fileName, 'a.png');
 assert.equal(after2.images[1].fileName, 'b.png');
+assert.equal(after2.images[1].aspectRatio, '9:16', 'selected ratio must persist in image history');
 assert.equal(after2.imageUrl, img2.imageUrl, 'imageUrl points at newest');
 assert.deepEqual(after2.options, [{ caption: 'hi' }], 'options still survive');
 
