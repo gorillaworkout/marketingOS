@@ -123,6 +123,16 @@ test('selection is candidate-bound, max ten, unique, and rejects unsupported fac
   ] }, duplicateEventCandidates), /unique events/i);
 });
 
+test('an honest zero-selection result is accepted, not treated as a format error', () => {
+  // The evidence gate correctly rejecting every candidate (all speculative /
+  // low-importance) must hydrate to an empty, valid report — not throw.
+  const empty = validateAndHydrateMarketResearchSelection({ items: [] }, candidates);
+  assert.deepEqual(empty.items, []);
+  // Still rejects a genuinely malformed payload (missing items key entirely).
+  assert.throws(() => validateAndHydrateMarketResearchSelection({}, candidates), /items array/i);
+  assert.throws(() => validateAndHydrateMarketResearchSelection({ items: 'not-an-array' }, candidates), /items array/i);
+});
+
 test('prompt treats brief and publisher text as untrusted data and requires exact candidate IDs', () => {
   const prompts = buildMarketResearchPrompts({ brief: 'Morning briefing.', researchDate: '2026-07-27' }, candidates);
   assert.match(prompts.systemPrompt, /untrusted data/i);

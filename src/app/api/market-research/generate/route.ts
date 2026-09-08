@@ -71,6 +71,18 @@ export async function POST(request: NextRequest) {
         }
         if (!generated || !report) throw new Error('Market research ended without a valid report.');
 
+        // Zero valid selections is a legitimate, honest outcome (every same-day
+        // candidate was speculative/low-importance) — report it as such instead
+        // of writing an empty "completed" history row or a confusing error.
+        if (report.items.length === 0) {
+          controller.enqueue(encoder.encode(sseEvent({
+            step: 'done', progress: 100,
+            message: 'No same-day High Importance developments passed the evidence gate. Nothing was saved — try again later or broaden the brief.',
+            result: { items: [], input, model, groupsSearched: research.groupsSearched, groupCandidateCounts: research.groupCandidateCounts, sourceStatus: research.sourceStatus, candidateCount: research.candidates.length, evidenceSnapshot: [], historyId: null, usage: generated.usage },
+          })));
+          return;
+        }
+
         const selectedIds = new Set(report.items.map(item => item.candidateId));
         const evidenceSnapshot = research.candidates.filter(candidate => selectedIds.has(candidate.id));
         const historyId = randomUUID();

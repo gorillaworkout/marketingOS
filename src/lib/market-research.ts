@@ -127,7 +127,10 @@ function eventSimilarity(a: string, b: string): number {
 export function validateAndHydrateMarketResearchSelection(value: unknown, candidates: MarketNewsCandidate[]): MarketResearchReport {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('AI selection must be a JSON object.');
   const rawItems = (value as { items?: unknown }).items;
-  if (!Array.isArray(rawItems) || rawItems.length < 1) throw new Error('Select at least one candidate.');
+  // Zero items is a legitimate outcome: the evidence gate can correctly reject
+  // every same-day candidate as speculative/low-importance. That is not a
+  // format error and must not trigger the repair-retry loop in the route.
+  if (!Array.isArray(rawItems)) throw new Error('AI selection must include an items array.');
   if (rawItems.length > MARKET_RESEARCH_MAX_ITEMS) throw new Error(`Select a maximum of ten market news candidates.`);
   const candidateMap = new Map(candidates.map(candidate => [candidate.id, candidate]));
   const seen = new Set<string>();
