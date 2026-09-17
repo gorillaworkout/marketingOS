@@ -1,67 +1,64 @@
 import { NextRequest } from 'next/server';
-import { getAuthorizedUser } from '@/lib/auth';
+import { requireFeature } from '@/lib/auth';
 import { resolveFeatureModel } from '@/lib/model-routing';
+import { rateLimit } from '@/lib/rate-limit';
+import {
+  buildGatewayMessages,
+  conversationTitleFromMessages,
+  parseChatRequest,
+  parseStoredMessages,
+  type AiResearchChatMessage,
+} from '@/lib/ai-research';
 import { v4 as uuidv4 } from 'uuid';
 import { execute, queryOne } from '@/lib/database';
 
 const GORILLAWORKOUT_API_BASE = process.env.GORILLAWORKOUT_API_BASE || 'https://llm.gorillaworkout.id/v1';
 const GORILLAWORKOUT_API_KEY = process.env.GORILLAWORKOUT_API_KEY || '';
 const MAX_HISTORY = 20;
+const SYSTEM_PROMPT = `Kamu adalah GorillaWorkout AI Assistant, asisten riset dan analisis untuk tim marketing Dupoin Futures. Kamu membantu dengan riset, analisis data, penulisan konten, strategi marketing, dan pertanyaan umum seputar trading forex, komoditas, dan indeks. Jawab dalam Bahasa Indonesia yang profesional namun mudah dipahami. Hindari jawaban seperti AI — tulis seperti kolega yang kompeten dan helpful. Jika pengguna melampirkan gambar, baca teks, angka, grafik, dan detail visual di gambar tersebut lalu gunakan informasinya dalam jawaban.`;
 
-interface ChatMessage {
-  role: 'user' | 'assistant';
-  content: string;
+function jsonError(error: string, status: number) {
+  return new Response(JSON.stringify({ error }), { status });
 }
 
 export async function POST(request: NextRequest) {
-  const auth = await getAuthorizedUser(request);
+  const limited = rateLimit(request);
+  if (limited) return limited;
+
+  const auth = await requireFeature(request, 'ai-research');
   if ('error' in auth) {
-    return new Response(JSON.stringify({ error: auth.error }), { status: auth.status });
+    return jsonError(auth.error, auth.status);
   }
 
-  const { messages, conversationId } = await request.json() as {
-    messages: ChatMessage[];
-    conversationId?: string;
-  };
-
-  if (!messages || !Array.isArray(messages) || messages.length === 0) {
-    return new Response(JSON.stringify({ error: 'Messages are required' }), { status: 400 });
+  let parsed: { messages: AiResearchChatMessage[]; conversationId?: string };
+  try {
+    parsed = parseChatRequest(await request.json());
+  } catch (error) {
+    return jsonError(
+      error instanceof SyntaxError ? 'Invalid JSON body' : error instanceof Error ? error.message : 'Invalid request',
+      400,
+    );
   }
 
-  const lastMessage = messages[messages.length - 1];
-  if (lastMessage.role !== 'user' || !lastMessage.content?.trim()) {
-    return new Response(JSON.stringify({ error: 'Last message must be from user with content' }), { status: 400 });
+  const { messages, conversationId } = parsed;
+  let model: string;
+  try {
+    model = await resolveFeatureModel(auth.id, 'ai-research');
+  } catch (error) {
+    return jsonError(error instanceof Error ? error.message : 'Failed to resolve AI Research model', 500);
   }
 
-  // Resolve model preference
-  const model = await resolveFeatureModel(auth.id, 'ai-research').catch(() => 'ag/gemini-3-flash-agent');
-
-  // Load chat history from DB, limit to last N messages
-  let dbMessages: { role: string; content: string }[] = [];
+  let dbMessages: AiResearchChatMessage[] = [];
   if (conversationId) {
     const history = await queryOne<{ messages: string }>(
       'SELECT messages FROM ai_research_conversations WHERE id = ? AND user_id = ?',
       [conversationId, auth.id],
     );
-    if (history) {
-      try {
-        dbMessages = JSON.parse(history.messages);
-      } catch {
-        dbMessages = [];
-      }
-    }
+    if (history) dbMessages = parseStoredMessages(history.messages);
   }
 
-  // Prepare API messages (truncate to avoid context overflow)
-  const systemPrompt = {
-    role: 'system',
-    content: `Kamu adalah GorillaWorkout AI Assistant, asisten riset dan analisis untuk tim marketing Dupoin Futures. Kamu membantu dengan riset, analisis data, penulisan konten, strategi marketing, dan pertanyaan umum seputar trading forex, komoditas, dan indeks. Jawab dalam Bahasa Indonesia yang profesional namun mudah dipahami. Hindari jawaban seperti AI — tulis seperti kolega yang kompeten dan helpful.`,
-  };
+  const apiMessages = buildGatewayMessages(SYSTEM_PROMPT, dbMessages, messages, MAX_HISTORY);
 
-  const recentHistory = [...dbMessages, ...messages].slice(-MAX_HISTORY);
-  const apiMessages = [systemPrompt, ...recentHistory.map(m => ({ role: m.role, content: m.content }))];
-
-  // SSE stream
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
     async start(controller) {
@@ -118,8 +115,8 @@ export async function POST(request: NextRequest) {
               if (data === '[DONE]') { done = true; break; }
 
               try {
-                const parsed = JSON.parse(data);
-                const delta = parsed.choices?.[0]?.delta?.content;
+                const parsedChunk = JSON.parse(data);
+                const delta = parsedChunk.choices?.[0]?.delta?.content;
                 if (delta) {
                   fullContent += delta;
                   controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'token', content: delta })}\n\n`));
@@ -129,13 +126,11 @@ export async function POST(request: NextRequest) {
               }
             }
           } catch {
-            // Stream error — deliver what we have
             done = true;
           }
         }
 
-        // Save conversation to DB
-        const allMessages = [...dbMessages, ...messages, { role: 'assistant', content: fullContent }];
+        const allMessages = [...dbMessages, ...messages, { role: 'assistant' as const, content: fullContent }];
         const convId = conversationId || uuidv4();
 
         if (conversationId) {
@@ -169,16 +164,14 @@ export async function POST(request: NextRequest) {
   });
 }
 
-// GET: load conversation history
 export async function GET(request: NextRequest) {
-  const auth = await getAuthorizedUser(request);
-  if ('error' in auth) return new Response(JSON.stringify({ error: auth.error }), { status: auth.status });
+  const auth = await requireFeature(request, 'ai-research');
+  if ('error' in auth) return jsonError(auth.error, auth.status);
 
   const { searchParams } = new URL(request.url);
   const conversationId = searchParams.get('id');
 
   if (!conversationId) {
-    // List conversations
     const conversations = await import('@/lib/database').then(m =>
       m.queryAll<{ id: string; model: string; updated_at: string; messages: string }>(
         'SELECT id, model, updated_at, messages FROM ai_research_conversations WHERE user_id = ? ORDER BY updated_at DESC LIMIT 50',
@@ -187,12 +180,10 @@ export async function GET(request: NextRequest) {
     );
     return new Response(JSON.stringify({
       conversations: conversations.map(c => {
-        let msgs: ChatMessage[] = [];
-        try { msgs = JSON.parse(c.messages); } catch {}
-        const firstUser = msgs.find(m => m.role === 'user');
+        const msgs = parseStoredMessages(c.messages);
         return {
           id: c.id,
-          title: firstUser ? firstUser.content.slice(0, 80) : 'New conversation',
+          title: conversationTitleFromMessages(msgs),
           model: c.model,
           updatedAt: c.updated_at,
           messageCount: msgs.length,
@@ -201,32 +192,31 @@ export async function GET(request: NextRequest) {
     }));
   }
 
-  // Load single conversation
   const row = await queryOne<{ id: string; messages: string; model: string }>(
     'SELECT id, messages, model FROM ai_research_conversations WHERE id = ? AND user_id = ?',
     [conversationId, auth.id],
   );
 
   if (!row) {
-    return new Response(JSON.stringify({ error: 'Conversation not found' }), { status: 404 });
+    return jsonError('Conversation not found', 404);
   }
 
-  let messages: ChatMessage[] = [];
-  try { messages = JSON.parse(row.messages); } catch {}
-
-  return new Response(JSON.stringify({ id: row.id, messages, model: row.model }));
+  return new Response(JSON.stringify({
+    id: row.id,
+    messages: parseStoredMessages(row.messages),
+    model: row.model,
+  }));
 }
 
-// DELETE: delete a conversation
 export async function DELETE(request: NextRequest) {
-  const auth = await getAuthorizedUser(request);
-  if ('error' in auth) return new Response(JSON.stringify({ error: auth.error }), { status: auth.status });
+  const auth = await requireFeature(request, 'ai-research');
+  if ('error' in auth) return jsonError(auth.error, auth.status);
 
   const { searchParams } = new URL(request.url);
   const conversationId = searchParams.get('id');
 
   if (!conversationId) {
-    return new Response(JSON.stringify({ error: 'Conversation ID is required' }), { status: 400 });
+    return jsonError('Conversation ID is required', 400);
   }
 
   await execute(

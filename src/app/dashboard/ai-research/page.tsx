@@ -1,10 +1,24 @@
 'use client';
 
 import { useEffect, useRef, useState, useCallback } from 'react';
+import {
+  AI_RESEARCH_ALLOWED_IMAGE_TYPES,
+  AI_RESEARCH_IMAGE_ONLY_PROMPT,
+  AI_RESEARCH_MAX_IMAGE_BYTES,
+  AI_RESEARCH_MAX_IMAGES,
+  AI_RESEARCH_MAX_TOTAL_IMAGE_BYTES,
+} from '@/lib/ai-research';
+
+interface ChatImage {
+  mimeType: string;
+  dataUrl: string;
+  name?: string;
+}
 
 interface Message {
   role: 'user' | 'assistant';
   content: string;
+  images?: ChatImage[];
 }
 
 interface Conversation {
@@ -17,11 +31,30 @@ interface Conversation {
 
 interface ModelOption { id: string; name: string; tier: string; provider: string }
 
+interface PendingImage {
+  id: string;
+  file: File;
+  previewUrl: string;
+}
+
+function readFileAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === 'string') resolve(reader.result);
+      else reject(new Error(`Could not read ${file.name}`));
+    };
+    reader.onerror = () => reject(new Error(`Could not read ${file.name}`));
+    reader.readAsDataURL(file);
+  });
+}
+
 export default function AIResearchPage() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeConvoId, setActiveConvoId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
+  const [pendingImages, setPendingImages] = useState<PendingImage[]>([]);
   const [loading, setLoading] = useState(false);
   const [streaming, setStreaming] = useState('');
   const [error, setError] = useState('');
@@ -33,8 +66,8 @@ export default function AIResearchPage() {
   const [savingModel, setSavingModel] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // ---- Data loading (keep same logic) ----
   useEffect(() => {
     fetch('/api/settings/model')
       .then(res => res.json())
@@ -48,6 +81,12 @@ export default function AIResearchPage() {
       })
       .catch(() => {});
   }, []);
+
+  useEffect(() => {
+    return () => {
+      pendingImages.forEach(image => URL.revokeObjectURL(image.previewUrl));
+    };
+  }, [pendingImages]);
 
   const saveModelPreference = async (modelId: string | null) => {
     setSavingModel(true);
@@ -82,15 +121,82 @@ export default function AIResearchPage() {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, streaming]);
 
+  const clearPendingImages = () => {
+    setPendingImages(prev => {
+      prev.forEach(image => URL.revokeObjectURL(image.previewUrl));
+      return [];
+    });
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
+  const addImages = (files: FileList | File[]) => {
+    const incoming = Array.from(files);
+    if (!incoming.length) return;
+
+    setError('');
+    setPendingImages(prev => {
+      const next = [...prev];
+      for (const file of incoming) {
+        if (!AI_RESEARCH_ALLOWED_IMAGE_TYPES.includes(file.type as typeof AI_RESEARCH_ALLOWED_IMAGE_TYPES[number])) {
+          setError('Unsupported image type. Use JPEG, PNG, WebP, or GIF.');
+          continue;
+        }
+        if (file.size > AI_RESEARCH_MAX_IMAGE_BYTES) {
+          setError(`${file.name} is larger than 4 MB.`);
+          continue;
+        }
+        if (next.length >= AI_RESEARCH_MAX_IMAGES) {
+          setError(`You can attach up to ${AI_RESEARCH_MAX_IMAGES} images per message.`);
+          break;
+        }
+        const total = next.reduce((sum, item) => sum + item.file.size, 0) + file.size;
+        if (total > AI_RESEARCH_MAX_TOTAL_IMAGE_BYTES) {
+          setError('Attached images exceed the 6 MB total limit.');
+          break;
+        }
+        next.push({ id: `${file.name}-${file.size}-${file.lastModified}-${next.length}`, file, previewUrl: URL.createObjectURL(file) });
+      }
+      return next;
+    });
+  };
+
+  const removePendingImage = (id: string) => {
+    setPendingImages(prev => {
+      const target = prev.find(image => image.id === id);
+      if (target) URL.revokeObjectURL(target.previewUrl);
+      return prev.filter(image => image.id !== id);
+    });
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
   const sendMessage = async () => {
     const trimmed = input.trim();
-    if (!trimmed || loading) return;
+    if ((!trimmed && pendingImages.length === 0) || loading) return;
     setError('');
-    const userMsg: Message = { role: 'user', content: trimmed };
+
+    let images: ChatImage[] = [];
+    try {
+      images = await Promise.all(pendingImages.map(async item => ({
+        mimeType: item.file.type,
+        dataUrl: await readFileAsDataUrl(item.file),
+        name: item.file.name,
+      })));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not read the attached image');
+      return;
+    }
+
+    const userMsg: Message = {
+      role: 'user',
+      content: trimmed || AI_RESEARCH_IMAGE_ONLY_PROMPT,
+      images: images.length ? images : undefined,
+    };
     setMessages(prev => [...prev, userMsg]);
     setInput('');
+    clearPendingImages();
     setStreaming('');
     setLoading(true);
+    if (inputRef.current) inputRef.current.style.height = 'auto';
 
     try {
       const res = await fetch('/api/ai-research/chat', {
@@ -132,6 +238,7 @@ export default function AIResearchPage() {
 
   const newConversation = () => {
     setActiveConvoId(null); setMessages([]); setStreaming(''); setError(''); setModel('');
+    clearPendingImages();
     setTimeout(() => inputRef.current?.focus(), 50);
     if (window.innerWidth < 768) setSidebarOpen(false);
   };
@@ -145,7 +252,6 @@ export default function AIResearchPage() {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
   };
 
-  // Auto-resize textarea
   const autoResize = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     setInput(e.target.value);
     const el = e.target;
@@ -153,9 +259,8 @@ export default function AIResearchPage() {
     el.style.height = Math.min(el.scrollHeight, 160) + 'px';
   };
 
-  const currentModelName = allowedModels.find(m => m.id === currentModel)?.name || 'Gemini 3 Flash Agent';
+  const canSend = !loading && Boolean(input.trim() || pendingImages.length);
 
-  // ---- RENDER ----
   return (
     <div className="h-[calc(100vh-64px)] flex flex-col bg-[var(--mos-bg)]">
       {/* Top bar */}
@@ -173,7 +278,7 @@ export default function AIResearchPage() {
         <span className="text-sm font-semibold text-[var(--mos-text)] truncate">AI Research</span>
 
         <select
-          value={currentModel}
+          value={currentModel || defaultModel}
           disabled={savingModel}
           onChange={e => saveModelPreference(e.target.value)}
           className="ml-auto min-h-7 rounded-lg border border-[var(--mos-border)] bg-[var(--mos-raised)] px-2 py-1 text-[11px] text-[var(--mos-text)] outline-none focus:border-indigo-400/60 max-w-[160px] truncate"
@@ -252,7 +357,7 @@ export default function AIResearchPage() {
                   </div>
                   <h2 className="text-xl font-semibold text-[var(--mos-text)] mb-2">GorillaWorkout AI</h2>
                   <p className="text-sm text-[var(--mos-text-muted)] max-w-md">
-                    Ask anything — riset topik trading, analisis berita, strategi marketing, atau sekadar brainstorming ide.
+                    Ask anything — riset topik trading, analisis berita, strategi marketing, atau lampirkan gambar untuk dibaca AI.
                   </p>
                   <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 gap-2 w-full max-w-lg">
                     {[
@@ -277,18 +382,28 @@ export default function AIResearchPage() {
               {messages.map((msg, i) => (
                 <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
                   <div className={`flex gap-3 max-w-[85%] sm:max-w-[75%] ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}>
-                    {/* Avatar */}
                     <div className={`w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5 ${msg.role === 'user' ? 'bg-indigo-600' : 'bg-emerald-600'}`}>
                       {msg.role === 'user'
                         ? <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z" /></svg>
                         : <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.5"><path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" /></svg>
                       }
                     </div>
-                    {/* Bubble */}
                     <div className="min-w-0">
                       <p className="text-[10px] font-semibold text-[var(--mos-text-muted)] mb-1 px-1">
                         {msg.role === 'user' ? 'You' : 'GorillaWorkout AI'}
                       </p>
+                      {msg.images && msg.images.length > 0 && (
+                        <div className={`mb-2 flex flex-wrap gap-2 ${msg.role === 'user' ? 'justify-end' : ''}`}>
+                          {msg.images.map((image, imageIndex) => (
+                            <img
+                              key={`${image.name || 'image'}-${imageIndex}`}
+                              src={image.dataUrl}
+                              alt={image.name || `Attached image ${imageIndex + 1}`}
+                              className="max-h-40 max-w-[160px] rounded-xl border border-[var(--mos-border)] object-cover"
+                            />
+                          ))}
+                        </div>
+                      )}
                       <div className={`px-4 py-2.5 text-sm leading-relaxed whitespace-pre-wrap ${
                         msg.role === 'user'
                           ? 'bg-indigo-600 text-white rounded-2xl rounded-tr-md'
@@ -306,7 +421,7 @@ export default function AIResearchPage() {
                 <div className="flex justify-start">
                   <div className="flex gap-3 max-w-[85%] sm:max-w-[75%]">
                     <div className="w-7 h-7 rounded-full bg-emerald-600 flex items-center justify-center flex-shrink-0 mt-0.5">
-                      <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.5"><path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" /></svg>
+                      <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.5"><path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09z" /></svg>
                     </div>
                     <div className="min-w-0">
                       <p className="text-[10px] font-semibold text-[var(--mos-text-muted)] mb-1 px-1 flex items-center gap-2">
@@ -339,20 +454,63 @@ export default function AIResearchPage() {
           {/* Input — sticky at bottom */}
           <div className="flex-shrink-0 border-t border-[var(--mos-border)] bg-[var(--mos-bg)] px-4 py-3">
             <div className="max-w-3xl mx-auto">
-              <div className="flex gap-3 items-end bg-[var(--mos-raised)] border border-[var(--mos-border)] rounded-2xl px-4 py-3 focus-within:border-indigo-400/60 focus-within:ring-1 focus-within:ring-indigo-400/30 transition-all">
+              {pendingImages.length > 0 && (
+                <div className="mb-2 flex flex-wrap gap-2">
+                  {pendingImages.map(image => (
+                    <div key={image.id} className="relative">
+                      <img
+                        src={image.previewUrl}
+                        alt={image.file.name}
+                        className="h-16 w-16 rounded-lg border border-[var(--mos-border)] object-cover"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => removePendingImage(image.id)}
+                        className="absolute -right-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-red-600 text-[10px] text-white"
+                        title={`Remove ${image.file.name}`}
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <div className="flex gap-2 items-end bg-[var(--mos-raised)] border border-[var(--mos-border)] rounded-2xl px-3 py-3 focus-within:border-indigo-400/60 focus-within:ring-1 focus-within:ring-indigo-400/30 transition-all">
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept={AI_RESEARCH_ALLOWED_IMAGE_TYPES.join(',')}
+                  multiple
+                  className="hidden"
+                  onChange={e => {
+                    if (e.target.files) addImages(e.target.files);
+                  }}
+                />
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={loading}
+                  className="text-[var(--mos-text-muted)] hover:text-[var(--mos-text)] disabled:opacity-30 p-2 rounded-xl transition-colors flex-shrink-0"
+                  title="Attach images"
+                  aria-label="Attach images"
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.8">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M18.375 12.739l-7.693 7.693a4.5 4.5 0 01-6.364-6.364l10.94-10.94A3 3 0 1119.5 8.25l-10.94 10.939a1.5 1.5 0 01-2.121-2.121l8.485-8.486" />
+                  </svg>
+                </button>
                 <textarea
                   ref={inputRef}
                   value={input}
                   onChange={autoResize}
                   onKeyDown={handleKeyDown}
-                  placeholder="Tanyakan apapun..."
+                  placeholder="Tanyakan apapun atau lampirkan gambar..."
                   disabled={loading}
                   rows={1}
                   className="flex-1 min-h-[24px] max-h-[160px] resize-none bg-transparent border-none text-sm text-[var(--mos-text)] placeholder-[var(--mos-text-muted)] focus:outline-none"
                 />
                 <button
                   onClick={sendMessage}
-                  disabled={loading || !input.trim()}
+                  disabled={!canSend}
                   className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-30 disabled:cursor-not-allowed text-white p-2 rounded-xl transition-colors flex-shrink-0"
                   title="Send message"
                 >
@@ -369,7 +527,7 @@ export default function AIResearchPage() {
                 </button>
               </div>
               <p className="text-[9px] text-[var(--mos-text-faint)] text-center mt-2">
-                GorillaWorkout AI may produce inaccurate information. Enter to send · Shift+Enter for newline.
+                GorillaWorkout AI may produce inaccurate information. Enter to send · Shift+Enter for newline · JPEG/PNG/WebP/GIF up to 4 images.
               </p>
             </div>
           </div>
