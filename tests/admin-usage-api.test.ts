@@ -50,13 +50,18 @@ test('by-provider returns provider breakdown', () => {
   assert.equal(providers.find(provider => provider.provider === 'openrouter')?.accountSource, 'personal');
 });
 
-test('by-feature includes ai-research without a hard-coded task_type allowlist', () => {
+test('by-feature includes ai-research and image-gen without a hard-coded task_type allowlist', () => {
   const withResearch: UsageRecord[] = [
     ...records,
     {
       id: '4', userId: 'u3', username: 'Cinta', department: 'Research', model: 'ag/gemini-3-flash-agent',
       provider: 'gorillaworkout', accountSource: 'office', inputTokens: 80, outputTokens: 20, cost: 0,
       taskId: null, taskType: 'ai-research',
+    },
+    {
+      id: '5', userId: 'u1', username: 'Ari', department: 'Marketing', model: 'cx/gpt-5.5-image',
+      provider: 'gorillaworkout', accountSource: 'office', inputTokens: 0, outputTokens: 0, cost: 0,
+      taskId: 't1', taskType: 'image-gen',
     },
   ];
   const features = buildFeatures(withResearch);
@@ -66,6 +71,12 @@ test('by-feature includes ai-research without a hard-coded task_type allowlist',
   assert.equal(research.totalTokens, 100);
   assert.equal(research.userCount, 1);
   assert.equal(research.requestCount, 1);
+
+  const images = features.find(feature => feature.taskType === 'image-gen');
+  assert.ok(images, 'image-gen must appear in feature aggregation');
+  assert.equal(images.label, 'Image Generation');
+  assert.equal(images.totalTokens, 0);
+  assert.equal(images.requestCount, 1);
 
   const helper = fs.readFileSync(path.join(process.cwd(), 'src/lib/admin-usage.ts'), 'utf8');
   assert.match(helper, /l\.task_type/);

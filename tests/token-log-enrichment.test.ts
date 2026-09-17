@@ -27,30 +27,41 @@ void describe('Token Log Enrichment', () => {
   });
 
   void it('each caller passes taskType in options', () => {
-    const videoApi = require('fs').readFileSync(
-      require('path').join(__dirname, '../src/app/api/video-script/generate/route.ts'),
-      'utf-8'
-    );
-    const eventApi = require('fs').readFileSync(
-      require('path').join(__dirname, '../src/app/api/event-plan/generate/route.ts'),
-      'utf-8'
-    );
-    // Each generateContent call should include taskType
-    const videoMatches = videoApi.match(/taskType:\s*'video-script'/g);
-    assert(videoMatches, 'video-script route missing taskType');
-    assert(videoMatches.length >= 1, `video-script route has ${videoMatches.length} taskType refs (expected ≥1)`);
+    const fs = require('fs');
+    const path = require('path');
+    const read = (file: string) => fs.readFileSync(path.join(__dirname, '..', file), 'utf-8');
 
-    const eventMatches = eventApi.match(/taskType:\s*'event-plan'/g);
-    assert(eventMatches, 'event-plan route missing taskType');
-    assert(eventMatches.length >= 1, `event-plan route has ${eventMatches.length} taskType refs (expected ≥1)`);
+    const expected: Array<[string, string, string]> = [
+      ['src/app/api/social-post/generate/route.ts', "taskType:\\s*'social-post'", 'social-post'],
+      ['src/app/api/video-script/generate/route.ts', "taskType:\\s*'video-script'", 'video-script'],
+      ['src/app/api/event-plan/generate/route.ts', "taskType:\\s*'event-plan'", 'event-plan'],
+      ['src/app/api/article-market-news/generate/route.ts', "taskType:\\s*'article-market-news'", 'article-market-news'],
+      ['src/app/api/market-research/generate/route.ts', "taskType:\\s*'market-research'", 'market-research'],
+      ['src/app/api/ai-research/chat/route.ts', "taskType:\\s*'ai-research'", 'ai-research'],
+      ['src/app/api/generate-image/route.ts', "taskType:\\s*'image-gen'", 'image-gen'],
+    ];
+    for (const [file, pattern, label] of expected) {
+      const matches = read(file).match(new RegExp(pattern, 'g'));
+      assert(matches, `${label} route missing taskType`);
+      assert(matches.length >= 1, `${label} route has ${matches.length} taskType refs (expected ≥1)`);
+    }
 
-    const researchApi = require('fs').readFileSync(
-      require('path').join(__dirname, '../src/app/api/ai-research/chat/route.ts'),
-      'utf-8'
-    );
-    const researchMatches = researchApi.match(/taskType:\s*'ai-research'/g);
-    assert(researchMatches, 'ai-research route missing taskType');
-    assert(researchMatches.length >= 1, `ai-research route has ${researchMatches.length} taskType refs (expected ≥1)`);
+    const social = read('src/app/api/social-post/generate/route.ts');
+    const generateContentCalls = social.match(/generateContent\(/g) || [];
+    const socialTaskTypes = social.match(/taskType:\s*'social-post'/g) || [];
+    assert.equal(generateContentCalls.length, socialTaskTypes.length, 'social-post image-prompt must log as social-post');
+
+    const knowledgeSave = read('src/app/api/knowledge/save/route.ts');
+    assert.match(knowledgeSave, /generateContent/);
+    assert.match(knowledgeSave, /taskType: analysisFeature/);
+    const knowledgeAnalyze = read('src/app/api/knowledge/analyze/route.ts');
+    assert.match(knowledgeAnalyze, /generateContent/);
+    assert.match(knowledgeAnalyze, /taskType: 'social-post'/);
+
+    const image = read('src/app/api/generate-image/route.ts');
+    assert.match(image, /logTokenUsage/);
+    assert.match(image, /parseImageGenerationUsage/);
+    assert.doesNotMatch(image, /INSERT INTO token_logs/);
   });
 
   void it('token_logs INSERT includes new columns via the shared helper', () => {
@@ -63,6 +74,7 @@ void describe('Token Log Enrichment', () => {
       'utf-8'
     );
     assert.match(openai, /logTokenUsage/);
+    assert.match(openai, /resolveTokenUsage/);
     const inserts = tokenLog.match(/INSERT INTO token_logs \(/g);
     assert(inserts, 'No INSERT INTO token_logs found');
     assert(inserts.length >= 1, `Found ${inserts.length} INSERT statements`);

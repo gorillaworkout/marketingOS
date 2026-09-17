@@ -53,6 +53,81 @@ export function resolveTokenUsage(options: {
   };
 }
 
+export function mergeGatewayUsage(
+  a: GatewayTokenUsage | null,
+  b: GatewayTokenUsage | null,
+): GatewayTokenUsage | null {
+  if (!a) return b;
+  if (!b) return a;
+  return {
+    inputTokens: a.inputTokens + b.inputTokens,
+    outputTokens: a.outputTokens + b.outputTokens,
+  };
+}
+
+/** Reads `usage` from a full chat-completion HTTP body (JSON or SSE). */
+export function parseGatewayResponseUsage(body: string, contentType: string | null): GatewayTokenUsage | null {
+  if (contentType?.toLowerCase().includes('text/event-stream')) {
+    return consumeChatCompletionSseLines(body.split(/\r?\n/)).usage;
+  }
+  try {
+    return parseGatewayUsage(JSON.parse(body) as unknown);
+  } catch {
+    return null;
+  }
+}
+
+function asNonNegativeNumber(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value) && value >= 0) return value;
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed) && parsed >= 0) return parsed;
+  }
+  return null;
+}
+
+/** Dollar cost if the gateway includes one; never inferred from tokens. */
+export function parseReportedCost(payload: unknown): number | null {
+  if (!payload || typeof payload !== 'object') return null;
+  const record = payload as Record<string, unknown>;
+  const usage = record.usage && typeof record.usage === 'object'
+    ? record.usage as Record<string, unknown>
+    : null;
+  return asNonNegativeNumber(record.cost)
+    ?? asNonNegativeNumber(usage?.cost)
+    ?? asNonNegativeNumber(usage?.total_cost);
+}
+
+export interface ImageGenerationUsage {
+  inputTokens: number;
+  outputTokens: number;
+  cost: number;
+}
+
+/**
+ * Image `/images/generations` usage. Prefer split token fields, then
+ * `total_tokens`, then zeros. Do not estimate from prompt length — T2I billing
+ * is not ~chars/4, and a char heuristic would invent a fake token count.
+ */
+export function parseImageGenerationUsage(payload: unknown): ImageGenerationUsage {
+  const cost = parseReportedCost(payload) ?? 0;
+  const reported = parseGatewayUsage(payload);
+  if (reported) return { ...reported, cost };
+  if (payload && typeof payload === 'object') {
+    const usage = (payload as { usage?: unknown }).usage;
+    if (usage && typeof usage === 'object') {
+      const total = asNonNegativeInt((usage as Record<string, unknown>).total_tokens);
+      if (total != null) return { inputTokens: total, outputTokens: 0, cost };
+    }
+  }
+  return { inputTokens: 0, outputTokens: 0, cost };
+}
+
+/** Analytics labels for task_type values that are not generation-feature keys. */
+export const EXTRA_TASK_TYPE_LABELS: Record<string, string> = {
+  'image-gen': 'Image Generation',
+};
+
 function contentText(content: GatewayMessage['content']): string {
   if (typeof content === 'string') return content;
   if (!Array.isArray(content)) return '';
@@ -112,5 +187,5 @@ export function taskTypeLabel(taskType: string | null | undefined): string {
   const value = (taskType || '').trim();
   if (!value) return 'Legacy';
   if (isGenerationFeature(value)) return GUIDANCE_FEATURE_LABELS[value];
-  return value;
+  return EXTRA_TASK_TYPE_LABELS[value] || value;
 }

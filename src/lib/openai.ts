@@ -1,6 +1,11 @@
 import { parseGatewayCompletion } from '@/lib/gateway-response';
 import { logTokenUsage } from '@/lib/token-log';
-import { estimateTokensFromChars } from '@/lib/token-usage';
+import {
+  mergeGatewayUsage,
+  parseGatewayResponseUsage,
+  resolveTokenUsage,
+  type GatewayTokenUsage,
+} from '@/lib/token-usage';
 
 const GORILLAWORKOUT_API_BASE = process.env.GORILLAWORKOUT_API_BASE || 'https://llm.gorillaworkout.id/v1';
 const GORILLAWORKOUT_API_KEY = process.env.GORILLAWORKOUT_API_KEY || '';
@@ -120,7 +125,7 @@ async function callApi(
     temperature?: number;
     maxTokens?: number;
   } = {}
-): Promise<{ content: string; model: string }> {
+): Promise<{ content: string; model: string; usage: GatewayTokenUsage | null }> {
   const model = options.model || PRIMARY_MODEL;
   getModelProvider(model);
 
@@ -153,8 +158,9 @@ async function callApi(
   }
 
   const responseBody = await response.text();
-  const content = parseGatewayCompletion(responseBody, response.headers.get('content-type'));
-  return { content, model };
+  const contentType = response.headers.get('content-type');
+  const content = parseGatewayCompletion(responseBody, contentType);
+  return { content, model, usage: parseGatewayResponseUsage(responseBody, contentType) };
 }
 
 /**
@@ -170,19 +176,21 @@ async function callApiWithRetry(
     parseJson?: boolean;
     jsonRepairAttempts?: 0 | 1;
   } = {}
-): Promise<{ content: string; parsed?: unknown; model: string; retried: boolean }> {
+): Promise<{ content: string; parsed?: unknown; model: string; retried: boolean; usage: GatewayTokenUsage | null }> {
   const parseJson = options.parseJson ?? true;
   let retried = false;
+  let usage: GatewayTokenUsage | null = null;
 
   // Try primary model
   try {
     const result = await callApi(messages, options);
+    usage = mergeGatewayUsage(usage, result.usage);
     if (parseJson && options.responseFormat?.type === 'json_object') {
       try {
         const parsed = JSON.parse(result.content);
-        return { ...result, parsed, retried };
+        return { ...result, parsed, retried, usage };
       } catch {
-        if ((options.jsonRepairAttempts ?? 1) === 0) return { ...result, retried };
+        if ((options.jsonRepairAttempts ?? 1) === 0) return { ...result, retried, usage };
         // Retry once with explicit JSON reminder
         retried = true;
         const retryMessages = [
@@ -191,15 +199,16 @@ async function callApiWithRetry(
           { role: 'user', content: 'Your response was not valid JSON. Please output ONLY valid JSON with no markdown formatting or code fences.' },
         ];
         const retryResult = await callApi(retryMessages, options);
+        usage = mergeGatewayUsage(usage, retryResult.usage);
         try {
           const parsed = JSON.parse(retryResult.content);
-          return { ...retryResult, parsed, retried };
+          return { ...retryResult, parsed, retried, usage };
         } catch {
-          return { ...retryResult, retried };
+          return { ...retryResult, retried, usage };
         }
       }
     }
-    return { ...result, retried };
+    return { ...result, retried, usage };
   } catch (generationError) {
     throw generationError;
   }
@@ -247,9 +256,13 @@ export async function generateContent(
   });
 
   const pricing = getPricing(result.model);
-  // Estimate tokens from content length (rough: 1 token ≈ 4 chars)
-  const inputTokens = estimateTokensFromChars(enhancedSystemPrompt + userPrompt);
-  const outputTokens = estimateTokensFromChars(result.content);
+  const resolved = resolveTokenUsage({
+    reported: result.usage,
+    inputText: enhancedSystemPrompt + userPrompt,
+    outputText: result.content,
+  });
+  const inputTokens = resolved.inputTokens;
+  const outputTokens = resolved.outputTokens;
   const cost = inputTokens * pricing.input + outputTokens * pricing.output;
 
   const usage: TokenUsage = { inputTokens, outputTokens, model: result.model, cost };
@@ -314,10 +327,14 @@ export async function generateMultiStep(
   drafts.push({ step: 'draft', content: draftResult.content, model: draftResult.model });
   onProgress?.({ step: 'draft', progress: 33, message: '✅ Draft complete' });
   const draftPricing = getPricing(draftResult.model);
-  totalUsage.inputTokens += estimateTokensFromChars(draftSystem + userPrompt);
-  totalUsage.outputTokens += estimateTokensFromChars(draftResult.content);
-  totalUsage.cost += (totalUsage.inputTokens / 1_000_000) * draftPricing.input +
-                     (totalUsage.outputTokens / 1_000_000) * draftPricing.output;
+  const draftUsage = resolveTokenUsage({
+    reported: draftResult.usage,
+    inputText: draftSystem + userPrompt,
+    outputText: draftResult.content,
+  });
+  totalUsage.inputTokens += draftUsage.inputTokens;
+  totalUsage.outputTokens += draftUsage.outputTokens;
+  totalUsage.cost += draftUsage.inputTokens * draftPricing.input + draftUsage.outputTokens * draftPricing.output;
 
   // Step 2: Self-review against brand guidelines
   onProgress?.({ step: 'review', progress: 37, message: '🔍 Reviewing against brand guidelines...' });
@@ -341,10 +358,14 @@ Output JSON: { "score": <1-10>, "issues": ["..."], "suggestions": ["..."], "pass
   drafts.push({ step: 'review', content: reviewResult.content, model: reviewResult.model });
   onProgress?.({ step: 'review', progress: 66, message: '✅ Review complete' });
   const reviewPricing = getPricing(reviewResult.model);
-  totalUsage.inputTokens += estimateTokensFromChars(reviewSystem + reviewPrompt);
-  totalUsage.outputTokens += estimateTokensFromChars(reviewResult.content);
-  totalUsage.cost += (totalUsage.inputTokens / 1_000_000) * reviewPricing.input +
-                     (totalUsage.outputTokens / 1_000_000) * reviewPricing.output;
+  const reviewUsage = resolveTokenUsage({
+    reported: reviewResult.usage,
+    inputText: reviewSystem + reviewPrompt,
+    outputText: reviewResult.content,
+  });
+  totalUsage.inputTokens += reviewUsage.inputTokens;
+  totalUsage.outputTokens += reviewUsage.outputTokens;
+  totalUsage.cost += reviewUsage.inputTokens * reviewPricing.input + reviewUsage.outputTokens * reviewPricing.output;
 
   // Step 3: Refined final version
   let reviewFeedback = '';
@@ -380,10 +401,14 @@ Output the same JSON structure as the draft, but improved. Output valid JSON onl
   );
   drafts.push({ step: 'refined', content: refineResult.content, model: refineResult.model });
   const refinePricing = getPricing(refineResult.model);
-  totalUsage.inputTokens += estimateTokensFromChars(refineSystem + refinePrompt);
-  totalUsage.outputTokens += estimateTokensFromChars(refineResult.content);
-  totalUsage.cost += (totalUsage.inputTokens / 1_000_000) * refinePricing.input +
-                     (totalUsage.outputTokens / 1_000_000) * refinePricing.output;
+  const refineUsage = resolveTokenUsage({
+    reported: refineResult.usage,
+    inputText: refineSystem + refinePrompt,
+    outputText: refineResult.content,
+  });
+  totalUsage.inputTokens += refineUsage.inputTokens;
+  totalUsage.outputTokens += refineUsage.outputTokens;
+  totalUsage.cost += refineUsage.inputTokens * refinePricing.input + refineUsage.outputTokens * refinePricing.output;
 
   await logTokenUsage({
     userId,
