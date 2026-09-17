@@ -79,7 +79,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       if (data.authenticated) {
         setUser(data.user);
         const generationFeature = pathname.split('/').pop() || '';
-        const adminOnlyPages = ['/dashboard/tokens', '/dashboard/analytics', '/dashboard/accounts', '/dashboard/templates', '/dashboard/calendar', '/dashboard/knowledge', '/dashboard/knowledge-graph', '/dashboard/brand-guidelines', '/dashboard/history'];
+        const adminOnlyPages = ['/dashboard/tokens', '/dashboard/analytics', '/dashboard/accounts', '/dashboard/templates', '/dashboard/calendar', '/dashboard/knowledge', '/dashboard/knowledge-graph', '/dashboard/brand-guidelines', '/dashboard/history', '/dashboard/ai-research/admin'];
         if (data.user.role !== 'admin' && (adminOnlyPages.includes(pathname) || (GENERATION_FEATURES.includes(generationFeature as typeof GENERATION_FEATURES[number]) && !data.user.enabledFeatures?.includes(generationFeature)))) {
           router.replace('/dashboard');
         }
@@ -125,6 +125,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         { href: '/dashboard/knowledge-graph', label: 'Knowledge Graph', icon: 'graph', adminOnly: true },
         { href: '/dashboard/tokens', label: 'Token usage', icon: 'tokens', adminOnly: true },
         { href: '/dashboard/analytics', label: 'Analytics', icon: 'analytics', adminOnly: true },
+        { href: '/dashboard/ai-research/admin', label: 'AI Research log', icon: 'research', adminOnly: true },
         { href: '/dashboard/accounts', label: 'Accounts', icon: 'accounts', adminOnly: true },
       ],
     },
@@ -139,6 +140,13 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       return user?.role === 'admin' || user?.enabledFeatures.includes(feature);
     }),
   })).filter(section => section.items.length);
+
+  const navHrefs = visibleSections.flatMap(section => section.items.map(item => item.href));
+  const isNavActive = (href: string) => {
+    if (href === '/dashboard') return pathname === href;
+    if (pathname !== href && !pathname.startsWith(`${href}/`)) return false;
+    return !navHrefs.some(other => other !== href && other.startsWith(`${href}/`) && (pathname === other || pathname.startsWith(`${other}/`)));
+  };
 
 
   const sidebar = (
@@ -158,7 +166,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             {section.label && <p className="mb-1.5 px-2 text-[10px] font-medium uppercase tracking-[0.12em] text-[var(--mos-text-faint)]">{section.label}</p>}
             <div className="space-y-0.5">
               {section.items.map(item => {
-                const active = item.href === '/dashboard' ? pathname === item.href : pathname.startsWith(item.href);
+                const active = isNavActive(item.href);
                 return (
                   <Link key={item.href} href={item.href} onClick={() => setMobileOpen(false)} className={`group flex h-8.5 items-center gap-2.5 rounded-[6px] px-2.5 text-[13px] transition ${active ? 'bg-white/[0.065] text-[var(--mos-text)] shadow-[inset_2px_0_0_var(--mos-accent)]' : 'text-[var(--mos-text-muted)] hover:bg-white/[0.035] hover:text-[var(--mos-text-secondary)]'}`}>
                     <NavIcon name={item.icon} />
