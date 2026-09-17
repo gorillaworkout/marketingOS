@@ -166,23 +166,38 @@ async function runImageJob(job: ImageJob, prompt: string, brief: string, type: s
   }
 }
 
+function isCapacityOrRateLimit(lower: string, status: number): boolean {
+  if (status === 429) return true;
+  if (lower.includes('usage limit') || lower.includes('rate limit') || lower.includes('quota')) return true;
+  if (lower.includes('exhausted your capacity') || lower.includes('capacity exhausted')) return true;
+  return lower.includes('exhausted') && lower.includes('capacity');
+}
+
 /**
  * Translate an upstream failure into something the user can act on.
  *
  * The gateway wraps provider errors as `Image API error <status>: {...}`, so the
  * HTTP status plus a few marker strings are enough to tell "wait and retry"
- * apart from "tell an admin".
+ * apart from "tell an admin". Antigravity T2I 429s ("exhausted your capacity")
+ * are often wrapped by the gateway/CF as HTTP 502 — capacity markers must win
+ * over the generic 5xx outage copy.
  */
 export function explainImageFailure(reason: string, model: string): string {
   const status = Number(/Image API error (\d{3})/.exec(reason)?.[1] ?? 0);
   const lower = reason.toLowerCase();
   const reset = /reset after ([^)"]+)/i.exec(reason)?.[1]?.trim();
   const waitHint = reset ? ` Try again in ${reset}.` : ' Try again in a few minutes.';
+  const capacityLimited = isCapacityOrRateLimit(lower, status);
 
   if (lower.includes('is not configured')) {
     return 'Image generation is not configured on the server (missing API key). Please contact the administrator.';
   }
-  if (status === 429 || lower.includes('usage limit') || lower.includes('rate limit') || lower.includes('quota')) {
+  if (capacityLimited) {
+    // Wrapped 502s and Antigravity models get the explicit quota message so users
+    // do not think the whole image service is down.
+    if (model.startsWith('ag/') || status >= 500) {
+      return `Antigravity image quota/rate limit is full — try again in a moment, or switch to ${imageModelLabel(DEFAULT_IMAGE_MODEL)} (\`${DEFAULT_IMAGE_MODEL}\`).`;
+    }
     return `Usage limit reached for ${model}.${waitHint} You can also pick a different image model.`;
   }
   if (status === 401 || lower.includes('token is expired') || lower.includes('authentication')) {
