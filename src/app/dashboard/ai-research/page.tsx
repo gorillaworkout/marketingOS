@@ -31,6 +31,16 @@ interface Conversation {
 
 interface ModelOption { id: string; name: string; tier: string; provider: string }
 
+interface ModelHealthResult {
+  model: string;
+  name: string;
+  status: 'ok' | 'fail';
+  httpStatus: number | null;
+  error: string | null;
+  checkedAt: string;
+  latencyMs: number;
+}
+
 interface PendingImage {
   id: string;
   file: File;
@@ -88,6 +98,10 @@ export default function AIResearchPage() {
   const [currentModel, setCurrentModel] = useState('');
   const [defaultModel, setDefaultModel] = useState('');
   const [savingModel, setSavingModel] = useState(false);
+  const [healthChecking, setHealthChecking] = useState(false);
+  const [healthResults, setHealthResults] = useState<ModelHealthResult[] | null>(null);
+  const [healthError, setHealthError] = useState('');
+  const [healthOpen, setHealthOpen] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -112,6 +126,28 @@ export default function AIResearchPage() {
       pendingImages.forEach(image => URL.revokeObjectURL(image.previewUrl));
     };
   }, [pendingImages]);
+
+  const checkModelHealth = async () => {
+    setHealthChecking(true);
+    setHealthError('');
+    setHealthOpen(true);
+    try {
+      const res = await fetch('/api/ai-research/health', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+      const data = await res.json().catch(() => ({})) as { results?: ModelHealthResult[]; error?: string };
+      if (!res.ok || !Array.isArray(data.results)) {
+        throw new Error(data.error || `Health check failed (${res.status})`);
+      }
+      setHealthResults(data.results);
+    } catch (e) {
+      setHealthError(e instanceof Error ? e.message : 'Health check failed');
+    } finally {
+      setHealthChecking(false);
+    }
+  };
 
   const saveModelPreference = async (modelId: string | null) => {
     setSavingModel(true);
@@ -310,11 +346,41 @@ export default function AIResearchPage() {
   };
 
   const canSend = !loading && Boolean(input.trim() || pendingImages.length);
+  const selectedModelId = currentModel || defaultModel;
+  const selectedHealth = healthResults?.find(result => result.model === selectedModelId);
+  const failCount = healthResults?.filter(result => result.status === 'fail').length || 0;
+  const lastCheckedAt = healthResults?.[0]?.checkedAt;
+  const healthBadgeLabel = healthChecking
+    ? 'Checking'
+    : !healthResults
+      ? null
+      : failCount === 0
+        ? 'OK'
+        : failCount === healthResults.length
+          ? 'FAIL'
+          : `${failCount} FAIL`;
+  const healthBadgeTone = healthChecking
+    ? 'neutral'
+    : !healthResults
+      ? 'neutral'
+      : failCount === 0
+        ? 'success'
+        : failCount === healthResults.length
+          ? 'danger'
+          : 'warning';
+
+  const formatCheckedAt = (iso: string) => {
+    try {
+      return new Date(iso).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    } catch {
+      return iso;
+    }
+  };
 
   return (
     <div className="h-[calc(100vh-64px)] flex flex-col bg-[var(--mos-bg)]">
       {/* Top bar */}
-      <div className="flex items-center gap-3 px-4 py-2.5 border-b border-[var(--mos-border)] bg-[var(--mos-bg)] flex-shrink-0">
+      <div className="flex items-center gap-3 px-4 py-2.5 border-b border-[var(--mos-border)] bg-[var(--mos-bg)] flex-shrink-0 flex-wrap">
         <button
           onClick={() => setSidebarOpen(!sidebarOpen)}
           className="p-1.5 text-[var(--mos-text-muted)] hover:text-[var(--mos-text)] hover:bg-[var(--mos-hover)] rounded-lg transition-colors"
@@ -327,14 +393,75 @@ export default function AIResearchPage() {
 
         <span className="text-sm font-semibold text-[var(--mos-text)] truncate">AI Research</span>
 
-        <select
-          value={currentModel || defaultModel}
-          disabled={savingModel}
-          onChange={e => saveModelPreference(e.target.value)}
-          className="ml-auto min-h-7 rounded-lg border border-[var(--mos-border)] bg-[var(--mos-raised)] px-2 py-1 text-[11px] text-[var(--mos-text)] outline-none focus:border-indigo-400/60 max-w-[160px] truncate"
-        >
-          {allowedModels.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
-        </select>
+        <div className="ml-auto relative flex items-center gap-1.5 min-w-0">
+          <select
+            value={selectedModelId}
+            disabled={savingModel}
+            onChange={e => saveModelPreference(e.target.value)}
+            aria-label="AI Research model"
+            className="min-h-7 rounded-lg border border-[var(--mos-border)] bg-[var(--mos-raised)] px-2 py-1 text-[11px] text-[var(--mos-text)] outline-none focus:border-indigo-400/60 max-w-[140px] sm:max-w-[160px] truncate"
+          >
+            {allowedModels.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+          </select>
+          <button
+            type="button"
+            onClick={checkModelHealth}
+            disabled={healthChecking}
+            aria-busy={healthChecking}
+            className="min-h-7 flex-shrink-0 rounded-lg border border-[var(--mos-border)] bg-[var(--mos-raised)] px-2 py-1 text-[11px] font-medium text-[var(--mos-text)] hover:bg-[var(--mos-hover)] disabled:opacity-50 transition-colors"
+            title="Ping allowed AI Research models on the GorillaWorkout gateway"
+          >
+            {healthChecking ? 'Checking…' : 'Check'}
+          </button>
+          {healthBadgeLabel && (
+            <button
+              type="button"
+              onClick={() => setHealthOpen(open => !open)}
+              className={`inline-flex h-7 max-w-[140px] items-center gap-1 truncate rounded-lg border px-2 text-[10px] font-medium ${
+                healthBadgeTone === 'success'
+                  ? 'border-emerald-400/20 bg-emerald-400/10 text-emerald-300'
+                  : healthBadgeTone === 'danger'
+                    ? 'border-red-400/20 bg-red-400/10 text-red-300'
+                    : healthBadgeTone === 'warning'
+                      ? 'border-amber-400/20 bg-amber-400/10 text-amber-200'
+                      : 'border-white/[0.07] bg-white/[0.035] text-[var(--mos-text-muted)]'
+              }`}
+              title={selectedHealth?.error || healthError || 'Show model health details'}
+              aria-expanded={healthOpen}
+            >
+              <span className="h-1.5 w-1.5 rounded-full bg-current opacity-80 flex-shrink-0" />
+              {healthBadgeLabel}
+            </button>
+          )}
+          {(healthOpen && (healthResults || healthError)) && (
+            <div
+              role="status"
+              aria-live="polite"
+              className="absolute right-0 top-full z-20 mt-1 w-72 max-w-[calc(100vw-2rem)] rounded-lg border border-[var(--mos-border)] bg-[var(--mos-raised)] p-2 shadow-lg"
+            >
+              {healthError && <p className="px-1 py-1 text-[11px] text-red-300">{healthError}</p>}
+              {healthResults?.map(result => (
+                <div key={result.model} className="flex items-start justify-between gap-2 px-1 py-1.5 border-b border-[var(--mos-border-subtle)] last:border-b-0">
+                  <div className="min-w-0">
+                    <p className="text-[11px] text-[var(--mos-text)] truncate">{result.name}</p>
+                    {result.status === 'fail' && result.error && (
+                      <p className="text-[10px] text-red-300 leading-4 mt-0.5">{result.error}{result.httpStatus ? ` · HTTP ${result.httpStatus}` : ''}</p>
+                    )}
+                  </div>
+                  <span className={`flex-shrink-0 text-[10px] font-semibold ${result.status === 'ok' ? 'text-emerald-300' : 'text-red-300'}`}>
+                    {result.status === 'ok' ? 'OK' : 'FAIL'}
+                  </span>
+                </div>
+              ))}
+              {lastCheckedAt && (
+                <p className="px-1 pt-1 text-[9px] text-[var(--mos-text-faint)]">
+                  Last checked {formatCheckedAt(lastCheckedAt)}
+                  {selectedHealth ? ` · ${selectedHealth.latencyMs}ms` : ''}
+                </p>
+              )}
+            </div>
+          )}
+        </div>
 
         <button
           onClick={newConversation}
