@@ -3,6 +3,7 @@ import { queryOne, queryAll, execute } from '@/lib/database';
 import { requireFeature } from '@/lib/auth';
 import { rateLimit } from '@/lib/rate-limit';
 import { generateContent, getSmartSystemPrompt, fetchContextMemory, fetchStyleContext, getUserPreferredModel, runQC, generateDupoinFileName, type BrandGuidelines, type QCResult } from '@/lib/openai';
+import { buildSocialPostImagePromptUserMessage } from '@/lib/dupoin-image-prompt';
 import { v4 as uuidv4 } from 'uuid';
 import fs from 'fs';
 import path from 'path';
@@ -277,14 +278,13 @@ Follow the SOP strictly. Output JSON format with: { "hook": "...", "caption": ".
           const smartImageSystem = getSmartSystemPrompt('image-prompt', platform, brandGuidelines, undefined, styleContext);
           const imagePrompts = await Promise.all(options.map(async selectedCaption => generateContent(
             smartImageSystem,
-            `Buat advertising creative prompt yang menerjemahkan post ini menjadi iklan siap tayang.
-Brief: ${brief}
-Platform: ${platform || 'Instagram'}
-Target: ${targetAudience || 'General'}
-Selected hook: ${selectedCaption.hook}
-Selected caption: ${selectedCaption.caption}
-
-Tentukan Exact headline, Subheadline, CTA, visual hierarchy, layout, supporting scene, text contrast, safe zone 80px, dan posisi Dupoin logo. Jangan masukkan hashtag atau caption panjang ke gambar.`,
+            buildSocialPostImagePromptUserMessage({
+              brief,
+              platform,
+              targetAudience,
+              hook: selectedCaption.hook,
+              caption: selectedCaption.caption,
+            }),
             userId,
             taskId,
             { brandGuidelines, model: preferredModel, taskType: 'social-post' }

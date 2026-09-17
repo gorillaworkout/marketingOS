@@ -1,0 +1,95 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
+import {
+  DUPOIN_BLUE_HEX,
+  DUPOIN_LOGO_COMPOSITE_LINE,
+  DUPOIN_LOGO_IN_PROMPT_LINE,
+  IMAGE_PROMPT_SYSTEM,
+  buildSocialPostImagePromptUserMessage,
+} from '../src/lib/dupoin-image-prompt';
+import { getSmartSystemPrompt, getSystemPrompt } from '../src/lib/openai';
+
+const read = (relative: string) => readFileSync(path.join(process.cwd(), relative), 'utf8');
+
+const openai = read('src/lib/openai.ts');
+const route = read('src/app/api/social-post/generate/route.ts');
+
+test('image-prompt system encodes Dupoin Brand Guidelines 2026 locks', () => {
+  const systemPrompt = getSystemPrompt('image-prompt');
+  const smartPrompt = getSmartSystemPrompt('image-prompt', 'Instagram');
+
+  assert.equal(systemPrompt, IMAGE_PROMPT_SYSTEM);
+  assert.equal(smartPrompt.includes(systemPrompt), true, 'getSmartSystemPrompt must wrap the image-prompt system prompt');
+
+  for (const prompt of [systemPrompt, smartPrompt]) {
+    assert.match(prompt, /#2EB5C4/, 'must lock official Dupoin Blue hex');
+    assert.equal(prompt.includes(DUPOIN_BLUE_HEX), true);
+    assert.match(prompt, /RGB 46,181,196/);
+    assert.match(prompt, /80px/);
+    assert.match(prompt, /1080x1350/);
+    assert.match(prompt, /1080x1080/);
+    assert.match(prompt, /Exact headline/i);
+    assert.match(prompt, /Subheadline/i);
+    assert.match(prompt, /CTA/);
+    assert.match(prompt, /visual hierarchy/i);
+    assert.match(prompt, /Dupoin logo/i);
+    assert.match(prompt, /clear space/i);
+    assert.match(prompt, /1x capital x-height/i);
+    assert.match(prompt, /logo composite/i);
+    assert.match(prompt, /graphic mark \+ wordmark/);
+    assert.equal(prompt.includes(DUPOIN_LOGO_COMPOSITE_LINE), true);
+    assert.equal(prompt.includes(DUPOIN_LOGO_IN_PROMPT_LINE), true);
+    assert.match(prompt, /never invent/i);
+    assert.match(prompt, /text-only/i);
+    assert.match(prompt, /professional, stable, trustworthy/i);
+    assert.match(prompt, /Indonesian traders 25-45/i);
+    assert.match(prompt, /no hashtags/i);
+    assert.match(prompt, /wrong teal/i);
+    assert.match(prompt, /invented logos/i);
+    assert.match(prompt, /generic stock/i);
+    assert.doesNotMatch(prompt, /#2eb5c4/);
+    assert.doesNotMatch(prompt, /JANGAN (minta|tulis)[^\n]*teks/i);
+  }
+});
+
+test('sample image-prompt builder output contains #2EB5C4 and logo composite language', () => {
+  const sample = buildSocialPostImagePromptUserMessage({
+    brief: 'Edukasi risk management untuk trader pemula',
+    platform: 'Instagram',
+    targetAudience: 'Indonesian traders 25-45',
+    hook: 'Rencana dulu, baru entry',
+    caption: 'Kelola risiko sebelum membuka posisi. Pelajari kerangka kerja Dupoin.',
+  });
+
+  assert.match(sample, /#2EB5C4/);
+  assert.equal(sample.includes(DUPOIN_BLUE_HEX), true);
+  assert.match(sample, /clear space/i);
+  assert.match(sample, /logo composite/i);
+  assert.match(sample, /graphic mark \+ wordmark/);
+  assert.match(sample, /1x capital x-height/i);
+  assert.match(sample, /80px/);
+  assert.match(sample, /Exact headline/);
+  assert.match(sample, /Subheadline/);
+  assert.match(sample, /CTA/);
+  assert.match(sample, /visual hierarchy/i);
+  assert.match(sample, /Dupoin logo/);
+  assert.match(sample, /Rencana dulu, baru entry/, 'must use the selected hook');
+  assert.match(sample, /Kelola risiko sebelum membuka posisi/, 'must use the selected caption');
+  assert.match(sample, /no hashtags/i);
+  assert.match(sample, /never invent/i);
+  assert.doesNotMatch(sample, /JANGAN (minta|tulis)[^\n]*teks/i);
+});
+
+test('Social Post generate route uses the Brand Guidelines 2026 image-prompt builder', () => {
+  assert.match(openai, /IMAGE_PROMPT_SYSTEM/);
+  assert.match(openai, /'image-prompt': IMAGE_PROMPT_SYSTEM/);
+  assert.match(route, /getSmartSystemPrompt\('image-prompt'/);
+  assert.match(route, /buildSocialPostImagePromptUserMessage/);
+  assert.match(route, /selectedCaption\.hook/);
+  assert.match(route, /selectedCaption\.caption/);
+  assert.doesNotMatch(route, /Buat advertising creative prompt yang menerjemahkan post ini menjadi iklan siap tayang\.\nBrief:/);
+  assert.doesNotMatch(openai, /#2eb5c4/);
+  assert.doesNotMatch(openai, /small Dupoin logo in the (bottom|lower)-right corner/);
+});
