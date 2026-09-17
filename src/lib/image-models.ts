@@ -9,18 +9,19 @@ export const DEFAULT_IMAGE_MODEL = 'cx/gpt-5.5-image';
 
 /**
  * Social Post image-generation catalog served by the GorillaWorkout gateway
- * (`POST /images/generations`). Approved list only:
- * `cx/gpt-5.5-image`, `ag/nano-banana`, `ag/nano-banana-pro`.
+ * (`POST /images/generations`). Approved list:
+ * `cx/gpt-5.5-image`, `ag/nano-banana`, `ag/nano-banana-pro`, `ag/gemini-3.1-flash-image`.
  *
  * Intentionally omitted:
  * - `cx/gpt-5.4-image` — production probe: rejected on a ChatGPT account
  * - `ag/nanobanana` — do not alias Nano Banana
- * - `ag/gemini-3.1-flash-image` — live probe works, but not approved for this PR
+ * - other Gemini image ids besides `ag/gemini-3.1-flash-image`
  */
 export const AVAILABLE_IMAGE_MODELS: ImageModelInfo[] = [
   { id: 'cx/gpt-5.5-image', name: 'GPT-5.5 Image', description: 'Codex · image generation · high quality' },
   { id: 'ag/nano-banana', name: 'Nano Banana (Gemini / Antigravity)', description: 'Antigravity · Gemini T2I' },
   { id: 'ag/nano-banana-pro', name: 'Nano Banana Pro (Gemini / Antigravity)', description: 'Antigravity · Gemini T2I · higher quality' },
+  { id: 'ag/gemini-3.1-flash-image', name: 'Gemini 3.1 Flash Image (Antigravity)', description: 'Antigravity · Gemini 3.1 Flash T2I' },
 ];
 
 export const IMAGE_MODELS: readonly string[] = AVAILABLE_IMAGE_MODELS.map(model => model.id);
