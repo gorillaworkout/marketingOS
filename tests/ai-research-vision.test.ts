@@ -78,6 +78,18 @@ test('conversation titles prefer user text and stay backward compatible with sto
   ]);
 });
 
+test('parseStoredMessages accepts pg JSONB arrays instead of wiping history', () => {
+  const stored = [{
+    role: 'user',
+    content: 'Baca grafik ini',
+    images: [{ mimeType: 'image/png', dataUrl, name: 'chart.png' }],
+  }];
+  assert.deepEqual(parseStoredMessages(stored), stored);
+  assert.deepEqual(parseStoredMessages(JSON.stringify(stored)), stored);
+  assert.deepEqual(parseStoredMessages(null), []);
+  assert.deepEqual(parseStoredMessages({ role: 'user' }), []);
+});
+
 test('AI Research UI adds a file picker, previews, and sends images with the prompt', () => {
   const page = read('src/app/dashboard/ai-research/page.tsx');
   assert.match(page, /type="file"/);
@@ -85,7 +97,10 @@ test('AI Research UI adds a file picker, previews, and sends images with the pro
   assert.match(page, /multiple/);
   assert.match(page, /previewUrl/);
   assert.match(page, /JSON\.stringify\(\{ messages: \[userMsg\], conversationId: activeConvoId \}\)/);
-  assert.match(page, /dataUrl: await readFileAsDataUrl\(item\.file\)/);
+  assert.match(page, /fileToChatImage\(item\.file\)/);
+  assert.match(page, /skipNextLoadRef/);
+  assert.match(page, /d\.type === 'start'/);
+  assert.doesNotMatch(page, /setMessages\(data\.messages \|\| \[\]\)/);
   assert.match(page, /canSend/);
 });
 
@@ -95,8 +110,12 @@ test('AI Research chat route forwards multimodal content to the existing gateway
   assert.match(route, /rateLimit\(request\)/);
   assert.match(route, /parseChatRequest/);
   assert.match(route, /buildGatewayMessages/);
+  assert.match(route, /persistConversation/);
+  assert.match(route, /type: 'start'/);
+  assert.match(route, /jsonb_array_elements\(messages\)/);
   assert.match(route, /resolveFeatureModel\(auth\.id, 'ai-research'\)/);
   assert.match(route, /GORILLAWORKOUT_API_BASE.*\/chat\/completions/);
+  assert.doesNotMatch(route, /SELECT id, model, updated_at, messages FROM ai_research_conversations/);
   assert.doesNotMatch(route, /catch \(\(\) => 'ag\/gemini-3-flash-agent'\)/);
   assert.doesNotMatch(route, /OPENROUTER_API_KEY|callCodex|callClaude/);
 });

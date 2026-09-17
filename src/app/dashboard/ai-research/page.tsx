@@ -49,6 +49,30 @@ function readFileAsDataUrl(file: File): Promise<string> {
   });
 }
 
+const PREVIEW_MAX_EDGE = 1280;
+
+async function fileToChatImage(file: File): Promise<ChatImage> {
+  if (file.type === 'image/gif') {
+    return { mimeType: file.type, dataUrl: await readFileAsDataUrl(file), name: file.name };
+  }
+  try {
+    const bitmap = await createImageBitmap(file);
+    const scale = Math.min(1, PREVIEW_MAX_EDGE / Math.max(bitmap.width, bitmap.height));
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+    canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('Could not compress image');
+    ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    bitmap.close();
+    const mimeType = file.type === 'image/png' ? 'image/png' : 'image/jpeg';
+    const dataUrl = canvas.toDataURL(mimeType, mimeType === 'image/jpeg' ? 0.82 : undefined);
+    return { mimeType, dataUrl, name: file.name };
+  } catch {
+    return { mimeType: file.type, dataUrl: await readFileAsDataUrl(file), name: file.name };
+  }
+}
+
 export default function AIResearchPage() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeConvoId, setActiveConvoId] = useState<string | null>(null);
@@ -67,6 +91,7 @@ export default function AIResearchPage() {
   const chatEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const skipNextLoadRef = useRef(false);
 
   useEffect(() => {
     fetch('/api/settings/model')
@@ -110,11 +135,29 @@ export default function AIResearchPage() {
   useEffect(() => { loadConversations(); }, [loadConversations]);
 
   useEffect(() => {
-    if (!activeConvoId) { setMessages([]); setModel(''); return; }
+    if (!activeConvoId) return;
+    if (skipNextLoadRef.current) {
+      skipNextLoadRef.current = false;
+      return;
+    }
+    let cancelled = false;
     fetch(`/api/ai-research/chat?id=${activeConvoId}`)
-      .then(res => res.json())
-      .then(data => { setMessages(data.messages || []); setModel(data.model || ''); })
-      .catch(() => setError('Failed to load conversation'));
+      .then(async res => {
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || !Array.isArray(data.messages)) {
+          throw new Error(typeof data.error === 'string' ? data.error : 'Failed to load conversation');
+        }
+        return data as { messages: Message[]; model?: string };
+      })
+      .then(data => {
+        if (cancelled) return;
+        setMessages(data.messages);
+        setModel(data.model || '');
+      })
+      .catch(() => {
+        if (!cancelled) setError('Failed to load conversation');
+      });
+    return () => { cancelled = true; };
   }, [activeConvoId]);
 
   useEffect(() => {
@@ -176,11 +219,7 @@ export default function AIResearchPage() {
 
     let images: ChatImage[] = [];
     try {
-      images = await Promise.all(pendingImages.map(async item => ({
-        mimeType: item.file.type,
-        dataUrl: await readFileAsDataUrl(item.file),
-        name: item.file.name,
-      })));
+      images = await Promise.all(pendingImages.map(item => fileToChatImage(item.file)));
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not read the attached image');
       return;
@@ -219,12 +258,23 @@ export default function AIResearchPage() {
         for (const line of lines) {
           const t = line.trim();
           if (!t.startsWith('data: ')) continue;
-          const d = JSON.parse(t.slice(6));
-          if (d.type === 'token') { content += d.content; setStreaming(content); }
+          let d: { type?: string; content?: string; conversationId?: string; model?: string; error?: string };
+          try { d = JSON.parse(t.slice(6)); } catch { continue; }
+          if (d.type === 'start') {
+            if (d.conversationId && !activeConvoId) {
+              skipNextLoadRef.current = true;
+              setActiveConvoId(d.conversationId);
+            }
+            if (d.model) setModel(d.model);
+            loadConversations();
+          } else if (d.type === 'token') { content += d.content || ''; setStreaming(content); }
           else if (d.type === 'done') {
             setStreaming('');
             setMessages(prev => [...prev, { role: 'assistant', content }]);
-            if (d.conversationId && !activeConvoId) setActiveConvoId(d.conversationId);
+            if (d.conversationId && !activeConvoId) {
+              skipNextLoadRef.current = true;
+              setActiveConvoId(d.conversationId);
+            }
             setModel(d.model || model);
             loadConversations();
           } else if (d.type === 'error') throw new Error(d.error);

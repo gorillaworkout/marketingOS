@@ -32,7 +32,8 @@ export type GatewayMessage = {
   content: string | GatewayContentPart[];
 };
 
-const DATA_URL_PATTERN = /^data:(image\/(?:jpeg|png|webp|gif));base64,([A-Za-z0-9+/]+={0,2})$/;
+const DATA_URL_PREFIX = 'data:';
+const BASE64_MARKER = ';base64,';
 
 export function isAllowedImageType(value: unknown): value is AiResearchImageType {
   return typeof value === 'string'
@@ -50,6 +51,28 @@ function decodeBase64Length(base64: string): number {
   return Math.floor((base64.length * 3) / 4) - padding;
 }
 
+export function splitImageDataUrl(dataUrl: string): { mimeType: AiResearchImageType; base64: string } | null {
+  const trimmed = dataUrl.trim();
+  const markerAt = trimmed.indexOf(BASE64_MARKER);
+  if (!trimmed.startsWith(DATA_URL_PREFIX) || markerAt < 0) return null;
+  const mimeType = trimmed.slice(DATA_URL_PREFIX.length, markerAt);
+  const base64 = trimmed.slice(markerAt + BASE64_MARKER.length);
+  if (!isAllowedImageType(mimeType) || !base64) return null;
+  return { mimeType, base64 };
+}
+
+/** pg returns JSONB as objects; some callers still pass serialized strings. */
+export function coerceJsonArray(raw: unknown): unknown[] | null {
+  if (Array.isArray(raw)) return raw;
+  if (typeof raw !== 'string' || !raw.trim()) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
 export function validateImageAttachment(value: unknown, index = 0): AiResearchImage {
   if (!value || typeof value !== 'object') {
     throw imageAttachmentError(`Image ${index + 1} is invalid.`);
@@ -60,20 +83,15 @@ export function validateImageAttachment(value: unknown, index = 0): AiResearchIm
     throw imageAttachmentError(`Image ${index + 1} is missing image data.`);
   }
 
-  const match = image.dataUrl.trim().match(DATA_URL_PATTERN);
-  if (!match) {
+  const parsed = splitImageDataUrl(image.dataUrl);
+  if (!parsed) {
     throw imageAttachmentError('Unsupported image type. Use JPEG, PNG, WebP, or GIF.');
   }
-
-  const mimeType = match[1];
-  if (!isAllowedImageType(mimeType)) {
-    throw imageAttachmentError('Unsupported image type. Use JPEG, PNG, WebP, or GIF.');
-  }
-  if (typeof image.mimeType === 'string' && image.mimeType !== mimeType) {
+  if (typeof image.mimeType === 'string' && image.mimeType !== parsed.mimeType) {
     throw imageAttachmentError(`Image ${index + 1} type does not match the file data.`);
   }
 
-  const bytes = decodeBase64Length(match[2]);
+  const bytes = decodeBase64Length(parsed.base64);
   if (bytes <= 0) {
     throw imageAttachmentError(`Image ${index + 1} is empty.`);
   }
@@ -82,7 +100,11 @@ export function validateImageAttachment(value: unknown, index = 0): AiResearchIm
   }
 
   const name = typeof image.name === 'string' ? image.name.trim().slice(0, 120) : undefined;
-  return { mimeType, dataUrl: `data:${mimeType};base64,${match[2]}`, name: name || undefined };
+  return {
+    mimeType: parsed.mimeType,
+    dataUrl: `${DATA_URL_PREFIX}${parsed.mimeType}${BASE64_MARKER}${parsed.base64}`,
+    name: name || undefined,
+  };
 }
 
 export function validateImageAttachments(value: unknown): AiResearchImage[] {
@@ -96,8 +118,8 @@ export function validateImageAttachments(value: unknown): AiResearchImage[] {
 
   const images = value.map((item, index) => validateImageAttachment(item, index));
   const totalBytes = images.reduce((sum, image) => {
-    const match = image.dataUrl.match(DATA_URL_PATTERN);
-    return sum + (match ? decodeBase64Length(match[2]) : 0);
+    const parsed = splitImageDataUrl(image.dataUrl);
+    return sum + (parsed ? decodeBase64Length(parsed.base64) : 0);
   }, 0);
   if (totalBytes > AI_RESEARCH_MAX_TOTAL_IMAGE_BYTES) {
     throw imageAttachmentError('Attached images exceed the 6 MB total limit.');
@@ -216,22 +238,21 @@ export function buildGatewayMessages(
   ];
 }
 
-export function parseStoredMessages(raw: string | null | undefined): AiResearchChatMessage[] {
-  if (!raw) return [];
-  try {
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return parsed.map(item => {
-      try {
-        return normalizeChatMessage(item);
-      } catch {
-        if (!item || typeof item !== 'object') return null;
-        const role = item.role === 'assistant' ? 'assistant' : item.role === 'user' ? 'user' : null;
-        if (!role) return null;
-        return { role, content: extractMessageText(item) };
-      }
-    }).filter((item): item is AiResearchChatMessage => Boolean(item));
-  } catch {
-    return [];
-  }
+export function parseStoredMessages(raw: unknown): AiResearchChatMessage[] {
+  const parsed = coerceJsonArray(raw);
+  if (!parsed) return [];
+  return parsed.map(item => {
+    try {
+      return normalizeChatMessage(item);
+    } catch {
+      if (!item || typeof item !== 'object') return null;
+      const role = (item as { role?: unknown }).role === 'assistant'
+        ? 'assistant'
+        : (item as { role?: unknown }).role === 'user'
+          ? 'user'
+          : null;
+      if (!role) return null;
+      return { role, content: extractMessageText(item as { content?: unknown }) };
+    }
+  }).filter((item): item is AiResearchChatMessage => Boolean(item));
 }
