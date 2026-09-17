@@ -103,7 +103,7 @@ async function runImageJob(job: ImageJob, prompt: string, brief: string, type: s
 
     const { payload, usedModel, fallbackFrom, fallbackMessage } = await generateWithAntigravityCapacityFallback(
       safeModel,
-      (attemptModel) => requestGatewayImage(attemptModel, gatewayPrompt, generationSpec.size),
+      (attemptModel) => requestGatewayImage(attemptModel, gatewayPrompt, generationSpec),
       {
         onRetry: (fallbackModel, fromModel) => {
           console.warn(`[generate-image] ${fromModel} capacity/quota exhausted; retrying once with ${fallbackModel}`);
@@ -182,7 +182,11 @@ type GatewayImagePayload = {
   cost?: unknown;
 };
 
-async function requestGatewayImage(model: string, prompt: string, size: string): Promise<GatewayImagePayload> {
+async function requestGatewayImage(
+  model: string,
+  gatewayPrompt: string,
+  generationSpec: { size: string },
+): Promise<GatewayImagePayload> {
   const response = await fetch(`${GORILLAWORKOUT_API_BASE}/images/generations`, {
     method: 'POST',
     headers: {
@@ -193,9 +197,9 @@ async function requestGatewayImage(model: string, prompt: string, size: string):
     },
     body: JSON.stringify({
       model,
-      prompt,
+      prompt: gatewayPrompt,
       n: 1,
-      size,
+      size: generationSpec.size,
     }),
     signal: AbortSignal.timeout(240_000),
   });
