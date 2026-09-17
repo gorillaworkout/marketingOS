@@ -4,6 +4,11 @@ import { queryOne, execute } from '@/lib/database';
 import { rateLimit } from '@/lib/rate-limit';
 import { createImageJobStore, type ImageJob, type ImageJobResult } from '@/lib/image-job-status';
 import { getImageGenerationSpec, parseImageAspectRatio, type ImageAspectRatio } from '@/lib/image-aspect-ratio';
+import {
+  generateWithAntigravityCapacityFallback,
+  isCapacityOrRateLimitFailure,
+  parseImageApiErrorStatus,
+} from '@/lib/image-generation-fallback';
 import { DEFAULT_IMAGE_MODEL, imageModelLabel, resolveImageModel } from '@/lib/image-models';
 import { logTokenUsage } from '@/lib/token-log';
 import { parseImageGenerationUsage } from '@/lib/token-usage';
@@ -96,33 +101,21 @@ async function runImageJob(job: ImageJob, prompt: string, brief: string, type: s
     const generationSpec = getImageGenerationSpec(aspectRatio);
     const gatewayPrompt = `${prompt}\n\n${generationSpec.promptSuffix}`;
 
-    const response = await fetch(`${GORILLAWORKOUT_API_BASE}/images/generations`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${GORILLAWORKOUT_API_KEY}`,
-        'HTTP-Referer': 'https://marketingos.local',
-        'X-Title': 'MarketingOS',
+    const { payload, usedModel, fallbackFrom, fallbackMessage } = await generateWithAntigravityCapacityFallback(
+      safeModel,
+      (attemptModel) => requestGatewayImage(attemptModel, gatewayPrompt, generationSpec),
+      {
+        onRetry: (fallbackModel, fromModel) => {
+          console.warn(`[generate-image] ${fromModel} capacity/quota exhausted; retrying once with ${fallbackModel}`);
+          imageJobs.update(job.id, job.ownerId, {
+            status: 'generating',
+            progress: 55,
+            message: `Antigravity quota full — retrying with ${imageModelLabel(fallbackModel)} instead of ${imageModelLabel(fromModel)}...`,
+          });
+        },
       },
-      body: JSON.stringify({
-        model: safeModel,
-        prompt: gatewayPrompt,
-        n: 1,
-        size: generationSpec.size,
-      }),
-      signal: AbortSignal.timeout(240_000),
-    });
+    );
 
-    if (!response.ok) {
-      const errText = await response.text();
-      throw new Error(`Image API error ${response.status}: ${errText.slice(0, 500)}`);
-    }
-
-    const payload = await response.json() as {
-      data?: Array<{ b64_json?: string; url?: string }>;
-      usage?: unknown;
-      cost?: unknown;
-    };
     const first = payload?.data?.[0];
     if (!first) throw new Error('Image API returned no image.');
 
@@ -150,19 +143,25 @@ async function runImageJob(job: ImageJob, prompt: string, brief: string, type: s
       imageUrl,
       fileName,
       sopName,
-      model: imageModelLabel(safeModel),
+      model: imageModelLabel(usedModel),
+      usedModel,
       aspectRatio,
+      ...(fallbackFrom ? { fallbackFrom, fallbackMessage } : {}),
     };
     imageJobs.update(job.id, job.ownerId, {
-      status: 'done', progress: 100, message: '✅ Image generated!', result,
+      status: 'done',
+      progress: 100,
+      message: fallbackMessage ? `✅ ${fallbackMessage}` : '✅ Image generated!',
+      result,
     });
     try {
-      await logImageGenerationUsage(job.ownerId, taskId, safeModel, payload);
+      await logImageGenerationUsage(job.ownerId, taskId, usedModel, payload);
     } catch (error) {
       console.error('[generate-image] Failed to log token usage:', error);
     }
     void recordImageOnTask(taskId, job.ownerId, {
-      imageUrl, fileName, sopName, model: safeModel, prompt, aspectRatio,
+      imageUrl, fileName, sopName, model: usedModel, prompt, aspectRatio,
+      ...(fallbackFrom ? { fallbackFrom, fallbackMessage } : {}),
     });
   } catch (error) {
     const reason = error instanceof Error ? error.message : 'unknown error';
@@ -177,11 +176,40 @@ async function runImageJob(job: ImageJob, prompt: string, brief: string, type: s
   }
 }
 
-function isCapacityOrRateLimit(lower: string, status: number): boolean {
-  if (status === 429) return true;
-  if (lower.includes('usage limit') || lower.includes('rate limit') || lower.includes('quota')) return true;
-  if (lower.includes('exhausted your capacity') || lower.includes('capacity exhausted')) return true;
-  return lower.includes('exhausted') && lower.includes('capacity');
+type GatewayImagePayload = {
+  data?: Array<{ b64_json?: string; url?: string }>;
+  usage?: unknown;
+  cost?: unknown;
+};
+
+async function requestGatewayImage(
+  model: string,
+  gatewayPrompt: string,
+  generationSpec: { size: string },
+): Promise<GatewayImagePayload> {
+  const response = await fetch(`${GORILLAWORKOUT_API_BASE}/images/generations`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${GORILLAWORKOUT_API_KEY}`,
+      'HTTP-Referer': 'https://marketingos.local',
+      'X-Title': 'MarketingOS',
+    },
+    body: JSON.stringify({
+      model,
+      prompt: gatewayPrompt,
+      n: 1,
+      size: generationSpec.size,
+    }),
+    signal: AbortSignal.timeout(240_000),
+  });
+
+  if (!response.ok) {
+    const errText = await response.text();
+    throw new Error(`Image API error ${response.status}: ${errText.slice(0, 500)}`);
+  }
+
+  return await response.json() as GatewayImagePayload;
 }
 
 /**
@@ -191,14 +219,15 @@ function isCapacityOrRateLimit(lower: string, status: number): boolean {
  * HTTP status plus a few marker strings are enough to tell "wait and retry"
  * apart from "tell an admin". Antigravity T2I 429s ("exhausted your capacity")
  * are often wrapped by the gateway/CF as HTTP 502 — capacity markers must win
- * over the generic 5xx outage copy.
+ * over the generic 5xx outage copy. Capacity detection is shared with
+ * `generateWithAntigravityCapacityFallback`.
  */
 export function explainImageFailure(reason: string, model: string): string {
-  const status = Number(/Image API error (\d{3})/.exec(reason)?.[1] ?? 0);
+  const status = parseImageApiErrorStatus(reason);
   const lower = reason.toLowerCase();
   const reset = /reset after ([^)"]+)/i.exec(reason)?.[1]?.trim();
   const waitHint = reset ? ` Try again in ${reset}.` : ' Try again in a few minutes.';
-  const capacityLimited = isCapacityOrRateLimit(lower, status);
+  const capacityLimited = isCapacityOrRateLimitFailure(reason);
 
   if (lower.includes('is not configured')) {
     return 'Image generation is not configured on the server (missing API key). Please contact the administrator.';
@@ -243,7 +272,16 @@ export function explainImageFailure(reason: string, model: string): string {
 async function recordImageOnTask(
   taskId: string | null,
   userId: string,
-  entry: { imageUrl: string; fileName: string; sopName: string; model: string; prompt: string; aspectRatio: ImageAspectRatio },
+  entry: {
+    imageUrl: string;
+    fileName: string;
+    sopName: string;
+    model: string;
+    prompt: string;
+    aspectRatio: ImageAspectRatio;
+    fallbackFrom?: string;
+    fallbackMessage?: string;
+  },
 ) {
   if (!taskId) return;
   try {

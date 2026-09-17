@@ -7,7 +7,14 @@ export interface ImageJobResult {
   imageUrl: string;
   fileName?: string;
   sopName?: string;
+  /** Display label of the model that actually produced the image. */
   model?: string;
+  /** Gateway id of the model that actually produced the image. */
+  usedModel?: string;
+  /** Original Antigravity model id when capacity fallback ran. */
+  fallbackFrom?: string;
+  /** Toast-friendly notice when capacity fallback ran. */
+  fallbackMessage?: string;
   aspectRatio?: ImageAspectRatio;
 }
 
