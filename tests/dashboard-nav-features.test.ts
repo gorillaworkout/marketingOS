@@ -42,6 +42,9 @@ test('Article Market News nav is hidden unless admin or article-market-news is e
   assert.equal(isDashboardNavItemVisible(sopItem, admin), true);
   assert.equal(isDashboardNavItemVisible(aiResearchItem, memberWithout), true);
   assert.equal(isDashboardNavItemVisible(aiResearchItem, { role: 'member', features: ['social-post'] }), false);
+  assert.equal(isDashboardNavItemVisible({ href: '/dashboard' }, memberWithout), true);
+  assert.equal(isDashboardNavItemVisible({ href: '/dashboard/history', adminOnly: true }, memberWithout), false);
+  assert.equal(isDashboardNavItemVisible({ href: '/dashboard/history', adminOnly: true }, admin), true);
 });
 
 test('visiting /dashboard/sop is blocked for members without article-market-news', () => {
