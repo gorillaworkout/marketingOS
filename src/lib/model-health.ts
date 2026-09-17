@@ -1,12 +1,16 @@
 export const MODEL_HEALTH_TIMEOUT_MS = 18_000;
-export const MODEL_HEALTH_MAX_TOKENS = 4;
+export const MODEL_HEALTH_MAX_TOKENS = 48;
 export const MODEL_HEALTH_PROMPT = 'ping';
-export const MODEL_HEALTH_ERROR_MAX_LENGTH = 160;
+export const MODEL_HEALTH_ERROR_MAX_LENGTH = 180;
 
-const GORILLAWORKOUT_API_BASE = process.env.GORILLAWORKOUT_API_BASE || 'https://llm.gorillaworkout.id/v1';
+/** Cloudflare 1010 blocks non-browser User-Agents on the production gateway. */
+export const GATEWAY_BROWSER_USER_AGENT =
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
+
+const GORILLAWORKOUT_API_BASE = process.env.GORILLAWORKOUT_API_BASE || 'https://llmdupoin.gorillaworkout.id/v1';
 const GORILLAWORKOUT_API_KEY = process.env.GORILLAWORKOUT_API_KEY || '';
 
-export type ModelHealthStatus = 'ok' | 'fail';
+export type ModelHealthStatus = 'ok' | 'fail' | 'stale';
 
 export interface ModelHealthTarget {
   id: string;
@@ -19,6 +23,7 @@ export interface ModelHealthResult {
   status: ModelHealthStatus;
   httpStatus: number | null;
   error: string | null;
+  snippet: string | null;
   checkedAt: string;
   latencyMs: number;
 }
@@ -50,14 +55,72 @@ export function sanitizeHealthError(raw: string, secrets: string[] = []): string
 function extractErrorMessage(value: unknown): string {
   if (!value) return '';
   if (typeof value === 'string') return value;
-  if (typeof value === 'object' && 'message' in value && typeof value.message === 'string') {
-    return value.message;
+  if (typeof value !== 'object') return '';
+  const record = value as { message?: unknown; type?: unknown; code?: unknown; error?: unknown };
+  const message = typeof record.message === 'string' ? record.message : '';
+  const type = typeof record.type === 'string' ? record.type : typeof record.code === 'string' ? record.code : '';
+  if (message && type && !message.toLowerCase().includes(type.toLowerCase())) {
+    return `${type}: ${message}`;
   }
+  if (message) return message;
+  if (type) return type;
+  if (record.error) return extractErrorMessage(record.error);
   try {
     return JSON.stringify(value);
   } catch {
     return 'Gateway error';
   }
+}
+
+function extractCompletionText(payload: unknown): string {
+  if (!payload || typeof payload !== 'object') return '';
+  const choices = (payload as { choices?: unknown }).choices;
+  if (!Array.isArray(choices) || !choices[0] || typeof choices[0] !== 'object') return '';
+  const choice = choices[0] as { message?: { content?: unknown }; delta?: { content?: unknown }; text?: unknown };
+  const content = choice.message?.content ?? choice.delta?.content ?? choice.text;
+  if (typeof content === 'string') return content.trim();
+  if (!Array.isArray(content)) return '';
+  return content
+    .map(part => (part && typeof part === 'object' && 'text' in part && typeof part.text === 'string' ? part.text : ''))
+    .filter(Boolean)
+    .join(' ')
+    .trim();
+}
+
+export function extractGatewaySnippet(raw: string): string {
+  const trimmed = raw.trim();
+  if (!trimmed) return '';
+  if (/error code 1010|cf-error-code[^0-9]*1010|cloudflare/i.test(trimmed) && /1010/.test(trimmed)) {
+    return 'Cloudflare blocked the probe (error 1010)';
+  }
+  try {
+    const parsed = JSON.parse(trimmed) as unknown;
+    const fromError = parsed && typeof parsed === 'object' && 'error' in parsed
+      ? extractErrorMessage((parsed as { error?: unknown }).error)
+      : '';
+    if (fromError) return fromError;
+    const fromMessage = parsed && typeof parsed === 'object' && 'message' in parsed
+      ? extractErrorMessage(parsed)
+      : '';
+    if (fromMessage) return fromMessage;
+    const content = extractCompletionText(parsed);
+    if (content) return content;
+  } catch {
+    // Not JSON — fall through to HTML/text stripping.
+  }
+  return trimmed.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+export function looksStaleOrDeprecated(content: string): boolean {
+  const lower = content.toLowerCase();
+  return (
+    /no longer available/.test(lower)
+    || /deprecated/.test(lower)
+    || /has been (retired|removed|replaced|discontinued)/.test(lower)
+    || /switch to\s+\S/.test(lower)
+    || /please (use|switch|upgrade|migrate)/.test(lower)
+    || /gemini 3\.5/.test(lower)
+  );
 }
 
 export function describeHealthFailure(options: {
@@ -67,14 +130,20 @@ export function describeHealthFailure(options: {
   secrets?: string[];
 }): string {
   if (options.timedOut) return 'Timed out waiting for gateway';
-  const sanitized = sanitizeHealthError(options.raw, options.secrets);
+  const extracted = extractGatewaySnippet(options.raw);
+  const sanitized = sanitizeHealthError(extracted || options.raw, options.secrets);
+  if (/cloudflare blocked the probe \(error 1010\)/i.test(sanitized) || /error 1010/.test(sanitized)) {
+    return 'Cloudflare blocked the probe (error 1010)';
+  }
   switch (options.httpStatus) {
     case 401:
-      return 'Auth failed (expired or invalid API key)';
+      return sanitized && !/^auth failed/i.test(sanitized)
+        ? `Auth failed (expired or invalid API key): ${sanitized}`
+        : 'Auth failed (expired or invalid API key)';
     case 403:
-      return 'Forbidden by gateway';
+      return sanitized && sanitized !== 'Forbidden by gateway' ? sanitized : 'Forbidden by gateway';
     case 404:
-      return 'Model not found on gateway';
+      return sanitized && !/not found/i.test(sanitized) ? sanitized : 'Model not found on gateway';
     case 429:
       return 'Gateway rate limited';
     default:
@@ -115,6 +184,7 @@ function result(
   status: ModelHealthStatus,
   httpStatus: number | null,
   error: string | null,
+  snippet: string | null,
   startedAt: number,
   now: () => Date,
 ): ModelHealthResult {
@@ -124,6 +194,7 @@ function result(
     status,
     httpStatus,
     error,
+    snippet,
     checkedAt: now().toISOString(),
     latencyMs: Math.max(0, Date.now() - startedAt),
   };
@@ -131,7 +202,7 @@ function result(
 
 /**
  * Cheap non-streaming chat/completions ping against the GorillaWorkout gateway.
- * Never returns API keys or Authorization material.
+ * Uses GORILLAWORKOUT_API_BASE / GORILLAWORKOUT_API_KEY. Never returns API keys.
  */
 export async function probeGatewayModel(
   modelId: string,
@@ -147,7 +218,7 @@ export async function probeGatewayModel(
   const startedAt = Date.now();
 
   if (!apiKey) {
-    return result(modelId, name, 'fail', null, 'Gateway is not configured', startedAt, now);
+    return result(modelId, name, 'fail', null, 'Gateway is not configured', null, startedAt, now);
   }
 
   const controller = new AbortController();
@@ -158,7 +229,9 @@ export async function probeGatewayModel(
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        Accept: 'application/json',
         Authorization: `Bearer ${apiKey}`,
+        'User-Agent': GATEWAY_BROWSER_USER_AGENT,
         'HTTP-Referer': 'https://marketing-aws.gorillaworkout.id',
         'X-Title': 'MarketingOS AI Research',
       },
@@ -173,6 +246,8 @@ export async function probeGatewayModel(
     });
 
     const rawBody = (await response.text()).slice(0, 2_000);
+    const snippet = sanitizeHealthError(extractGatewaySnippet(rawBody), secrets) || null;
+
     if (!response.ok) {
       return result(
         modelId,
@@ -180,6 +255,7 @@ export async function probeGatewayModel(
         'fail',
         response.status,
         describeHealthFailure({ httpStatus: response.status, raw: rawBody, secrets }),
+        snippet,
         startedAt,
         now,
       );
@@ -189,20 +265,18 @@ export async function probeGatewayModel(
     try {
       payload = JSON.parse(rawBody);
     } catch {
-      return result(modelId, name, 'fail', response.status, 'Invalid JSON from gateway', startedAt, now);
+      return result(modelId, name, 'fail', response.status, 'Invalid JSON from gateway', snippet, startedAt, now);
     }
 
     if (payload && typeof payload === 'object' && 'error' in payload && payload.error) {
+      const message = extractErrorMessage(payload.error);
       return result(
         modelId,
         name,
         'fail',
         response.status,
-        describeHealthFailure({
-          httpStatus: response.status,
-          raw: extractErrorMessage(payload.error),
-          secrets,
-        }),
+        describeHealthFailure({ httpStatus: response.status, raw: message || rawBody, secrets }),
+        snippet,
         startedAt,
         now,
       );
@@ -212,10 +286,25 @@ export async function probeGatewayModel(
       ? (payload as { choices?: unknown }).choices
       : null;
     if (!Array.isArray(choices)) {
-      return result(modelId, name, 'fail', response.status, 'Gateway response missing choices', startedAt, now);
+      return result(modelId, name, 'fail', response.status, 'Gateway response missing choices', snippet, startedAt, now);
     }
 
-    return result(modelId, name, 'ok', response.status, null, startedAt, now);
+    const content = extractCompletionText(payload);
+    const contentSnippet = content ? sanitizeHealthError(content, secrets) : snippet;
+    if (content && looksStaleOrDeprecated(content)) {
+      return result(
+        modelId,
+        name,
+        'stale',
+        response.status,
+        'Reachable, but the reply looks like a deprecation or switch notice',
+        contentSnippet,
+        startedAt,
+        now,
+      );
+    }
+
+    return result(modelId, name, 'ok', response.status, null, contentSnippet, startedAt, now);
   } catch (error) {
     if (isAbortError(error)) {
       return result(
@@ -224,6 +313,7 @@ export async function probeGatewayModel(
         'fail',
         null,
         describeHealthFailure({ httpStatus: null, raw: '', timedOut: true, secrets }),
+        null,
         startedAt,
         now,
       );
@@ -235,6 +325,7 @@ export async function probeGatewayModel(
       'fail',
       null,
       describeHealthFailure({ httpStatus: null, raw, secrets }),
+      sanitizeHealthError(raw, secrets) || null,
       startedAt,
       now,
     );

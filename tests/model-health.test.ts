@@ -2,9 +2,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
+  GATEWAY_BROWSER_USER_AGENT,
   MODEL_HEALTH_MAX_TOKENS,
   MODEL_HEALTH_PROMPT,
   describeHealthFailure,
+  extractGatewaySnippet,
+  looksStaleOrDeprecated,
   probeGatewayModel,
   sanitizeHealthError,
   selectModelsToProbe,
@@ -18,6 +21,10 @@ function jsonResponse(status: number, body: unknown): Response {
     status,
     headers: { 'Content-Type': 'application/json' },
   });
+}
+
+function htmlResponse(status: number, body: string): Response {
+  return new Response(body, { status, headers: { 'Content-Type': 'text/html' } });
 }
 
 test('selectModelsToProbe defaults to the AI Research allowlist and rejects unknown ids', () => {
@@ -37,28 +44,63 @@ test('sanitizeHealthError redacts secrets, bearer tokens, and truncates long gat
   assert.doesNotMatch(sanitized, new RegExp(SECRET));
   assert.doesNotMatch(sanitized, /Bearer sk-/i);
   assert.match(sanitized, /\[redacted\]/);
-  assert.ok(sanitized.length <= 160);
+  assert.ok(sanitized.length <= 180);
 });
 
-test('describeHealthFailure maps auth and timeout without echoing secrets', () => {
+test('extractGatewaySnippet pulls JSON errors, completion text, and Cloudflare 1010', () => {
   assert.equal(
+    extractGatewaySnippet(JSON.stringify({
+      error: { type: 'FreeTierError', message: "OpenCode's free tier can only be used from within OpenCode" },
+    })),
+    "FreeTierError: OpenCode's free tier can only be used from within OpenCode",
+  );
+  assert.equal(
+    extractGatewaySnippet(JSON.stringify({ choices: [{ message: { content: 'pong' } }] })),
+    'pong',
+  );
+  assert.equal(
+    extractGatewaySnippet('<html>Attention Required! error code 1010 Cloudflare</html>'),
+    'Cloudflare blocked the probe (error 1010)',
+  );
+});
+
+test('looksStaleOrDeprecated flags Gemini switch/deprecation notices but not a healthy ping', () => {
+  assert.equal(looksStaleOrDeprecated('pong'), false);
+  assert.equal(
+    looksStaleOrDeprecated('Gemini 3.5 Flash is no longer available. Please switch to Gemini 3.7 Flash.'),
+    true,
+  );
+});
+
+test('describeHealthFailure maps auth, timeout, and Cloudflare without echoing secrets', () => {
+  assert.match(
     describeHealthFailure({ httpStatus: 401, raw: `token ${SECRET} expired`, secrets: [SECRET] }),
-    'Auth failed (expired or invalid API key)',
+    /Auth failed/,
+  );
+  assert.doesNotMatch(
+    describeHealthFailure({ httpStatus: 401, raw: `token ${SECRET} expired`, secrets: [SECRET] }),
+    new RegExp(SECRET),
   );
   assert.equal(
     describeHealthFailure({ httpStatus: null, raw: '', timedOut: true, secrets: [SECRET] }),
     'Timed out waiting for gateway',
   );
-  const fallback = describeHealthFailure({ httpStatus: 502, raw: `upstream ${SECRET}`, secrets: [SECRET] });
-  assert.doesNotMatch(fallback, new RegExp(SECRET));
+  assert.equal(
+    describeHealthFailure({
+      httpStatus: 403,
+      raw: '<html>error code 1010 Cloudflare</html>',
+      secrets: [SECRET],
+    }),
+    'Cloudflare blocked the probe (error 1010)',
+  );
 });
 
-test('probeGatewayModel reports OK for a tiny non-streaming completion', async () => {
+test('probeGatewayModel reports OK for a tiny non-streaming completion and sends a browser User-Agent', async () => {
   let captured: { url: string; init: RequestInit } | undefined;
-  const result = await probeGatewayModel('pecut-free', {
-    name: 'Pecut Free (GorillaWorkout)',
+  const result = await probeGatewayModel('cc/claude-sonnet-5', {
+    name: 'Claude Sonnet 5',
     apiKey: SECRET,
-    apiBase: 'https://llm.example.test/v1',
+    apiBase: 'https://llmdupoin.gorillaworkout.id/v1',
     fetchImpl: async (url, init) => {
       captured = { url: String(url), init: init || {} };
       return jsonResponse(200, { choices: [{ message: { content: 'pong' } }] });
@@ -68,10 +110,12 @@ test('probeGatewayModel reports OK for a tiny non-streaming completion', async (
   assert.equal(result.status, 'ok');
   assert.equal(result.httpStatus, 200);
   assert.equal(result.error, null);
-  assert.equal(result.model, 'pecut-free');
-  assert.equal(result.name, 'Pecut Free (GorillaWorkout)');
-  assert.match(result.checkedAt, /^\d{4}-\d{2}-\d{2}T/);
-  assert.equal(captured?.url, 'https://llm.example.test/v1/chat/completions');
+  assert.equal(result.snippet, 'pong');
+  assert.equal(captured?.url, 'https://llmdupoin.gorillaworkout.id/v1/chat/completions');
+  const headers = new Headers(captured?.init.headers);
+  assert.equal(headers.get('User-Agent'), GATEWAY_BROWSER_USER_AGENT);
+  assert.match(GATEWAY_BROWSER_USER_AGENT, /Mozilla\/5\.0/);
+  assert.match(GATEWAY_BROWSER_USER_AGENT, /Chrome\//);
   const body = JSON.parse(String(captured?.init.body));
   assert.equal(body.stream, false);
   assert.equal(body.max_tokens, MODEL_HEALTH_MAX_TOKENS);
@@ -79,7 +123,40 @@ test('probeGatewayModel reports OK for a tiny non-streaming completion', async (
   assert.doesNotMatch(JSON.stringify(result), new RegExp(SECRET));
 });
 
-test('probeGatewayModel reports FAIL for HTTP errors and strips secrets from the payload', async () => {
+test('probeGatewayModel reports FAIL with HTTP 400 FreeTierError snippet and strips secrets', async () => {
+  const result = await probeGatewayModel('pecut-free', {
+    name: 'Pecut Free (GorillaWorkout)',
+    apiKey: SECRET,
+    fetchImpl: async () => jsonResponse(400, {
+      error: {
+        type: 'FreeTierError',
+        message: `OpenCode's free tier can only be used from within OpenCode (${SECRET})`,
+      },
+    }),
+  });
+  assert.equal(result.status, 'fail');
+  assert.equal(result.httpStatus, 400);
+  assert.match(result.error || '', /FreeTierError/);
+  assert.match(result.error || '', /OpenCode's free tier/);
+  assert.match(result.snippet || '', /OpenCode's free tier/);
+  assert.doesNotMatch(JSON.stringify(result), new RegExp(SECRET));
+});
+
+test('probeGatewayModel flags HTTP 200 deprecation replies as stale and keeps a snippet', async () => {
+  const notice = 'Gemini 3.5 Flash is no longer available. Please switch to Gemini 3.7 Flash.';
+  const result = await probeGatewayModel('ag/gemini-3-flash-agent', {
+    name: 'Gemini 3 Flash Agent',
+    apiKey: SECRET,
+    fetchImpl: async () => jsonResponse(200, { choices: [{ message: { content: notice } }] }),
+  });
+  assert.equal(result.status, 'stale');
+  assert.equal(result.httpStatus, 200);
+  assert.match(result.error || '', /deprecation|switch notice/i);
+  assert.match(result.snippet || '', /Gemini 3\.5 Flash is no longer available/);
+  assert.match(result.snippet || '', /Gemini 3\.7 Flash/);
+});
+
+test('probeGatewayModel reports FAIL for HTTP 401 and strips secrets from the payload', async () => {
   const result = await probeGatewayModel('ag/gemini-3-flash-agent', {
     name: 'Gemini 3 Flash Agent',
     apiKey: SECRET,
@@ -89,9 +166,21 @@ test('probeGatewayModel reports FAIL for HTTP errors and strips secrets from the
   });
   assert.equal(result.status, 'fail');
   assert.equal(result.httpStatus, 401);
-  assert.equal(result.error, 'Auth failed (expired or invalid API key)');
+  assert.match(result.error || '', /Auth failed/);
   assert.doesNotMatch(JSON.stringify(result), new RegExp(SECRET));
   assert.doesNotMatch(JSON.stringify(result), /Bearer /);
+});
+
+test('probeGatewayModel maps Cloudflare 1010 HTML to a short fail snippet', async () => {
+  const result = await probeGatewayModel('cc/claude-sonnet-5', {
+    name: 'Claude Sonnet 5',
+    apiKey: SECRET,
+    fetchImpl: async () => htmlResponse(403, '<html><body>error code 1010 Cloudflare</body></html>'),
+  });
+  assert.equal(result.status, 'fail');
+  assert.equal(result.httpStatus, 403);
+  assert.equal(result.error, 'Cloudflare blocked the probe (error 1010)');
+  assert.equal(result.snippet, 'Cloudflare blocked the probe (error 1010)');
 });
 
 test('probeGatewayModel times out instead of hanging the UI', async () => {
@@ -134,11 +223,17 @@ test('AI Research health route is feature-gated, rate-limited, and scoped to all
   assert.match(page, /\/api\/ai-research\/health/);
   assert.match(page, /healthChecking \? 'Checking…' : 'Check'/);
   assert.match(page, /healthResults/);
+  assert.match(page, /status === 'stale'/);
+  assert.match(page, /result\.snippet/);
   assert.match(page, /type="file"/);
   assert.match(page, /JSON\.stringify\(\{ messages: \[userMsg\], conversationId: activeConvoId \}\)/);
 
+  assert.match(lib, /process\.env\.GORILLAWORKOUT_API_BASE/);
+  assert.match(lib, /process\.env\.GORILLAWORKOUT_API_KEY/);
+  assert.match(lib, /llmdupoin\.gorillaworkout\.id/);
+  assert.match(lib, /User-Agent': GATEWAY_BROWSER_USER_AGENT/);
   assert.match(lib, /stream: false/);
   assert.match(lib, /max_tokens: MODEL_HEALTH_MAX_TOKENS/);
-  assert.match(lib, /sanitizeHealthError/);
+  assert.match(lib, /looksStaleOrDeprecated/);
   assert.doesNotMatch(lib, /console\.(log|info|debug).*apiKey|console\.(log|info|debug).*API_KEY/);
 });

@@ -34,9 +34,10 @@ interface ModelOption { id: string; name: string; tier: string; provider: string
 interface ModelHealthResult {
   model: string;
   name: string;
-  status: 'ok' | 'fail';
+  status: 'ok' | 'fail' | 'stale';
   httpStatus: number | null;
   error: string | null;
+  snippet: string | null;
   checkedAt: string;
   latencyMs: number;
 }
@@ -349,25 +350,26 @@ export default function AIResearchPage() {
   const selectedModelId = currentModel || defaultModel;
   const selectedHealth = healthResults?.find(result => result.model === selectedModelId);
   const failCount = healthResults?.filter(result => result.status === 'fail').length || 0;
+  const staleCount = healthResults?.filter(result => result.status === 'stale').length || 0;
   const lastCheckedAt = healthResults?.[0]?.checkedAt;
   const healthBadgeLabel = healthChecking
     ? 'Checking'
     : !healthResults
       ? null
-      : failCount === 0
-        ? 'OK'
-        : failCount === healthResults.length
-          ? 'FAIL'
-          : `${failCount} FAIL`;
+      : failCount > 0
+        ? failCount === healthResults.length ? 'FAIL' : `${failCount} FAIL`
+        : staleCount > 0
+          ? staleCount === healthResults.length ? 'STALE' : `${staleCount} STALE`
+          : 'OK';
   const healthBadgeTone = healthChecking
     ? 'neutral'
     : !healthResults
       ? 'neutral'
-      : failCount === 0
-        ? 'success'
-        : failCount === healthResults.length
-          ? 'danger'
-          : 'warning';
+      : failCount === healthResults.length && failCount > 0
+        ? 'danger'
+        : failCount > 0 || staleCount > 0
+          ? 'warning'
+          : 'success';
 
   const formatCheckedAt = (iso: string) => {
     try {
@@ -426,7 +428,7 @@ export default function AIResearchPage() {
                       ? 'border-amber-400/20 bg-amber-400/10 text-amber-200'
                       : 'border-white/[0.07] bg-white/[0.035] text-[var(--mos-text-muted)]'
               }`}
-              title={selectedHealth?.error || healthError || 'Show model health details'}
+              title="Show per-model health details"
               aria-expanded={healthOpen}
             >
               <span className="h-1.5 w-1.5 rounded-full bg-current opacity-80 flex-shrink-0" />
@@ -437,19 +439,28 @@ export default function AIResearchPage() {
             <div
               role="status"
               aria-live="polite"
-              className="absolute right-0 top-full z-20 mt-1 w-72 max-w-[calc(100vw-2rem)] rounded-lg border border-[var(--mos-border)] bg-[var(--mos-raised)] p-2 shadow-lg"
+              className="absolute right-0 top-full z-20 mt-1 w-80 max-w-[calc(100vw-2rem)] rounded-lg border border-[var(--mos-border)] bg-[var(--mos-raised)] p-2 shadow-lg"
             >
               {healthError && <p className="px-1 py-1 text-[11px] text-red-300">{healthError}</p>}
               {healthResults?.map(result => (
                 <div key={result.model} className="flex items-start justify-between gap-2 px-1 py-1.5 border-b border-[var(--mos-border-subtle)] last:border-b-0">
                   <div className="min-w-0">
                     <p className="text-[11px] text-[var(--mos-text)] truncate">{result.name}</p>
-                    {result.status === 'fail' && result.error && (
-                      <p className="text-[10px] text-red-300 leading-4 mt-0.5">{result.error}{result.httpStatus ? ` · HTTP ${result.httpStatus}` : ''}</p>
+                    <p className={`text-[10px] leading-4 mt-0.5 ${
+                      result.status === 'fail' ? 'text-red-300' : result.status === 'stale' ? 'text-amber-200' : 'text-[var(--mos-text-muted)]'
+                    }`}>
+                      {result.httpStatus ? `HTTP ${result.httpStatus}` : 'No HTTP status'}
+                      {result.status === 'fail' && result.error ? ` · ${result.error}` : ''}
+                      {result.status === 'stale' && result.error ? ` · ${result.error}` : ''}
+                    </p>
+                    {result.snippet && result.snippet !== result.error && (
+                      <p className="text-[10px] text-[var(--mos-text-faint)] leading-4 mt-0.5 break-words">{result.snippet}</p>
                     )}
                   </div>
-                  <span className={`flex-shrink-0 text-[10px] font-semibold ${result.status === 'ok' ? 'text-emerald-300' : 'text-red-300'}`}>
-                    {result.status === 'ok' ? 'OK' : 'FAIL'}
+                  <span className={`flex-shrink-0 text-[10px] font-semibold ${
+                    result.status === 'ok' ? 'text-emerald-300' : result.status === 'stale' ? 'text-amber-200' : 'text-red-300'
+                  }`}>
+                    {result.status === 'ok' ? 'OK' : result.status === 'stale' ? 'STALE' : 'FAIL'}
                   </span>
                 </div>
               ))}
