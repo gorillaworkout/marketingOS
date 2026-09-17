@@ -4,7 +4,11 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/dashboard';
-import { GENERATION_FEATURES } from '@/lib/authorization';
+import {
+  isDashboardNavItemVisible,
+  shouldBlockDashboardGenerationPath,
+  type GenerationFeature,
+} from '@/lib/authorization';
 
 interface User {
   id: string;
@@ -45,13 +49,13 @@ function NavIcon({ name }: { name: IconName }) {
 }
 
 const generateItems = [
-  { href: '/dashboard/social-post', label: 'Social post', icon: 'social' },
-  { href: '/dashboard/video-script', label: 'Video script', icon: 'video' },
-  { href: '/dashboard/event-plan', label: 'Event plan', icon: 'event' },
-  { href: '/dashboard/sop', label: 'Article Market News', icon: 'article' },
-  { href: '/dashboard/market-research', label: 'Market research', icon: 'research' },
-  { href: '/dashboard/ai-research', label: 'AI Research', icon: 'research' },
-] satisfies Array<{ href: string; label: string; icon: IconName; adminOnly?: boolean }>;
+  { href: '/dashboard/social-post', label: 'Social post', icon: 'social', feature: 'social-post' },
+  { href: '/dashboard/video-script', label: 'Video script', icon: 'video', feature: 'video-script' },
+  { href: '/dashboard/event-plan', label: 'Event plan', icon: 'event', feature: 'event-plan' },
+  { href: '/dashboard/sop', label: 'Article Market News', icon: 'article', feature: 'article-market-news' },
+  { href: '/dashboard/market-research', label: 'Market research', icon: 'research', feature: 'market-research' },
+  { href: '/dashboard/ai-research', label: 'AI Research', icon: 'research', feature: 'ai-research' },
+] satisfies Array<{ href: string; label: string; icon: IconName; adminOnly?: boolean; feature?: GenerationFeature }>;
 
 const resourceItems = [
   { href: '/dashboard/brand-guidelines', label: 'Brand guidelines', icon: 'brand', adminOnly: true },
@@ -78,9 +82,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       const data = await response.json();
       if (data.authenticated) {
         setUser(data.user);
-        const generationFeature = pathname.split('/').pop() || '';
         const adminOnlyPages = ['/dashboard/tokens', '/dashboard/analytics', '/dashboard/accounts', '/dashboard/templates', '/dashboard/calendar', '/dashboard/knowledge', '/dashboard/knowledge-graph', '/dashboard/brand-guidelines', '/dashboard/history', '/dashboard/ai-research/admin'];
-        if (data.user.role !== 'admin' && (adminOnlyPages.includes(pathname) || (GENERATION_FEATURES.includes(generationFeature as typeof GENERATION_FEATURES[number]) && !data.user.enabledFeatures?.includes(generationFeature)))) {
+        const principal = { role: data.user.role, features: data.user.enabledFeatures || [] };
+        if (data.user.role !== 'admin' && (adminOnlyPages.includes(pathname) || shouldBlockDashboardGenerationPath(principal, pathname))) {
           router.replace('/dashboard');
         }
       } else {
@@ -105,7 +109,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     return <div className="flex min-h-screen items-center justify-center bg-[var(--mos-bg)]"><span className="h-5 w-5 animate-spin rounded-full border border-[var(--mos-border-strong)] border-t-[var(--mos-accent)]" /></div>;
   }
 
-  const sections: Array<{ label?: string; items: Array<{ href: string; label: string; icon: IconName; adminOnly?: boolean }> }> = [
+  const principal = user ? { role: user.role, features: user.enabledFeatures || [] } : null;
+
+  const sections: Array<{ label?: string; items: Array<{ href: string; label: string; icon: IconName; adminOnly?: boolean; feature?: GenerationFeature }> }> = [
     { items: [{ href: '/dashboard', label: 'Overview', icon: 'home' }] },
     {
       label: 'Create',
@@ -133,12 +139,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   const visibleSections = sections.map(section => ({
     ...section,
-    items: section.items.filter(item => {
-      if (item.adminOnly) return user?.role === 'admin';
-      const feature = item.href.split('/').pop() || '';
-      if (!GENERATION_FEATURES.includes(feature as typeof GENERATION_FEATURES[number])) return true;
-      return user?.role === 'admin' || user?.enabledFeatures.includes(feature);
-    }),
+    items: section.items.filter(item => isDashboardNavItemVisible(item, principal)),
   })).filter(section => section.items.length);
 
   const navHrefs = visibleSections.flatMap(section => section.items.map(item => item.href));
