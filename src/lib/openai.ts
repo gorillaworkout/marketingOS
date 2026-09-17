@@ -1,4 +1,6 @@
 import { parseGatewayCompletion } from '@/lib/gateway-response';
+import { logTokenUsage } from '@/lib/token-log';
+import { estimateTokensFromChars } from '@/lib/token-usage';
 
 const GORILLAWORKOUT_API_BASE = process.env.GORILLAWORKOUT_API_BASE || 'https://llm.gorillaworkout.id/v1';
 const GORILLAWORKOUT_API_KEY = process.env.GORILLAWORKOUT_API_KEY || '';
@@ -246,28 +248,25 @@ export async function generateContent(
 
   const pricing = getPricing(result.model);
   // Estimate tokens from content length (rough: 1 token ≈ 4 chars)
-  const inputTokens = Math.ceil((enhancedSystemPrompt.length + userPrompt.length) / 4);
-  const outputTokens = Math.ceil(result.content.length / 4);
+  const inputTokens = estimateTokensFromChars(enhancedSystemPrompt + userPrompt);
+  const outputTokens = estimateTokensFromChars(result.content);
   const cost = inputTokens * pricing.input + outputTokens * pricing.output;
 
   const usage: TokenUsage = { inputTokens, outputTokens, model: result.model, cost };
 
-  // Log to database
-  try {
-    const { queryOne, execute } = await import('@/lib/database');
-    const { v4: uuidv4 } = await import('uuid');
-    // Some flows create the task after AI generation. Preserve usage logging while
-    // respecting PostgreSQL's foreign-key constraint during that pre-save phase.
-    const task = taskId ? await queryOne('SELECT id FROM tasks WHERE id = ?', [taskId]) : null;
-    const provider = getModelProvider(result.model);
-    const accountSource = 'office';
-    const deptRow = await queryOne<{ department_id: string | null }>('SELECT department_id FROM users WHERE id = ?', [userId]);
-    const departmentId = deptRow?.department_id || null;
-    await execute('INSERT INTO token_logs (id, user_id, task_id, model, provider, account_source, department_id, task_type, input_tokens, output_tokens, cost) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-      [uuidv4(), userId, task ? taskId : null, result.model, provider, accountSource, departmentId, options?.taskType || '', inputTokens, outputTokens, cost]);
-  } catch (e) {
-    console.error('Failed to log token usage:', e);
-  }
+  // Some flows create the task after AI generation. Preserve usage logging while
+  // respecting PostgreSQL's foreign-key constraint during that pre-save phase.
+  await logTokenUsage({
+    userId,
+    taskId,
+    model: result.model,
+    provider: getModelProvider(result.model),
+    accountSource: 'office',
+    taskType: options?.taskType || '',
+    inputTokens,
+    outputTokens,
+    cost,
+  });
 
   return { content: result.content, usage };
 }
@@ -315,8 +314,8 @@ export async function generateMultiStep(
   drafts.push({ step: 'draft', content: draftResult.content, model: draftResult.model });
   onProgress?.({ step: 'draft', progress: 33, message: '✅ Draft complete' });
   const draftPricing = getPricing(draftResult.model);
-  totalUsage.inputTokens += Math.ceil((draftSystem.length + userPrompt.length) / 4);
-  totalUsage.outputTokens += Math.ceil(draftResult.content.length / 4);
+  totalUsage.inputTokens += estimateTokensFromChars(draftSystem + userPrompt);
+  totalUsage.outputTokens += estimateTokensFromChars(draftResult.content);
   totalUsage.cost += (totalUsage.inputTokens / 1_000_000) * draftPricing.input +
                      (totalUsage.outputTokens / 1_000_000) * draftPricing.output;
 
@@ -342,8 +341,8 @@ Output JSON: { "score": <1-10>, "issues": ["..."], "suggestions": ["..."], "pass
   drafts.push({ step: 'review', content: reviewResult.content, model: reviewResult.model });
   onProgress?.({ step: 'review', progress: 66, message: '✅ Review complete' });
   const reviewPricing = getPricing(reviewResult.model);
-  totalUsage.inputTokens += Math.ceil((reviewSystem.length + reviewPrompt.length) / 4);
-  totalUsage.outputTokens += Math.ceil(reviewResult.content.length / 4);
+  totalUsage.inputTokens += estimateTokensFromChars(reviewSystem + reviewPrompt);
+  totalUsage.outputTokens += estimateTokensFromChars(reviewResult.content);
   totalUsage.cost += (totalUsage.inputTokens / 1_000_000) * reviewPricing.input +
                      (totalUsage.outputTokens / 1_000_000) * reviewPricing.output;
 
@@ -381,24 +380,22 @@ Output the same JSON structure as the draft, but improved. Output valid JSON onl
   );
   drafts.push({ step: 'refined', content: refineResult.content, model: refineResult.model });
   const refinePricing = getPricing(refineResult.model);
-  totalUsage.inputTokens += Math.ceil((refineSystem.length + refinePrompt.length) / 4);
-  totalUsage.outputTokens += Math.ceil(refineResult.content.length / 4);
+  totalUsage.inputTokens += estimateTokensFromChars(refineSystem + refinePrompt);
+  totalUsage.outputTokens += estimateTokensFromChars(refineResult.content);
   totalUsage.cost += (totalUsage.inputTokens / 1_000_000) * refinePricing.input +
                      (totalUsage.outputTokens / 1_000_000) * refinePricing.output;
 
-  // Log total usage
-  try {
-    const { queryOne, execute } = await import('@/lib/database');
-    const { v4: uuidv4 } = await import('uuid');
-    const provider = getModelProvider(totalUsage.model);
-    const accountSource = 'office';
-    const deptRow = await queryOne<{ department_id: string | null }>('SELECT department_id FROM users WHERE id = ?', [userId]);
-    const departmentId = deptRow?.department_id || null;
-    await execute('INSERT INTO token_logs (id, user_id, task_id, model, provider, account_source, department_id, task_type, input_tokens, output_tokens, cost) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-      [uuidv4(), userId, taskId, totalUsage.model, provider, accountSource, departmentId, module || '', totalUsage.inputTokens, totalUsage.outputTokens, totalUsage.cost]);
-      } catch (e) {
-    console.error('Failed to log token usage:', e);
-  }
+  await logTokenUsage({
+    userId,
+    taskId,
+    model: totalUsage.model,
+    provider: getModelProvider(totalUsage.model),
+    accountSource: 'office',
+    taskType: module || '',
+    inputTokens: totalUsage.inputTokens,
+    outputTokens: totalUsage.outputTokens,
+    cost: totalUsage.cost,
+  });
 
   return {
     content: refineResult.content,

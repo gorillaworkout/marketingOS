@@ -1,5 +1,6 @@
 import { queryAll } from '@/lib/database';
 import { AVAILABLE_MODELS } from '@/lib/openai';
+import { taskTypeLabel } from '@/lib/token-usage';
 
 export type UsagePeriod = 'month' | 'quarter' | 'year' | 'all' | `${number}-${number}`;
 
@@ -15,6 +16,7 @@ export interface UsageRecord {
   outputTokens: number;
   cost: number;
   taskId: string | null;
+  taskType: string;
 }
 
 export interface PeriodRange {
@@ -67,9 +69,10 @@ export async function getUsageRecords(periodValue: string | null): Promise<{ rec
     id: string; user_id: string; username: string | null; department: string | null;
     model: string; provider: string | null; account_source: string | null;
     input_tokens: number | string; output_tokens: number | string; cost: number | string; task_id: string | null;
+    task_type: string | null;
   }>(`
     SELECT l.id, l.user_id, u.username, d.name AS department, l.model, l.provider, l.account_source,
-      l.input_tokens, l.output_tokens, l.cost, l.task_id
+      l.input_tokens, l.output_tokens, l.cost, l.task_id, l.task_type
     FROM token_logs l
     LEFT JOIN users u ON u.id = l.user_id
     LEFT JOIN departments d ON d.id = l.department_id
@@ -90,6 +93,7 @@ export async function getUsageRecords(periodValue: string | null): Promise<{ rec
       outputTokens: Number(row.output_tokens) || 0,
       cost: Number(row.cost) || 0,
       taskId: row.task_id,
+      taskType: row.task_type || '',
     })),
   };
 }
@@ -196,6 +200,22 @@ export function buildProviders(records: UsageRecord[]) {
     totalCost: providerRecords.reduce((sum, record) => sum + record.cost, 0),
     modelBreakdown: breakdown(providerRecords, 'model'),
   })).sort((a, b) => b.totalCost - a.totalCost || b.totalTokens - a.totalTokens || a.provider.localeCompare(b.provider));
+}
+
+export function buildFeatures(records: UsageRecord[]) {
+  const groups = new Map<string, UsageRecord[]>();
+  for (const record of records) {
+    const key = record.taskType || '';
+    groups.set(key, [...(groups.get(key) || []), record]);
+  }
+  return [...groups.entries()].map(([taskType, featureRecords]) => ({
+    taskType,
+    label: taskTypeLabel(taskType),
+    totalTokens: featureRecords.reduce((sum, record) => sum + tokenCount(record), 0),
+    totalCost: featureRecords.reduce((sum, record) => sum + record.cost, 0),
+    userCount: new Set(featureRecords.map(record => record.userId)).size,
+    requestCount: featureRecords.length,
+  })).sort((a, b) => b.totalCost - a.totalCost || b.totalTokens - a.totalTokens || a.label.localeCompare(b.label));
 }
 
 export function buildTopUsers(records: UsageRecord[], limit: number) {

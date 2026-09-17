@@ -28,4 +28,5 @@ test('token usage page shows the user account and provider without source labels
   assert.match(page, />Provider</);
   assert.doesNotMatch(page, />Source</);
   assert.match(page, /accountBreakdown/);
+  assert.match(page, /taskTypeLabel/);
 });

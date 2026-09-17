@@ -8,6 +8,7 @@ type Summary = { totalTokens: number; totalCost: number; activeUsers: number; av
 type UserUsage = { rank: number; userId: string; username: string; department: string; totalTokens: number; totalCost: number; taskCount: number; topModel: string | null; topProvider: string | null };
 type DepartmentUsage = { department: string; totalTokens: number; totalCost: number; userCount: number; taskCount: number; modelBreakdown: { model: string; tokens: number; cost: number }[] };
 type ProviderUsage = { provider: string; accountSource: string; totalTokens: number; totalCost: number; modelBreakdown: { model: string; tokens: number; cost: number }[] };
+type FeatureUsage = { taskType: string; label: string; totalTokens: number; totalCost: number; userCount: number; requestCount: number };
 
 const number = (value: number) => value.toLocaleString(undefined, { maximumFractionDigits: 0 });
 const money = (value: number) => `$${value.toFixed(4)}`;
@@ -18,6 +19,7 @@ export default function AnalyticsPage() {
   const [users, setUsers] = useState<UserUsage[]>([]);
   const [departments, setDepartments] = useState<DepartmentUsage[]>([]);
   const [providers, setProviders] = useState<ProviderUsage[]>([]);
+  const [features, setFeatures] = useState<FeatureUsage[]>([]);
   const [loading, setLoading] = useState(true);
   const [sort, setSort] = useState<'cost' | 'tokens'>('cost');
 
@@ -25,17 +27,18 @@ export default function AnalyticsPage() {
     setLoading(true);
     const suffix = `?period=${period}`;
     try {
-      const [summaryResult, usersResult, departmentsResult, providersResult] = await Promise.all([
+      const [summaryResult, usersResult, departmentsResult, providersResult, featuresResult] = await Promise.all([
         fetch(`/api/admin/usage/summary${suffix}`),
         fetch(`/api/admin/usage/by-user${suffix}&limit=100`),
         fetch(`/api/admin/usage/by-department${suffix}`),
         fetch(`/api/admin/usage/by-provider${suffix}`),
+        fetch(`/api/admin/usage/by-feature${suffix}`),
       ]);
-      if (![summaryResult, usersResult, departmentsResult, providersResult].every(result => result.ok)) return;
-      const [nextSummary, nextUsers, nextDepartments, nextProviders] = await Promise.all([
-        summaryResult.json(), usersResult.json(), departmentsResult.json(), providersResult.json(),
+      if (![summaryResult, usersResult, departmentsResult, providersResult, featuresResult].every(result => result.ok)) return;
+      const [nextSummary, nextUsers, nextDepartments, nextProviders, nextFeatures] = await Promise.all([
+        summaryResult.json(), usersResult.json(), departmentsResult.json(), providersResult.json(), featuresResult.json(),
       ]);
-      setSummary(nextSummary); setUsers(nextUsers); setDepartments(nextDepartments); setProviders(nextProviders);
+      setSummary(nextSummary); setUsers(nextUsers); setDepartments(nextDepartments); setProviders(nextProviders); setFeatures(nextFeatures);
     } finally {
       setLoading(false);
     }
@@ -75,6 +78,10 @@ export default function AnalyticsPage() {
 
     <Section title="Department Usage"><table className="w-full min-w-[760px] text-sm"><thead className="border-b border-[var(--mos-border)] text-left text-xs uppercase tracking-wide text-[var(--mos-text-faint)]"><tr><th className="p-3">Department</th><th className="p-3 text-right">Users</th><th className="p-3 text-right">Tokens</th><th className="p-3 text-right">Cost</th><th className="p-3">Model breakdown</th><th className="p-3 text-right">% of Total</th></tr></thead>
       <tbody>{departments.map(department => <tr key={department.department} className="border-b border-[var(--mos-border)] text-[var(--mos-text-secondary)]"><td className="p-3 font-medium text-white">{department.department}</td><td className="p-3 text-right">{department.userCount}</td><td className="p-3 text-right">{number(department.totalTokens)}</td><td className="p-3 text-right text-green-400">{money(department.totalCost)}</td><td className="p-3 text-xs">{department.modelBreakdown.map(model => `${model.model} (${number(model.tokens)})`).join(', ') || '—'}</td><td className="p-3 text-right">{summary?.totalTokens ? `${((department.totalTokens / summary.totalTokens) * 100).toFixed(1)}%` : '0.0%'}</td></tr>)}{!loading && !departments.length && <Empty colSpan={6} />}</tbody>
+    </table></Section>
+
+    <Section title="Feature Usage"><table className="w-full min-w-[680px] text-sm"><thead className="border-b border-[var(--mos-border)] text-left text-xs uppercase tracking-wide text-[var(--mos-text-faint)]"><tr><th className="p-3">Feature</th><th className="p-3 text-right">Users</th><th className="p-3 text-right">Requests</th><th className="p-3 text-right">Tokens</th><th className="p-3 text-right">Cost</th><th className="p-3 text-right">% of Total</th></tr></thead>
+      <tbody>{features.map(feature => <tr key={feature.taskType || 'legacy'} className="border-b border-[var(--mos-border)] text-[var(--mos-text-secondary)]"><td className="p-3 font-medium text-white">{feature.label}</td><td className="p-3 text-right">{feature.userCount}</td><td className="p-3 text-right">{number(feature.requestCount)}</td><td className="p-3 text-right">{number(feature.totalTokens)}</td><td className="p-3 text-right text-green-400">{money(feature.totalCost)}</td><td className="p-3 text-right">{summary?.totalTokens ? `${((feature.totalTokens / summary.totalTokens) * 100).toFixed(1)}%` : '0.0%'}</td></tr>)}{!loading && !features.length && <Empty colSpan={6} />}</tbody>
     </table></Section>
 
     <Section title="Provider Attribution"><table className="w-full min-w-[620px] text-sm"><thead className="border-b border-[var(--mos-border)] text-left text-xs uppercase tracking-wide text-[var(--mos-text-faint)]"><tr><th className="p-3">Provider</th><th className="p-3">Source</th><th className="p-3 text-right">Tokens</th><th className="p-3 text-right">Cost</th><th className="p-3">Models</th></tr></thead>

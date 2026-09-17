@@ -3,16 +3,16 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import {
-  buildDepartments, buildProviders, buildSummary, buildUsers, getUsagePeriod, type UsageRecord,
+  buildDepartments, buildFeatures, buildProviders, buildSummary, buildUsers, getUsagePeriod, type UsageRecord,
 } from '../src/lib/admin-usage';
 
 const records: UsageRecord[] = [
-  { id: '1', userId: 'u1', username: 'Ari', department: 'Marketing', model: 'deepseek/deepseek-v4-flash', provider: 'openrouter', accountSource: 'personal', inputTokens: 100, outputTokens: 50, cost: 1.5, taskId: 't1' },
-  { id: '2', userId: 'u2', username: 'Bima', department: 'Sales', model: 'gpt-5.6-sol', provider: 'codex', accountSource: 'office', inputTokens: 400, outputTokens: 100, cost: 4, taskId: 't2' },
-  { id: '3', userId: 'u1', username: 'Ari', department: 'Marketing', model: 'deepseek/deepseek-v4-flash', provider: 'openrouter', accountSource: 'personal', inputTokens: 25, outputTokens: 25, cost: 0.5, taskId: 't3' },
+  { id: '1', userId: 'u1', username: 'Ari', department: 'Marketing', model: 'deepseek/deepseek-v4-flash', provider: 'openrouter', accountSource: 'personal', inputTokens: 100, outputTokens: 50, cost: 1.5, taskId: 't1', taskType: 'social-post' },
+  { id: '2', userId: 'u2', username: 'Bima', department: 'Sales', model: 'gpt-5.6-sol', provider: 'codex', accountSource: 'office', inputTokens: 400, outputTokens: 100, cost: 4, taskId: 't2', taskType: 'video-script' },
+  { id: '3', userId: 'u1', username: 'Ari', department: 'Marketing', model: 'deepseek/deepseek-v4-flash', provider: 'openrouter', accountSource: 'personal', inputTokens: 25, outputTokens: 25, cost: 0.5, taskId: 't3', taskType: 'social-post' },
 ];
 
-const endpoints = ['summary', 'by-user', 'by-department', 'by-provider', 'top-users', 'export'];
+const endpoints = ['summary', 'by-user', 'by-department', 'by-provider', 'by-feature', 'top-users', 'export'];
 
 test('Non-admin gets 403 on all endpoints', () => {
   for (const endpoint of endpoints) {
@@ -48,4 +48,27 @@ test('by-provider returns provider breakdown', () => {
   assert.equal(providers.length, 2);
   assert.ok(providers.every(provider => Array.isArray(provider.modelBreakdown)));
   assert.equal(providers.find(provider => provider.provider === 'openrouter')?.accountSource, 'personal');
+});
+
+test('by-feature includes ai-research without a hard-coded task_type allowlist', () => {
+  const withResearch: UsageRecord[] = [
+    ...records,
+    {
+      id: '4', userId: 'u3', username: 'Cinta', department: 'Research', model: 'ag/gemini-3-flash-agent',
+      provider: 'gorillaworkout', accountSource: 'office', inputTokens: 80, outputTokens: 20, cost: 0,
+      taskId: null, taskType: 'ai-research',
+    },
+  ];
+  const features = buildFeatures(withResearch);
+  const research = features.find(feature => feature.taskType === 'ai-research');
+  assert.ok(research, 'ai-research must appear in feature aggregation');
+  assert.equal(research.label, 'AI Research Assistant');
+  assert.equal(research.totalTokens, 100);
+  assert.equal(research.userCount, 1);
+  assert.equal(research.requestCount, 1);
+
+  const helper = fs.readFileSync(path.join(process.cwd(), 'src/lib/admin-usage.ts'), 'utf8');
+  assert.match(helper, /l\.task_type/);
+  assert.doesNotMatch(helper, /task_type IN \(/);
+  assert.doesNotMatch(helper, /ALLOWED_TASK/);
 });
