@@ -5,6 +5,8 @@ import { rateLimit } from '@/lib/rate-limit';
 import { createImageJobStore, type ImageJob, type ImageJobResult } from '@/lib/image-job-status';
 import { getImageGenerationSpec, parseImageAspectRatio, type ImageAspectRatio } from '@/lib/image-aspect-ratio';
 import { DEFAULT_IMAGE_MODEL, imageModelLabel, resolveImageModel } from '@/lib/image-models';
+import { logTokenUsage } from '@/lib/token-log';
+import { parseImageGenerationUsage } from '@/lib/token-usage';
 import fs from 'fs';
 import path from 'path';
 
@@ -116,7 +118,11 @@ async function runImageJob(job: ImageJob, prompt: string, brief: string, type: s
       throw new Error(`Image API error ${response.status}: ${errText.slice(0, 500)}`);
     }
 
-    const payload = await response.json() as { data?: Array<{ b64_json?: string; url?: string }> };
+    const payload = await response.json() as {
+      data?: Array<{ b64_json?: string; url?: string }>;
+      usage?: unknown;
+      cost?: unknown;
+    };
     const first = payload?.data?.[0];
     if (!first) throw new Error('Image API returned no image.');
 
@@ -150,6 +156,11 @@ async function runImageJob(job: ImageJob, prompt: string, brief: string, type: s
     imageJobs.update(job.id, job.ownerId, {
       status: 'done', progress: 100, message: '✅ Image generated!', result,
     });
+    try {
+      await logImageGenerationUsage(job.ownerId, taskId, safeModel, payload);
+    } catch (error) {
+      console.error('[generate-image] Failed to log token usage:', error);
+    }
     void recordImageOnTask(taskId, job.ownerId, {
       imageUrl, fileName, sopName, model: safeModel, prompt, aspectRatio,
     });
@@ -264,6 +275,26 @@ async function recordImageOnTask(
 function toPublicJob(job: ImageJob) {
   const { ownerId: _ownerId, ...publicJob } = job;
   return publicJob;
+}
+
+async function logImageGenerationUsage(
+  userId: string,
+  taskId: string | null,
+  model: string,
+  payload: unknown,
+) {
+  const usage = parseImageGenerationUsage(payload);
+  await logTokenUsage({
+    userId,
+    taskId,
+    model,
+    provider: 'gorillaworkout',
+    accountSource: 'office',
+    taskType: 'image-gen',
+    inputTokens: usage.inputTokens,
+    outputTokens: usage.outputTokens,
+    cost: usage.cost,
+  });
 }
 
 function jsonError(error: string, status: number) {

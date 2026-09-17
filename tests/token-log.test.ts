@@ -4,8 +4,13 @@ import { readFileSync } from 'node:fs';
 import {
   consumeChatCompletionSseLines,
   estimateTokensFromChars,
+  EXTRA_TASK_TYPE_LABELS,
   gatewayMessagesText,
+  mergeGatewayUsage,
+  parseGatewayResponseUsage,
   parseGatewayUsage,
+  parseImageGenerationUsage,
+  parseReportedCost,
   resolveTokenUsage,
   taskTypeLabel,
 } from '../src/lib/token-usage';
@@ -54,6 +59,25 @@ test('prefers gateway-reported usage and falls back to a char estimate', () => {
   });
 });
 
+test('parses usage from JSON and SSE chat-completion bodies', () => {
+  assert.deepEqual(parseGatewayResponseUsage(
+    JSON.stringify({ choices: [{ message: { content: 'hi' } }], usage: { prompt_tokens: 7, completion_tokens: 2 } }),
+    'application/json',
+  ), { inputTokens: 7, outputTokens: 2 });
+  assert.equal(parseGatewayResponseUsage('not-json', 'application/json'), null);
+
+  const sse = [
+    'data: {"choices":[{"delta":{"content":"Hi"}}]}',
+    'data: {"choices":[{"delta":{}}],"usage":{"prompt_tokens":9,"completion_tokens":1}}',
+    'data: [DONE]',
+  ].join('\n');
+  assert.deepEqual(parseGatewayResponseUsage(sse, 'text/event-stream'), { inputTokens: 9, outputTokens: 1 });
+  assert.deepEqual(mergeGatewayUsage({ inputTokens: 1, outputTokens: 2 }, { inputTokens: 3, outputTokens: 4 }), {
+    inputTokens: 4, outputTokens: 6,
+  });
+  assert.deepEqual(mergeGatewayUsage(null, { inputTokens: 1, outputTokens: 0 }), { inputTokens: 1, outputTokens: 0 });
+});
+
 test('reads usage from a final SSE chunk and ignores image payloads in estimates', () => {
   const parsed = consumeChatCompletionSseLines([
     'data: {"choices":[{"delta":{"content":"Hello"}}]}',
@@ -76,9 +100,36 @@ test('reads usage from a final SSE chunk and ignores image payloads in estimates
   assert.doesNotMatch(text, /AAAA/);
 });
 
-test('labels ai-research clearly and logs it from the streaming chat route', () => {
+test('image generation usage prefers reported tokens/cost and otherwise logs zeros', () => {
+  assert.deepEqual(parseImageGenerationUsage({
+    data: [{ b64_json: 'AAAA' }],
+    usage: { input_tokens: 40, output_tokens: 12 },
+  }), { inputTokens: 40, outputTokens: 12, cost: 0 });
+  assert.deepEqual(parseImageGenerationUsage({
+    usage: { prompt_tokens: 8, completion_tokens: 2, cost: 0.012 },
+  }), { inputTokens: 8, outputTokens: 2, cost: 0.012 });
+  assert.deepEqual(parseImageGenerationUsage({
+    usage: { total_tokens: 64 },
+  }), { inputTokens: 64, outputTokens: 0, cost: 0 });
+  assert.deepEqual(parseImageGenerationUsage({
+    data: [{ b64_json: 'AAAA' }],
+    cost: '1.5',
+  }), { inputTokens: 0, outputTokens: 0, cost: 1.5 });
+  assert.deepEqual(parseImageGenerationUsage({ data: [{ b64_json: 'AAAA' }] }), {
+    inputTokens: 0, outputTokens: 0, cost: 0,
+  });
+  assert.equal(parseReportedCost({ usage: { total_cost: 0.2 } }), 0.2);
+  const prompt = 'a'.repeat(10_000);
+  const estimated = parseImageGenerationUsage({ data: [{ b64_json: 'x' }] });
+  assert.equal(estimated.inputTokens, 0);
+  assert.notEqual(estimated.inputTokens, estimateTokensFromChars(prompt));
+});
+
+test('labels ai-research and image-gen clearly and logs them from their routes', () => {
   assert.equal(taskTypeLabel('ai-research'), 'AI Research Assistant');
   assert.equal(taskTypeLabel('social-post'), 'Social Post');
+  assert.equal(taskTypeLabel('image-gen'), 'Image Generation');
+  assert.equal(EXTRA_TASK_TYPE_LABELS['image-gen'], 'Image Generation');
   assert.equal(taskTypeLabel(''), 'Legacy');
   assert.equal(taskTypeLabel(null), 'Legacy');
 
@@ -91,6 +142,19 @@ test('labels ai-research clearly and logs it from the streaming chat route', () 
   assert.match(chat, /provider:\s*'gorillaworkout'/);
   assert.match(chat, /accountSource:\s*'office'/);
   assert.doesNotMatch(chat, /INSERT INTO token_logs/);
+
+  const image = readFileSync('src/app/api/generate-image/route.ts', 'utf8');
+  assert.match(image, /logTokenUsage/);
+  assert.match(image, /parseImageGenerationUsage/);
+  assert.match(image, /taskType:\s*'image-gen'/);
+  assert.match(image, /provider:\s*'gorillaworkout'/);
+  assert.match(image, /accountSource:\s*'office'/);
+  assert.doesNotMatch(image, /INSERT INTO token_logs/);
+  assert.match(image, /export function explainImageFailure/);
+
+  const openai = readFileSync('src/lib/openai.ts', 'utf8');
+  assert.match(openai, /resolveTokenUsage/);
+  assert.match(openai, /parseGatewayResponseUsage/);
 
   const tokensPage = readFileSync('src/app/dashboard/tokens/page.tsx', 'utf8');
   assert.match(tokensPage, /taskTypeLabel\(log\.task_type\)/);
