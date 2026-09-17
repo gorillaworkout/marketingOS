@@ -61,8 +61,8 @@ test('page exposes the admin Article Market News generation workflow', () => {
   assert.match(generator, /Verified Facts/);
 });
 
-test('route is admin-only, gateway-routed, evidence-gated, and never fetches submitted URLs', () => {
-  assert.match(route, /requireAdmin\(request\)/);
+test('route is feature-gated, gateway-routed, evidence-gated, and never fetches submitted URLs', () => {
+  assert.match(route, /requireFeature\(request, 'article-market-news'\)/);
   assert.match(route, /getUserPreferredModel\(auth\.id, 'article-market-news'\)/);
   assert.doesNotMatch(route, /getModelProvider|codexTextOnly|gpt-5\.6-sol/);
   assert.match(route, /jsonRepairAttempts: 0/);
