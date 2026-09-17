@@ -4,7 +4,6 @@ import { resolveFeatureModel } from '@/lib/model-routing';
 import { rateLimit } from '@/lib/rate-limit';
 import {
   buildGatewayMessages,
-  conversationTitleFromMessages,
   parseChatRequest,
   parseStoredMessages,
   type AiResearchChatMessage,
@@ -19,6 +18,27 @@ const SYSTEM_PROMPT = `Kamu adalah GorillaWorkout AI Assistant, asisten riset da
 
 function jsonError(error: string, status: number) {
   return new Response(JSON.stringify({ error }), { status });
+}
+
+async function persistConversation(
+  id: string,
+  userId: string,
+  messages: AiResearchChatMessage[],
+  model: string,
+  exists: boolean,
+) {
+  const payload = JSON.stringify(messages);
+  if (exists) {
+    await execute(
+      'UPDATE ai_research_conversations SET messages = ?, model = ?, updated_at = NOW() WHERE id = ? AND user_id = ?',
+      [payload, model, id, userId],
+    );
+    return;
+  }
+  await execute(
+    'INSERT INTO ai_research_conversations (id, user_id, messages, model, created_at, updated_at) VALUES (?, ?, ?, ?, NOW(), NOW())',
+    [id, userId, payload, model],
+  );
 }
 
 export async function POST(request: NextRequest) {
@@ -50,7 +70,7 @@ export async function POST(request: NextRequest) {
 
   let dbMessages: AiResearchChatMessage[] = [];
   if (conversationId) {
-    const history = await queryOne<{ messages: string }>(
+    const history = await queryOne<{ messages: unknown }>(
       'SELECT messages FROM ai_research_conversations WHERE id = ? AND user_id = ?',
       [conversationId, auth.id],
     );
@@ -58,11 +78,21 @@ export async function POST(request: NextRequest) {
   }
 
   const apiMessages = buildGatewayMessages(SYSTEM_PROMPT, dbMessages, messages, MAX_HISTORY);
+  const convId = conversationId || uuidv4();
+  const pendingMessages = [...dbMessages, ...messages];
+
+  try {
+    await persistConversation(convId, auth.id, pendingMessages, model, Boolean(conversationId));
+  } catch (error) {
+    return jsonError(error instanceof Error ? error.message : 'Failed to save conversation', 500);
+  }
 
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
     async start(controller) {
       try {
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'start', conversationId: convId, model })}\n\n`));
+
         const response = await fetch(`${GORILLAWORKOUT_API_BASE}/chat/completions`, {
           method: 'POST',
           headers: {
@@ -130,20 +160,8 @@ export async function POST(request: NextRequest) {
           }
         }
 
-        const allMessages = [...dbMessages, ...messages, { role: 'assistant' as const, content: fullContent }];
-        const convId = conversationId || uuidv4();
-
-        if (conversationId) {
-          await execute(
-            'UPDATE ai_research_conversations SET messages = ?, model = ?, updated_at = NOW() WHERE id = ? AND user_id = ?',
-            [JSON.stringify(allMessages), model, conversationId, auth.id],
-          );
-        } else {
-          await execute(
-            'INSERT INTO ai_research_conversations (id, user_id, messages, model, created_at, updated_at) VALUES (?, ?, ?, ?, NOW(), NOW())',
-            [convId, auth.id, JSON.stringify(allMessages), model],
-          );
-        }
+        const allMessages = [...pendingMessages, { role: 'assistant' as const, content: fullContent }];
+        await persistConversation(convId, auth.id, allMessages, model, true);
 
         controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'done', conversationId: convId, model })}\n\n`));
         controller.close();
@@ -173,26 +191,34 @@ export async function GET(request: NextRequest) {
 
   if (!conversationId) {
     const conversations = await import('@/lib/database').then(m =>
-      m.queryAll<{ id: string; model: string; updated_at: string; messages: string }>(
-        'SELECT id, model, updated_at, messages FROM ai_research_conversations WHERE user_id = ? ORDER BY updated_at DESC LIMIT 50',
+      m.queryAll<{ id: string; model: string; updated_at: string; title: string | null; message_count: number }>(
+        `SELECT id, model, updated_at,
+            COALESCE((
+              SELECT elem->>'content'
+              FROM jsonb_array_elements(messages) AS elem
+              WHERE elem->>'role' = 'user'
+              LIMIT 1
+            ), 'New conversation') AS title,
+            COALESCE(jsonb_array_length(messages), 0) AS message_count
+          FROM ai_research_conversations
+          WHERE user_id = ?
+          ORDER BY updated_at DESC
+          LIMIT 50`,
         [auth.id],
       ),
     );
     return new Response(JSON.stringify({
-      conversations: conversations.map(c => {
-        const msgs = parseStoredMessages(c.messages);
-        return {
-          id: c.id,
-          title: conversationTitleFromMessages(msgs),
-          model: c.model,
-          updatedAt: c.updated_at,
-          messageCount: msgs.length,
-        };
-      }),
+      conversations: conversations.map(c => ({
+        id: c.id,
+        title: (c.title || 'New conversation').slice(0, 80),
+        model: c.model,
+        updatedAt: c.updated_at,
+        messageCount: Number(c.message_count) || 0,
+      })),
     }));
   }
 
-  const row = await queryOne<{ id: string; messages: string; model: string }>(
+  const row = await queryOne<{ id: string; messages: unknown; model: string }>(
     'SELECT id, messages, model FROM ai_research_conversations WHERE id = ? AND user_id = ?',
     [conversationId, auth.id],
   );
