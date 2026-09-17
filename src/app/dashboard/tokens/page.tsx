@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useState } from 'react';
 import { DataTableFrame, EmptyState, LoadingState, MetricCard, Panel, PageHeader, PageStack, SectionHeader, StatusBadge } from '@/components/ui/dashboard';
+import { taskTypeLabel } from '@/lib/token-usage';
 
 type TokenLog = {
   id: string;
@@ -110,7 +111,7 @@ export default function TokensPage() {
                   </td>
                   <td className="py-2 px-2 whitespace-nowrap">{providerNames[log.provider] || log.provider}</td>
                   <td className="py-2 px-2 text-xs max-w-64 truncate" title={log.model}>{log.model}</td>
-                  <td className="py-2 px-2 text-xs whitespace-nowrap">{log.task_type || 'Legacy'}</td>
+                  <td className="py-2 px-2 text-xs whitespace-nowrap">{taskTypeLabel(log.task_type)}</td>
                   <td className="py-2 px-2 text-right">{log.input_tokens.toLocaleString()}</td>
                   <td className="py-2 px-2 text-right">{log.output_tokens.toLocaleString()}</td>
                   <td className="py-2 px-2 text-right text-green-400">${log.cost.toFixed(8)}</td>

@@ -8,6 +8,14 @@ import {
   parseStoredMessages,
   type AiResearchChatMessage,
 } from '@/lib/ai-research';
+import { AVAILABLE_MODELS } from '@/lib/openai';
+import { logTokenUsage } from '@/lib/token-log';
+import {
+  consumeChatCompletionSseLines,
+  gatewayMessagesText,
+  resolveTokenUsage,
+  type GatewayTokenUsage,
+} from '@/lib/token-usage';
 import { v4 as uuidv4 } from 'uuid';
 import { execute, queryOne } from '@/lib/database';
 
@@ -39,6 +47,37 @@ async function persistConversation(
     'INSERT INTO ai_research_conversations (id, user_id, messages, model, created_at, updated_at) VALUES (?, ?, ?, ?, NOW(), NOW())',
     [id, userId, payload, model],
   );
+}
+
+function usageCost(model: string, inputTokens: number, outputTokens: number): number {
+  const pricing = AVAILABLE_MODELS.find(candidate => candidate.id === model);
+  return inputTokens * (pricing?.input ?? 0) + outputTokens * (pricing?.output ?? 0);
+}
+
+async function logAiResearchUsage(options: {
+  userId: string;
+  model: string;
+  inputText: string;
+  outputText: string;
+  reported: GatewayTokenUsage | null;
+}) {
+  if (!options.outputText.trim()) return;
+  const usage = resolveTokenUsage({
+    reported: options.reported,
+    inputText: options.inputText,
+    outputText: options.outputText,
+  });
+  await logTokenUsage({
+    userId: options.userId,
+    taskId: null,
+    model: options.model,
+    provider: 'gorillaworkout',
+    accountSource: 'office',
+    taskType: 'ai-research',
+    inputTokens: usage.inputTokens,
+    outputTokens: usage.outputTokens,
+    cost: usageCost(options.model, usage.inputTokens, usage.outputTokens),
+  });
 }
 
 export async function POST(request: NextRequest) {
@@ -105,6 +144,7 @@ export async function POST(request: NextRequest) {
             model,
             messages: apiMessages,
             stream: true,
+            stream_options: { include_usage: true },
             temperature: 0.7,
             max_tokens: 2000,
           }),
@@ -127,6 +167,7 @@ export async function POST(request: NextRequest) {
         const decoder = new TextDecoder();
         let buffer = '';
         let fullContent = '';
+        let reportedUsage: GatewayTokenUsage | null = null;
         let done = false;
 
         while (!done) {
@@ -137,31 +178,37 @@ export async function POST(request: NextRequest) {
             buffer += decoder.decode(value, { stream: true });
             const lines = buffer.split('\n');
             buffer = lines.pop() || '';
-
-            for (const line of lines) {
-              const trimmed = line.trim();
-              if (!trimmed || !trimmed.startsWith('data: ')) continue;
-              const data = trimmed.slice(6);
-              if (data === '[DONE]') { done = true; break; }
-
-              try {
-                const parsedChunk = JSON.parse(data);
-                const delta = parsedChunk.choices?.[0]?.delta?.content;
-                if (delta) {
-                  fullContent += delta;
-                  controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'token', content: delta })}\n\n`));
-                }
-              } catch {
-                // Skip unparseable chunks
-              }
+            const parsed = consumeChatCompletionSseLines(lines);
+            if (parsed.content) {
+              fullContent += parsed.content;
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'token', content: parsed.content })}\n\n`));
             }
+            if (parsed.usage) reportedUsage = parsed.usage;
+            if (parsed.reachedDone) done = true;
           } catch {
             done = true;
           }
         }
 
+        buffer += decoder.decode();
+        if (buffer.trim()) {
+          const parsed = consumeChatCompletionSseLines([buffer]);
+          if (parsed.content) {
+            fullContent += parsed.content;
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'token', content: parsed.content })}\n\n`));
+          }
+          if (parsed.usage) reportedUsage = parsed.usage;
+        }
+
         const allMessages = [...pendingMessages, { role: 'assistant' as const, content: fullContent }];
         await persistConversation(convId, auth.id, allMessages, model, true);
+        await logAiResearchUsage({
+          userId: auth.id,
+          model,
+          inputText: gatewayMessagesText(apiMessages),
+          outputText: fullContent,
+          reported: reportedUsage,
+        });
 
         controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'done', conversationId: convId, model })}\n\n`));
         controller.close();

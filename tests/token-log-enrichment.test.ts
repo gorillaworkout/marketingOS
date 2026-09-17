@@ -43,20 +43,31 @@ void describe('Token Log Enrichment', () => {
     const eventMatches = eventApi.match(/taskType:\s*'event-plan'/g);
     assert(eventMatches, 'event-plan route missing taskType');
     assert(eventMatches.length >= 1, `event-plan route has ${eventMatches.length} taskType refs (expected ≥1)`);
+
+    const researchApi = require('fs').readFileSync(
+      require('path').join(__dirname, '../src/app/api/ai-research/chat/route.ts'),
+      'utf-8'
+    );
+    const researchMatches = researchApi.match(/taskType:\s*'ai-research'/g);
+    assert(researchMatches, 'ai-research route missing taskType');
+    assert(researchMatches.length >= 1, `ai-research route has ${researchMatches.length} taskType refs (expected ≥1)`);
   });
 
-  void it('openai.ts INSERT statement includes new columns', () => {
+  void it('token_logs INSERT includes new columns via the shared helper', () => {
+    const tokenLog = require('fs').readFileSync(
+      require('path').join(__dirname, '../src/lib/token-log.ts'),
+      'utf-8'
+    );
     const openai = require('fs').readFileSync(
       require('path').join(__dirname, '../src/lib/openai.ts'),
       'utf-8'
     );
-    // All INSERT INTO token_logs should include provider, account_source, department_id, task_type
-    const inserts = openai.match(/INSERT INTO token_logs \(/g);
+    assert.match(openai, /logTokenUsage/);
+    const inserts = tokenLog.match(/INSERT INTO token_logs \(/g);
     assert(inserts, 'No INSERT INTO token_logs found');
-    assert(inserts.length >= 2, `Found ${inserts.length} INSERT statements`);
+    assert(inserts.length >= 1, `Found ${inserts.length} INSERT statements`);
 
-    // Each insert should have the new columns
-    const insertLines = openai.match(/INSERT INTO token_logs \([^)]+\)/g) || [];
+    const insertLines = tokenLog.match(/INSERT INTO token_logs \([^)]+\)/g) || [];
     for (const line of insertLines) {
       assert(line.includes('provider'), `Missing provider column: ${line}`);
       assert(line.includes('account_source'), `Missing account_source column: ${line}`);
