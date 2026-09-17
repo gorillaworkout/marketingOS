@@ -108,7 +108,7 @@ export default function ImageModelsPage() {
         <div>
           <h2 className="text-lg font-semibold text-[var(--mos-text)]">Available Models</h2>
           <p className="mt-1 text-xs text-[var(--mos-text-muted)]">
-            Select which Codex image models users can choose from. At least one model must be enabled.
+            Select which image models users can choose from. At least one model must be enabled.
           </p>
         </div>
 
@@ -154,16 +154,17 @@ export default function ImageModelsPage() {
       </Panel>
 
       <Panel className="border-amber-400/15 bg-amber-400/[0.035]">
-        <h3 className="text-sm font-medium text-amber-100">ℹ️ About Codex Image Models</h3>
+        <h3 className="text-sm font-medium text-amber-100">ℹ️ About Image Models</h3>
         <p className="mt-2 text-xs leading-5 text-[var(--mos-text-muted)]">
-          Image generation mengalir lewat <strong>GorillaWorkout gateway</strong> (llm.gorillaworkout.id) satu pintu,
-          yang meneruskan ke akun <strong>Codex (ChatGPT)</strong> yang terhubung. Model yang dipilih di sini akan muncul
-          sebagai dropdown di Social Post page saat user mau generate image.
+          Image generation mengalir lewat <strong>GorillaWorkout gateway</strong> (llm.gorillaworkout.id) satu pintu
+          (`POST /images/generations`). Model yang dipilih di sini akan muncul sebagai dropdown di Social Post page
+          saat user mau generate image.
         </p>
         <ul className="mt-3 space-y-1 text-xs text-[var(--mos-text-muted)]">
-          <li>• <strong>GPT-5.5 Image:</strong> Quality tertinggi, processing ~60-90 detik</li>
-          <li>• <strong>GPT-5.4 Image:</strong> Balanced, lebih cepat</li>
-          <li>• <strong>Catatan:</strong> GPT-5.3 Image ditolak akun ChatGPT, jadi tidak disediakan.</li>
+          <li>• <strong>GPT-5.5 Image:</strong> Codex (ChatGPT) T2I — default, quality tertinggi</li>
+          <li>• <strong>Nano Banana / Nano Banana Pro:</strong> Antigravity Gemini T2I</li>
+          <li>• <strong>Gemini 3.1 Flash Image:</strong> Antigravity Gemini 3.1 Flash T2I</li>
+          <li>• <strong>Catatan:</strong> GPT-5.4 Image ditolak akun ChatGPT, jadi tidak disediakan.</li>
         </ul>
       </Panel>
 

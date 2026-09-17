@@ -4,6 +4,7 @@ import { queryOne, execute } from '@/lib/database';
 import { rateLimit } from '@/lib/rate-limit';
 import { createImageJobStore, type ImageJob, type ImageJobResult } from '@/lib/image-job-status';
 import { getImageGenerationSpec, parseImageAspectRatio, type ImageAspectRatio } from '@/lib/image-aspect-ratio';
+import { DEFAULT_IMAGE_MODEL, imageModelLabel, resolveImageModel } from '@/lib/image-models';
 import fs from 'fs';
 import path from 'path';
 
@@ -16,10 +17,6 @@ const JOB_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]
 // connected Codex (ChatGPT) account on the 9router host.
 const GORILLAWORKOUT_API_BASE = process.env.GORILLAWORKOUT_API_BASE || 'https://llm.gorillaworkout.id/v1';
 const GORILLAWORKOUT_API_KEY = process.env.GORILLAWORKOUT_API_KEY || '';
-
-// Codex image models served by the gateway. gpt-5.3-image is rejected on a
-// ChatGPT account, so only 5.5 and 5.4 are offered.
-const IMAGE_MODELS = ['cx/gpt-5.5-image', 'cx/gpt-5.4-image'];
 
 export async function POST(request: NextRequest) {
   const rl = rateLimit(request);
@@ -46,7 +43,7 @@ export async function POST(request: NextRequest) {
   const prompt = body.prompt.trim();
   const type = typeof body.type === 'string' ? body.type : 'social-post';
   const brief = typeof body.brief === 'string' ? body.brief : prompt;
-  const model = typeof body.model === 'string' && body.model.trim() ? body.model.trim() : 'cx/gpt-5.5-image';
+  const model = typeof body.model === 'string' && body.model.trim() ? body.model.trim() : DEFAULT_IMAGE_MODEL;
   const taskId = typeof body.taskId === 'string' && body.taskId.trim() ? body.taskId.trim() : null;
   let aspectRatio: ImageAspectRatio;
   try {
@@ -85,7 +82,7 @@ async function runImageJob(job: ImageJob, prompt: string, brief: string, type: s
 
   try {
     imageJobs.update(job.id, job.ownerId, {
-      status: 'generating', progress: 30, message: `🤖 Codex generating image with ${model} (30-90s)...`,
+      status: 'generating', progress: 30, message: `🤖 Generating image with ${model} (30-90s)...`,
     });
 
     if (!GORILLAWORKOUT_API_KEY) {
@@ -93,7 +90,7 @@ async function runImageJob(job: ImageJob, prompt: string, brief: string, type: s
     }
 
     // Fall back to the gateway's default image model when an unknown one is requested.
-    const safeModel = IMAGE_MODELS.includes(model) ? model : 'cx/gpt-5.5-image';
+    const safeModel = resolveImageModel(model);
     const generationSpec = getImageGenerationSpec(aspectRatio);
     const gatewayPrompt = `${prompt}\n\n${generationSpec.promptSuffix}`;
 
@@ -147,7 +144,7 @@ async function runImageJob(job: ImageJob, prompt: string, brief: string, type: s
       imageUrl,
       fileName,
       sopName,
-      model: `${safeModel} (Codex)`,
+      model: imageModelLabel(safeModel),
       aspectRatio,
     };
     imageJobs.update(job.id, job.ownerId, {

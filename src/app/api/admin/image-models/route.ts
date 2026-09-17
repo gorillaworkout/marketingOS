@@ -1,14 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAdmin } from '@/lib/auth';
 import { queryOne, execute } from '@/lib/database';
-
-// Codex image models served by the GorillaWorkout gateway (one-door). The
-// gateway maps these to the connected Codex (ChatGPT) account. gpt-5.3-image
-// is rejected on a ChatGPT account, so only 5.5 and 5.4 are offered.
-const AVAILABLE_IMAGE_MODELS = [
-  { id: 'cx/gpt-5.5-image', name: 'GPT-5.5 Image', description: 'Codex · image generation · high quality' },
-  { id: 'cx/gpt-5.4-image', name: 'GPT-5.4 Image', description: 'Codex · image generation · balanced' },
-];
+import { AVAILABLE_IMAGE_MODELS, DEFAULT_IMAGE_MODEL, isAllowedImageModel } from '@/lib/image-models';
 
 export async function GET(request: NextRequest) {
   const auth = await requireAdmin(request);
@@ -26,7 +19,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({
         availableModels: AVAILABLE_IMAGE_MODELS,
         allowedModels: AVAILABLE_IMAGE_MODELS.map(m => m.id),
-        defaultModel: 'cx/gpt-5.5-image',
+        defaultModel: DEFAULT_IMAGE_MODEL,
       });
     }
 
@@ -60,8 +53,8 @@ export async function PUT(request: NextRequest) {
       return NextResponse.json({ error: 'Default model must be one of the allowed models' }, { status: 400 });
     }
 
-    const allowedModels = body.allowedModels.filter(id => 
-      typeof id === 'string' && AVAILABLE_IMAGE_MODELS.some(m => m.id === id)
+    const allowedModels = body.allowedModels.filter(id =>
+      typeof id === 'string' && isAllowedImageModel(id)
     );
 
     if (allowedModels.length === 0) {
