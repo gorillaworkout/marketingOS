@@ -36,6 +36,7 @@ const generateImage = readFileSync('src/app/api/generate-image/route.ts', 'utf8'
 assert.match(generateImage, /GORILLAWORKOUT_API_BASE/);
 assert.match(generateImage, /\/images\/generations/);
 assert.match(generateImage, /resolveImageModel/);
+assert.match(generateImage, /generateWithAntigravityCapacityFallback/);
 assert.doesNotMatch(generateImage, /gpt-5\.4-image|ag\/nanobanana/);
 
 const socialPost = readFileSync('src/app/dashboard/social-post/page.tsx', 'utf8');

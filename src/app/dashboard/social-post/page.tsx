@@ -66,7 +66,17 @@ interface ImageJobResponse {
   progress?: number;
   message?: string;
   error?: string;
-  result?: { success?: boolean; imageUrl?: string; fileName?: string; sopName?: string; model?: string; aspectRatio?: ImageAspectRatio };
+  result?: {
+    success?: boolean;
+    imageUrl?: string;
+    fileName?: string;
+    sopName?: string;
+    model?: string;
+    usedModel?: string;
+    fallbackFrom?: string;
+    fallbackMessage?: string;
+    aspectRatio?: ImageAspectRatio;
+  };
 }
 
 async function readImageJobResponse(response: Response): Promise<ImageJobResponse> {
@@ -122,6 +132,8 @@ export default function SocialPostPage() {
   const [imageAspectRatio, setImageAspectRatio] = useState<ImageAspectRatio>(DEFAULT_IMAGE_ASPECT_RATIO);
   const [availableImageModels, setAvailableImageModels] = useState(AVAILABLE_IMAGE_MODELS);
   const [imageProgress, setImageProgress] = useState<ImageProgressState | null>(null);
+  const [imageNotice, setImageNotice] = useState('');
+  const [generatedImageModel, setGeneratedImageModel] = useState<string | null>(null);
   const imageProgressTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const imagePollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const imageRunRef = useRef(0);
@@ -230,6 +242,8 @@ export default function SocialPostPage() {
     setResult(null);
     setGeneratedImage(null);
     setImageHistory([]);
+    setImageNotice('');
+    setGeneratedImageModel(null);
     setTokenUsage(null);
     setViewingPost(null);
     setSelectedIndex(null);
@@ -437,6 +451,8 @@ export default function SocialPostPage() {
     setGeneratingImage(true);
     setError('');
     setGeneratedImage(null);
+    setImageNotice('');
+    setGeneratedImageModel(null);
     setImageProgress({ step: 'trying', progress: 5, message: 'Starting image generation...', elapsed: 0 });
 
     const startTime = Date.now();
@@ -472,7 +488,13 @@ export default function SocialPostPage() {
           });
 
           if (status.status === 'done' && status.result?.success && status.result.imageUrl) {
+            const usedModelId = status.result.usedModel || imageModel;
+            const usedModelLabel = status.result.model
+              || availableImageModels.find(item => item.id === usedModelId)?.name
+              || usedModelId;
             setGeneratedImage(status.result.imageUrl);
+            setGeneratedImageModel(usedModelLabel);
+            if (status.result.fallbackMessage) setImageNotice(status.result.fallbackMessage);
             setGeneratingImage(false);
             stopImageTracking();
             // The image is now attached to the task row; refresh history views.
@@ -482,7 +504,9 @@ export default function SocialPostPage() {
                 imageUrl: status.result!.imageUrl,
                 fileName: status.result!.fileName,
                 sopName: status.result!.sopName,
-                model: imageModel,
+                model: usedModelId,
+                fallbackFrom: status.result!.fallbackFrom,
+                fallbackMessage: status.result!.fallbackMessage,
                 aspectRatio: status.result!.aspectRatio || imageAspectRatio,
                 prompt: editableImagePrompt,
                 generatedAt: new Date().toISOString(),
@@ -531,6 +555,8 @@ export default function SocialPostPage() {
     setResult(null);
     setSelectedIndex(null);
     setGeneratedImage(null);
+    setImageNotice('');
+    setGeneratedImageModel(null);
     setKnowledgeSaved(false);
     setError('');
     setResearchPosts([]);
@@ -565,6 +591,13 @@ export default function SocialPostPage() {
       setImageAspectRatio(IMAGE_ASPECT_RATIOS.includes(latest?.aspectRatio) ? latest.aspectRatio : DEFAULT_IMAGE_ASPECT_RATIO);
       const restoredUrl = latest?.imageUrl || data.imageUrl || null;
       if (restoredUrl) setGeneratedImage(restoredUrl);
+      const restoredModelId = latest?.usedModel || latest?.model;
+      setGeneratedImageModel(
+        restoredModelId
+          ? (availableImageModels.find(item => item.id === restoredModelId)?.name || restoredModelId)
+          : null,
+      );
+      setImageNotice(typeof latest?.fallbackMessage === 'string' ? latest.fallbackMessage : '');
     } catch {}
   };
 
@@ -705,6 +738,11 @@ export default function SocialPostPage() {
           )}
 
           {error && <div className="bg-red-500/10 border border-red-500/20 text-red-400 px-4 py-3 rounded-lg">{error}</div>}
+          {imageNotice && !error && (
+            <div role="status" className="bg-amber-500/10 border border-amber-500/20 text-amber-200 px-4 py-3 rounded-lg">
+              {imageNotice}
+            </div>
+          )}
 
           {/* Knowledge saved notification */}
           {knowledgeSaved && (
@@ -1006,9 +1044,19 @@ export default function SocialPostPage() {
           {generatedImage && (
             <Panel>
               <div className="flex items-center justify-between mb-4">
-                <SectionHeader title="Generated image" description="Final visual asset for this post." />
+                <SectionHeader
+                  title="Generated image"
+                  description={generatedImageModel
+                    ? `Final visual asset · ${generatedImageModel}`
+                    : 'Final visual asset for this post.'}
+                />
                 <a href={generatedImage} download className="inline-flex h-8 items-center rounded-[var(--mos-radius-control)] border border-[var(--mos-border)] bg-[var(--mos-raised)] px-3 text-xs font-medium text-[var(--mos-text-secondary)]">Download</a>
               </div>
+              {imageNotice && (
+                <div role="status" className="mb-3 bg-amber-500/10 border border-amber-500/20 text-amber-200 px-3 py-2 rounded-lg text-xs">
+                  {imageNotice}
+                </div>
+              )}
               <div className="bg-[var(--mos-surface)] rounded-lg p-2 flex items-center justify-center">
                 <img src={generatedImage} alt="Generated" className="max-w-full max-h-[500px] rounded-lg" />
               </div>
@@ -1026,7 +1074,8 @@ export default function SocialPostPage() {
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-xs text-[var(--mos-text-secondary)]">{img.sopName || img.fileName}</p>
                       <p className="text-[10px] text-[var(--mos-text-faint)]">
-                        {img.model || 'unknown model'}
+                        {availableImageModels.find(item => item.id === img.model)?.name || img.model || 'unknown model'}
+                        {img.fallbackFrom ? ` · fallback from ${availableImageModels.find(item => item.id === img.fallbackFrom)?.name || img.fallbackFrom}` : ''}
                         {img.aspectRatio ? ` · ${img.aspectRatio}` : ''}
                         {img.generatedAt ? ` · ${new Date(img.generatedAt).toLocaleString('id-ID')}` : ''}
                       </p>

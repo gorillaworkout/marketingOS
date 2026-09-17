@@ -56,4 +56,7 @@ test('route threads ratio through gateway request, job result, and task history'
   assert.match(route, /result: ImageJobResult = \{[\s\S]*aspectRatio/);
   assert.match(route, /recordImageOnTask\([\s\S]*aspectRatio/);
   assert.match(status, /aspectRatio\?: ImageAspectRatio/);
+  assert.match(status, /usedModel\?: string/);
+  assert.match(status, /fallbackFrom\?: string/);
+  assert.match(status, /fallbackMessage\?: string/);
 });
