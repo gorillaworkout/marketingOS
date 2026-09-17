@@ -15,6 +15,7 @@ import {
 } from '@/components/ui/dashboard';
 import InlineModelSelector from '@/components/InlineModelSelector';
 import { DEFAULT_IMAGE_ASPECT_RATIO, IMAGE_ASPECT_RATIOS, type ImageAspectRatio } from '@/lib/image-aspect-ratio';
+import { AVAILABLE_IMAGE_MODELS, DEFAULT_IMAGE_MODEL } from '@/lib/image-models';
 
 interface QCCheck {
   name: string;
@@ -117,9 +118,9 @@ export default function SocialPostPage() {
   const [generatingImage, setGeneratingImage] = useState(false);
   const [generatedImage, setGeneratedImage] = useState<string | null>(null);
   const [editableImagePrompt, setEditableImagePrompt] = useState('');
-  const [imageModel, setImageModel] = useState('cx/gpt-5.5-image');
+  const [imageModel, setImageModel] = useState(DEFAULT_IMAGE_MODEL);
   const [imageAspectRatio, setImageAspectRatio] = useState<ImageAspectRatio>(DEFAULT_IMAGE_ASPECT_RATIO);
-  const [availableImageModels, setAvailableImageModels] = useState<Array<{ id: string; name: string; description: string }>>([]);
+  const [availableImageModels, setAvailableImageModels] = useState(AVAILABLE_IMAGE_MODELS);
   const [imageProgress, setImageProgress] = useState<ImageProgressState | null>(null);
   const imageProgressTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const imagePollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -158,7 +159,7 @@ export default function SocialPostPage() {
     fetch('/api/image-models')
       .then(res => res.json())
       .then(data => {
-        if (data.models && Array.isArray(data.models)) {
+        if (data.models && Array.isArray(data.models) && data.models.length > 0) {
           setAvailableImageModels(data.models);
           if (data.defaultModel) {
             setImageModel(data.defaultModel);
@@ -956,15 +957,11 @@ export default function SocialPostPage() {
                 <div className="space-y-2">
                   <label className="block text-xs text-[var(--mos-text-faint)] uppercase tracking-wide">Image Generation Model</label>
                   <Select value={imageModel} onChange={(e) => setImageModel(e.target.value)}>
-                    {availableImageModels.length > 0 ? (
-                      availableImageModels.map(model => (
-                        <option key={model.id} value={model.id}>
-                          {model.name} — {model.description}
-                        </option>
-                      ))
-                    ) : (
-                      <option value="cx/gpt-5.5-image">GPT-5.5 Image — Codex · image generation</option>
-                    )}
+                    {(availableImageModels.length > 0 ? availableImageModels : AVAILABLE_IMAGE_MODELS).map(model => (
+                      <option key={model.id} value={model.id}>
+                        {model.name} — {model.description}
+                      </option>
+                    ))}
                   </Select>
                   <p className="text-xs text-[var(--mos-text-faint)]">Model di-generate melalui GorillaWorkout gateway (llm.gorillaworkout.id)</p>
                 </div>
