@@ -101,39 +101,56 @@ export function cosineSimilarity(a: number[], b: number[]): number {
   return denom === 0 ? 0 : dot / denom;
 }
 
-/**
- * Find knowledge entries most similar to the given text.
- * Searches all entries with embeddings, computes cosine similarity,
- * and returns the top `limit` results.
- */
-export async function findSimilarEntries(
-  text: string,
-  limit: number = 5
-): Promise<KnowledgeEntry[]> {
-  const queryEmbedding = await getEmbedding(text);
+export interface SimilarEntriesScope {
+  userId: string;
+  taskType?: string;
+  limit?: number;
+}
 
-  // Fetch all entries with embeddings
-  const entries = await queryAll<KnowledgeEntry>('SELECT * FROM knowledge_entries WHERE embedding IS NOT NULL');
+export function buildSimilarEntriesQuery(scope: { userId: string; taskType?: string }): { sql: string; params: unknown[] } {
+  let sql = 'SELECT * FROM knowledge_entries WHERE user_id = ? AND embedding IS NOT NULL';
+  const params: unknown[] = [scope.userId];
+  if (scope.taskType) {
+    sql += ' AND task_type = ?';
+    params.push(scope.taskType);
+  }
+  return { sql, params };
+}
 
-  if (entries.length === 0) return [];
-
-  // Compute similarities
-  const scored: Array<{ entry: KnowledgeEntry; score: number }> = [];
+export function rankSimilarEntries<T extends { embedding: string | null }>(
+  queryEmbedding: number[],
+  entries: T[],
+  limit: number,
+): T[] {
+  const scored: Array<{ entry: T; score: number }> = [];
   for (const entry of entries) {
     if (!entry.embedding) continue;
     try {
       const entryEmb = JSON.parse(entry.embedding) as number[];
-      const score = cosineSimilarity(queryEmbedding, entryEmb);
-      scored.push({ entry, score });
+      scored.push({ entry, score: cosineSimilarity(queryEmbedding, entryEmb) });
     } catch {
       // Skip entries with invalid embeddings
     }
   }
-
-  // Sort by similarity descending
   scored.sort((a, b) => b.score - a.score);
-
   return scored.slice(0, limit).map(s => s.entry);
+}
+
+/**
+ * Find this user's knowledge entries most similar to the given text.
+ * Always scoped to `userId` so RAG never retrieves another user's selections.
+ */
+export async function findSimilarEntries(
+  text: string,
+  scope: SimilarEntriesScope,
+): Promise<KnowledgeEntry[]> {
+  if (!scope.userId) return [];
+  const limit = scope.limit ?? 5;
+  const { sql, params } = buildSimilarEntriesQuery(scope);
+  const queryEmbedding = await getEmbedding(text);
+  const entries = await queryAll<KnowledgeEntry>(sql, params);
+  if (entries.length === 0) return [];
+  return rankSimilarEntries(queryEmbedding, entries, limit);
 }
 
 /**
@@ -146,8 +163,11 @@ export async function buildConnections(entryId: string): Promise<void> {
 
   if (!entry.embedding) return;
 
-  // Find similar entries (excluding self)
-  const similar = await findSimilarEntries(entry.brief + ' ' + entry.selected_output, 10);
+  // Find similar entries for the same user (excluding self)
+  const similar = await findSimilarEntries(entry.brief + ' ' + entry.selected_output, {
+    userId: entry.user_id,
+    limit: 10,
+  });
   const SIMILARITY_THRESHOLD = 0.5;
 
   for (const similarEntry of similar) {

@@ -15,6 +15,7 @@ import {
 } from '@/components/ui/dashboard';
 import InlineModelSelector from '@/components/InlineModelSelector';
 import { DEFAULT_IMAGE_ASPECT_RATIO, IMAGE_ASPECT_RATIOS, type ImageAspectRatio } from '@/lib/image-aspect-ratio';
+import { applyDupoinImagePromptLocks } from '@/lib/dupoin-image-prompt';
 import { AVAILABLE_IMAGE_MODELS, DEFAULT_IMAGE_MODEL } from '@/lib/image-models';
 
 interface QCCheck {
@@ -312,7 +313,7 @@ export default function SocialPostPage() {
                 setTaskId(r.taskId);
                 setTokenUsage(r.usage);
                 if (r.options?.[0]) {
-                  setEditableImagePrompt(r.options[0].imagePrompt || r.imagePrompt || '');
+                  setEditableImagePrompt(applyDupoinImagePromptLocks(r.options[0].imagePrompt || r.imagePrompt || '', imageAspectRatio));
                 }
                 if (r.qcResults) setQcResults(r.qcResults);
                 if (r.dupoinFileName) setDupoinFileName(r.dupoinFileName);
@@ -381,7 +382,7 @@ export default function SocialPostPage() {
       }
 
       setKnowledgeSaved(true);
-      setEditableImagePrompt(selected.imagePrompt || '');
+      setEditableImagePrompt(applyDupoinImagePromptLocks(selected.imagePrompt || '', imageAspectRatio));
       setTimeout(() => setKnowledgeSaved(false), 5000);
     } catch (e) {
       const message = e instanceof Error ? e.message : 'Unknown error';
@@ -461,10 +462,12 @@ export default function SocialPostPage() {
     }, 1000);
 
     try {
+      const imagePrompt = applyDupoinImagePromptLocks(editableImagePrompt, imageAspectRatio);
+      setEditableImagePrompt(imagePrompt);
       const res = await fetch('/api/generate-image', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt: editableImagePrompt, taskId, type: 'social-post', brief: brief || editableImagePrompt.substring(0, 100), model: imageModel, aspectRatio: imageAspectRatio }),
+        body: JSON.stringify({ prompt: imagePrompt, taskId, type: 'social-post', brief: brief || imagePrompt.substring(0, 100), model: imageModel, aspectRatio: imageAspectRatio }),
       });
 
       const startup = await readImageJobResponse(res);
@@ -508,7 +511,7 @@ export default function SocialPostPage() {
                 fallbackFrom: status.result!.fallbackFrom,
                 fallbackMessage: status.result!.fallbackMessage,
                 aspectRatio: status.result!.aspectRatio || imageAspectRatio,
-                prompt: editableImagePrompt,
+                prompt: imagePrompt,
                 generatedAt: new Date().toISOString(),
               }]);
             }
@@ -566,29 +569,30 @@ export default function SocialPostPage() {
     setBrief(post.brief || '');
     try {
       const data = JSON.parse(post.output_data || '{}');
+      const history = Array.isArray(data.images) ? data.images : [];
+      const latest = history[history.length - 1];
+      const restoredRatio = IMAGE_ASPECT_RATIOS.includes(latest?.aspectRatio) ? latest.aspectRatio : DEFAULT_IMAGE_ASPECT_RATIO;
+      setImageAspectRatio(restoredRatio);
       // Handle both old format (single result) and new format (3 options)
       if (data.options && Array.isArray(data.options)) {
         setOptions(data.options);
         setTaskId(post.id);
         if (data.options[0]) {
-          setEditableImagePrompt(data.options[0].imagePrompt || data.imagePrompt || '');
+          setEditableImagePrompt(applyDupoinImagePromptLocks(data.options[0].imagePrompt || data.imagePrompt || '', restoredRatio));
         }
       } else {
         // Old format - convert to single option
         const imagePrompt = data.imagePrompt || '';
         setResult({ caption: data.captionData || data, imagePrompt, taskId: post.id });
         setTaskId(post.id);
-        setEditableImagePrompt(imagePrompt);
+        setEditableImagePrompt(applyDupoinImagePromptLocks(imagePrompt, restoredRatio));
       }
       // Load SOP data if available
       if (data.qcResults) setQcResults(data.qcResults);
       if (data.dupoinFileName) setDupoinFileName(data.dupoinFileName);
       if (data.researchPosts) setResearchPosts(data.researchPosts);
       // Replay previously generated images for this post
-      const history = Array.isArray(data.images) ? data.images : [];
       setImageHistory(history);
-      const latest = history[history.length - 1];
-      setImageAspectRatio(IMAGE_ASPECT_RATIOS.includes(latest?.aspectRatio) ? latest.aspectRatio : DEFAULT_IMAGE_ASPECT_RATIO);
       const restoredUrl = latest?.imageUrl || data.imageUrl || null;
       if (restoredUrl) setGeneratedImage(restoredUrl);
       const restoredModelId = latest?.usedModel || latest?.model;
@@ -1005,7 +1009,11 @@ export default function SocialPostPage() {
                 </div>
 
                 <FormField label="Image aspect ratio">
-                  <Select value={imageAspectRatio} onChange={(e) => setImageAspectRatio(e.target.value as ImageAspectRatio)}>
+                  <Select value={imageAspectRatio} onChange={(e) => {
+                    const ratio = e.target.value as ImageAspectRatio;
+                    setImageAspectRatio(ratio);
+                    setEditableImagePrompt(prev => prev.trim() ? applyDupoinImagePromptLocks(prev, ratio) : prev);
+                  }}>
                     {IMAGE_ASPECT_RATIOS.map(ratio => <option key={ratio} value={ratio}>{ratio}</option>)}
                   </Select>
                 </FormField>

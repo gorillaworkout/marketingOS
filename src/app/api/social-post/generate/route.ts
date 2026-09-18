@@ -2,8 +2,9 @@ import { NextRequest } from 'next/server';
 import { queryOne, queryAll, execute } from '@/lib/database';
 import { requireFeature } from '@/lib/auth';
 import { rateLimit } from '@/lib/rate-limit';
-import { generateContent, getSmartSystemPrompt, fetchContextMemory, fetchStyleContext, getUserPreferredModel, runQC, generateDupoinFileName, type BrandGuidelines, type QCResult } from '@/lib/openai';
+import { generateContent, getSmartSystemPrompt, fetchContextMemory, fetchStyleContext, fetchKnowledgeContext, getUserPreferredModel, runQC, generateDupoinFileName, type BrandGuidelines, type QCResult } from '@/lib/openai';
 import { buildSocialPostImagePromptUserMessage } from '@/lib/dupoin-image-prompt';
+import { DEFAULT_IMAGE_ASPECT_RATIO } from '@/lib/image-aspect-ratio';
 import { v4 as uuidv4 } from 'uuid';
 import fs from 'fs';
 import path from 'path';
@@ -100,6 +101,9 @@ export async function POST(request: NextRequest) {
 
   // Fetch style context from knowledge graph
   const styleContext = await fetchStyleContext(userId, 'social-post');
+
+  // Retrieve similar approved knowledge_entries for this user (RAG)
+  const knowledgeContext = await fetchKnowledgeContext(userId, brief, 'social-post', 5);
 
   // Fetch best examples for auto-learning
   let bestExamples = '';
@@ -206,6 +210,7 @@ Goal: ${goal || 'Awareness'}
 ${variant.instruction}
 ${bestExamples}
 ${contextMemory}
+${knowledgeContext}
 
 Follow the SOP strictly. Output JSON format with: { "hook": "...", "caption": "...", "hashtags": ["..."] }`;
 
@@ -278,13 +283,14 @@ Follow the SOP strictly. Output JSON format with: { "hook": "...", "caption": ".
           const smartImageSystem = getSmartSystemPrompt('image-prompt', platform, brandGuidelines, undefined, styleContext);
           const imagePrompts = await Promise.all(options.map(async selectedCaption => generateContent(
             smartImageSystem,
-            buildSocialPostImagePromptUserMessage({
+            `${buildSocialPostImagePromptUserMessage({
               brief,
               platform,
               targetAudience,
               hook: selectedCaption.hook,
               caption: selectedCaption.caption,
-            }),
+              aspectRatio: DEFAULT_IMAGE_ASPECT_RATIO,
+            })}${knowledgeContext}`,
             userId,
             taskId,
             { brandGuidelines, model: preferredModel, taskType: 'social-post' }

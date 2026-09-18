@@ -2,7 +2,7 @@ import { NextRequest } from 'next/server';
 import { queryOne, queryAll, execute } from '@/lib/database';
 import { requireFeature } from '@/lib/auth';
 import { rateLimit } from '@/lib/rate-limit';
-import { generateContent, getSmartSystemPrompt, fetchContextMemory, fetchStyleContext, getUserPreferredModel, type BrandGuidelines } from '@/lib/openai';
+import { generateContent, getSmartSystemPrompt, fetchContextMemory, fetchStyleContext, fetchKnowledgeContext, getUserPreferredModel, type BrandGuidelines } from '@/lib/openai';
 import { v4 as uuidv4 } from 'uuid';
 import fs from 'fs';
 import path from 'path';
@@ -130,6 +130,8 @@ async function handlePreview(
   // Fetch style context
   const styleContext = await fetchStyleContext(userId, 'video-script');
 
+  const knowledgeContext = await fetchKnowledgeContext(userId, event, 'video-script', 5);
+
   const encoder = new TextEncoder();
   let timeoutId: ReturnType<typeof setTimeout>;
 
@@ -187,6 +189,7 @@ ${referencesContent}
 ${variant.instruction}
 
 ${contextMemory}
+${knowledgeContext}
 
 Generate ONLY the preview fields (hook, context, highlight, brandTieIn, cta). Do NOT generate the full script yet.
 
@@ -332,6 +335,7 @@ async function handleFull(
 
   const contextMemory = await fetchContextMemory(userId, 'video-script', 5);
   const styleContext = await fetchStyleContext(userId, 'video-script');
+  const knowledgeContext = await fetchKnowledgeContext(userId, event, 'video-script', 5);
 
   // Fetch best examples
   let bestExamples = '';
@@ -394,6 +398,7 @@ ${editedPrompt}
 ${variant.instruction}
 ${bestExamples}
 ${contextMemory}
+${knowledgeContext}
 
 Platform: ${platform || 'Instagram Reels'}
 Duration: ${duration || '30-45 seconds'}
