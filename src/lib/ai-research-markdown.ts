@@ -10,7 +10,7 @@ export type MarkdownBlock =
   | { type: 'heading'; level: 1 | 2 | 3; children: MarkdownInline[] }
   | { type: 'list'; ordered: boolean; items: MarkdownInline[][] }
   | { type: 'codeblock'; value: string; language?: string }
-  | { type: 'table'; headers: MarkdownInline[][]; rows: MarkdownInline[][] };
+  | { type: 'table'; headers: MarkdownInline[][]; rows: MarkdownInline[][][] };
 
 const SAFE_HREF = /^(https?:\/\/|mailto:)/i;
 
@@ -108,7 +108,7 @@ export function parseMarkdown(source: string): MarkdownBlock[] {
     if (line.includes('|') && index + 1 < lines.length && isTableSeparator(lines[index + 1])) {
       const headers = splitTableRow(line).map(parseInline);
       index += 2;
-      const rows: MarkdownInline[][] = [];
+      const rows: MarkdownInline[][][] = [];
       while (index < lines.length && lines[index].includes('|') && !isTableSeparator(lines[index])) {
         rows.push(splitTableRow(lines[index]).map(parseInline));
         index += 1;

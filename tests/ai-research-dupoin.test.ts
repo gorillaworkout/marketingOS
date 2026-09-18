@@ -75,6 +75,10 @@ test('assistant markdown contract renders bold, lists, links, and code without r
     'pair,bid',
     '```',
     '',
+    '| pair | bid |',
+    '| --- | --- |',
+    '| XAUUSD | 2650 |',
+    '',
     '<script>alert(1)</script>',
     '',
     '[xss](javascript:alert(1))',
@@ -87,6 +91,7 @@ test('assistant markdown contract renders bold, lists, links, and code without r
   assert.ok(blocks.some(block => block.type === 'paragraph' && block.children.some(node => node.type === 'link' && node.href === 'https://bappebti.go.id')));
   assert.ok(blocks.some(block => block.type === 'paragraph' && block.children.some(node => node.type === 'code' && node.value === 'XAUUSD')));
   assert.ok(blocks.some(block => block.type === 'codeblock' && block.value.includes('pair,bid')));
+  assert.ok(blocks.some(block => block.type === 'table' && block.rows.length === 1));
   assert.ok(blocks.some(block => block.type === 'paragraph' && block.children.some(node => node.type === 'text' && String(node.value).includes('<script>alert(1)</script>'))));
   assert.equal(sanitizeHref('javascript:alert(1)'), null);
   assert.equal(sanitizeHref('https://dupoin.co.id/about'), 'https://dupoin.co.id/about');
