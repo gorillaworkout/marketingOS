@@ -8,6 +8,7 @@ export async function GET(request: NextRequest) {
   if ('error' in viewer) return NextResponse.json({ error: viewer.error }, { status: viewer.status });
 
   const status = GORILLAWORKOUT_API_KEY ? 'available' : 'not_configured';
+  // /dashboard/models library + Organization checkboxes render this array.
   return NextResponse.json({
     provider: {
       id: 'gorillaworkout',

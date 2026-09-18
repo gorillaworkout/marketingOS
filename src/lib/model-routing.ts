@@ -64,23 +64,23 @@ export const DEFAULT_FEATURE_ASSIGNMENTS: Record<GenerationFeature, {
   defaultModel: string;
 }> = {
   'social-post': {
-    allowedModels: ['ag/gemini-3-flash', 'ag/gemini-3.6-flash-medium', 'ag/claude-sonnet-4-6'],
+    allowedModels: ['ag/gemini-3-flash', 'ag/gemini-3.6-flash-medium', 'ag/claude-sonnet-4-6', PREFERRED_CODEX_MODEL, 'cx/gpt-5.3-codex-spark'],
     defaultModel: 'ag/gemini-3-flash',
   },
   'video-script': {
-    allowedModels: ['ag/gemini-3-flash', 'ag/gemini-3.6-flash-medium', 'ag/claude-sonnet-4-6'],
+    allowedModels: ['ag/gemini-3-flash', 'ag/gemini-3.6-flash-medium', 'ag/claude-sonnet-4-6', PREFERRED_CODEX_MODEL, 'cx/gpt-5.3-codex-spark'],
     defaultModel: 'ag/gemini-3-flash',
   },
   'event-plan': {
-    allowedModels: ['ag/gemini-3-flash', 'ag/gemini-3.1-pro-low', 'ag/claude-sonnet-4-6'],
+    allowedModels: ['ag/gemini-3-flash', 'ag/gemini-3.1-pro-low', 'ag/claude-sonnet-4-6', PREFERRED_CODEX_MODEL, 'cx/gpt-5.3-codex-spark'],
     defaultModel: 'ag/gemini-3.1-pro-low',
   },
   'article-market-news': {
-    allowedModels: ['ag/claude-sonnet-4-6', 'lr/claude-sonnet-4.5', 'ag/gemini-3.1-pro-low'],
+    allowedModels: ['ag/claude-sonnet-4-6', 'lr/claude-sonnet-4.5', 'ag/gemini-3.1-pro-low', PREFERRED_CODEX_MODEL, 'cx/gpt-5.3-codex-spark'],
     defaultModel: 'ag/claude-sonnet-4-6',
   },
   'market-research': {
-    allowedModels: ['ag/claude-sonnet-4-6', 'lr/claude-sonnet-4.5', 'ag/gemini-3.1-pro-low'],
+    allowedModels: ['ag/claude-sonnet-4-6', 'lr/claude-sonnet-4.5', 'ag/gemini-3.1-pro-low', PREFERRED_CODEX_MODEL, 'cx/gpt-5.3-codex-spark'],
     defaultModel: 'ag/claude-sonnet-4-6',
   },
   'ai-research': {

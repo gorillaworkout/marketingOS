@@ -70,6 +70,17 @@ test('AI Research defaults include GPT-5.6 Sol and no Kimi', () => {
     id.startsWith('kimi/') || id.startsWith('tr/') || id.startsWith('cmc/moonshotai/') || id.toLowerCase().includes('kimi')));
 });
 
+test('every workflow allowlist includes Sol and Spark so /dashboard/models can assign them', () => {
+  for (const [feature, assignment] of Object.entries(DEFAULT_FEATURE_ASSIGNMENTS)) {
+    assert.ok(assignment.allowedModels.includes(PREFERRED_CODEX_MODEL), `${feature} missing Sol`);
+    assert.ok(assignment.allowedModels.includes('cx/gpt-5.3-codex-spark'), `${feature} missing Spark`);
+    assert.ok(assignment.allowedModels.includes(assignment.defaultModel), `${feature} default outside allowlist`);
+    if (feature !== 'ai-research') {
+      assert.notEqual(assignment.defaultModel, PREFERRED_CODEX_MODEL, `${feature} should keep its existing default`);
+    }
+  }
+});
+
 test('the Codex restore migration only writes catalog models and never writes Kimi', () => {
   const referenced = [...new Set(quotedModelIds(restore))];
   assert.ok(referenced.includes(PREFERRED_CODEX_MODEL));

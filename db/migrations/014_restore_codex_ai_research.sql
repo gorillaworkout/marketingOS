@@ -16,8 +16,9 @@
 
 BEGIN;
 
--- 1. Drop residual Kimi/moonshot ids from every allowlist and union the
---    GPT-5.6 Codex family onto ai-research. ONE statement so the
+-- 1. Drop residual Kimi/moonshot ids from every allowlist. Union Sol + Spark
+--    onto every feature so /dashboard/models Organization policy can assign
+--    them; add Terra/Luna only on ai-research. ONE statement so the
 --    allowed_models / default_allowed CHECKs stay satisfied.
 UPDATE feature_model_assignments SET
   allowed_models = COALESCE(
@@ -36,10 +37,14 @@ UPDATE feature_model_assignments SET
           SELECT model, ord
           FROM (VALUES
             ('cx/gpt-5.6-sol', 1),
-            ('cx/gpt-5.3-codex-spark', 2),
+            ('cx/gpt-5.3-codex-spark', 2)
+          ) AS catalog_codex(model, ord)
+          UNION ALL
+          SELECT model, ord
+          FROM (VALUES
             ('cx/gpt-5.6-terra', 3),
             ('cx/gpt-5.6-luna', 4)
-          ) AS codex(model, ord)
+          ) AS research_codex(model, ord)
           WHERE feature_key = 'ai-research'
         ) AS combined
         WHERE model IN (
@@ -64,11 +69,11 @@ UPDATE feature_model_assignments SET
       ) AS deduped
     ),
     CASE feature_key
-      WHEN 'article-market-news' THEN '["ag/claude-sonnet-4-6","lr/claude-sonnet-4.5","ag/gemini-3.1-pro-low"]'::jsonb
-      WHEN 'market-research'     THEN '["ag/claude-sonnet-4-6","lr/claude-sonnet-4.5","ag/gemini-3.1-pro-low"]'::jsonb
-      WHEN 'event-plan'          THEN '["ag/gemini-3-flash","ag/gemini-3.1-pro-low","ag/claude-sonnet-4-6"]'::jsonb
+      WHEN 'article-market-news' THEN '["ag/claude-sonnet-4-6","lr/claude-sonnet-4.5","ag/gemini-3.1-pro-low","cx/gpt-5.6-sol","cx/gpt-5.3-codex-spark"]'::jsonb
+      WHEN 'market-research'     THEN '["ag/claude-sonnet-4-6","lr/claude-sonnet-4.5","ag/gemini-3.1-pro-low","cx/gpt-5.6-sol","cx/gpt-5.3-codex-spark"]'::jsonb
+      WHEN 'event-plan'          THEN '["ag/gemini-3-flash","ag/gemini-3.1-pro-low","ag/claude-sonnet-4-6","cx/gpt-5.6-sol","cx/gpt-5.3-codex-spark"]'::jsonb
       WHEN 'ai-research'         THEN '["cx/gpt-5.6-sol","cx/gpt-5.3-codex-spark","cx/gpt-5.6-terra","cx/gpt-5.6-luna","ag/gemini-3-flash","ag/gemini-3.6-flash-high","ag/claude-sonnet-4-6","ag/gemini-3.1-pro-low"]'::jsonb
-      ELSE '["ag/gemini-3-flash","ag/gemini-3.6-flash-medium","ag/claude-sonnet-4-6"]'::jsonb
+      ELSE '["ag/gemini-3-flash","ag/gemini-3.6-flash-medium","ag/claude-sonnet-4-6","cx/gpt-5.6-sol","cx/gpt-5.3-codex-spark"]'::jsonb
     END
   ),
   default_model = CASE

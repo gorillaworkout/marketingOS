@@ -88,6 +88,14 @@ async function main() {
   assert.ok(video);
   assert.ok(!video.allowed_models.includes('kimi/k3'));
   assert.notEqual(video.default_model, 'kimi/k3');
+  assert.ok(video.allowed_models.includes('cx/gpt-5.6-sol'));
+  assert.ok(video.allowed_models.includes('cx/gpt-5.3-codex-spark'));
+
+  const social = assignments.find(row => row.feature_key === 'social-post');
+  assert.ok(social);
+  assert.ok(social.allowed_models.includes('cx/gpt-5.6-sol'));
+  assert.ok(social.allowed_models.includes('cx/gpt-5.3-codex-spark'));
+  assert.equal(social.default_model, 'ag/gemini-3-flash');
 
   const preferences = await queryAll<{ task_type: string; model: string }>(
     'SELECT task_type, model FROM task_model_preferences ORDER BY task_type',
