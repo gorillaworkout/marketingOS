@@ -9,10 +9,13 @@ import {
 } from '../src/lib/ai-research';
 import {
   AI_RESEARCH_CONTEXT_HEADER,
+  AI_RESEARCH_DEFAULT_TEMPERATURE,
   AI_RESEARCH_GROUNDED_PERSON_HEADER,
   AI_RESEARCH_GROUNDED_PERSON_MUST_ANSWER,
   AI_RESEARCH_MAX_SOURCES,
   AI_RESEARCH_NO_INVENT_FACTS,
+  AI_RESEARCH_PERSON_FACT_PREFIX,
+  AI_RESEARCH_PERSON_HIT_TEMPERATURE,
   AI_RESEARCH_PERSON_NAME_HIT,
   buildAiResearchChatMessages,
   buildFallbackSearchQueries,
@@ -56,8 +59,10 @@ import {
   selectFetchCandidates,
   SERPER_EXHAUSTED_WARNING,
   shouldResearchQuery,
+  resolveAiResearchTemperature,
   sourcesHaveUsefulHits,
   sourcesMentionPersonName,
+  trimPersonRosterNoise,
   unwrapSearchResultUrl,
   wikipediaSearchHosts,
 } from '../src/lib/ai-research-grounding';
@@ -320,6 +325,8 @@ test('AI Research chat route grounds answers, raises the token budget, and updat
   assert.match(route, /export const maxDuration = 60/);
   assert.match(route, /type: 'research'/);
   assert.match(route, /sourceCount/);
+  assert.match(route, /resolveAiResearchTemperature/);
+  assert.doesNotMatch(route, /temperature:\s*0\.7/);
   assert.doesNotMatch(route, /max_tokens:\s*2000/);
   const envExample = read('.env.example');
   assert.match(envExample, /SERPER_API_KEY=/);
@@ -461,10 +468,11 @@ test('Sella Susriana + Dupoin research grounds Bappebti wakil pialang hits inste
   assert.match(String(messages[1].content), /Bappebti|bappebti/);
   const lastUserIdx = messages.map(message => message.role).lastIndexOf('user');
   assert.ok(lastUserIdx > 0);
-  assert.equal(messages[lastUserIdx].content, sellaQuery);
+  assert.match(String(messages[lastUserIdx].content), new RegExp(sellaQuery));
   assert.equal(messages[lastUserIdx - 1].role, 'system');
   assert.match(String(messages[lastUserIdx - 1].content), new RegExp(AI_RESEARCH_GROUNDED_PERSON_HEADER));
-  assert.match(String(messages[lastUserIdx - 1].content), /Sella Susriana \| section: Wakil Pialang/i);
+  assert.match(String(messages[lastUserIdx - 1].content), /PERSON_FACT: Sella Susriana \| Wakil Pialang/i);
+  assert.match(String(messages[lastUserIdx].content), /PERSON_FACT: Sella Susriana \| Wakil Pialang/i);
   assert.match(AI_RESEARCH_SYSTEM_PROMPT, /apa yang sumber sebutkan/);
   assert.match(AI_RESEARCH_SYSTEM_PROMPT, /belum terverifikasi/);
   assert.match(AI_RESEARCH_SYSTEM_PROMPT, /LinkedIn publik|berita, direktori/);
@@ -499,10 +507,13 @@ test('long Bappebti broker pages keep wakil pialang heading with a late person n
   assert.match(window, /Sella Susriana/);
   assert.match(window, /wakil pialang/i);
   assert.match(window, /\[Section: Wakil Pialang\]/i);
+  assert.doesNotMatch(window, /1234567890/);
+  assert.doesNotMatch(window, /Nomor rekening bank penampung/i);
 
   const extracted = extractPageSnippet(html, sellaQuery);
   assert.match(extracted.snippet, /Sella Susriana/);
   assert.match(extracted.snippet, /wakil pialang/i);
+  assert.doesNotMatch(extracted.snippet, /1234567890/);
 
   const research = {
     query: sellaQuery,
@@ -524,7 +535,8 @@ test('long Bappebti broker pages keep wakil pialang heading with a late person n
   assert.ok(instruction);
   assert.match(instruction!, new RegExp(AI_RESEARCH_GROUNDED_PERSON_HEADER));
   assert.equal(instruction!.includes(AI_RESEARCH_GROUNDED_PERSON_MUST_ANSWER), true);
-  assert.match(instruction!, /Sella Susriana \| section: Wakil Pialang/);
+  assert.match(instruction!, /Cite that URL\. Do not say unconfirmed \/ tidak terkonfirmasi/);
+  assert.match(instruction!, /PERSON_FACT: Sella Susriana \| Wakil Pialang/);
   assert.match(instruction!, /bappebti\.go\.id\/pialang_berjangka\/detail\/423/);
   assert.doesNotMatch(instruction!, /If a fact is missing from the sources, say the grounded sources do not confirm it/);
   assert.doesNotMatch(instruction!, /Prefer summarizing grounded hits over saying no verified source was found/);
@@ -534,7 +546,7 @@ test('long Bappebti broker pages keep wakil pialang heading with a late person n
   assert.match(grounded, /wakil pialang/i);
   assert.equal(grounded.includes(AI_RESEARCH_PERSON_NAME_HIT), true);
   assert.equal(grounded.includes(AI_RESEARCH_GROUNDED_PERSON_MUST_ANSWER), true);
-  assert.match(grounded, /Sella Susriana \| section: Wakil Pialang/);
+  assert.match(grounded, /PERSON_FACT: Sella Susriana \| Wakil Pialang/);
   assert.equal(sourcesMentionPersonName(research), true);
   assert.match(grounded, /Synthesize a rich answer/);
 
@@ -548,7 +560,8 @@ test('long Bappebti broker pages keep wakil pialang heading with a late person n
     research,
   });
   const lastUserIdx = messages.map(message => message.role).lastIndexOf('user');
-  assert.equal(messages[lastUserIdx].content, sellaQuery);
+  assert.match(String(messages[lastUserIdx].content), new RegExp(sellaQuery));
+  assert.match(String(messages[lastUserIdx].content), /PERSON_FACT: Sella Susriana \| Wakil Pialang/);
   assert.equal(messages[lastUserIdx - 1].role, 'system');
   assert.equal(messages[lastUserIdx - 1].content, instruction);
   assert.match(String(messages[1].content), /GROUNDING_SOURCES/);
@@ -580,7 +593,7 @@ test('long 14-source grounding still pins a short roster fact next to the latest
   };
   const grounded = formatResearchContext(research);
   assert.ok(grounded.length > 20_000, `expected a bulky grounding block, got ${grounded.length}`);
-  assert.match(grounded, /Sella Susriana \| section: Wakil Pialang/);
+  assert.match(grounded, /PERSON_FACT: Sella Susriana \| Wakil Pialang/);
   assert.equal(grounded.includes(AI_RESEARCH_GROUNDED_PERSON_MUST_ANSWER), true);
 
   const messages = buildAiResearchChatMessages({
@@ -591,16 +604,28 @@ test('long 14-source grounding still pins a short roster fact next to the latest
   });
   const lastUserIdx = messages.map(message => message.role).lastIndexOf('user');
   const adjacent = String(messages[lastUserIdx - 1].content);
-  assert.equal(messages[lastUserIdx].content, sellaQuery);
+  const userTurn = String(messages[lastUserIdx].content);
+  assert.match(userTurn, new RegExp(sellaQuery));
+  assert.match(userTurn, /PERSON_FACT: Sella Susriana \| Wakil Pialang/);
   assert.equal(messages[lastUserIdx - 1].role, 'system');
   assert.ok(adjacent.length < 1_200, `adjacent instruction must stay short, got ${adjacent.length}`);
   assert.match(adjacent, new RegExp(AI_RESEARCH_GROUNDED_PERSON_HEADER));
+  assert.match(adjacent, new RegExp(AI_RESEARCH_PERSON_FACT_PREFIX));
   assert.equal(adjacent.includes(AI_RESEARCH_GROUNDED_PERSON_MUST_ANSWER), true);
-  assert.match(adjacent, /Sella Susriana \| section: Wakil Pialang/);
+  assert.match(adjacent, /Cite that URL\. Do not say unconfirmed \/ tidak terkonfirmasi/);
+  assert.match(adjacent, /PERSON_FACT: Sella Susriana \| Wakil Pialang/);
   assert.match(adjacent, /bappebti\.go\.id\/pialang_berjangka\/detail\/423/);
   assert.doesNotMatch(adjacent, /If a fact is missing from the sources, say the grounded sources do not confirm it/);
   assert.doesNotMatch(adjacent, /Background source 13/);
   assert.ok(String(messages[1].content).length > 20_000);
+  assert.equal(resolveAiResearchTemperature(research), AI_RESEARCH_PERSON_HIT_TEMPERATURE);
+  assert.equal(resolveAiResearchTemperature({
+    query: 'Apa fakta resmi Dupoin Indonesia?',
+    indonesiaPreferred: true,
+    sources: [{ title: 'Dupoin', url: 'https://www.dupoin.co.id/', snippet: 'Pialang berjangka.', origin: 'indonesia' }],
+  }), AI_RESEARCH_DEFAULT_TEMPERATURE);
+  assert.match(trimPersonRosterNoise(`${pad} Sella Susriana`), /Sella Susriana/);
+  assert.doesNotMatch(trimPersonRosterNoise(`${pad} Sella Susriana`), /1234567890/);
 });
 
 test('AI Research UI shows a thinking bubble before tokens and keeps the stream cursor after', () => {

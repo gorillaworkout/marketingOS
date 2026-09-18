@@ -10,7 +10,11 @@ import {
   type AiResearchChatMessage,
 } from '@/lib/ai-research';
 import { hydrateMessageFiles } from '@/lib/ai-research-files';
-import { buildAiResearchChatMessages, gatherAiResearchContext } from '@/lib/ai-research-grounding';
+import {
+  buildAiResearchChatMessages,
+  gatherAiResearchContext,
+  resolveAiResearchTemperature,
+} from '@/lib/ai-research-grounding';
 import { AVAILABLE_MODELS } from '@/lib/openai';
 import { logTokenUsage } from '@/lib/token-log';
 import {
@@ -169,7 +173,7 @@ export async function POST(request: NextRequest) {
             messages: apiMessages,
             stream: true,
             stream_options: { include_usage: true },
-            temperature: 0.7,
+            temperature: resolveAiResearchTemperature(research),
             max_tokens: AI_RESEARCH_MAX_OUTPUT_TOKENS,
           }),
         });
