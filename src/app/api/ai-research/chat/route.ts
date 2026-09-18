@@ -144,7 +144,8 @@ export async function POST(request: NextRequest) {
         let research = null;
         try {
           research = await gatherAiResearchContext(latestUser?.content || '');
-        } catch {
+        } catch (error) {
+          console.error('[ai-research] gatherAiResearchContext failed:', error);
           research = null;
         }
         controller.enqueue(encoder.encode(`data: ${JSON.stringify({

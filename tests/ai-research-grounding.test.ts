@@ -330,6 +330,7 @@ test('AI Research chat route grounds answers, raises the token budget, and updat
   const route = read('src/app/api/ai-research/chat/route.ts');
   const lib = read('src/lib/ai-research.ts');
   assert.match(route, /gatherAiResearchContext/);
+  assert.match(route, /console\.error\('\[ai-research\] gatherAiResearchContext failed:'/);
   assert.match(route, /buildAiResearchChatMessages/);
   assert.match(route, /AI_RESEARCH_SYSTEM_PROMPT/);
   assert.match(route, /AI_RESEARCH_MAX_OUTPUT_TOKENS/);

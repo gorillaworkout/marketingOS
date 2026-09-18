@@ -134,11 +134,13 @@ export default function LoginPage() {
             </button>
           </div>
 
-          <div className="mt-6 pt-6 border-t border-gray-700/50">
-            <p className="text-xs text-gray-500 text-center">
-              Demo credentials: <span className="text-gray-400">admin</span> / <span className="text-gray-400">marketing123</span>
-            </p>
-          </div>
+          {process.env.NODE_ENV !== 'production' && (
+            <div className="mt-6 pt-6 border-t border-gray-700/50">
+              <p className="text-xs text-gray-500 text-center">
+                Demo credentials: <span className="text-gray-400">admin</span> / <span className="text-gray-400">marketing123</span>
+              </p>
+            </div>
+          )}
         </form>
       </div>
     </div>
