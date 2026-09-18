@@ -2,6 +2,7 @@ import {
   AI_RESEARCH_IMAGE_ONLY_PROMPT,
   buildGatewayMessages,
   type AiResearchChatMessage,
+  type GatewayContentPart,
   type GatewayMessage,
 } from './ai-research';
 
@@ -43,6 +44,19 @@ export const AI_RESEARCH_SYNTHESIZE_HITS =
   'Relevant grounded sources were retrieved. Synthesize a rich answer from everything they state (role, institution, other public traces) and cite titles + URLs. Prefer summarizing grounded hits over saying no verified source was found. Only say a fact is unverified when these excerpts truly do not mention it.';
 export const AI_RESEARCH_PERSON_NAME_HIT =
   'The person name from the user query appears in the retrieved excerpts. Treat that as a verified public listing (for example an official broker or Bappebti roster). Synthesize the stated role, institution, and other public traces and cite the titles + URLs. Do not refuse with “no verified public sources” or “belum ada sumber publik terverifikasi” when the name is present. Do not invent a biography beyond what these excerpts state.';
+export const AI_RESEARCH_GROUNDED_PERSON_HEADER = 'GROUNDED_PERSON_FACT:';
+export const AI_RESEARCH_PERSON_FACT_PREFIX = 'PERSON_FACT:';
+export const AI_RESEARCH_GROUNDED_PERSON_MUST_ANSWER =
+  'Cite that URL. Do not say unconfirmed / tidak terkonfirmasi. Do not say “belum bisa dipastikan” or “tidak ada sumber terkonfirmasi”. MUST answer from this roster fact. Do not invent a biography beyond the excerpt.';
+export const AI_RESEARCH_DEFAULT_TEMPERATURE = 0.7;
+export const AI_RESEARCH_PERSON_HIT_TEMPERATURE = 0.25;
+
+export interface GroundedPersonFact {
+  name: string;
+  section: string | null;
+  title: string;
+  url: string;
+}
 
 const DEFAULT_TIMEOUT_MS = 20_000;
 const DEFAULT_MAX_BYTES = 500_000;
@@ -537,7 +551,8 @@ export function extractRelevantWindow(text: string, query = ''): string {
       ? [nameRange]
       : [sliceRange(text.length, role.index, ROLE_WINDOW_LOOKBACK, ROLE_WINDOW_SIZE), nameRange];
     const label = `[Section: ${titleCaseName(role.needle)}] `;
-    return `${label}${mergeTextRanges(text, ranges, MAX_SNIPPET - label.length)}`.slice(0, MAX_SNIPPET);
+    const merged = `${label}${mergeTextRanges(text, ranges, MAX_SNIPPET - label.length)}`;
+    return trimPersonRosterNoise(merged).slice(0, MAX_SNIPPET);
   }
 
   const factHit = FACT_NEEDLES
@@ -1139,6 +1154,132 @@ export function sourcesMentionPersonName(context: ResearchContext): boolean {
   });
 }
 
+const SECTION_LABEL_RE = /\[Section:\s*([^\]]+)\]/i;
+const REKENING_NOISE_PATTERNS = [
+  /nomor\s+rekening(?:\s+bank)?(?:\s+penampung)?(?:\s+dana)?(?:\s+nasabah)?(?:\s+dan)?/gi,
+  /\brekening(?:\s+penampung)?/gi,
+  /\b(?:bca|mandiri|bni|bri|btn)\s+\d{6,}\b/gi,
+  /\b(?:bca|mandiri|bni|bri|btn)\b/gi,
+  /\b\d{8,}\b/g,
+];
+
+export function trimPersonRosterNoise(text: string): string {
+  let cleaned = text;
+  for (const pattern of REKENING_NOISE_PATTERNS) {
+    cleaned = cleaned.replace(pattern, ' ');
+  }
+  return cleaned.replace(/\s+/g, ' ').trim();
+}
+
+function shouldTrimRosterNoise(query: string, snippet: string): boolean {
+  const names = extractPersonNameCandidates(query);
+  if (!names.length) return false;
+  const lower = snippet.toLowerCase();
+  const hasName = names.some(name => lower.includes(name.toLowerCase()));
+  return hasName && (SECTION_LABEL_RE.test(snippet) || ROLE_SNIPPET_RE.test(lower));
+}
+
+function snippetSectionLabel(snippet: string): string | null {
+  const labeled = snippet.match(SECTION_LABEL_RE)?.[1]?.replace(/\s+/g, ' ').trim();
+  if (labeled) return labeled;
+  const lower = snippet.toLowerCase();
+  const role = ROLE_HEADING_NEEDLES.find(item => lower.includes(item.needle));
+  return role ? titleCaseName(role.needle) : null;
+}
+
+function scorePersonFact(fact: GroundedPersonFact): number {
+  let score = 0;
+  if (fact.section) score += 40;
+  if (/wakil pialang/i.test(fact.section || '')) score += 40;
+  try {
+    const host = new URL(fact.url).hostname.replace(/^www\./, '');
+    if (host === 'bappebti.go.id' || host.endsWith('.bappebti.go.id')) score += 30;
+    if (PREFERRED_OFFICIAL_HOSTS.some(official => host === official || host.endsWith(`.${official}`))) {
+      score += 10;
+    }
+  } catch { /* ignore */ }
+  return score;
+}
+
+export function extractGroundedPersonFacts(context: ResearchContext): GroundedPersonFact[] {
+  const names = extractPersonNameCandidates(context.query);
+  if (!names.length) return [];
+  const facts: GroundedPersonFact[] = [];
+  const seen = new Set<string>();
+  for (const source of context.sources) {
+    const blob = `${source.title} ${source.snippet}`;
+    const lower = blob.toLowerCase();
+    for (const name of names) {
+      if (!lower.includes(name.toLowerCase())) continue;
+      const key = `${name.toLowerCase()}|${source.url.replace(/\/$/, '')}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      facts.push({
+        name,
+        section: snippetSectionLabel(source.snippet),
+        title: source.title,
+        url: source.url,
+      });
+    }
+  }
+  facts.sort((a, b) => scorePersonFact(b) - scorePersonFact(a));
+  return facts;
+}
+
+export function formatGroundedPersonFactLine(fact: GroundedPersonFact): string {
+  const section = fact.section || 'listed in excerpt';
+  return `${AI_RESEARCH_PERSON_FACT_PREFIX} ${fact.name} | ${section} | ${fact.url}`;
+}
+
+export function formatGroundedPersonInstruction(facts: GroundedPersonFact[]): string | null {
+  if (!facts.length) return null;
+  return [
+    AI_RESEARCH_GROUNDED_PERSON_HEADER,
+    AI_RESEARCH_GROUNDED_PERSON_MUST_ANSWER,
+    '',
+    ...facts.slice(0, 6).map(formatGroundedPersonFactLine),
+  ].join('\n');
+}
+
+function lastUserMessageIndex(messages: GatewayMessage[]): number {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].role === 'user') return i;
+  }
+  return -1;
+}
+
+function attachInstructionToContent(
+  content: string | GatewayContentPart[],
+  instruction: string,
+): string | GatewayContentPart[] {
+  const suffix = `\n\n${instruction}`;
+  if (typeof content === 'string') return `${content}${suffix}`;
+  return [...content, { type: 'text', text: suffix }];
+}
+
+export function injectGroundedPersonInstruction(
+  messages: GatewayMessage[],
+  context: ResearchContext,
+): GatewayMessage[] {
+  const instruction = formatGroundedPersonInstruction(extractGroundedPersonFacts(context));
+  if (!instruction) return messages;
+  const factMessage: GatewayMessage = { role: 'system', content: instruction };
+  const lastUser = lastUserMessageIndex(messages);
+  if (lastUser < 0) return [...messages, factMessage];
+  const user = messages[lastUser];
+  return [
+    ...messages.slice(0, lastUser),
+    factMessage,
+    { ...user, content: attachInstructionToContent(user.content, instruction) },
+    ...messages.slice(lastUser + 1),
+  ];
+}
+
+export function resolveAiResearchTemperature(research: ResearchContext | null): number {
+  if (research && sourcesMentionPersonName(research)) return AI_RESEARCH_PERSON_HIT_TEMPERATURE;
+  return AI_RESEARCH_DEFAULT_TEMPERATURE;
+}
+
 export function sourcesHaveUsefulHits(context: ResearchContext): boolean {
   const names = extractPersonNameCandidates(context.query).map(name => name.toLowerCase());
   return context.sources.some(source => {
@@ -1153,6 +1294,7 @@ export function sourcesHaveUsefulHits(context: ResearchContext): boolean {
 }
 
 export function formatResearchContext(context: ResearchContext): string {
+  const personInstruction = formatGroundedPersonInstruction(extractGroundedPersonFacts(context));
   const lines = [
     AI_RESEARCH_CONTEXT_HEADER,
     `User query: ${context.query}`,
@@ -1165,6 +1307,9 @@ export function formatResearchContext(context: ResearchContext): string {
     lines.push('No web sources were retrieved. Do not invent company facts.');
     return lines.join('\n');
   }
+  if (personInstruction) {
+    lines.push(personInstruction);
+  }
   if (sourcesHaveUsefulHits(context)) {
     lines.push(AI_RESEARCH_SYNTHESIZE_HITS);
   }
@@ -1176,7 +1321,10 @@ export function formatResearchContext(context: ResearchContext): string {
     lines.push(`[${index + 1}] ${source.title}`);
     lines.push(`URL: ${source.url}`);
     lines.push(`Origin: ${source.origin}`);
-    lines.push(`Excerpt: ${source.snippet}`);
+    const excerpt = shouldTrimRosterNoise(context.query, source.snippet)
+      ? trimPersonRosterNoise(source.snippet)
+      : source.snippet;
+    lines.push(`Excerpt: ${excerpt}`);
   });
   lines.push('');
   lines.push('Cite sources in the answer using the titles and URLs above.');
@@ -1189,8 +1337,8 @@ export function injectResearchContext(
 ): GatewayMessage[] {
   if (!context || context.sources.length === 0) return messages;
   const grounded: GatewayMessage = { role: 'system', content: formatResearchContext(context) };
-  if (messages.length === 0) return [grounded];
-  return [messages[0], grounded, ...messages.slice(1)];
+  const next = messages.length === 0 ? [grounded] : [messages[0], grounded, ...messages.slice(1)];
+  return injectGroundedPersonInstruction(next, context);
 }
 
 export function buildAiResearchChatMessages(options: {
