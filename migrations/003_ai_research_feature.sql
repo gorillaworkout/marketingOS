@@ -1,3 +1,7 @@
+-- SUPERSEDED by db/migrations/012_ai_research_conversations.sql
+-- scripts/migrate.ts only reads db/migrations/. Do not apply this file:
+-- it seeds retired pecut-free / ag/gemini-3-flash-agent model ids.
+--
 -- Migration: add ai-research feature
 -- Add ai-research to the feature_model_assignments table if not already present
 
