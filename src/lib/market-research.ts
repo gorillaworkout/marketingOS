@@ -85,6 +85,13 @@ function extractNumbers(value: string): string[] {
     .filter(Boolean);
 }
 
+/** Four-digit calendar years are dating, not invented rates/prices/counts. */
+function isCalendarYear(value: string): boolean {
+  if (!/^\d{4}$/.test(value)) return false;
+  const year = Number(value);
+  return year >= 1900 && year <= 2100;
+}
+
 function extractQuotes(value: string): string[] {
   const quotes: string[] = [];
   for (const pattern of [/“([^”]+)”/g, /‘([^’]+)’/g, /«([^»]+)»/g, /"([^"]+)"/g, /'([^'\n]{2,200})'/g]) {
@@ -161,7 +168,7 @@ export function validateAndHydrateMarketResearchSelection(value: unknown, candid
     const narratives = `${eventKey}\n${mainEvent}\n${latestFactualDevelopment}\n${marketRelevance}`;
     if (hasCompetitor(narratives)) throw new Error(`Selection ${index + 1} mentions a competitor broker.`);
     const allowedNumbers = new Set(extractNumbers(candidate.evidence));
-    const unsupportedNumbers = extractNumbers(narratives).filter(number => !allowedNumbers.has(number));
+    const unsupportedNumbers = extractNumbers(narratives).filter(number => !allowedNumbers.has(number) && !isCalendarYear(number));
     if (unsupportedNumbers.length > 0) throw new Error(`Selection ${index + 1} contains unsupported numeric facts: ${[...new Set(unsupportedNumbers)].join(', ')}.`);
     const unsupportedQuotes = extractQuotes(narratives).filter(quote => !candidate.evidence.includes(quote));
     if (unsupportedQuotes.length > 0) throw new Error(`Selection ${index + 1} contains unsupported quotes.`);

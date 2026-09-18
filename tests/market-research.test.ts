@@ -123,6 +123,21 @@ test('selection is candidate-bound, max ten, unique, and rejects unsupported fac
   ] }, duplicateEventCandidates), /unique events/i);
 });
 
+test('calendar years in narratives are not treated as unsupported numeric facts', () => {
+  assert.equal(candidates[0].evidence.includes('2026'), false);
+  const selection = { items: [{
+    candidateId: 'candidate-a', eventKey: 'official-gold-data-release', productCategory: 'Commodity', symbol: 'XAUUSD',
+    mainEvent: 'Pada 2026 data resmi memengaruhi harga emas.',
+    latestFactualDevelopment: 'Nilai terbaru tercatat 2.622.000 tahun 2026.',
+    marketRelevance: 'Perkembangan tahun ini relevan untuk sentimen Gold.',
+  }] };
+  const hydrated = validateAndHydrateMarketResearchSelection(selection, candidates);
+  assert.equal(hydrated.items[0].mainEvent.includes('2026'), true);
+  assert.throws(() => validateAndHydrateMarketResearchSelection({ items: [{ ...selection.items[0], latestFactualDevelopment: 'Suku bunga naik 3.5%.' }] }, candidates), /unsupported numeric facts: 3.5/);
+  assert.throws(() => validateAndHydrateMarketResearchSelection({ items: [{ ...selection.items[0], latestFactualDevelopment: 'Harga bergerak 1250.' }] }, candidates), /unsupported numeric facts: 1250/);
+  assert.throws(() => validateAndHydrateMarketResearchSelection({ items: [{ ...selection.items[0], latestFactualDevelopment: 'Target harga 1899 tercatat.' }] }, candidates), /unsupported numeric facts: 1899/);
+});
+
 test('an honest zero-selection result is accepted, not treated as a format error', () => {
   // The evidence gate correctly rejecting every candidate (all speculative /
   // low-importance) must hydrate to an empty, valid report — not throw.
