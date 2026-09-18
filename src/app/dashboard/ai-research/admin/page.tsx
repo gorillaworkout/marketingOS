@@ -1,7 +1,8 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { conversationTitleFromMessages, type AiResearchChatMessage } from '@/lib/ai-research';
+import { AiResearchFileChip, AiResearchMarkdown } from '@/components/AiResearchMarkdown';
+import { AI_RESEARCH_ASSISTANT_NAME, conversationTitleFromMessages, type AiResearchChatMessage } from '@/lib/ai-research';
 import {
   Button,
   DataTableFrame,
@@ -257,7 +258,7 @@ export default function AdminAiResearchPage() {
                   <div key={`${message.role}-${index}`} className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}>
                     <div className="max-w-[92%] min-w-0">
                       <p className="mb-1 px-1 text-[10px] font-semibold text-[var(--mos-text-muted)]">
-                        {message.role === 'user' ? detail.user.name : 'GorillaWorkout AI'}
+                        {message.role === 'user' ? detail.user.name : AI_RESEARCH_ASSISTANT_NAME}
                       </p>
                       {message.images && message.images.length > 0 && (
                         <div className={`mb-2 flex flex-wrap gap-2 ${message.role === 'user' ? 'justify-end' : ''}`}>
@@ -271,13 +272,22 @@ export default function AdminAiResearchPage() {
                           ))}
                         </div>
                       )}
+                      {message.files && message.files.length > 0 && (
+                        <div className={`mb-2 flex flex-wrap gap-2 ${message.role === 'user' ? 'justify-end' : ''}`}>
+                          {message.files.map((file, fileIndex) => (
+                            <AiResearchFileChip key={`${file.name || 'file'}-${fileIndex}`} name={file.name || `Spreadsheet ${fileIndex + 1}`} />
+                          ))}
+                        </div>
+                      )}
                       {message.content && (
-                        <div className={`whitespace-pre-wrap px-4 py-2.5 text-sm leading-relaxed ${
+                        <div className={`px-4 py-2.5 text-sm leading-relaxed ${
                           message.role === 'user'
-                            ? 'rounded-2xl rounded-tr-md bg-indigo-600 text-white'
+                            ? 'rounded-2xl rounded-tr-md bg-indigo-600 text-white whitespace-pre-wrap'
                             : 'rounded-2xl rounded-tl-md border border-[var(--mos-border)] bg-[var(--mos-raised)] text-[var(--mos-text)]'
                         }`}>
-                          {message.content}
+                          {message.role === 'assistant'
+                            ? <AiResearchMarkdown text={message.content} />
+                            : message.content}
                         </div>
                       )}
                     </div>

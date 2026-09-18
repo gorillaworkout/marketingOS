@@ -40,7 +40,7 @@ test('parses a user turn with text plus images and fills an image-only prompt', 
   });
   assert.equal(imageOnly.messages[0].content, AI_RESEARCH_IMAGE_ONLY_PROMPT);
 
-  assert.throws(() => parseChatRequest({ messages: [{ role: 'user', content: '' }] }), /text or at least one image/i);
+  assert.throws(() => parseChatRequest({ messages: [{ role: 'user', content: '' }] }), /text or at least one attachment/i);
 });
 
 test('builds OpenAI-compatible multimodal content and keeps recent images for the gateway', () => {
@@ -93,7 +93,7 @@ test('parseStoredMessages accepts pg JSONB arrays instead of wiping history', ()
 test('AI Research UI adds a file picker, previews, and sends images with the prompt', () => {
   const page = read('src/app/dashboard/ai-research/page.tsx');
   assert.match(page, /type="file"/);
-  assert.match(page, /accept=\{AI_RESEARCH_ALLOWED_IMAGE_TYPES\.join\(','\)\}/);
+  assert.match(page, /accept=\{AI_RESEARCH_FILE_PICKER_ACCEPT\}/);
   assert.match(page, /multiple/);
   assert.match(page, /previewUrl/);
   assert.match(page, /JSON\.stringify\(\{ messages: \[userMsg\], conversationId: activeConvoId \}\)/);
@@ -111,6 +111,7 @@ test('AI Research chat route forwards multimodal content to the existing gateway
   assert.match(route, /requireFeature\(request, 'ai-research'\)/);
   assert.match(route, /rateLimit\(request\)/);
   assert.match(route, /parseChatRequest/);
+  assert.match(route, /hydrateMessageFiles/);
   assert.match(route, /buildAiResearchChatMessages/);
   assert.match(route, /gatherAiResearchContext/);
   assert.match(route, /persistConversation/);

@@ -9,6 +9,7 @@ import {
   parseStoredMessages,
   type AiResearchChatMessage,
 } from '@/lib/ai-research';
+import { hydrateMessageFiles } from '@/lib/ai-research-files';
 import { buildAiResearchChatMessages, gatherAiResearchContext } from '@/lib/ai-research-grounding';
 import { AVAILABLE_MODELS } from '@/lib/openai';
 import { logTokenUsage } from '@/lib/token-log';
@@ -95,6 +96,7 @@ export async function POST(request: NextRequest) {
   let parsed: { messages: AiResearchChatMessage[]; conversationId?: string };
   try {
     parsed = parseChatRequest(await request.json());
+    parsed.messages = hydrateMessageFiles(parsed.messages);
   } catch (error) {
     return jsonError(
       error instanceof SyntaxError ? 'Invalid JSON body' : error instanceof Error ? error.message : 'Invalid request',
@@ -116,7 +118,7 @@ export async function POST(request: NextRequest) {
       'SELECT messages FROM ai_research_conversations WHERE id = ? AND user_id = ?',
       [conversationId, auth.id],
     );
-    if (history) dbMessages = parseStoredMessages(history.messages);
+    if (history) dbMessages = hydrateMessageFiles(parseStoredMessages(history.messages));
   }
 
   const convId = conversationId || uuidv4();
@@ -156,7 +158,7 @@ export async function POST(request: NextRequest) {
             'Content-Type': 'application/json',
             'Authorization': `Bearer ${GORILLAWORKOUT_API_KEY}`,
             'HTTP-Referer': 'https://marketing-aws.gorillaworkout.id',
-            'X-Title': 'MarketingOS AI Research',
+            'X-Title': 'Dupoin AI Research',
           },
           body: JSON.stringify({
             model,
