@@ -2,7 +2,7 @@ import { NextRequest } from 'next/server';
 import { queryOne, queryAll, execute } from '@/lib/database';
 import { requireFeature } from '@/lib/auth';
 import { rateLimit } from '@/lib/rate-limit';
-import { generateContent, getSmartSystemPrompt, fetchContextMemory, fetchStyleContext, getUserPreferredModel, type BrandGuidelines } from '@/lib/openai';
+import { generateContent, getSmartSystemPrompt, fetchContextMemory, fetchStyleContext, fetchKnowledgeContext, getUserPreferredModel, type BrandGuidelines } from '@/lib/openai';
 import { v4 as uuidv4 } from 'uuid';
 import fs from 'fs';
 import path from 'path';
@@ -201,6 +201,13 @@ export async function POST(request: NextRequest) {
   // Fetch style context from knowledge graph
   const styleContext = await fetchStyleContext(userId, 'event-plan');
 
+  const knowledgeContext = await fetchKnowledgeContext(
+    userId,
+    [eventName, theme, location].filter(Boolean).join(' '),
+    'event-plan',
+    5,
+  );
+
   // Fetch best examples for auto-learning
   let bestExamples = '';
   try {
@@ -252,6 +259,7 @@ ${researchUrls.length ? researchUrls.map((url) => `- ${url}`).join('\n') : '- No
 ${variant.instruction}
 ${bestExamples}
 ${contextMemory}
+${knowledgeContext}
 
 Follow the SOP strictly. Output JSON with: { "objective": "...", "concept": "...", "theme": "...", "venue": "...", "speakers": ["..."], "budget": { "currency": "IDR", "total": 50000000, "items": [{ "category": "Venue", "estimatedCost": 10000000, "notes": "..." }], "contingency": 5000000 }, "timeline": "...", "research": { "status": "unverified" | "source-provided", "sources": [{ "url": "https://...", "claim": "Needs manual quotation verification" }], "contacts": [{ "vendor": "...", "phone": "...", "email": "...", "sourceUrl": "https://...", "verified": false }] } }.
 The budget must use this exact JSON schema: { "currency": "IDR", "total": 50000000, "items": [{ "category": "Venue", "estimatedCost": 10000000, "notes": "..." }], "contingency": 5000000 }. All money values are integer Rupiah. The total must not exceed the submitted Budget ceiling when supplied, and the budget has to be itemized.

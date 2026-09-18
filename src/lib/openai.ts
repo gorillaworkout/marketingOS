@@ -520,6 +520,52 @@ ${sections.join('\n')}`);
   } catch (e) { console.error('Failed to fetch style context:', e); return ''; }
 }
 
+export interface KnowledgeContextEntry {
+  task_type?: string | null;
+  platform?: string | null;
+  audience?: string | null;
+  brief?: string | null;
+  selected_output?: string | null;
+}
+
+/**
+ * Format retrieved knowledge_entries into a prompt block for RAG injection.
+ * Returns empty string when there is nothing to inject.
+ */
+export function formatKnowledgeContext(entries: KnowledgeContextEntry[]): string {
+  if (!entries.length) return '';
+
+  const lines = entries.map((entry, idx) => {
+    const scope = [entry.task_type, entry.platform, entry.audience].filter(Boolean).join('/');
+    const brief = String(entry.brief || '').replace(/\s+/g, ' ').trim().substring(0, 140);
+    const selected = String(entry.selected_output || '').replace(/\s+/g, ' ').trim().substring(0, 220);
+    return `${idx + 1}. [${scope || 'knowledge'}] Brief: "${brief}"\n   Approved: "${selected}"`;
+  });
+
+  return `\n\n🧠 KNOWLEDGE GRAPH — Similar approved selections for this user:\n${lines.join('\n')}\n\nUse these as retrieved examples of what this user approved. Do NOT copy them — create something fresh that follows the same quality, tone, and structure.`;
+}
+
+/**
+ * Retrieve user-scoped similar knowledge_entries and return a prompt block.
+ * Complements fetchStyleContext (learned profile) and fetchContextMemory (recent tasks).
+ */
+export async function fetchKnowledgeContext(
+  userId: string,
+  query: string,
+  taskType?: string,
+  limit: number = 5,
+): Promise<string> {
+  try {
+    if (!userId || !String(query || '').trim()) return '';
+    const { findSimilarEntries } = await import('@/lib/embeddings');
+    const entries = await findSimilarEntries(query, { userId, taskType, limit });
+    return formatKnowledgeContext(entries);
+  } catch (e) {
+    console.error('Failed to fetch knowledge context:', e);
+    return '';
+  }
+}
+
 /**
  * Build brand guidelines section for prompt injection.
  */

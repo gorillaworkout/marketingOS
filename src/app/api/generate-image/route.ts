@@ -4,6 +4,7 @@ import { queryOne, execute } from '@/lib/database';
 import { rateLimit } from '@/lib/rate-limit';
 import { createImageJobStore, type ImageJob, type ImageJobResult } from '@/lib/image-job-status';
 import { getImageGenerationSpec, parseImageAspectRatio, type ImageAspectRatio } from '@/lib/image-aspect-ratio';
+import { applyDupoinImagePromptLocks } from '@/lib/dupoin-image-prompt';
 import {
   generateWithAntigravityCapacityFallback,
   isCapacityOrRateLimitFailure,
@@ -99,7 +100,7 @@ async function runImageJob(job: ImageJob, prompt: string, brief: string, type: s
     // Fall back to the gateway's default image model when an unknown one is requested.
     const safeModel = resolveImageModel(model);
     const generationSpec = getImageGenerationSpec(aspectRatio);
-    const gatewayPrompt = `${prompt}\n\n${generationSpec.promptSuffix}`;
+    const gatewayPrompt = applyDupoinImagePromptLocks(prompt, aspectRatio);
 
     const { payload, usedModel, fallbackFrom, fallbackMessage } = await generateWithAntigravityCapacityFallback(
       safeModel,

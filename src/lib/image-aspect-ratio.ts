@@ -16,10 +16,26 @@ export function parseImageAspectRatio(value: unknown): ImageAspectRatio {
   throw new Error('Invalid image aspect ratio');
 }
 
+export function getImageOrientation(aspectRatio: ImageAspectRatio): 'landscape' | 'portrait' | 'square' {
+  if (aspectRatio === '1:1') return 'square';
+  return Number(aspectRatio.split(':')[0]) > Number(aspectRatio.split(':')[1]) ? 'landscape' : 'portrait';
+}
+
+const ASPECT_PROMPT_SUFFIX_RE = /\n\nCompose the image in an exact \d+:\d+ (?:landscape|portrait|square) aspect ratio(?: \([^)]+\))?; keep all essential subjects and branding inside that frame\.\s*$/;
+
 export function getImageGenerationSpec(aspectRatio: ImageAspectRatio) {
-  const orientation = aspectRatio === '1:1' ? 'square' : Number(aspectRatio.split(':')[0]) > Number(aspectRatio.split(':')[1]) ? 'landscape' : 'portrait';
+  const orientation = getImageOrientation(aspectRatio);
+  const size = GATEWAY_SIZES[aspectRatio];
   return {
-    size: GATEWAY_SIZES[aspectRatio],
-    promptSuffix: `Compose the image in an exact ${aspectRatio} ${orientation} aspect ratio; keep all essential subjects and branding inside that frame.`,
+    size,
+    orientation,
+    promptSuffix: `Compose the image in an exact ${aspectRatio} ${orientation} aspect ratio (${size}); keep all essential subjects and branding inside that frame.`,
   } as const;
+}
+
+/** Bake the dropdown size/aspect into image-prompt text without stacking duplicates. */
+export function withImageAspectPrompt(prompt: string, aspectRatio: ImageAspectRatio): string {
+  const { promptSuffix } = getImageGenerationSpec(aspectRatio);
+  const trimmed = String(prompt || '').replace(ASPECT_PROMPT_SUFFIX_RE, '').trimEnd();
+  return trimmed ? `${trimmed}\n\n${promptSuffix}` : promptSuffix;
 }
