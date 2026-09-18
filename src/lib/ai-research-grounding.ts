@@ -153,8 +153,8 @@ const ROLE_HEADING_NEEDLES: Array<{ needle: string; weight: number }> = [
 
 const ROLE_SNIPPET_RE = /wakil pialang|daftar wakil|pialang berjangka|\bpialang\b|pengurus/;
 const NAME_WINDOW_LOOKBACK = 800;
-const ROLE_WINDOW_LOOKBACK = 120;
-const ROLE_WINDOW_SIZE = 480;
+const ROLE_WINDOW_LOOKBACK = 16;
+const ROLE_WINDOW_SIZE = 360;
 
 const QUERY_STOPWORDS = new Set([
   'siapa', 'sih', 'jir', 'di', 'yang', 'untuk', 'dari', 'dengan', 'tidak',

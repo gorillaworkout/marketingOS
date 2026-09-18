@@ -255,7 +255,7 @@ test('injects research context into the chat path when sources are available', (
   assert.match(String(messages[1].content), /BAPPEBTI/);
   assert.match(String(messages[1].content), new RegExp(AI_RESEARCH_NO_INVENT_FACTS));
   assert.match(String(messages[1].content), /Synthesize a rich answer/);
-  assert.doesNotMatch(String(messages[1].content), new RegExp(AI_RESEARCH_PERSON_NAME_HIT));
+  assert.equal(String(messages[1].content).includes(AI_RESEARCH_PERSON_NAME_HIT), false);
   assert.equal(messages[2].content, research.query);
 
   const withoutSources = injectResearchContext(
@@ -443,7 +443,7 @@ test('Sella Susriana + Dupoin research grounds Bappebti wakil pialang hits inste
   assert.match(grounded, /wakil pialang/i);
   assert.match(grounded, /Sella Susriana/);
   assert.match(grounded, /Synthesize a rich answer/);
-  assert.match(grounded, new RegExp(AI_RESEARCH_PERSON_NAME_HIT));
+  assert.equal(grounded.includes(AI_RESEARCH_PERSON_NAME_HIT), true);
   assert.equal(sourcesMentionPersonName(result), true);
   assert.doesNotMatch(grounded, /No web sources were retrieved/);
 
@@ -507,7 +507,7 @@ test('long Bappebti broker pages keep wakil pialang heading with a late person n
   const grounded = formatResearchContext(research);
   assert.match(grounded, /Sella Susriana/);
   assert.match(grounded, /wakil pialang/i);
-  assert.match(grounded, new RegExp(AI_RESEARCH_PERSON_NAME_HIT));
+  assert.equal(grounded.includes(AI_RESEARCH_PERSON_NAME_HIT), true);
   assert.equal(sourcesMentionPersonName(research), true);
   assert.match(grounded, /Synthesize a rich answer/);
 });
