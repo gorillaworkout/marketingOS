@@ -17,6 +17,7 @@ import {
   AI_RESEARCH_PERSON_FACT_PREFIX,
   AI_RESEARCH_PERSON_HIT_TEMPERATURE,
   AI_RESEARCH_PERSON_NAME_HIT,
+  AI_RESEARCH_SYNTHESIZE_ALL_TRACES,
   buildAiResearchChatMessages,
   buildFallbackSearchQueries,
   buildNewsRssQueries,
@@ -57,6 +58,7 @@ import {
   rankResearchSources,
   researchSourceHost,
   selectFetchCandidates,
+  selectFinalResearchSources,
   SERPER_EXHAUSTED_WARNING,
   shouldResearchQuery,
   resolveAiResearchTemperature,
@@ -383,10 +385,16 @@ test('person + Dupoin queries extract names and run a multi-query regulator brow
   assert.ok(queries.some(query => /site:bappebti\.go\.id/i.test(query)));
   assert.ok(queries.some(query => /wakil pialang/i.test(query)));
   assert.ok(queries.some(query => /linkedin\.com|berita OR news/i.test(query)));
+  assert.ok(queries.some(query => /CPNS|Kemdikbud|freelancer/i.test(query)));
+  assert.ok(queries.some(query => /ilmu tanah|administrasi|KYC/i.test(query)));
 
   const openWeb = buildOpenWebSearchQueries(sellaQuery);
+  assert.ok(openWeb.some(query => /^"Sella Susriana"$/i.test(query)), 'Serper must run a bare-name query');
   assert.ok(openWeb.some(query => /Sella Susriana/i.test(query)));
+  assert.ok(openWeb.some(query => /CPNS|freelancer/i.test(query)));
+  assert.ok(openWeb.some(query => /news OR berita OR linkedin/i.test(query)));
   assert.ok(!openWeb.every(query => /site:/i.test(query)), 'open-web queries must not be site-restricted');
+  assert.ok(openWeb.length >= 5, `expected more open-web person queries, got ${openWeb.length}`);
 
   const wikiQueries = buildWikipediaQueries(sellaQuery);
   assert.ok(wikiQueries.some(query => /Sella Susriana/i.test(query)));
@@ -477,6 +485,8 @@ test('Sella Susriana + Dupoin research grounds Bappebti wakil pialang hits inste
   assert.match(AI_RESEARCH_SYSTEM_PROMPT, /belum terverifikasi/);
   assert.match(AI_RESEARCH_SYSTEM_PROMPT, /LinkedIn publik|berita, direktori/);
   assert.match(AI_RESEARCH_SYSTEM_PROMPT, /belum ada sumber publik terverifikasi/);
+  assert.match(AI_RESEARCH_SYSTEM_PROMPT, /daftar CPNS|profil freelancer/);
+  assert.match(AI_RESEARCH_SYSTEM_PROMPT, /Jangan menggabungkan identitas/);
 });
 
 test('long Bappebti broker pages keep wakil pialang heading with a late person name', () => {
@@ -626,6 +636,90 @@ test('long 14-source grounding still pins a short roster fact next to the latest
   }), AI_RESEARCH_DEFAULT_TEMPERATURE);
   assert.match(trimPersonRosterNoise(`${pad} Sella Susriana`), /Sella Susriana/);
   assert.doesNotMatch(trimPersonRosterNoise(`${pad} Sella Susriana`), /1234567890/);
+});
+
+const sellaMultiTraceResearch = {
+  query: sellaQuery,
+  indonesiaPreferred: true,
+  sources: [
+    {
+      title: 'Bappebti - PT Dupoin Futures Indonesia',
+      url: 'https://bappebti.go.id/pialang_berjangka/detail/423',
+      snippet: '[Section: Wakil Pialang] Sella Susriana tercatat sebagai Wakil Pialang Berjangka pada PT Dupoin Futures Indonesia.',
+      origin: 'indonesia' as const,
+    },
+    {
+      title: 'Pengumuman CPNS Kemdikbudristek 2024',
+      url: 'https://sscasn.bkn.go.id/formasi/2024/sella-susriana',
+      snippet: 'Sella Susriana — formasi Pranata Laboratorium Pendidikan Ahli Pertama, CPNS Kemdikbudristek 2024.',
+      origin: 'indonesia' as const,
+    },
+    {
+      title: 'Profil freelancer Sella Susriana',
+      url: 'https://www.sribulancer.com/id/public/sella-susriana',
+      snippet: 'Sella Susriana, lulusan Ilmu Tanah Universitas Andalas, mengerjakan administrasi dan KYC.',
+      origin: 'indonesia' as const,
+    },
+  ],
+};
+
+test('multi-source person fixture keeps PERSON_FACT and requires covering other traces', () => {
+  const facts = extractGroundedPersonFacts(sellaMultiTraceResearch);
+  assert.ok(facts.some(fact => /bappebti\.go\.id/i.test(fact.url) && /Wakil Pialang/i.test(fact.section || '')));
+  assert.ok(facts.some(fact => /sscasn\.bkn\.go\.id|bkn\.go\.id/i.test(fact.url)));
+  assert.ok(facts.some(fact => /sribulancer\.com/i.test(fact.url)));
+
+  const instruction = formatGroundedPersonInstruction(facts);
+  assert.ok(instruction);
+  assert.match(instruction!, /PERSON_FACT: Sella Susriana \| Wakil Pialang/);
+  assert.equal(instruction!.includes(AI_RESEARCH_GROUNDED_PERSON_MUST_ANSWER), true);
+  assert.match(instruction!, /synthesize ALL other grounded excerpts/i);
+  assert.match(instruction!, /may or may not be the same person/i);
+  assert.doesNotMatch(instruction!, /MUST answer from this roster fact/);
+
+  const grounded = formatResearchContext(sellaMultiTraceResearch);
+  assert.match(grounded, /PERSON_FACT: Sella Susriana \| Wakil Pialang/);
+  assert.equal(grounded.includes(AI_RESEARCH_SYNTHESIZE_ALL_TRACES), true);
+  assert.match(grounded, /Pranata Laboratorium Pendidikan Ahli Pertama/);
+  assert.match(grounded, /Ilmu Tanah Universitas Andalas/);
+  assert.match(grounded, /administrasi dan KYC/);
+  assert.match(grounded, /sscasn\.bkn\.go\.id|bkn\.go\.id/);
+  assert.match(grounded, /sribulancer\.com/);
+
+  const messages = buildAiResearchChatMessages({
+    systemPrompt: AI_RESEARCH_SYSTEM_PROMPT,
+    history: [],
+    incoming: [{ role: 'user', content: sellaQuery }],
+    research: sellaMultiTraceResearch,
+  });
+  const blob = messages.map(message => String(message.content)).join('\n');
+  assert.match(blob, /PERSON_FACT: Sella Susriana \| Wakil Pialang/);
+  assert.match(blob, new RegExp(AI_RESEARCH_SYNTHESIZE_ALL_TRACES.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  assert.match(blob, /bappebti\.go\.id/);
+  assert.match(blob, /sscasn\.bkn\.go\.id|bkn\.go\.id/);
+  assert.match(blob, /sribulancer\.com/);
+  const hosts = new Set(sellaMultiTraceResearch.sources.map(source => researchSourceHost(source.url)));
+  assert.ok(hosts.size >= 3, `expected multiple domains in the fixture, got ${[...hosts].join(', ')}`);
+});
+
+test('final source selection reserves CPNS and freelancer traces instead of official-only crowding', () => {
+  const crowded = [
+    ...sellaMultiTraceResearch.sources,
+    { title: 'Bappebti home', url: 'https://bappebti.go.id/', snippet: 'Portal resmi Bappebti.', origin: 'indonesia' as const },
+    { title: 'Bappebti list', url: 'https://bappebti.go.id/pialang_berjangka', snippet: 'Daftar pialang berjangka.', origin: 'indonesia' as const },
+    { title: 'Dupoin home', url: 'https://www.dupoin.co.id/', snippet: 'PT Dupoin Futures Indonesia terdaftar BAPPEBTI.', origin: 'indonesia' as const },
+    { title: 'Dupoin licenses', url: 'https://www.dupoin.co.id/about-us/licenses', snippet: 'Lisensi Bappebti Dupoin.', origin: 'indonesia' as const },
+    { title: 'Dupoin about', url: 'https://www.dupoin.co.id/about-us', snippet: 'Tentang Dupoin Futures.', origin: 'indonesia' as const },
+    { title: 'Wikipedia Bappebti', url: 'https://id.wikipedia.org/wiki/Bappebti', snippet: 'Regulator perdagangan berjangka.', origin: 'indonesia' as const },
+    { title: 'Wikipedia Dupoin', url: 'https://id.wikipedia.org/wiki/Dupoin', snippet: 'Perusahaan pialang.', origin: 'indonesia' as const },
+  ];
+  const selected = selectFinalResearchSources(crowded, sellaQuery, true, 8);
+  assert.ok(selected.some(source => /bappebti\.go\.id\/pialang_berjangka\/detail\/423/.test(source.url)));
+  assert.ok(selected.some(source => /sscasn\.bkn\.go\.id|bkn\.go\.id/.test(source.url)), 'CPNS listing must survive official crowding');
+  assert.ok(selected.some(source => /sribulancer\.com/.test(source.url)), 'freelancer profile must survive official crowding');
+  const fetched = selectFetchCandidates(crowded, sellaQuery, true, 8);
+  assert.ok(fetched.some(source => /sscasn\.bkn\.go\.id|bkn\.go\.id/.test(source.url)));
+  assert.ok(fetched.some(source => /sribulancer\.com/.test(source.url)));
 });
 
 test('AI Research UI shows a thinking bubble before tokens and keeps the stream cursor after', () => {
@@ -936,6 +1030,16 @@ test('optional Serper API is used when DDG HTML is blocked', async () => {
             link: 'https://www.bloomberg.com/profile/person/sella-susriana',
             snippet: 'Public directory mention of Sella Susriana.',
           },
+          {
+            title: 'CPNS Kemdikbudristek 2024',
+            link: 'https://sscasn.bkn.go.id/formasi/2024/sella-susriana',
+            snippet: 'Sella Susriana — Pranata Laboratorium Pendidikan Ahli Pertama, CPNS Kemdikbudristek 2024.',
+          },
+          {
+            title: 'Freelancer Sella Susriana',
+            link: 'https://www.sribulancer.com/id/public/sella-susriana',
+            snippet: 'Sella Susriana, Ilmu Tanah Universitas Andalas, administrasi dan KYC.',
+          },
         ],
       }), { status: 200, headers: { 'content-type': 'application/json' } });
     }
@@ -956,6 +1060,18 @@ test('optional Serper API is used when DDG HTML is blocked', async () => {
     }
     if (url.includes('bloomberg.com')) {
       return new Response('<html><title>Bloomberg</title><body>Public directory listing for Sella Susriana with a professional biography excerpt.</body></html>', {
+        status: 200,
+        headers: { 'content-type': 'text/html' },
+      });
+    }
+    if (url.includes('sscasn.bkn.go.id') || url.includes('bkn.go.id')) {
+      return new Response('<html><title>CPNS 2024</title><body>Sella Susriana tercatat pada formasi Pranata Laboratorium Pendidikan Ahli Pertama CPNS Kemdikbudristek 2024.</body></html>', {
+        status: 200,
+        headers: { 'content-type': 'text/html' },
+      });
+    }
+    if (url.includes('sribulancer.com')) {
+      return new Response('<html><title>Freelancer</title><body>Sella Susriana, lulusan Ilmu Tanah Universitas Andalas, mengerjakan administrasi dan KYC.</body></html>', {
         status: 200,
         headers: { 'content-type': 'text/html' },
       });
@@ -989,6 +1105,14 @@ test('optional Serper API is used when DDG HTML is blocked', async () => {
   assert.ok(result.sources.some(source => /Sella Susriana/i.test(source.snippet)));
   assert.ok(result.sources.some(source => /bappebti\.go\.id/i.test(source.url)), 'official seeds remain a floor');
   assert.ok(result.sources.some(source => source.url.includes('linkedin.com') || source.url.includes('cnbcindonesia.com') || source.url.includes('bloomberg.com')));
+  assert.ok(
+    result.sources.some(source => /sscasn\.bkn\.go\.id|bkn\.go\.id/.test(source.url)),
+    'CPNS listing from Serper must survive ranking and host caps',
+  );
+  assert.ok(
+    result.sources.some(source => source.url.includes('sribulancer.com')),
+    'freelancer profile from Serper must survive ranking and host caps',
+  );
   assert.ok(hosts.size >= 4, `search APIs must keep diverse domains, got ${[...hosts].join(', ')}`);
   assert.match(formatResearchContext(result), /Synthesize a rich answer/);
   assert.match(formatResearchContext(result), new RegExp(AI_RESEARCH_NO_INVENT_FACTS));
