@@ -6,6 +6,12 @@ import { NextRequest } from 'next/server';
 import { isSafeGeneratedImageFilename, generatedImageContentType } from '../src/lib/generated-images';
 import { GET, respondGeneratedImage } from '../src/app/api/generated-images/[filename]/route';
 
+test('generated-image route narrows session via userId like other getSession consumers', () => {
+  const route = fs.readFileSync('src/app/api/generated-images/[filename]/route.ts', 'utf8');
+  assert.match(route, /if \(!\('userId' in auth\)\)/);
+  assert.doesNotMatch(route, /if \('error' in auth\)/);
+});
+
 test('accepts a generated PNG filename and resolves its content type', () => {
   const filename = 'DUPOIN_RisikoTrading_SocialPost_V1_20260723.png';
 

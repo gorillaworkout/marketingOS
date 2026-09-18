@@ -20,7 +20,7 @@ export async function respondGeneratedImage(
   auth: AuthResult | AuthError,
   params: { filename: string },
 ) {
-  if ('error' in auth) {
+  if (!('userId' in auth)) {
     return NextResponse.json({ error: auth.error }, { status: auth.status });
   }
 
