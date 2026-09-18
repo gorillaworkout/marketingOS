@@ -8,11 +8,14 @@ import {
 
 export type ResearchOrigin = 'indonesia' | 'international';
 
+export type ResearchDiscovery = 'search-api';
+
 export interface ResearchSource {
   title: string;
   url: string;
   snippet: string;
   origin: ResearchOrigin;
+  discoveredVia?: ResearchDiscovery;
 }
 
 export interface ResearchContext {
@@ -187,7 +190,7 @@ const SOCIAL_CROWD_HOSTS = [
   'twitter.com',
   'x.com',
 ];
-const HIGH_VALUE_PERSON_HOST_RE = /cake\.me|freelancer\.|sribulancer|sscasn|bkn\.go\.id|linkedin|projects\.co\.id|scholar/;
+const HIGH_VALUE_PERSON_HOST_RE = /cake\.me|freelancer\.|sribulancer|sscasn|bkn\.go\.id|linkedin|projects\.co\.id|scholar|unand/;
 const NAME_WINDOW_LOOKBACK = 800;
 const ROLE_WINDOW_LOOKBACK = 16;
 const ROLE_WINDOW_SIZE = 360;
@@ -616,8 +619,8 @@ export function extractPageSnippet(html: string, query = ''): { title: string; s
   return { title, snippet: combined.replace(/\s+/g, ' ').trim().slice(0, MAX_SNIPPET) };
 }
 
-export function parseDuckDuckGoResults(html: string): Array<{ title: string; url: string; snippet: string }> {
-  const results: Array<{ title: string; url: string; snippet: string }> = [];
+export function parseDuckDuckGoResults(html: string): Array<{ title: string; url: string; snippet: string; discoveredVia?: ResearchDiscovery }> {
+  const results: Array<{ title: string; url: string; snippet: string; discoveredVia?: ResearchDiscovery }> = [];
   const seen = new Set<string>();
   const linkRe = /<a\b[^>]*class="[^"]*result__a[^"]*"[^>]*>[\s\S]*?<\/a>/gi;
   let match: RegExpExecArray | null;
@@ -633,7 +636,12 @@ export function parseDuckDuckGoResults(html: string): Array<{ title: string; url
     const snippet = snippetMatch ? htmlToPlainText(snippetMatch[1]).slice(0, MAX_SNIPPET) : '';
     if (seen.has(url)) continue;
     seen.add(url);
-    results.push({ title: htmlToPlainText(titleHtml).slice(0, 180) || url, url, snippet });
+    results.push({
+      title: htmlToPlainText(titleHtml).slice(0, 180) || url,
+      url,
+      snippet,
+      discoveredVia: 'search-api' as const,
+    });
   }
   return results.slice(0, 12);
 }
@@ -801,6 +809,7 @@ function parseSearchApiList(
       url,
       snippet: htmlToPlainText(snippet).slice(0, MAX_SNIPPET),
       origin: classifySourceOrigin(url),
+      discoveredVia: 'search-api',
     });
   }
   return sources;
@@ -833,6 +842,7 @@ export function parseSerperResults(payload: unknown): ResearchSource[] {
         url,
         snippet: snippet.slice(0, MAX_SNIPPET),
         origin: classifySourceOrigin(url),
+        discoveredVia: 'search-api',
       });
     }
   }
@@ -1088,24 +1098,28 @@ export function rankResearchSources(
   const scored = sources.map((source, index) => {
     let score = 0;
     const blob = `${source.title} ${source.snippet} ${source.url}`.toLowerCase();
+    const named = sourceMentionsPersonName(source, query);
     try {
       const host = new URL(source.url).hostname.replace(/^www\./, '');
       if (officialHosts.some(official => host === official || host.endsWith(`.${official}`))) score += 50;
       if (host === 'bappebti.go.id' || host.endsWith('.bappebti.go.id')) score += 20;
       if (host === 'ojk.go.id' || host.endsWith('.ojk.go.id')) score += 10;
-      if (host.includes('linkedin.com') && names.some(name => blob.includes(name))) score += 15;
-      if (host.endsWith('.ac.id') && names.some(name => blob.includes(name))) score += 16;
+      if (host.includes('linkedin.com') && named) score += 15;
+      if (host.endsWith('.ac.id') && named) score += 16;
     } catch { /* ignore */ }
     if (indonesiaPreferred && source.origin === 'indonesia') score += 20;
-    if (names.some(name => blob.includes(name))) score += 30;
-    if (names.some(name => blob.includes(name)) && !isOfficialResearchHost(source.url)) {
+    if (named) score += 30;
+    if (named && !isOfficialResearchHost(source.url)) {
       score += 22;
     }
-    if (names.some(name => blob.includes(name)) && OPEN_WEB_PERSON_TRACE_RE.test(blob)) {
+    if (named && OPEN_WEB_PERSON_TRACE_RE.test(blob)) {
       score += 18;
     }
-    if (names.some(name => blob.includes(name)) && isHighValuePersonTraceHost(source.url)) {
+    if (named && isHighValuePersonTraceHost(source.url)) {
       score += 16;
+    }
+    if (isSearchApiSource(source) && named && !isOfficialResearchHost(source.url)) {
+      score += 12;
     }
     if (isSocialCrowdHost(source.url)) score -= 28;
     if (/wakil pialang|pialang berjangka/.test(blob)) score += 20;
@@ -1178,15 +1192,41 @@ function sourceKey(url: string): string {
   return url.replace(/\/$/, '');
 }
 
+export function mentionsPersonName(text: string, name: string): boolean {
+  const n = name.toLowerCase().replace(/\s+/g, ' ').trim();
+  if (!n || !text) return false;
+  const lower = text.toLowerCase();
+  const compact = n.replace(/\s+/g, '');
+  const dashed = n.replace(/\s+/g, '-');
+  const underscored = n.replace(/\s+/g, '_');
+  const spacedHaystack = lower.replace(/[^a-z0-9]+/g, ' ').replace(/\s+/g, ' ').trim();
+  const compactHaystack = lower.replace(/[^a-z0-9]+/g, '');
+  if (lower.includes(n) || lower.includes(dashed) || lower.includes(underscored) || spacedHaystack.includes(n)) {
+    return true;
+  }
+  return compact.length >= 6 && compactHaystack.includes(compact);
+}
+
+export function textMentionsPersonName(text: string, query: string): boolean {
+  const names = extractPersonNameCandidates(query);
+  if (!names.length || !text) return false;
+  return names.some(name => mentionsPersonName(text, name));
+}
+
+export function isSearchApiSource(source: ResearchSource): boolean {
+  return source.discoveredVia === 'search-api';
+}
+
 export function sourceMentionsPersonName(source: ResearchSource, query: string): boolean {
-  const names = extractPersonNameCandidates(query).map(name => name.toLowerCase());
-  if (!names.length) return false;
-  const blob = `${source.title} ${source.snippet}`.toLowerCase();
-  return names.some(name => blob.includes(name));
+  return textMentionsPersonName(`${source.title} ${source.snippet} ${source.url}`, query);
 }
 
 export function isOpenWebPersonTrace(source: ResearchSource, query: string): boolean {
-  return sourceMentionsPersonName(source, query) && !isOfficialResearchHost(source.url);
+  if (isOfficialResearchHost(source.url) || isLikelyLoginWallHost(source.url)) return false;
+  if (sourceMentionsPersonName(source, query)) return true;
+  return looksLikePersonQuery(query)
+    && isSearchApiSource(source)
+    && isHighValuePersonTraceHost(source.url);
 }
 
 function pushUniqueSources(
@@ -1288,13 +1328,72 @@ export function selectFinalResearchSources(
   return picked.slice(0, limit);
 }
 
+function preferOrganicSnippet(
+  fetched: ResearchSource,
+  organic: ResearchSource,
+  query: string,
+): ResearchSource {
+  const fetchedHasName = sourceMentionsPersonName(fetched, query);
+  const organicHasName = sourceMentionsPersonName(organic, query);
+  const fetchedSnippet = fetched.snippet.trim();
+  const organicSnippet = organic.snippet.trim();
+  if (organicHasName && (!fetchedHasName || fetchedSnippet.length < 40) && organicSnippet) {
+    return {
+      ...fetched,
+      title: fetched.title && fetchedHasName ? fetched.title : (organic.title || fetched.title),
+      snippet: organic.snippet.slice(0, MAX_SNIPPET),
+      discoveredVia: fetched.discoveredVia || organic.discoveredVia,
+    };
+  }
+  if (!fetchedSnippet && organicSnippet) {
+    return {
+      ...fetched,
+      title: fetched.title || organic.title,
+      snippet: organic.snippet.slice(0, MAX_SNIPPET),
+      discoveredVia: fetched.discoveredVia || organic.discoveredVia,
+    };
+  }
+  return {
+    ...fetched,
+    discoveredVia: fetched.discoveredVia || organic.discoveredVia,
+  };
+}
+
+export function isOrganicSearchNameHit(source: ResearchSource, query: string): boolean {
+  if (isOfficialResearchHost(source.url) || isLikelyLoginWallHost(source.url)) return false;
+  if (!isSearchApiSource(source) && !isOpenWebPersonTrace(source, query)) return false;
+  return sourceMentionsPersonName(source, query)
+    || (isSearchApiSource(source) && isHighValuePersonTraceHost(source.url));
+}
+
+export function mergeOrganicSearchHits(
+  fetched: ResearchSource[],
+  discovered: ResearchSource[],
+  query: string,
+): ResearchSource[] {
+  const byUrl = new Map<string, ResearchSource>();
+  for (const source of fetched) {
+    byUrl.set(sourceKey(source.url), source);
+  }
+  for (const organic of discovered) {
+    if (!isOrganicSearchNameHit(organic, query)) continue;
+    const key = sourceKey(organic.url);
+    const existing = byUrl.get(key);
+    if (!existing) {
+      byUrl.set(key, {
+        ...organic,
+        title: organic.title || organic.url,
+        snippet: organic.snippet.slice(0, MAX_SNIPPET),
+      });
+      continue;
+    }
+    byUrl.set(key, preferOrganicSnippet(existing, organic, query));
+  }
+  return [...byUrl.values()];
+}
+
 export function sourcesMentionPersonName(context: ResearchContext): boolean {
-  const names = extractPersonNameCandidates(context.query).map(name => name.toLowerCase());
-  if (!names.length) return false;
-  return context.sources.some(source => {
-    const blob = `${source.title} ${source.snippet}`.toLowerCase();
-    return names.some(name => blob.includes(name));
-  });
+  return context.sources.some(source => sourceMentionsPersonName(source, context.query));
 }
 
 const SECTION_LABEL_RE = /\[Section:\s*([^\]]+)\]/i;
@@ -1350,10 +1449,9 @@ export function extractGroundedPersonFacts(context: ResearchContext): GroundedPe
   const facts: GroundedPersonFact[] = [];
   const seen = new Set<string>();
   for (const source of context.sources) {
-    const blob = `${source.title} ${source.snippet}`;
-    const lower = blob.toLowerCase();
+    const blob = `${source.title} ${source.snippet} ${source.url}`;
     for (const name of names) {
-      if (!lower.includes(name.toLowerCase())) continue;
+      if (!mentionsPersonName(blob, name)) continue;
       const key = `${name.toLowerCase()}|${source.url.replace(/\/$/, '')}`;
       if (seen.has(key)) continue;
       seen.add(key);
@@ -1381,15 +1479,32 @@ export function formatGroundedPersonFactLine(fact: GroundedPersonFact): string {
   return `${prefix} ${fact.name} | ${section} | ${fact.url}`;
 }
 
+function uniqueFactsByHost(facts: GroundedPersonFact[], maxPerHost = 1): GroundedPersonFact[] {
+  const counts = new Map<string, number>();
+  const seen = new Set<string>();
+  const picked: GroundedPersonFact[] = [];
+  for (const fact of facts) {
+    const key = fact.url.replace(/\/$/, '');
+    if (seen.has(key)) continue;
+    const host = researchSourceHost(fact.url) || fact.url;
+    const used = counts.get(host) || 0;
+    if (used >= maxPerHost) continue;
+    seen.add(key);
+    counts.set(host, used + 1);
+    picked.push(fact);
+  }
+  return picked;
+}
+
 export function formatGroundedPersonInstruction(facts: GroundedPersonFact[]): string | null {
   if (!facts.length) return null;
-  const official = facts.filter(isOfficialPersonFact);
-  const other = facts.filter(fact => !isOfficialPersonFact(fact));
+  const official = uniqueFactsByHost(facts.filter(isOfficialPersonFact), 1).slice(0, 2);
+  const other = uniqueFactsByHost(facts.filter(fact => !isOfficialPersonFact(fact)), 1).slice(0, 12);
   return [
     AI_RESEARCH_GROUNDED_PERSON_HEADER,
     AI_RESEARCH_GROUNDED_PERSON_MUST_ANSWER,
     '',
-    ...[...official, ...other].slice(0, 8).map(formatGroundedPersonFactLine),
+    ...[...official, ...other].map(formatGroundedPersonFactLine),
   ].join('\n');
 }
 
@@ -1433,14 +1548,15 @@ export function resolveAiResearchTemperature(research: ResearchContext | null): 
 }
 
 export function sourcesHaveUsefulHits(context: ResearchContext): boolean {
-  const names = extractPersonNameCandidates(context.query).map(name => name.toLowerCase());
   return context.sources.some(source => {
-    if (isLikelyLoginWallHost(source.url) || isEmptyOrLoginWallSource(source.snippet, source.url, source.title)) {
+    if (isLikelyLoginWallHost(source.url)) return false;
+    if (isOpenWebPersonTrace(source, context.query) && source.snippet.trim()) return true;
+    if (isEmptyOrLoginWallSource(source.snippet, source.url, source.title)) {
       return false;
     }
     const blob = `${source.title} ${source.snippet} ${source.url}`.toLowerCase();
     return source.snippet.trim().length >= 40
-      || names.some(name => blob.includes(name))
+      || sourceMentionsPersonName(source, context.query)
       || /bappebti|wakil pialang|pialang|ojk|dupoin/i.test(blob);
   });
 }
@@ -1820,7 +1936,7 @@ type PageFetchOptions = {
 };
 
 async function fetchPageSource(
-  candidate: { title: string; url: string; snippet: string },
+  candidate: ResearchSource,
   query: string,
   fetchImpl: typeof fetch,
   maxBytes: number,
@@ -1829,10 +1945,23 @@ async function fetchPageSource(
 ): Promise<ResearchSource> {
   const origin = classifySourceOrigin(candidate.url);
   const fallback: ResearchSource = {
+    ...candidate,
     title: candidate.title,
     url: candidate.url,
     snippet: candidate.snippet,
     origin,
+  };
+  const keepSearchSnippet = (): ResearchSource | null => {
+    if (!candidate.snippet.trim()) return null;
+    if (isEmptyOrLoginWallSource(candidate.snippet, candidate.url, candidate.title)
+      && !sourceMentionsPersonName(candidate, query)
+      && !isOrganicSearchNameHit(candidate, query)) {
+      return null;
+    }
+    return {
+      ...fallback,
+      snippet: candidate.snippet.slice(0, MAX_SNIPPET),
+    };
   };
   if (!isPublicHttpUrl(candidate.url) || isLikelyLoginWallHost(candidate.url)) return fallback;
 
@@ -1840,10 +1969,8 @@ async function fetchPageSource(
     const host = new URL(candidate.url).hostname.toLowerCase();
     if ((host === 'wikipedia.org' || host.endsWith('.wikipedia.org')) && candidate.snippet.trim().length >= 80) {
       return {
-        title: candidate.title,
-        url: candidate.url,
+        ...fallback,
         snippet: candidate.snippet.slice(0, MAX_SNIPPET),
-        origin,
       };
     }
   } catch {
@@ -1859,17 +1986,17 @@ async function fetchPageSource(
         },
         redirect: 'follow',
       }, maxBytes, timeoutMs);
-      if (!isPublicHttpUrl(page.url) || isLikelyLoginWallHost(page.url)) return null;
+      if (!isPublicHttpUrl(page.url) || isLikelyLoginWallHost(page.url)) return keepSearchSnippet();
       if (isEmptyOrLoginWallSource(page.text, page.url, htmlTitle(page.text))) {
-        if (candidate.snippet.trim().length >= 40 && !isEmptyOrLoginWallSource(candidate.snippet, candidate.url, candidate.title)) {
-          return { title: candidate.title, url: candidate.url, snippet: candidate.snippet.slice(0, MAX_SNIPPET), origin };
-        }
-        return null;
+        return keepSearchSnippet();
       }
       const extracted = extractFetchedContent(page.text, query, page.contentType);
       const snippet = pickRicherSnippet(extracted.snippet, candidate.snippet, query).slice(0, MAX_SNIPPET);
-      if (!snippet.trim() || isEmptyOrLoginWallSource(snippet, page.url, extracted.title)) return null;
+      if (!snippet.trim() || isEmptyOrLoginWallSource(snippet, page.url, extracted.title)) {
+        return keepSearchSnippet();
+      }
       return {
+        ...fallback,
         title: extracted.title || candidate.title,
         url: page.url,
         snippet,
@@ -1898,15 +2025,15 @@ async function fetchPageSource(
         return null;
       }
       if (isEmptyOrLoginWallSource(page.text, candidate.url)) {
-        if (candidate.snippet.trim().length >= 40 && !isEmptyOrLoginWallSource(candidate.snippet, candidate.url, candidate.title)) {
-          return { title: candidate.title, url: candidate.url, snippet: candidate.snippet.slice(0, MAX_SNIPPET), origin };
-        }
-        return null;
+        return keepSearchSnippet();
       }
       const extracted = extractFetchedContent(page.text, query, page.contentType);
       const snippet = pickRicherSnippet(extracted.snippet, candidate.snippet, query).slice(0, MAX_SNIPPET);
-      if (!snippet.trim() || isEmptyOrLoginWallSource(snippet, candidate.url, extracted.title)) return null;
+      if (!snippet.trim() || isEmptyOrLoginWallSource(snippet, candidate.url, extracted.title)) {
+        return keepSearchSnippet();
+      }
       return {
+        ...fallback,
         title: extracted.title || candidate.title,
         url: candidate.url,
         snippet,
@@ -1930,10 +2057,9 @@ async function fetchPageSource(
 }
 
 function snippetGroundingScore(text: string, query: string): number {
-  const names = extractPersonNameCandidates(query).map(name => name.toLowerCase());
   const lower = text.toLowerCase();
   let score = 0;
-  if (names.some(name => lower.includes(name))) score += 3;
+  if (textMentionsPersonName(text, query)) score += 3;
   if (ROLE_SNIPPET_RE.test(lower)) score += 2;
   if (score >= 5) score += 2;
   if (text.trim().length > 80) score += 1;
@@ -1954,16 +2080,27 @@ function uniqueSourceCount(sources: ResearchSource[]): number {
 }
 
 function isUsableResearchSource(source: ResearchSource, query: string): boolean {
-  if (isLikelyLoginWallHost(source.url) || isEmptyOrLoginWallSource(source.snippet, source.url, source.title)) {
+  if (isLikelyLoginWallHost(source.url)) return false;
+  if (isOpenWebPersonTrace(source, query) && source.snippet.trim()) return true;
+  if (isOrganicSearchNameHit(source, query) && source.snippet.trim()) return true;
+  if (isEmptyOrLoginWallSource(source.snippet, source.url, source.title)) {
     return false;
   }
   const blob = `${source.title} ${source.snippet} ${source.url}`.toLowerCase();
-  const names = extractPersonNameCandidates(query).map(name => name.toLowerCase());
   return source.snippet.trim().length >= 40
     || isOfficialResearchHost(source.url)
     || source.url.includes('dupoin')
-    || names.some(name => blob.includes(name))
+    || sourceMentionsPersonName(source, query)
     || /wakil pialang|bappebti|pialang berjangka/.test(blob);
+}
+
+function keepResearchSource(source: ResearchSource, query: string): boolean {
+  if (isLikelyLoginWallHost(source.url)) return false;
+  if ((isOpenWebPersonTrace(source, query) || isOrganicSearchNameHit(source, query)) && source.snippet.trim()) {
+    return true;
+  }
+  if (isEmptyOrLoginWallSource(source.snippet, source.url, source.title)) return false;
+  return isUsableResearchSource(source, query);
 }
 
 export async function gatherAiResearchContext(
@@ -2108,11 +2245,13 @@ export async function gatherAiResearchContext(
     fetchBudget,
     { enableJina, jinaState },
   )));
-  const cleaned = fetched.filter(source => (
-    !isLikelyLoginWallHost(source.url)
-    && !isEmptyOrLoginWallSource(source.snippet, source.url, source.title)
+  const merged = mergeOrganicSearchHits(fetched, found, query);
+  const cleaned = merged.filter(source => keepResearchSource(source, query));
+  const withText = cleaned.filter(source => (
+    source.snippet.trim().length >= 40
+    || isOpenWebPersonTrace(source, query)
+    || isOrganicSearchNameHit(source, query)
   ));
-  const withText = cleaned.filter(source => source.snippet.trim().length >= 40);
   const usable = cleaned.filter(source => isUsableResearchSource(source, query));
   const selected = withText.length >= 3 ? withText : usable.length ? usable : cleaned;
   return {

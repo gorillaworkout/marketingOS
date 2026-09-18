@@ -41,8 +41,13 @@ import {
   isDeepPersonResearch,
   isDuckDuckGoAnomalyPage,
   isEmptyOrLoginWallSource,
+  isHighValuePersonTraceHost,
   isLikelyLoginWallHost,
+  isOpenWebPersonTrace,
+  isOrganicSearchNameHit,
   jinaReaderUrl,
+  mentionsPersonName,
+  mergeOrganicSearchHits,
   officialSeedUrls,
   parseBraveResults,
   parseDuckDuckGoInstantAnswer,
@@ -63,6 +68,7 @@ import {
   SERPER_EXHAUSTED_WARNING,
   shouldResearchQuery,
   resolveAiResearchTemperature,
+  sourceMentionsPersonName,
   sourcesHaveUsefulHits,
   sourcesMentionPersonName,
   trimPersonRosterNoise,
@@ -773,6 +779,239 @@ test('Serper-like organic name hits survive official seeds and Facebook/YouTube 
   assert.match(grounded, /cake\.me/);
   assert.match(grounded, /freelancer\.co\.nz/);
   assert.match(grounded, /scholar\.unand\.ac\.id/);
+});
+
+test('URL slugs and compact handles count as open-web person traces', () => {
+  const cake = {
+    title: 'CakeResume',
+    url: 'https://www.cake.me/sella-susriana',
+    snippet: 'View resume.',
+    origin: 'international' as const,
+    discoveredVia: 'search-api' as const,
+  };
+  const freelancer = {
+    title: 'Freelancer',
+    url: 'https://www.freelancer.co.nz/u/sellasusriana',
+    snippet: 'Member since 2019.',
+    origin: 'international' as const,
+    discoveredVia: 'search-api' as const,
+  };
+  const unand = {
+    title: 'EPrints University of Andalas',
+    url: 'https://scholar.unand.ac.id/id/eprint/sella-susriana',
+    snippet: 'Preview.',
+    origin: 'indonesia' as const,
+    discoveredVia: 'search-api' as const,
+  };
+  assert.equal(mentionsPersonName(cake.url, 'Sella Susriana'), true);
+  assert.equal(mentionsPersonName(freelancer.url, 'Sella Susriana'), true);
+  assert.equal(isHighValuePersonTraceHost(cake.url), true);
+  assert.equal(isHighValuePersonTraceHost(freelancer.url), true);
+  assert.equal(isHighValuePersonTraceHost(unand.url), true);
+  assert.equal(sourceMentionsPersonName(cake, sellaQuery), true);
+  assert.equal(sourceMentionsPersonName(freelancer, sellaQuery), true);
+  assert.equal(sourceMentionsPersonName(unand, sellaQuery), true);
+  assert.equal(isOpenWebPersonTrace(cake, sellaQuery), true);
+  assert.equal(isOpenWebPersonTrace(freelancer, sellaQuery), true);
+  assert.equal(isOpenWebPersonTrace(unand, sellaQuery), true);
+  assert.equal(isOrganicSearchNameHit(cake, sellaQuery), true);
+
+  const reserved = selectFinalResearchSources([
+    { title: 'Bappebti Dupoin', url: 'https://bappebti.go.id/pialang_berjangka/detail/423', snippet: 'Sella Susriana tercatat sebagai Wakil Pialang.', origin: 'indonesia' },
+    { title: 'Bappebti home', url: 'https://bappebti.go.id/', snippet: 'Portal resmi Bappebti.', origin: 'indonesia' },
+    { title: 'Dupoin home', url: 'https://www.dupoin.co.id/', snippet: 'PT Dupoin Futures Indonesia.', origin: 'indonesia' },
+    { title: 'Facebook Dupoin', url: 'https://www.facebook.com/dupoin', snippet: 'Sella Susriana mentioned on a Dupoin page.', origin: 'international' },
+    { title: 'YouTube clip', url: 'https://www.youtube.com/watch?v=sella', snippet: 'Video mentioning Sella Susriana.', origin: 'international' },
+    cake,
+    freelancer,
+    unand,
+  ], sellaQuery, true, 14);
+  const reservedUrls = reserved.map(source => source.url).join(' ');
+  assert.ok(/cake\.me/.test(reservedUrls));
+  assert.ok(/freelancer\.co\.nz/.test(reservedUrls));
+  assert.ok(/scholar\.unand\.ac\.id/.test(reservedUrls));
+});
+
+test('Serper organic name hits survive failed fetches and emit OTHER_PUBLIC_TRACE', async () => {
+  const calls: string[] = [];
+  const fetchImpl: typeof fetch = async (input, init) => {
+    const url = String(input);
+    calls.push(url);
+    if (url.includes('google.serper.dev/search')) {
+      assert.equal((init?.headers as Record<string, string>)?.['X-API-KEY'] || (init?.headers as Headers | undefined)?.get?.('X-API-KEY'), 'organic-keep-serper');
+      return new Response(JSON.stringify({
+        organic: [
+          {
+            title: 'Bappebti Dupoin',
+            link: 'https://bappebti.go.id/pialang_berjangka/detail/423',
+            snippet: 'Sella Susriana tercatat sebagai wakil pialang.',
+          },
+          {
+            title: 'CakeResume',
+            link: 'https://www.cake.me/sella-susriana',
+            snippet: 'Sign up to see Sella Susriana resume for administrasi and KYC.',
+          },
+          {
+            title: 'EPrints University of Andalas',
+            link: 'https://scholar.unand.ac.id/id/eprint/sella-susriana',
+            snippet: 'Preview.',
+          },
+          {
+            title: 'Freelancer',
+            link: 'https://www.freelancer.co.nz/u/sellasusriana',
+            snippet: 'Member since 2019.',
+          },
+          {
+            title: 'Facebook Dupoin',
+            link: 'https://www.facebook.com/dupoin',
+            snippet: 'Sella Susriana mentioned on a Dupoin page.',
+          },
+          {
+            title: 'YouTube clip',
+            link: 'https://www.youtube.com/watch?v=sella',
+            snippet: 'Video mentioning Sella Susriana.',
+          },
+          {
+            title: 'Wikipedia Bappebti',
+            link: 'https://id.wikipedia.org/wiki/Bappebti',
+            snippet: 'Regulator perdagangan berjangka Indonesia.',
+          },
+        ],
+      }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }
+    if (url.includes('html.duckduckgo.com')) {
+      return new Response(ddgAnomalyHtml, { status: 202, headers: { 'content-type': 'text/html' } });
+    }
+    if (url.includes('cake.me') || url.includes('unand.ac.id') || url.includes('freelancer.co.nz')) {
+      return new Response('not found', { status: 404 });
+    }
+    if (url.startsWith('https://r.jina.ai/') && /cake\.me|unand|freelancer/.test(url)) {
+      return new Response('not found', { status: 404 });
+    }
+    if (url.includes('bappebti.go.id') && !url.startsWith('https://r.jina.ai/')) {
+      return new Response(sellaBappebtiHtml, { status: 200, headers: { 'content-type': 'text/html' } });
+    }
+    if (url.includes('dupoin.co.id') || url.includes('dupoin.com')) {
+      return new Response(officialHtml, { status: 200, headers: { 'content-type': 'text/html' } });
+    }
+    if (url.includes('facebook.com') || url.includes('youtube.com')) {
+      return new Response('<html><title>Social</title><body>Sella Susriana mentioned on a public Dupoin social page with extra commentary.</body></html>', {
+        status: 200,
+        headers: { 'content-type': 'text/html' },
+      });
+    }
+    if (url.includes('id.wikipedia.org') && url.includes('prop=extracts')) {
+      return new Response(JSON.stringify({
+        query: { pages: { '1': { title: 'Bappebti', extract: 'Bappebti mengawasi pialang berjangka di Indonesia.' } } },
+      }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }
+    if (url.includes('api.php') || url.includes('api.duckduckgo.com') || url.includes('wikidata.org') || url.includes('news.google.com')) {
+      return new Response(JSON.stringify({ query: { search: [] }, search: [], Heading: '', AbstractText: '', Results: [] }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }
+    return new Response('not found', { status: 404 });
+  };
+
+  const result = await gatherAiResearchContext(sellaQuery, {
+    fetchImpl,
+    timeoutMs: 8_000,
+    searchApiKeys: { serper: 'organic-keep-serper' },
+    logger: { warn() { /* DDG blocked; Serper supplies organic URLs */ } },
+  });
+  const urls = result.sources.map(source => source.url).join(' ');
+  assert.ok(calls.some(url => url.includes('google.serper.dev/search')));
+  assert.ok(/bappebti\.go\.id\/pialang_berjangka\/detail\/423/.test(urls), 'official Bappebti floor stays');
+  assert.ok(/cake\.me/.test(urls), 'cake.me Serper organic must survive failed fetch');
+  assert.ok(/freelancer\.co\.nz/.test(urls), 'freelancer.co.nz Serper organic must survive failed fetch');
+  assert.ok(/scholar\.unand\.ac\.id/.test(urls), 'Unand scholar Serper organic must survive failed fetch');
+
+  const cake = result.sources.find(source => source.url.includes('cake.me'));
+  const freelancer = result.sources.find(source => source.url.includes('freelancer.co.nz'));
+  const unand = result.sources.find(source => source.url.includes('scholar.unand.ac.id'));
+  assert.ok(cake);
+  assert.match(cake!.snippet, /Sella Susriana|administrasi|KYC/i);
+  assert.ok(freelancer);
+  assert.ok(freelancer!.snippet.trim().length > 0, 'freelancer keeps the Serper snippet');
+  assert.ok(unand);
+  assert.ok(unand!.snippet.trim().length > 0, 'Unand keeps the Serper snippet');
+
+  const facts = extractGroundedPersonFacts(result);
+  assert.ok(facts.some(fact => /bappebti\.go\.id/.test(fact.url)), `missing bappebti fact: ${facts.map(fact => fact.url).join(' ')}`);
+  assert.ok(facts.some(fact => /cake\.me/.test(fact.url)), `missing cake fact: ${facts.map(fact => fact.url).join(' ')}`);
+  assert.ok(facts.some(fact => /freelancer\.co\.nz/.test(fact.url)), `missing freelancer fact: ${facts.map(fact => fact.url).join(' ')}`);
+  assert.ok(facts.some(fact => /scholar\.unand\.ac\.id/.test(fact.url)), `missing unand fact: ${facts.map(fact => fact.url).join(' ')}`);
+
+  const grounded = formatResearchContext(result);
+  assert.match(grounded, /PERSON_FACT: Sella Susriana/, `grounded missing PERSON_FACT:\n${grounded.slice(0, 1500)}`);
+  assert.match(grounded, /OTHER_PUBLIC_TRACE:.*cake\.me|OTHER_PUBLIC_TRACE:.*freelancer|OTHER_PUBLIC_TRACE:.*unand/, `grounded missing OTHER_PUBLIC_TRACE:\n${grounded.slice(0, 2000)}`);
+  assert.match(grounded, /cake\.me/);
+  assert.match(grounded, /freelancer\.co\.nz/);
+  assert.match(grounded, /scholar\.unand\.ac\.id/);
+
+  const messages = buildAiResearchChatMessages({
+    systemPrompt: AI_RESEARCH_SYSTEM_PROMPT,
+    history: [],
+    incoming: [{ role: 'user', content: sellaQuery }],
+    research: result,
+  });
+  const blob = messages.map(message => String(message.content)).join('\n');
+  assert.match(blob, /PERSON_FACT: Sella Susriana/);
+  assert.match(blob, /OTHER_PUBLIC_TRACE:/);
+  assert.match(blob, /cake\.me/);
+  assert.match(blob, /freelancer\.co\.nz/);
+  assert.match(blob, /scholar\.unand\.ac\.id/);
+  const otherTraceLines = blob.split('\n').filter(line => line.startsWith('OTHER_PUBLIC_TRACE:'));
+  assert.ok(otherTraceLines.length >= 3, `expected OTHER_PUBLIC_TRACE rows for organic hosts, got ${otherTraceLines.join(' | ')}`);
+  assert.ok(otherTraceLines.some(line => /cake\.me/.test(line)));
+  assert.ok(otherTraceLines.some(line => /freelancer\.co\.nz/.test(line)));
+  assert.ok(otherTraceLines.some(line => /unand/.test(line)));
+});
+
+test('mergeOrganicSearchHits injects unfetched Serper name hits using search snippets', () => {
+  const fetched = [
+    {
+      title: 'Bappebti - PT Dupoin Futures Indonesia',
+      url: 'https://bappebti.go.id/pialang_berjangka/detail/423',
+      snippet: '[Section: Wakil Pialang] Sella Susriana tercatat sebagai Wakil Pialang.',
+      origin: 'indonesia' as const,
+    },
+    {
+      title: 'Dupoin home',
+      url: 'https://www.dupoin.co.id/',
+      snippet: 'PT Dupoin Futures Indonesia terdaftar BAPPEBTI dengan kantor di Jakarta.',
+      origin: 'indonesia' as const,
+    },
+  ];
+  const discovered = [
+    ...fetched,
+    {
+      title: 'CakeResume',
+      url: 'https://www.cake.me/sella-susriana',
+      snippet: 'Sign up to see Sella Susriana resume for administrasi and KYC.',
+      origin: 'international' as const,
+      discoveredVia: 'search-api' as const,
+    },
+    {
+      title: 'Freelancer',
+      url: 'https://www.freelancer.co.nz/u/sellasusriana',
+      snippet: 'Member since 2019.',
+      origin: 'international' as const,
+      discoveredVia: 'search-api' as const,
+    },
+    {
+      title: 'EPrints University of Andalas',
+      url: 'https://scholar.unand.ac.id/id/eprint/sella-susriana',
+      snippet: 'Preview.',
+      origin: 'indonesia' as const,
+      discoveredVia: 'search-api' as const,
+    },
+  ];
+  const merged = mergeOrganicSearchHits(fetched, discovered, sellaQuery);
+  assert.ok(merged.some(source => source.url.includes('cake.me') && /Sella Susriana/i.test(source.snippet)));
+  assert.ok(merged.some(source => source.url.includes('freelancer.co.nz')));
+  assert.ok(merged.some(source => source.url.includes('scholar.unand.ac.id')));
 });
 
 test('AI Research UI shows a thinking bubble before tokens and keeps the stream cursor after', () => {
