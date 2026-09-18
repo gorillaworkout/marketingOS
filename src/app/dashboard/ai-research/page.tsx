@@ -199,7 +199,7 @@ export default function AIResearchPage() {
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, streaming]);
+  }, [messages, streaming, loading]);
 
   const clearPendingImages = () => {
     setPendingImages(prev => {
@@ -604,6 +604,34 @@ export default function AIResearchPage() {
                 </div>
               ))}
 
+              {/* Thinking / typing bubble before the first stream token */}
+              {loading && !streaming && (
+                <div className="flex justify-start" role="status" aria-live="polite" aria-label="GorillaWorkout AI is researching">
+                  <div className="flex gap-3 max-w-[85%] sm:max-w-[75%]">
+                    <div className="w-7 h-7 rounded-full bg-emerald-600 flex items-center justify-center flex-shrink-0 mt-0.5">
+                      <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.5"><path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" /></svg>
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-[10px] font-semibold text-[var(--mos-text-muted)] mb-1 px-1 flex items-center gap-2">
+                        GorillaWorkout AI
+                        <span className="text-[9px] font-medium text-emerald-300/80">Sedang meneliti</span>
+                      </p>
+                      <div
+                        data-testid="ai-research-thinking"
+                        className="px-4 py-3 bg-[var(--mos-raised)] border border-[var(--mos-border)] text-[var(--mos-text)] rounded-2xl rounded-tl-md"
+                      >
+                        <span className="sr-only">Thinking</span>
+                        <span className="ai-research-typing-dots" aria-hidden="true">
+                          <span />
+                          <span />
+                          <span />
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {/* Streaming indicator */}
               {streaming && (
                 <div className="flex justify-start">
@@ -618,7 +646,7 @@ export default function AIResearchPage() {
                       </p>
                       <div className="px-4 py-2.5 bg-[var(--mos-raised)] border border-[var(--mos-border)] text-[var(--mos-text)] rounded-2xl rounded-tl-md text-sm leading-relaxed whitespace-pre-wrap">
                         {streaming}
-                        <span className="inline-block w-1 h-4 bg-indigo-400 animate-pulse ml-0.5 align-middle" />
+                        <span className="inline-block w-1 h-4 bg-indigo-400 animate-pulse ml-0.5 align-middle" data-testid="ai-research-stream-cursor" />
                       </div>
                     </div>
                   </div>
@@ -721,6 +749,28 @@ export default function AIResearchPage() {
           </div>
         </div>
       </div>
+      <style>{`
+        .ai-research-typing-dots {
+          display: inline-flex;
+          align-items: center;
+          gap: 5px;
+          height: 12px;
+        }
+        .ai-research-typing-dots span {
+          width: 6px;
+          height: 6px;
+          border-radius: 999px;
+          background: var(--mos-accent-soft);
+          opacity: 0.28;
+          animation: ai-research-typing 1.05s infinite ease-in-out;
+        }
+        .ai-research-typing-dots span:nth-child(2) { animation-delay: 0.16s; }
+        .ai-research-typing-dots span:nth-child(3) { animation-delay: 0.32s; }
+        @keyframes ai-research-typing {
+          0%, 80%, 100% { opacity: 0.28; transform: translateY(0); }
+          40% { opacity: 1; transform: translateY(-3px); }
+        }
+      `}</style>
     </div>
   );
 }

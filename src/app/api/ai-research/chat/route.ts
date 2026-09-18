@@ -3,11 +3,13 @@ import { requireFeature } from '@/lib/auth';
 import { resolveFeatureModel } from '@/lib/model-routing';
 import { rateLimit } from '@/lib/rate-limit';
 import {
-  buildGatewayMessages,
+  AI_RESEARCH_MAX_OUTPUT_TOKENS,
+  AI_RESEARCH_SYSTEM_PROMPT,
   parseChatRequest,
   parseStoredMessages,
   type AiResearchChatMessage,
 } from '@/lib/ai-research';
+import { buildAiResearchChatMessages, gatherAiResearchContext } from '@/lib/ai-research-grounding';
 import { AVAILABLE_MODELS } from '@/lib/openai';
 import { logTokenUsage } from '@/lib/token-log';
 import {
@@ -22,7 +24,8 @@ import { execute, queryOne } from '@/lib/database';
 const GORILLAWORKOUT_API_BASE = process.env.GORILLAWORKOUT_API_BASE || 'https://llm.gorillaworkout.id/v1';
 const GORILLAWORKOUT_API_KEY = process.env.GORILLAWORKOUT_API_KEY || '';
 const MAX_HISTORY = 20;
-const SYSTEM_PROMPT = `Kamu adalah GorillaWorkout AI Assistant, asisten riset dan analisis untuk tim marketing Dupoin Futures. Kamu membantu dengan riset, analisis data, penulisan konten, strategi marketing, dan pertanyaan umum seputar trading forex, komoditas, dan indeks. Jawab dalam Bahasa Indonesia yang profesional namun mudah dipahami. Hindari jawaban seperti AI — tulis seperti kolega yang kompeten dan helpful. Jika pengguna melampirkan gambar, baca teks, angka, grafik, dan detail visual di gambar tersebut lalu gunakan informasinya dalam jawaban.`;
+
+export const maxDuration = 60;
 
 function jsonError(error: string, status: number) {
   return new Response(JSON.stringify({ error }), { status });
@@ -116,9 +119,9 @@ export async function POST(request: NextRequest) {
     if (history) dbMessages = parseStoredMessages(history.messages);
   }
 
-  const apiMessages = buildGatewayMessages(SYSTEM_PROMPT, dbMessages, messages, MAX_HISTORY);
   const convId = conversationId || uuidv4();
   const pendingMessages = [...dbMessages, ...messages];
+  const latestUser = messages[messages.length - 1];
 
   try {
     await persistConversation(convId, auth.id, pendingMessages, model, Boolean(conversationId));
@@ -131,6 +134,21 @@ export async function POST(request: NextRequest) {
     async start(controller) {
       try {
         controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'start', conversationId: convId, model })}\n\n`));
+
+        let research = null;
+        try {
+          research = await gatherAiResearchContext(latestUser?.content || '');
+        } catch {
+          research = null;
+        }
+
+        const apiMessages = buildAiResearchChatMessages({
+          systemPrompt: AI_RESEARCH_SYSTEM_PROMPT,
+          history: dbMessages,
+          incoming: messages,
+          maxHistory: MAX_HISTORY,
+          research,
+        });
 
         const response = await fetch(`${GORILLAWORKOUT_API_BASE}/chat/completions`, {
           method: 'POST',
@@ -146,7 +164,7 @@ export async function POST(request: NextRequest) {
             stream: true,
             stream_options: { include_usage: true },
             temperature: 0.7,
-            max_tokens: 2000,
+            max_tokens: AI_RESEARCH_MAX_OUTPUT_TOKENS,
           }),
         });
 
