@@ -13,10 +13,12 @@ import {
   AI_RESEARCH_NO_INVENT_FACTS,
   buildAiResearchChatMessages,
   buildFallbackSearchQueries,
+  buildOpenWebSearchQueries,
   buildSearchQueries,
   buildWikipediaQueries,
   classifySourceOrigin,
   DDG_HTML_BLOCKED_WARNING,
+  diversifyResearchSources,
   extractPersonNameCandidates,
   extractFetchedContent,
   formatResearchContext,
@@ -38,6 +40,8 @@ import {
   parseWikipediaSearch,
   prefersIndonesiaSources,
   rankResearchSources,
+  researchSourceHost,
+  selectFetchCandidates,
   shouldPreferJinaReader,
   shouldResearchQuery,
   sourcesHaveUsefulHits,
@@ -78,7 +82,7 @@ test('research query helpers prefer Indonesia sources and skip trivial turns', (
   assert.ok(dupoinSeeds.includes('https://www.dupoin.com/'));
   assert.ok(dupoinSeeds.some(url => /bappebti\.go\.id/i.test(url)));
   assert.ok(dupoinSeeds.some(url => /about-us|tentang/i.test(url)));
-  assert.ok(AI_RESEARCH_MAX_SOURCES >= 8);
+  assert.ok(AI_RESEARCH_MAX_SOURCES >= 12);
 });
 
 test('search parsers unwrap public results and drop private hosts', () => {
@@ -176,6 +180,28 @@ test('ranking prefers official and Indonesia sources for Indonesian queries', ()
   ], true, 'Fakta Dupoin Indonesia');
   assert.equal(ranked[0].url, 'https://www.dupoin.co.id/');
   assert.equal(ranked[1].origin, 'indonesia');
+});
+
+test('fetch selection keeps official seeds as a floor and prefers diverse web domains', () => {
+  const sources = [
+    { title: 'Bappebti home', url: 'https://bappebti.go.id/', snippet: '', origin: 'indonesia' as const },
+    { title: 'Bappebti dupoin', url: 'https://bappebti.go.id/pialang_berjangka/detail/423', snippet: '', origin: 'indonesia' as const },
+    { title: 'Bappebti wakil', url: 'https://bappebti.go.id/pialang_berjangka_wakil_pialang', snippet: '', origin: 'indonesia' as const },
+    { title: 'Dupoin home', url: 'https://www.dupoin.co.id/', snippet: '', origin: 'indonesia' as const },
+    { title: 'Dupoin licenses', url: 'https://www.dupoin.co.id/about-us/licenses', snippet: '', origin: 'indonesia' as const },
+    { title: 'News', url: 'https://www.cnbcindonesia.com/market/sella', snippet: 'Sella Susriana disebut di liputan pasar.', origin: 'indonesia' as const },
+    { title: 'LinkedIn', url: 'https://www.linkedin.com/in/sella-susriana', snippet: 'Public profile mentioning Sella Susriana.', origin: 'international' as const },
+    { title: 'Directory', url: 'https://www.bloomberg.com/profile/person/sella', snippet: 'Brief public bio of Sella Susriana.', origin: 'international' as const },
+    { title: 'Kompas', url: 'https://www.kompas.com/sella-susriana', snippet: 'Berita tentang Sella Susriana.', origin: 'indonesia' as const },
+  ];
+  const fetched = selectFetchCandidates(sources, 'sella susriana siapa sih jir di dupoin', true, 8);
+  const hosts = new Set(fetched.map(source => researchSourceHost(source.url)));
+  assert.ok(fetched.some(source => source.url.includes('bappebti.go.id')), 'official seeds remain a floor');
+  assert.ok(fetched.some(source => source.url.includes('cnbcindonesia.com')));
+  assert.ok(fetched.some(source => source.url.includes('linkedin.com')));
+  assert.ok(hosts.size >= 4, `expected diverse hosts, got ${[...hosts].join(', ')}`);
+  const diversified = diversifyResearchSources(fetched, 6, 2);
+  assert.ok(diversified.filter(source => researchSourceHost(source.url) === 'bappebti.go.id').length <= 2);
 });
 
 test('injects research context into the chat path when sources are available', () => {
@@ -309,11 +335,16 @@ test('person + Dupoin queries extract names and run a multi-query regulator brow
 
   const queries = buildSearchQueries(sellaQuery);
   assert.ok(queries.length >= 5, `expected a broad query set, got ${queries.length}`);
+  assert.ok(queries.some(query => /^"Sella Susriana"$/i.test(query)));
   assert.ok(queries.some(query => /"Sella Susriana" Dupoin/i.test(query)));
   assert.ok(queries.some(query => /"Sella Susriana" Bappebti/i.test(query)));
   assert.ok(queries.some(query => /site:bappebti\.go\.id/i.test(query)));
   assert.ok(queries.some(query => /wakil pialang/i.test(query)));
-  assert.ok(queries.some(query => /linkedin\.com/i.test(query)));
+  assert.ok(queries.some(query => /linkedin\.com|berita OR news/i.test(query)));
+
+  const openWeb = buildOpenWebSearchQueries(sellaQuery);
+  assert.ok(openWeb.some(query => /Sella Susriana/i.test(query)));
+  assert.ok(!openWeb.every(query => /site:/i.test(query)), 'open-web queries must not be site-restricted');
 
   const wikiQueries = buildWikipediaQueries(sellaQuery);
   assert.ok(wikiQueries.some(query => /Sella Susriana/i.test(query)));
@@ -390,6 +421,7 @@ test('Sella Susriana + Dupoin research grounds Bappebti wakil pialang hits inste
   assert.match(String(messages[1].content), /Bappebti|bappebti/);
   assert.match(AI_RESEARCH_SYSTEM_PROMPT, /apa yang sumber sebutkan/);
   assert.match(AI_RESEARCH_SYSTEM_PROMPT, /belum terverifikasi/);
+  assert.match(AI_RESEARCH_SYSTEM_PROMPT, /LinkedIn publik|berita, direktori/);
 });
 
 test('AI Research UI shows a thinking bubble before tokens and keeps the stream cursor after', () => {
@@ -635,15 +667,50 @@ test('optional Serper API is used when DDG HTML is blocked', async () => {
     if (url.includes('google.serper.dev/search')) {
       assert.equal((init?.headers as Record<string, string>)?.['X-API-KEY'] || (init?.headers as Headers | undefined)?.get?.('X-API-KEY'), 'test-serper');
       return new Response(JSON.stringify({
-        organic: [{
-          title: 'Bappebti Dupoin',
-          link: 'https://bappebti.go.id/pialang_berjangka/detail/423',
-          snippet: 'Daftar wakil pialang PT Dupoin Futures Indonesia.',
-        }],
+        organic: [
+          {
+            title: 'Bappebti Dupoin',
+            link: 'https://bappebti.go.id/pialang_berjangka/detail/423',
+            snippet: 'Daftar wakil pialang PT Dupoin Futures Indonesia.',
+          },
+          {
+            title: 'Sella Susriana | LinkedIn',
+            link: 'https://www.linkedin.com/in/sella-susriana',
+            snippet: 'Public LinkedIn profile mentioning Sella Susriana in financial services.',
+          },
+          {
+            title: 'CNBC: Dupoin dan wakil pialang',
+            link: 'https://www.cnbcindonesia.com/market/sella-susriana',
+            snippet: 'Liputan Sella Susriana di industri pialang berjangka.',
+          },
+          {
+            title: 'Bloomberg profile',
+            link: 'https://www.bloomberg.com/profile/person/sella-susriana',
+            snippet: 'Public directory mention of Sella Susriana.',
+          },
+        ],
       }), { status: 200, headers: { 'content-type': 'application/json' } });
     }
     if (url.startsWith('https://r.jina.ai/') && url.includes('bappebti.go.id')) {
       return new Response(sellaJinaMarkdown, { status: 200, headers: { 'content-type': 'text/plain' } });
+    }
+    if (url.includes('linkedin.com')) {
+      return new Response('<html><title>Sella Susriana</title><body>Public profile mentioning Sella Susriana in financial services at a futures brokerage.</body></html>', {
+        status: 200,
+        headers: { 'content-type': 'text/html' },
+      });
+    }
+    if (url.includes('cnbcindonesia.com')) {
+      return new Response('<html><title>CNBC</title><body>Liputan Sella Susriana sebagai wakil pialang dan jejak publik di industri berjangka Indonesia.</body></html>', {
+        status: 200,
+        headers: { 'content-type': 'text/html' },
+      });
+    }
+    if (url.includes('bloomberg.com')) {
+      return new Response('<html><title>Bloomberg</title><body>Public directory listing for Sella Susriana with a professional biography excerpt.</body></html>', {
+        status: 200,
+        headers: { 'content-type': 'text/html' },
+      });
     }
     if (url.includes('api.php') || url.includes('api.duckduckgo.com')) {
       return new Response(JSON.stringify({ query: { search: [] } }), {
@@ -664,6 +731,10 @@ test('optional Serper API is used when DDG HTML is blocked', async () => {
     searchApiKeys: { serper: 'test-serper' },
     logger: { warn() { /* DDG still blocked; Serper supplies URLs */ } },
   });
+  const hosts = new Set(result.sources.map(source => researchSourceHost(source.url)));
   assert.ok(calls.some(url => url.includes('google.serper.dev/search')));
   assert.ok(result.sources.some(source => /Sella Susriana/i.test(source.snippet)));
+  assert.ok(result.sources.some(source => /bappebti\.go\.id/i.test(source.url)), 'official seeds remain a floor');
+  assert.ok(result.sources.some(source => source.url.includes('linkedin.com') || source.url.includes('cnbcindonesia.com') || source.url.includes('bloomberg.com')));
+  assert.ok(hosts.size >= 4, `search APIs must keep diverse domains, got ${[...hosts].join(', ')}`);
 });

@@ -42,12 +42,14 @@ export const AI_RESEARCH_NO_INVENT_FACTS =
 export const AI_RESEARCH_SYNTHESIZE_HITS =
   'Relevant grounded sources were retrieved. Synthesize a rich answer from everything they state (role, institution, other public traces) and cite titles + URLs. Prefer summarizing grounded hits over saying no verified source was found. Only say a fact is unverified when these excerpts truly do not mention it.';
 
-const DEFAULT_TIMEOUT_MS = 16_000;
+const DEFAULT_TIMEOUT_MS = 20_000;
 const DEFAULT_MAX_BYTES = 500_000;
-export const AI_RESEARCH_MAX_SOURCES = 10;
+export const AI_RESEARCH_MAX_SOURCES = 14;
 const MAX_SOURCES = AI_RESEARCH_MAX_SOURCES;
-const MAX_PAGE_FETCHES = 12;
-const MAX_SEARCH_QUERIES = 10;
+const MAX_PAGE_FETCHES = 18;
+const MAX_SEARCH_QUERIES = 12;
+const OFFICIAL_FETCH_FLOOR = 4;
+const MAX_SOURCES_PER_HOST = 2;
 const MAX_SNIPPET = 2_200;
 const MAX_URL_LENGTH = 2_048;
 const RESEARCH_USER_AGENT =
@@ -111,7 +113,7 @@ const PREFERRED_OFFICIAL_HOSTS = [
 export const AI_RESEARCH_JINA_READER_PREFIX = 'https://r.jina.ai/';
 export const DDG_HTML_BLOCKED_WARNING =
   '[ai-research] DuckDuckGo HTML search was blocked (bot challenge / anomaly). Falling back to official seeds, Wikipedia, Instant Answer, optional search APIs, and Jina-backed page fetch.';
-const MAX_JINA_FETCHES = 8;
+const MAX_JINA_FETCHES = 12;
 const KNOWN_INCOMPLETE_TLS_HOSTS = new Set(['bappebti.go.id', 'www.bappebti.go.id']);
 
 const FACT_NEEDLES = [
@@ -288,19 +290,19 @@ export function buildSearchQueries(text: string): string[] {
   const deep = isDeepPersonResearch(query);
 
   for (const name of names.slice(0, 2)) {
+    extras.push(`"${name}"`);
     extras.push(`"${name}" Dupoin`);
     extras.push(`"${name}" Bappebti`);
     extras.push(`"${name}" "wakil pialang"`);
+    extras.push(`"${name}" berita OR news OR linkedin`);
+    extras.push(`"${name}" site:linkedin.com`);
     extras.push(`"${name}" site:bappebti.go.id`);
     extras.push(`"${name}" site:dupoin.co.id`);
-    extras.push(`"${name}" Dupoin site:linkedin.com`);
-    extras.push(`"${name}" Dupoin berita`);
   }
 
   if (deep) {
     extras.push('wakil pialang Dupoin');
     extras.push('daftar pialang berjangka Dupoin site:bappebti.go.id');
-    extras.push('PT Dupoin Futures Indonesia wakil pialang site:bappebti.go.id');
   }
 
   if (indonesia && !/\bindonesia\b/i.test(query) && !deep) {
@@ -313,6 +315,24 @@ export function buildSearchQueries(text: string): string[] {
     extras.push(`${query} site:.id`);
   }
   return [...new Set([...prioritized, ...extras])].slice(0, MAX_SEARCH_QUERIES);
+}
+
+export function buildOpenWebSearchQueries(text: string): string[] {
+  const query = text.replace(/\s+/g, ' ').trim();
+  const names = extractPersonNameCandidates(query);
+  const extras = [query];
+  for (const name of names.slice(0, 2)) {
+    extras.push(`"${name}"`);
+    extras.push(`"${name}" Dupoin OR Bappebti OR "wakil pialang"`);
+    extras.push(`"${name}" news OR berita OR linkedin`);
+  }
+  if (!names.length) {
+    extras.push(`${query} news OR berita`);
+    if (prefersIndonesiaSources(query) && !/\bindonesia\b/i.test(query)) {
+      extras.push(`${query} Indonesia`);
+    }
+  }
+  return [...new Set(extras.filter(Boolean))].slice(0, 5);
 }
 
 export function buildFallbackSearchQueries(text: string): string[] {
@@ -447,7 +467,7 @@ export function parseDuckDuckGoResults(html: string): Array<{ title: string; url
     seen.add(url);
     results.push({ title: htmlToPlainText(titleHtml).slice(0, 180) || url, url, snippet });
   }
-  return results.slice(0, 10);
+  return results.slice(0, 12);
 }
 
 function decodeHtmlAttr(value: string): string {
@@ -609,7 +629,7 @@ export function parseSerperResults(payload: unknown): ResearchSource[] {
   if (!payload || typeof payload !== 'object') return [];
   const organic = (payload as { organic?: unknown }).organic;
   return Array.isArray(organic)
-    ? parseSearchApiList(organic, ['link', 'url'], ['title'], ['snippet', 'description']).slice(0, 10)
+    ? parseSearchApiList(organic, ['link', 'url'], ['title'], ['snippet', 'description']).slice(0, 12)
     : [];
 }
 
@@ -617,7 +637,7 @@ export function parseBraveResults(payload: unknown): ResearchSource[] {
   if (!payload || typeof payload !== 'object') return [];
   const results = (payload as { web?: { results?: unknown } }).web?.results;
   return Array.isArray(results)
-    ? parseSearchApiList(results, ['url'], ['title'], ['description', 'snippet']).slice(0, 10)
+    ? parseSearchApiList(results, ['url'], ['title'], ['description', 'snippet']).slice(0, 12)
     : [];
 }
 
@@ -625,7 +645,7 @@ export function parseTavilyResults(payload: unknown): ResearchSource[] {
   if (!payload || typeof payload !== 'object') return [];
   const results = (payload as { results?: unknown }).results;
   return Array.isArray(results)
-    ? parseSearchApiList(results, ['url'], ['title'], ['content', 'snippet']).slice(0, 10)
+    ? parseSearchApiList(results, ['url'], ['title'], ['content', 'snippet']).slice(0, 12)
     : [];
 }
 
@@ -733,8 +753,11 @@ export function rankResearchSources(
       score += 35;
     }
     if (!source.snippet.trim()) {
-      if (phase === 'fetch' && isOfficialResearchHost(source.url)) score += 25;
-      else score -= 80;
+      if (phase === 'fetch') {
+        if (isOfficialResearchHost(source.url)) score += 15;
+      } else {
+        score -= 80;
+      }
     } else if (source.snippet.length < 40) score -= 20;
     if (source.snippet.length > 80) score += 5;
     if (source.snippet.length > 400) score += 4;
@@ -748,6 +771,67 @@ export function rankResearchSources(
     if (!unique.has(key)) unique.set(key, row.source);
   }
   return [...unique.values()].slice(0, limit);
+}
+
+export function researchSourceHost(url: string): string {
+  try {
+    return new URL(url).hostname.toLowerCase().replace(/^www\./, '');
+  } catch {
+    return '';
+  }
+}
+
+export function diversifyResearchSources(
+  sources: ResearchSource[],
+  limit: number,
+  maxPerHost = MAX_SOURCES_PER_HOST,
+): ResearchSource[] {
+  const counts = new Map<string, number>();
+  const picked: ResearchSource[] = [];
+  const overflow: ResearchSource[] = [];
+  for (const source of sources) {
+    const host = researchSourceHost(source.url) || source.url;
+    const used = counts.get(host) || 0;
+    if (used < maxPerHost) {
+      picked.push(source);
+      counts.set(host, used + 1);
+      if (picked.length >= limit) return picked;
+    } else {
+      overflow.push(source);
+    }
+  }
+  for (const source of overflow) {
+    if (picked.length >= limit) break;
+    picked.push(source);
+  }
+  return picked;
+}
+
+export function selectFetchCandidates(
+  sources: ResearchSource[],
+  query: string,
+  indonesiaPreferred: boolean,
+  limit = MAX_PAGE_FETCHES,
+): ResearchSource[] {
+  const ranked = rankResearchSources(sources, indonesiaPreferred, query, sources.length, 'fetch');
+  const official = ranked.filter(source => isOfficialResearchHost(source.url));
+  const web = ranked.filter(source => !isOfficialResearchHost(source.url));
+  const floorLimit = Math.min(OFFICIAL_FETCH_FLOOR, limit);
+  const floor = diversifyResearchSources(official, floorLimit, MAX_SOURCES_PER_HOST);
+  const remaining = Math.max(0, limit - floor.length);
+  const webPicked = diversifyResearchSources(web, remaining, MAX_SOURCES_PER_HOST);
+  const combined = [...floor, ...webPicked];
+  if (combined.length < limit) {
+    const seen = new Set(combined.map(source => source.url.replace(/\/$/, '')));
+    for (const source of ranked) {
+      if (combined.length >= limit) break;
+      const key = source.url.replace(/\/$/, '');
+      if (seen.has(key)) continue;
+      seen.add(key);
+      combined.push(source);
+    }
+  }
+  return combined.slice(0, limit);
 }
 
 export function sourcesHaveUsefulHits(context: ResearchContext): boolean {
@@ -1011,7 +1095,7 @@ async function searchSerper(
       'X-API-KEY': apiKey,
       'User-Agent': RESEARCH_USER_AGENT,
     },
-    body: JSON.stringify({ q: query, num: 10, gl: 'id', hl: 'id' }),
+    body: JSON.stringify({ q: query, num: 12, gl: 'id', hl: 'id' }),
   }, maxBytes, timeoutMs);
   return parseSerperResults(jsonPayload(text));
 }
@@ -1023,7 +1107,7 @@ async function searchBrave(
   maxBytes: number,
   timeoutMs: number,
 ): Promise<ResearchSource[]> {
-  const url = `https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(query)}&count=10`;
+  const url = `https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(query)}&count=12`;
   const { text } = await fetchBounded(fetchImpl, url, {
     headers: {
       Accept: 'application/json',
@@ -1053,7 +1137,7 @@ async function searchTavily(
       api_key: apiKey,
       query,
       search_depth: 'basic',
-      max_results: 8,
+      max_results: 10,
       include_answer: false,
     }),
   }, maxBytes, timeoutMs);
@@ -1071,10 +1155,10 @@ async function searchCommercialApis(
   if (keys.serper) {
     try { sources.push(...await searchSerper(query, keys.serper, fetchImpl, maxBytes, timeoutMs)); } catch { /* optional */ }
   }
-  if (sources.length < 3 && keys.brave) {
+  if (sources.length < 8 && keys.brave) {
     try { sources.push(...await searchBrave(query, keys.brave, fetchImpl, maxBytes, timeoutMs)); } catch { /* optional */ }
   }
-  if (sources.length < 3 && keys.tavily) {
+  if (sources.length < 8 && keys.tavily) {
     try { sources.push(...await searchTavily(query, keys.tavily, fetchImpl, maxBytes, timeoutMs)); } catch { /* optional */ }
   }
   return sources;
@@ -1227,6 +1311,7 @@ export async function gatherAiResearchContext(
   const jinaState = { count: 0 };
 
   const queries = buildSearchQueries(query);
+  const apiQueries = hasSearchApiKeys ? buildOpenWebSearchQueries(query) : [];
   const wikiQueries = buildWikipediaQueries(query);
   const instantQueries = [...new Set([
     query,
@@ -1241,8 +1326,7 @@ export async function gatherAiResearchContext(
     origin: classifySourceOrigin(url),
   }));
 
-  const searchBudget = Math.max(1_500, Math.floor(remainingMs(deadline, now) * 0.45));
-  const apiQueries = queries.slice(0, 3);
+  const searchBudget = Math.max(1_500, Math.floor(remainingMs(deadline, now) * 0.4));
   const [ddgProbe, wikiSettled, instantSettled, apiSettled] = await Promise.all([
     searchDuckDuckGoHtml(queries[0], fetchImpl, maxBytes, Math.min(3_000, searchBudget)),
     Promise.allSettled(wikiQueries.map(item => (
@@ -1276,7 +1360,7 @@ export async function gatherAiResearchContext(
     }
   }
 
-  if (!htmlSearchBlocked && queries.length > 1) {
+  if (!htmlSearchBlocked && !apiHits && queries.length > 1) {
     const rest = await Promise.allSettled(
       queries.slice(1).map(item => searchDuckDuckGoHtml(item, fetchImpl, maxBytes, searchBudget)),
     );
@@ -1292,7 +1376,7 @@ export async function gatherAiResearchContext(
     logger.warn(DDG_HTML_BLOCKED_WARNING);
   }
 
-  if (!htmlSearchBlocked && (searchHits < 3 || uniqueSourceCount(found) < 4)) {
+  if (!htmlSearchBlocked && !apiHits && (searchHits < 3 || uniqueSourceCount(found) < 4)) {
     const fallbackQueries = buildFallbackSearchQueries(query);
     const fallbackBudget = Math.max(1_200, Math.floor(remainingMs(deadline, now) * 0.35));
     if (fallbackQueries.length && fallbackBudget > 0) {
@@ -1307,7 +1391,7 @@ export async function gatherAiResearchContext(
     }
   }
 
-  const ranked = rankResearchSources(found, indonesiaPreferred, query, MAX_PAGE_FETCHES, 'fetch');
+  const ranked = selectFetchCandidates(found, query, indonesiaPreferred, MAX_PAGE_FETCHES);
   if (ranked.length === 0) return empty;
 
   const fetchBudget = Math.max(1_200, remainingMs(deadline, now));
@@ -1325,6 +1409,9 @@ export async function gatherAiResearchContext(
   return {
     query,
     indonesiaPreferred,
-    sources: rankResearchSources(selected, indonesiaPreferred, query),
+    sources: diversifyResearchSources(
+      rankResearchSources(selected, indonesiaPreferred, query, selected.length),
+      MAX_SOURCES,
+    ),
   };
 }
