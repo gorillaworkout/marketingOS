@@ -1005,7 +1005,7 @@ export default function SocialPostPage() {
                       </option>
                     ))}
                   </Select>
-                  <p className="text-xs text-[var(--mos-text-faint)]">Model di-generate melalui GorillaWorkout gateway (llm.gorillaworkout.id)</p>
+                  <p className="text-xs text-[var(--mos-text-faint)]">Model di-generate melalui GorillaWorkout gateway (llmdupoin.gorillaworkout.id)</p>
                 </div>
 
                 <FormField label="Image aspect ratio">

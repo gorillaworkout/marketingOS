@@ -156,7 +156,7 @@ export default function ImageModelsPage() {
       <Panel className="border-amber-400/15 bg-amber-400/[0.035]">
         <h3 className="text-sm font-medium text-amber-100">ℹ️ About Image Models</h3>
         <p className="mt-2 text-xs leading-5 text-[var(--mos-text-muted)]">
-          Image generation mengalir lewat <strong>GorillaWorkout gateway</strong> (llm.gorillaworkout.id) satu pintu
+          Image generation mengalir lewat <strong>GorillaWorkout gateway</strong> (llmdupoin.gorillaworkout.id) satu pintu
           (`POST /images/generations`). Model yang dipilih di sini akan muncul sebagai dropdown di Social Post page
           saat user mau generate image.
         </p>

@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
+import { AVAILABLE_MODELS } from '../src/lib/openai';
 
 const read = (relative: string) => {
   const file = path.join(process.cwd(), relative);
@@ -25,6 +26,9 @@ const knowledgeAnalyze = read('src/app/api/knowledge/analyze/route.ts');
 const database = read('src/lib/database.ts');
 const articleRoute = read('src/app/api/article-market-news/generate/route.ts');
 const researchRoute = read('src/app/api/market-research/generate/route.ts');
+const gatewayConfig = read('src/lib/gateway-config.ts');
+const envExample = read('.env.example');
+const restoreMigration = read('db/migrations/014_restore_codex_ai_research.sql');
 
 test('MarketingOS exposes GorillaWorkout as its only generation gateway', () => {
   assert.match(openai, /export type ModelProvider = 'gorillaworkout'/);
@@ -36,7 +40,7 @@ test('MarketingOS exposes GorillaWorkout as its only generation gateway', () => 
 });
 
 test('feature model routing defines one allowlist for every generation workflow', () => {
-  for (const feature of ['social-post', 'video-script', 'event-plan', 'article-market-news', 'market-research']) {
+  for (const feature of ['social-post', 'video-script', 'event-plan', 'article-market-news', 'market-research', 'ai-research']) {
     assert.match(routing, new RegExp(`'${feature}'`));
   }
   assert.match(routing, /feature_model_assignments/);
@@ -106,4 +110,37 @@ test('assignment updates normalize stale preferences in one transaction', () => 
   assert.match(assignmentRoute, /executeTransaction/);
   assert.match(assignmentRoute, /UPDATE task_model_preferences/);
   assert.match(assignmentRoute, /NOT \(model = ANY/);
+});
+
+test('gateway defaults to llmdupoin and is overridable by env', () => {
+  assert.match(gatewayConfig, /DEFAULT_GORILLAWORKOUT_API_BASE = 'https:\/\/llmdupoin\.gorillaworkout\.id\/v1'/);
+  assert.match(gatewayConfig, /process\.env\.GORILLAWORKOUT_API_BASE/);
+  assert.match(gatewayConfig, /process\.env\.GORILLAWORKOUT_API_KEY/);
+  assert.doesNotMatch(gatewayConfig, /llm\.gorillaworkout\.id/);
+  assert.match(openai, /from '@\/lib\/gateway-config'/);
+  assert.doesNotMatch(openai, /https:\/\/llm\.gorillaworkout\.id/);
+  assert.doesNotMatch(modelsRoute, /https:\/\/llm\.gorillaworkout\.id/);
+  assert.match(envExample, /llmdupoin\.gorillaworkout\.id\/v1/);
+  assert.match(envExample, /GORILLAWORKOUT_API_KEY=/);
+  assert.doesNotMatch(envExample, /sk-[a-zA-Z0-9]/);
+  const probe = read('scripts/probe-gateway-models.ts');
+  assert.match(probe, /resolveGorillaWorkoutApiBase/);
+  assert.match(probe, /GORILLAWORKOUT_API_KEY is not set/);
+  assert.doesNotMatch(probe, /https:\/\/llm\.gorillaworkout\.id/);
+});
+
+test('AI Research routing restores Codex and never reintroduces Kimi', () => {
+  assert.match(routing, /PREFERRED_CODEX_MODEL/);
+  assert.match(routing, /cx\/gpt-5\.3-codex-spark/);
+  assert.match(routing, /cx\/gpt-5\.6-terra/);
+  assert.match(routing, /cx\/gpt-5\.6-luna/);
+  assert.ok(!AVAILABLE_MODELS.some(model =>
+    model.id.startsWith('kimi/') || model.id.startsWith('tr/') || model.id.startsWith('cmc/moonshotai/') || model.id.toLowerCase().includes('kimi')));
+  assert.ok(AVAILABLE_MODELS.some(model => model.id === 'cx/gpt-5.6-sol'));
+  assert.ok(AVAILABLE_MODELS.some(model => model.id === 'cx/gpt-5.3-codex-spark'));
+  assert.match(openai, /cx\/gpt-5\.6-sol/);
+  assert.match(modelsRoute, /AVAILABLE_MODELS/);
+  assert.match(restoreMigration, /cx\/gpt-5\.6-sol/);
+  assert.match(restoreMigration, /cx\/gpt-5\.3-codex-spark/);
+  assert.match(restoreMigration, /feature_key = 'ai-research'/);
 });

@@ -12,6 +12,7 @@ import {
   parseImageApiErrorStatus,
 } from '@/lib/image-generation-fallback';
 import { DEFAULT_IMAGE_MODEL, imageModelLabel, resolveImageModel } from '@/lib/image-models';
+import { GORILLAWORKOUT_API_BASE, GORILLAWORKOUT_API_KEY } from '@/lib/gateway-config';
 import { logTokenUsage } from '@/lib/token-log';
 import { parseImageGenerationUsage } from '@/lib/token-usage';
 import fs from 'fs';
@@ -21,11 +22,9 @@ const imageJobs = createImageJobStore();
 const JOB_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 // Image generation now flows through the single GorillaWorkout LLM gateway
-// (llm.gorillaworkout.id) instead of spawning the Codex CLI directly, so every
-// generate feature is one-door. The gateway maps cx/* image models to the
-// connected Codex (ChatGPT) account on the 9router host.
-const GORILLAWORKOUT_API_BASE = process.env.GORILLAWORKOUT_API_BASE || 'https://llm.gorillaworkout.id/v1';
-const GORILLAWORKOUT_API_KEY = process.env.GORILLAWORKOUT_API_KEY || '';
+// (llmdupoin.gorillaworkout.id, override with GORILLAWORKOUT_API_BASE) instead
+// of spawning the Codex CLI directly, so every generate feature is one-door.
+// The gateway maps cx/* image models to the connected Codex (ChatGPT) account.
 
 export async function POST(request: NextRequest) {
   const rl = rateLimit(request);

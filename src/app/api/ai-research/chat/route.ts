@@ -21,6 +21,7 @@ import {
   buildResearchSsePayload,
   parsePinnedSourceUrls,
 } from '@/lib/ai-research-inspector';
+import { GORILLAWORKOUT_API_BASE, GORILLAWORKOUT_API_KEY } from '@/lib/gateway-config';
 import { AVAILABLE_MODELS } from '@/lib/openai';
 import { logTokenUsage } from '@/lib/token-log';
 import {
@@ -32,8 +33,6 @@ import {
 import { v4 as uuidv4 } from 'uuid';
 import { execute, queryOne } from '@/lib/database';
 
-const GORILLAWORKOUT_API_BASE = process.env.GORILLAWORKOUT_API_BASE || 'https://llm.gorillaworkout.id/v1';
-const GORILLAWORKOUT_API_KEY = process.env.GORILLAWORKOUT_API_KEY || '';
 const MAX_HISTORY = 20;
 
 export const maxDuration = 60;

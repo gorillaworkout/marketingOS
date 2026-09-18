@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, existsSync } from 'node:fs';
 import path from 'node:path';
+import { AVAILABLE_MODELS } from '../src/lib/openai';
 
 const root = process.cwd();
 const read = (file: string) => readFileSync(path.join(root, file), 'utf8');
@@ -19,6 +20,12 @@ test('Models API exposes only the configured GorillaWorkout gateway catalog', ()
   assert.match(modelsRoute, /GorillaWorkout LLM/);
   assert.match(modelsRoute, /AVAILABLE_MODELS/);
   assert.doesNotMatch(modelsRoute, /OpenRouter|openrouter\.ai|credits/);
+  assert.ok(AVAILABLE_MODELS.some(model => model.id === 'cx/gpt-5.6-sol'), 'library page is empty of Sol without this catalog id');
+  assert.ok(AVAILABLE_MODELS.some(model => model.id === 'cx/gpt-5.3-codex-spark'), 'library page is empty of Codex Spark without this catalog id');
+  assert.ok(!AVAILABLE_MODELS.some(model => model.id.toLowerCase().includes('kimi')));
+  assert.match(modelsPage, /fetch\('\/api\/models'\)/);
+  assert.match(modelsPage, /visibleModels\.map/);
+  assert.match(read('src/app/api/admin/model-assignments/route.ts'), /models: AVAILABLE_MODELS/);
 });
 
 test('Models page manages feature allowlists and defaults', () => {

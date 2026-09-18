@@ -1,5 +1,5 @@
 import { queryOne } from '@/lib/database';
-import { AVAILABLE_MODELS, type ModelInfo } from '@/lib/openai';
+import { AVAILABLE_MODELS, PREFERRED_CODEX_MODEL, type ModelInfo } from '@/lib/openai';
 
 export const GENERATION_FEATURES = [
   'social-post',
@@ -59,33 +59,42 @@ export const FEATURE_METADATA: Record<GenerationFeature, FeatureMetadata> = {
 };
 
 // Every id here must exist in AVAILABLE_MODELS and pass scripts/probe-gateway-models.ts.
-const DEFAULT_FEATURE_ASSIGNMENTS: Record<GenerationFeature, {
+export const DEFAULT_FEATURE_ASSIGNMENTS: Record<GenerationFeature, {
   allowedModels: string[];
   defaultModel: string;
 }> = {
   'social-post': {
-    allowedModels: ['ag/gemini-3-flash', 'ag/gemini-3.6-flash-medium', 'ag/claude-sonnet-4-6'],
+    allowedModels: ['ag/gemini-3-flash', 'ag/gemini-3.6-flash-medium', 'ag/claude-sonnet-4-6', PREFERRED_CODEX_MODEL, 'cx/gpt-5.3-codex-spark'],
     defaultModel: 'ag/gemini-3-flash',
   },
   'video-script': {
-    allowedModels: ['ag/gemini-3-flash', 'ag/gemini-3.6-flash-medium', 'ag/claude-sonnet-4-6'],
+    allowedModels: ['ag/gemini-3-flash', 'ag/gemini-3.6-flash-medium', 'ag/claude-sonnet-4-6', PREFERRED_CODEX_MODEL, 'cx/gpt-5.3-codex-spark'],
     defaultModel: 'ag/gemini-3-flash',
   },
   'event-plan': {
-    allowedModels: ['ag/gemini-3-flash', 'ag/gemini-3.1-pro-low', 'ag/claude-sonnet-4-6'],
+    allowedModels: ['ag/gemini-3-flash', 'ag/gemini-3.1-pro-low', 'ag/claude-sonnet-4-6', PREFERRED_CODEX_MODEL, 'cx/gpt-5.3-codex-spark'],
     defaultModel: 'ag/gemini-3.1-pro-low',
   },
   'article-market-news': {
-    allowedModels: ['ag/claude-sonnet-4-6', 'lr/claude-sonnet-4.5', 'ag/gemini-3.1-pro-low'],
+    allowedModels: ['ag/claude-sonnet-4-6', 'lr/claude-sonnet-4.5', 'ag/gemini-3.1-pro-low', PREFERRED_CODEX_MODEL, 'cx/gpt-5.3-codex-spark'],
     defaultModel: 'ag/claude-sonnet-4-6',
   },
   'market-research': {
-    allowedModels: ['ag/claude-sonnet-4-6', 'lr/claude-sonnet-4.5', 'ag/gemini-3.1-pro-low'],
+    allowedModels: ['ag/claude-sonnet-4-6', 'lr/claude-sonnet-4.5', 'ag/gemini-3.1-pro-low', PREFERRED_CODEX_MODEL, 'cx/gpt-5.3-codex-spark'],
     defaultModel: 'ag/claude-sonnet-4-6',
   },
   'ai-research': {
-    allowedModels: ['ag/gemini-3-flash', 'ag/gemini-3.6-flash-high', 'ag/claude-sonnet-4-6', 'ag/gemini-3.1-pro-low'],
-    defaultModel: 'ag/gemini-3-flash',
+    allowedModels: [
+      PREFERRED_CODEX_MODEL,
+      'cx/gpt-5.3-codex-spark',
+      'cx/gpt-5.6-terra',
+      'cx/gpt-5.6-luna',
+      'ag/gemini-3-flash',
+      'ag/gemini-3.6-flash-high',
+      'ag/claude-sonnet-4-6',
+      'ag/gemini-3.1-pro-low',
+    ],
+    defaultModel: PREFERRED_CODEX_MODEL,
   },
 };
 

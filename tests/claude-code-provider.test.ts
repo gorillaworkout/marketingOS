@@ -12,18 +12,19 @@ test('Claude-family catalog IDs are exposed only through GorillaWorkout', () => 
 });
 
 test('retired upstream prefixes stay out of the catalog', () => {
-  // Verified dead 2026-09-18 via scripts/probe-gateway-models.ts.
-  // kimi/* and tr/* have no API key at all; cmc/* (Command Code) is not topped up;
-  // cx/* and cc/* have expired OAuth. Re-probe before reintroducing any of these —
-  // a listed id is not a working id, and ag/gemini-3.5-* even returns HTTP 200
-  // with a retirement notice as its answer.
+  // VPS GET /models lists cmc/moonshotai/Kimi-K2.5 and Kimi-K2.6 — do not catalog.
+  // kimi/* and tr/* stay retired. cc/* OAuth expired. Codex cx/* is restored
+  // for llmdupoin so /dashboard/models is not empty of GPT-5.6 Sol.
   const retired = AVAILABLE_MODELS.filter(model =>
-    model.id.startsWith('cc/') || model.id.startsWith('cx/')
+    model.id.startsWith('cc/')
     || model.id.startsWith('kimi/') || model.id.startsWith('tr/')
     || model.id.startsWith('cmc/')
+    || model.id.toLowerCase().includes('kimi')
     || model.id === 'pecut-free' || model.id.includes('gemini-3.5')
     || model.id === 'ag/gemini-3-flash-agent');
   assert.deepEqual(retired, [], 'catalog must not list models that no longer answer');
+  assert.ok(AVAILABLE_MODELS.some(model => model.id === 'cx/gpt-5.6-sol'), 'GPT-5.6 Sol must be in the catalog');
+  assert.ok(AVAILABLE_MODELS.some(model => model.id === 'cx/gpt-5.3-codex-spark'), 'Codex Spark must be in the catalog');
 });
 
 test('no local Claude CLI generation path remains', () => {

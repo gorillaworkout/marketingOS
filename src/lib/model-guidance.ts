@@ -111,6 +111,7 @@ export function getModelGuidance(modelId: string): ModelGuidance {
         'event-plan': review ? 'specialist' : 'excellent',
         'article-market-news': review ? 'specialist' : mini ? 'good' : 'excellent',
         'market-research': review ? 'specialist' : mini ? 'good' : 'excellent',
+        'ai-research': review ? 'specialist' : sol ? 'excellent' : 'good',
       }),
       note: review ? 'Gunakan setelah draft utama, bukan sebagai generator default.' : 'Panduan internal; model tidak boleh mengarang source, quotation, atau fakta pasar.',
     };

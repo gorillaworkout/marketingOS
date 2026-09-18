@@ -1,5 +1,6 @@
 import { parseGatewayCompletion } from '@/lib/gateway-response';
 import { IMAGE_PROMPT_SYSTEM } from '@/lib/dupoin-image-prompt';
+import { GORILLAWORKOUT_API_BASE, GORILLAWORKOUT_API_KEY } from '@/lib/gateway-config';
 import { logTokenUsage } from '@/lib/token-log';
 import {
   mergeGatewayUsage,
@@ -8,11 +9,11 @@ import {
   type GatewayTokenUsage,
 } from '@/lib/token-usage';
 
-const GORILLAWORKOUT_API_BASE = process.env.GORILLAWORKOUT_API_BASE || 'https://llm.gorillaworkout.id/v1';
-const GORILLAWORKOUT_API_KEY = process.env.GORILLAWORKOUT_API_KEY || '';
-
 // Must stay inside AVAILABLE_MODELS; verified live via scripts/probe-gateway-models.ts.
 const PRIMARY_MODEL = 'ag/gemini-3-flash';
+
+/** Bayu's expected AI Research Codex default. Re-probe before removing. */
+export const PREFERRED_CODEX_MODEL = 'cx/gpt-5.6-sol';
 
 export type ModelProvider = 'gorillaworkout';
 
@@ -25,21 +26,22 @@ export interface ModelInfo {
   output: number;
 }
 
-// Catalog IDs verified live against the gateway with scripts/probe-gateway-models.ts.
-// Only 9 of 61 listed ids answered a real completion (probed 2026-09-18).
-// Removed, by cause:
-//   kimi/*, tr/moonshotai/*  — no API key at all (owner removed it); do not re-add.
-//   cmc/*                    — Command Code account not topped up (400 BAD_REQUEST).
-//   cx/*                     — Codex OAuth token expired (401).
-//   cc/*                     — Claude Code OAuth token expired (401).
-//   ag/gemini-3.7-*          — 404 Requested entity was not found (never existed upstream).
-//   ag/gemini-3.5-*, ag/gemini-3-flash-agent — retired upstream; they return HTTP 200
-//                              whose body is a retirement notice, so a status check
-//                              alone does NOT catch them.
-//   pecut-free               — upstream 400 "Unsupported model mimo-auto".
-// cx/*, cc/*, and cmc/* are credential problems, not retirements: they can come back
-// once the gateway re-authenticates or the account is topped up. ALWAYS re-probe
-// before re-adding any id here — a listed model is not a working model.
+// Catalog IDs for the GorillaWorkout OpenAI-compatible gateway
+// (default https://llmdupoin.gorillaworkout.id/v1, override with GORILLAWORKOUT_API_BASE).
+//
+// VPS live probe (authoritative, 2026-09-18): GET /v1/models on llmdupoin
+// returned HTTP 200 with 51 ids. Codex `cx/*` below were on that list.
+// Migration 011 had removed them after a 401 on llm.gorillaworkout.id —
+// re-probe with scripts/probe-gateway-models.ts before removing them again.
+// Do not dump every `*-review` variant unless a short completion is verified.
+//
+// Still out (do not re-add):
+//   kimi/*, tr/moonshotai/*              — retired; no Kimi API key.
+//   cmc/moonshotai/Kimi-K2.5, Kimi-K2.6  — listed on the gateway; do not catalog.
+//   cc/*                                 — Claude Code OAuth expired (401).
+//   ag/gemini-3.7-*                      — 404, never existed upstream.
+//   ag/gemini-3.5-*, ag/gemini-3-flash-agent — retired (HTTP 200 retirement notice).
+//   pecut-free                           — upstream 400 "Unsupported model mimo-auto".
 export const AVAILABLE_MODELS: ModelInfo[] = [
   { id: 'ag/gemini-3-flash', name: 'Gemini 3 Flash', tier: 'budget', provider: 'gorillaworkout', input: 0, output: 0 },
   { id: 'ag/gemini-3.6-flash-low', name: 'Gemini 3.6 Flash Low', tier: 'budget', provider: 'gorillaworkout', input: 0, output: 0 },
@@ -50,6 +52,14 @@ export const AVAILABLE_MODELS: ModelInfo[] = [
   { id: 'ag/claude-sonnet-4-6', name: 'Claude Sonnet 4.6', tier: 'balanced', provider: 'gorillaworkout', input: 0, output: 0 },
   { id: 'lr/claude-sonnet-4.5', name: 'Claude Sonnet 4.5', tier: 'balanced', provider: 'gorillaworkout', input: 0, output: 0 },
   { id: 'ag/gpt-oss-120b-medium', name: 'GPT OSS 120B Medium', tier: 'balanced', provider: 'gorillaworkout', input: 0, output: 0 },
+  // Codex chat models restored for llmdupoin. Re-probe before removing again.
+  { id: 'cx/gpt-5.6-sol', name: 'GPT-5.6 Sol', tier: 'premium', provider: 'gorillaworkout', input: 0, output: 0 },
+  { id: 'cx/gpt-5.6-terra', name: 'GPT-5.6 Terra', tier: 'balanced', provider: 'gorillaworkout', input: 0, output: 0 },
+  { id: 'cx/gpt-5.6-luna', name: 'GPT-5.6 Luna', tier: 'budget', provider: 'gorillaworkout', input: 0, output: 0 },
+  { id: 'cx/gpt-5.5', name: 'GPT-5.5', tier: 'balanced', provider: 'gorillaworkout', input: 0, output: 0 },
+  { id: 'cx/gpt-5.4', name: 'GPT-5.4', tier: 'balanced', provider: 'gorillaworkout', input: 0, output: 0 },
+  { id: 'cx/gpt-5.4-mini', name: 'GPT-5.4 Mini', tier: 'budget', provider: 'gorillaworkout', input: 0, output: 0 },
+  { id: 'cx/gpt-5.3-codex-spark', name: 'GPT-5.3 Codex Spark', tier: 'budget', provider: 'gorillaworkout', input: 0, output: 0 },
 ];
 
 export function getModelProvider(modelId: string): ModelProvider {
