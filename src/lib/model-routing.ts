@@ -58,33 +58,34 @@ export const FEATURE_METADATA: Record<GenerationFeature, FeatureMetadata> = {
   },
 };
 
+// Every id here must exist in AVAILABLE_MODELS and pass scripts/probe-gateway-models.ts.
 const DEFAULT_FEATURE_ASSIGNMENTS: Record<GenerationFeature, {
   allowedModels: string[];
   defaultModel: string;
 }> = {
   'social-post': {
-    allowedModels: ['pecut-free', 'ag/gemini-3-flash-agent', 'cc/claude-sonnet-5'],
-    defaultModel: 'pecut-free',
+    allowedModels: ['ag/gemini-3-flash', 'ag/gemini-3.6-flash-medium', 'ag/claude-sonnet-4-6'],
+    defaultModel: 'ag/gemini-3-flash',
   },
   'video-script': {
-    allowedModels: ['pecut-free', 'ag/gemini-3-flash-agent', 'cc/claude-sonnet-5'],
-    defaultModel: 'ag/gemini-3-flash-agent',
+    allowedModels: ['ag/gemini-3-flash', 'ag/gemini-3.6-flash-medium', 'ag/claude-sonnet-4-6'],
+    defaultModel: 'ag/gemini-3-flash',
   },
   'event-plan': {
-    allowedModels: ['pecut-free', 'ag/gemini-3-flash-agent', 'cc/claude-sonnet-5'],
-    defaultModel: 'ag/gemini-3-flash-agent',
+    allowedModels: ['ag/gemini-3-flash', 'ag/gemini-3.1-pro-low', 'ag/claude-sonnet-4-6'],
+    defaultModel: 'ag/gemini-3.1-pro-low',
   },
   'article-market-news': {
-    allowedModels: ['ag/claude-sonnet-4-6', 'cc/claude-sonnet-5'],
-    defaultModel: 'cc/claude-sonnet-5',
+    allowedModels: ['ag/claude-sonnet-4-6', 'lr/claude-sonnet-4.5', 'ag/gemini-3.1-pro-low'],
+    defaultModel: 'ag/claude-sonnet-4-6',
   },
   'market-research': {
-    allowedModels: ['ag/claude-sonnet-4-6', 'cc/claude-sonnet-5'],
-    defaultModel: 'cc/claude-sonnet-5',
+    allowedModels: ['ag/claude-sonnet-4-6', 'lr/claude-sonnet-4.5', 'ag/gemini-3.1-pro-low'],
+    defaultModel: 'ag/claude-sonnet-4-6',
   },
   'ai-research': {
-    allowedModels: ['pecut-free', 'ag/gemini-3-flash-agent', 'cc/claude-sonnet-5'],
-    defaultModel: 'ag/gemini-3-flash-agent',
+    allowedModels: ['ag/gemini-3-flash', 'ag/gemini-3.6-flash-high', 'ag/claude-sonnet-4-6', 'ag/gemini-3.1-pro-low'],
+    defaultModel: 'ag/gemini-3-flash',
   },
 };
 

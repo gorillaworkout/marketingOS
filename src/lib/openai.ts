@@ -11,7 +11,8 @@ import {
 const GORILLAWORKOUT_API_BASE = process.env.GORILLAWORKOUT_API_BASE || 'https://llm.gorillaworkout.id/v1';
 const GORILLAWORKOUT_API_KEY = process.env.GORILLAWORKOUT_API_KEY || '';
 
-const PRIMARY_MODEL = 'pecut-free';
+// Must stay inside AVAILABLE_MODELS; verified live via scripts/probe-gateway-models.ts.
+const PRIMARY_MODEL = 'ag/gemini-3-flash';
 
 export type ModelProvider = 'gorillaworkout';
 
@@ -24,50 +25,31 @@ export interface ModelInfo {
   output: number;
 }
 
-// Catalog IDs exposed by the OpenAI-compatible GorillaWorkout LLM gateway.
+// Catalog IDs verified live against the gateway with scripts/probe-gateway-models.ts.
+// Only 9 of 61 listed ids answered a real completion (probed 2026-09-18).
+// Removed, by cause:
+//   kimi/*, tr/moonshotai/*  — no API key at all (owner removed it); do not re-add.
+//   cmc/*                    — Command Code account not topped up (400 BAD_REQUEST).
+//   cx/*                     — Codex OAuth token expired (401).
+//   cc/*                     — Claude Code OAuth token expired (401).
+//   ag/gemini-3.7-*          — 404 Requested entity was not found (never existed upstream).
+//   ag/gemini-3.5-*, ag/gemini-3-flash-agent — retired upstream; they return HTTP 200
+//                              whose body is a retirement notice, so a status check
+//                              alone does NOT catch them.
+//   pecut-free               — upstream 400 "Unsupported model mimo-auto".
+// cx/*, cc/*, and cmc/* are credential problems, not retirements: they can come back
+// once the gateway re-authenticates or the account is topped up. ALWAYS re-probe
+// before re-adding any id here — a listed model is not a working model.
 export const AVAILABLE_MODELS: ModelInfo[] = [
-  { id: 'pecut-free', name: 'Pecut Free (GorillaWorkout)', tier: 'budget', provider: 'gorillaworkout', input: 0, output: 0 },
-  { id: 'ag/gemini-3-flash-agent', name: 'Gemini 3 Flash Agent', tier: 'budget', provider: 'gorillaworkout', input: 0, output: 0 },
-  { id: 'ag/gemini-3.7-flash-low', name: 'Gemini 3.7 Flash Low', tier: 'budget', provider: 'gorillaworkout', input: 0, output: 0 },
-  { id: 'ag/gemini-3.7-flash-medium', name: 'Gemini 3.7 Flash Medium', tier: 'balanced', provider: 'gorillaworkout', input: 0, output: 0 },
-  { id: 'ag/gemini-3.7-flash-high', name: 'Gemini 3.7 Flash High', tier: 'premium', provider: 'gorillaworkout', input: 0, output: 0 },
-  { id: 'ag/gemini-pro-agent', name: 'Gemini Pro Agent', tier: 'balanced', provider: 'gorillaworkout', input: 0, output: 0 },
-  { id: 'ag/gemini-3.1-pro-low', name: 'Gemini 3.1 Pro Low', tier: 'balanced', provider: 'gorillaworkout', input: 0, output: 0 },
-  { id: 'ag/claude-sonnet-4-6', name: 'Claude Sonnet 4.6', tier: 'balanced', provider: 'gorillaworkout', input: 0, output: 0 },
-  { id: 'ag/claude-opus-4-6-thinking', name: 'Claude Opus 4.6 Thinking', tier: 'premium', provider: 'gorillaworkout', input: 0, output: 0 },
-  { id: 'ag/gpt-oss-120b-medium', name: 'GPT OSS 120B Medium', tier: 'balanced', provider: 'gorillaworkout', input: 0, output: 0 },
   { id: 'ag/gemini-3-flash', name: 'Gemini 3 Flash', tier: 'budget', provider: 'gorillaworkout', input: 0, output: 0 },
-  { id: 'cc/claude-fable-5', name: 'Claude Fable 5', tier: 'balanced', provider: 'gorillaworkout', input: 0, output: 0 },
-  { id: 'cc/claude-sonnet-5', name: 'Claude Sonnet 5', tier: 'balanced', provider: 'gorillaworkout', input: 0, output: 0 },
-  { id: 'cc/claude-opus-4-8', name: 'Claude Opus 4.8', tier: 'premium', provider: 'gorillaworkout', input: 0, output: 0 },
-  { id: 'cc/claude-opus-4-7', name: 'Claude Opus 4.7', tier: 'premium', provider: 'gorillaworkout', input: 0, output: 0 },
-  { id: 'cc/claude-haiku-4-5-20251001', name: 'Claude Haiku 4.5', tier: 'budget', provider: 'gorillaworkout', input: 0, output: 0 },
-  { id: 'cx/gpt-5.6-sol', name: 'GPT-5.6 Sol', tier: 'premium', provider: 'gorillaworkout', input: 0, output: 0 },
-  { id: 'cx/gpt-5.6-sol-review', name: 'GPT-5.6 Sol Review', tier: 'premium', provider: 'gorillaworkout', input: 0, output: 0 },
-  { id: 'cx/gpt-5.6-terra', name: 'GPT-5.6 Terra', tier: 'balanced', provider: 'gorillaworkout', input: 0, output: 0 },
-  { id: 'cx/gpt-5.6-terra-review', name: 'GPT-5.6 Terra Review', tier: 'balanced', provider: 'gorillaworkout', input: 0, output: 0 },
-  { id: 'cx/gpt-5.6-luna', name: 'GPT-5.6 Luna', tier: 'budget', provider: 'gorillaworkout', input: 0, output: 0 },
-  { id: 'cx/gpt-5.6-luna-review', name: 'GPT-5.6 Luna Review', tier: 'budget', provider: 'gorillaworkout', input: 0, output: 0 },
-  { id: 'cx/gpt-5.5', name: 'GPT-5.5', tier: 'balanced', provider: 'gorillaworkout', input: 0, output: 0 },
-  { id: 'cx/gpt-5.5-review', name: 'GPT-5.5 Review', tier: 'balanced', provider: 'gorillaworkout', input: 0, output: 0 },
-  { id: 'cx/gpt-5.4', name: 'GPT-5.4', tier: 'balanced', provider: 'gorillaworkout', input: 0, output: 0 },
-  { id: 'cx/gpt-5.4-review', name: 'GPT-5.4 Review', tier: 'balanced', provider: 'gorillaworkout', input: 0, output: 0 },
-  { id: 'cx/gpt-5.4-mini', name: 'GPT-5.4 Mini', tier: 'budget', provider: 'gorillaworkout', input: 0, output: 0 },
-  { id: 'cx/gpt-5.4-mini-review', name: 'GPT-5.4 Mini Review', tier: 'budget', provider: 'gorillaworkout', input: 0, output: 0 },
-  { id: 'cx/gpt-5.3-codex-spark', name: 'GPT-5.3 Codex Spark', tier: 'budget', provider: 'gorillaworkout', input: 0, output: 0 },
-  { id: 'cx/gpt-5.3-codex-spark-review', name: 'GPT-5.3 Codex Spark Review', tier: 'budget', provider: 'gorillaworkout', input: 0, output: 0 },
-  { id: 'kimi/k3', name: 'Kimi K3', tier: 'balanced', provider: 'gorillaworkout', input: 0, output: 0 },
-  { id: 'kimi/kimi-for-coding', name: 'Kimi for Coding', tier: 'balanced', provider: 'gorillaworkout', input: 0, output: 0 },
-  { id: 'kimi/kimi-for-coding-highspeed', name: 'Kimi for Coding High Speed', tier: 'premium', provider: 'gorillaworkout', input: 0, output: 0 },
-  { id: 'kimi/kimi-k2.5', name: 'Kimi K2.5', tier: 'balanced', provider: 'gorillaworkout', input: 0, output: 0 },
-  { id: 'kimi/kimi-k2.5-thinking', name: 'Kimi K2.5 Thinking', tier: 'premium', provider: 'gorillaworkout', input: 0, output: 0 },
-  { id: 'kimi/kimi-k2.6', name: 'Kimi K2.6', tier: 'balanced', provider: 'gorillaworkout', input: 0, output: 0 },
-  { id: 'kimi/kimi-k2.7-code', name: 'Kimi K2.7 Code', tier: 'balanced', provider: 'gorillaworkout', input: 0, output: 0 },
-  { id: 'kimi/kimi-k2.7-code-highspeed', name: 'Kimi K2.7 Code High Speed', tier: 'premium', provider: 'gorillaworkout', input: 0, output: 0 },
-  { id: 'kimi/kimi-k3', name: 'Kimi K3 Latest', tier: 'balanced', provider: 'gorillaworkout', input: 0, output: 0 },
-  { id: 'kimi/kimi-latest', name: 'Kimi Latest', tier: 'balanced', provider: 'gorillaworkout', input: 0, output: 0 },
-  { id: 'tr/moonshotai/kimi-k3', name: 'Kimi K3 (Together)', tier: 'balanced', provider: 'gorillaworkout', input: 0, output: 0 },
-  { id: 'tr/moonshotai/kimi-k3-free', name: 'Kimi K3 Free (Together)', tier: 'budget', provider: 'gorillaworkout', input: 0, output: 0 },
+  { id: 'ag/gemini-3.6-flash-low', name: 'Gemini 3.6 Flash Low', tier: 'budget', provider: 'gorillaworkout', input: 0, output: 0 },
+  { id: 'ag/gemini-3.6-flash-medium', name: 'Gemini 3.6 Flash Medium', tier: 'balanced', provider: 'gorillaworkout', input: 0, output: 0 },
+  { id: 'ag/gemini-3.6-flash-high', name: 'Gemini 3.6 Flash High', tier: 'balanced', provider: 'gorillaworkout', input: 0, output: 0 },
+  { id: 'ag/gemini-3.1-pro-low', name: 'Gemini 3.1 Pro Low', tier: 'balanced', provider: 'gorillaworkout', input: 0, output: 0 },
+  { id: 'ag/gemini-pro-agent', name: 'Gemini Pro Agent', tier: 'balanced', provider: 'gorillaworkout', input: 0, output: 0 },
+  { id: 'ag/claude-sonnet-4-6', name: 'Claude Sonnet 4.6', tier: 'balanced', provider: 'gorillaworkout', input: 0, output: 0 },
+  { id: 'lr/claude-sonnet-4.5', name: 'Claude Sonnet 4.5', tier: 'balanced', provider: 'gorillaworkout', input: 0, output: 0 },
+  { id: 'ag/gpt-oss-120b-medium', name: 'GPT OSS 120B Medium', tier: 'balanced', provider: 'gorillaworkout', input: 0, output: 0 },
 ];
 
 export function getModelProvider(modelId: string): ModelProvider {

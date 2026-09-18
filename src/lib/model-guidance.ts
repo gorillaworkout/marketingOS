@@ -3,7 +3,7 @@ import type { GenerationFeature } from '@/lib/model-routing';
 export type GuidanceLevel = 'excellent' | 'good' | 'specialist' | 'limited';
 
 export interface ModelGuidance {
-  family: 'Gemini' | 'Claude' | 'GPT / Codex' | 'Kimi' | 'GorillaWorkout';
+  family: 'Gemini' | 'Claude' | 'GPT / Codex' | 'GorillaWorkout';
   summary: string;
   strengths: string[];
   tradeoffs: string[];
@@ -30,19 +30,6 @@ function fit(overrides: Partial<Record<GenerationFeature, GuidanceLevel>>): Reco
 /** Operational guidance for MarketingOS; this is not a vendor benchmark or universal quality ranking. */
 export function getModelGuidance(modelId: string): ModelGuidance {
   const lower = modelId.toLowerCase();
-
-  if (modelId === 'pecut-free') {
-    return {
-      family: 'GorillaWorkout',
-      summary: 'Pilihan tanpa biaya untuk eksperimen, draft awal, dan pekerjaan yang tidak dikejar waktu.',
-      strengths: ['Tanpa biaya gateway', 'Cocok untuk eksplorasi prompt', 'Berguna sebagai opsi cadangan manual'],
-      tradeoffs: ['Latency production dapat sangat bervariasi', 'Workflow multi-step dapat melewati batas waktu', 'Konsistensi format perlu diawasi'],
-      bestFor: ['Draft non-urgent', 'Eksperimen internal', 'Menguji struktur brief'],
-      speed: 'Variable', reasoning: 'Light',
-      workflowFit: fit({ 'social-post': 'limited', 'video-script': 'limited', 'article-market-news': 'limited', 'market-research': 'limited' }),
-      note: 'Observasi MarketingOS: tidak dijadikan default Social Post karena workflow empat completion pernah melewati timeout 300 detik.',
-    };
-  }
 
   if (lower.includes('gemini')) {
     const pro = lower.includes('pro');
@@ -126,28 +113,6 @@ export function getModelGuidance(modelId: string): ModelGuidance {
         'market-research': review ? 'specialist' : mini ? 'good' : 'excellent',
       }),
       note: review ? 'Gunakan setelah draft utama, bukan sebagai generator default.' : 'Panduan internal; model tidak boleh mengarang source, quotation, atau fakta pasar.',
-    };
-  }
-
-  if (lower.includes('kimi') || lower.includes('moonshot')) {
-    const code = lower.includes('coding') || lower.includes('code');
-    const thinking = lower.includes('thinking');
-    const highspeed = lower.includes('highspeed');
-    return {
-      family: 'Kimi',
-      summary: code ? 'Model berorientasi coding/struktur; lebih relevan untuk transformasi teknis daripada copy utama.' : 'Model long-context untuk membaca brief panjang dan merangkum banyak konteks.',
-      strengths: code ? ['Struktur teknis', 'Transformasi format', 'Instruksi sistematis'] : ['Long-context synthesis', 'Meringkas brief panjang', 'Membandingkan banyak input'],
-      tradeoffs: code ? ['Bukan writing model utama', 'Tone marketing perlu banyak arahan', 'Kurang cocok untuk caption final'] : ['Tone Bahasa Indonesia perlu divalidasi', 'Belum banyak data penggunaan internal', thinking ? 'Varian thinking lebih lambat' : 'Output perlu QC brand'],
-      bestFor: code ? ['JSON/schema work', 'Technical transformation', 'Workflow utilities'] : ['Long brief analysis', 'Research digestion', 'Reference comparison'],
-      speed: highspeed ? 'Fast' : thinking ? 'Deliberate' : 'Moderate', reasoning: thinking ? 'Deep' : 'Balanced',
-      workflowFit: fit({
-        'social-post': code ? 'limited' : 'good',
-        'video-script': code ? 'limited' : 'good',
-        'event-plan': code ? 'specialist' : 'good',
-        'article-market-news': code ? 'limited' : 'good',
-        'market-research': code ? 'specialist' : 'excellent',
-      }),
-      note: 'Gunakan sebagai opsi eksplorasi sampai MarketingOS memiliki cukup data rating internal untuk perbandingan yang lebih kuat.',
     };
   }
 

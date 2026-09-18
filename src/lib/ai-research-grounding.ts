@@ -218,6 +218,10 @@ const COMMON_NON_NAME_WORDS = new Set([
   'ceritakan', 'jelaskan', 'sebutkan', 'daftar', 'info', 'informasi',
   'profil', 'profile', 'legal', 'hukum', 'nomor', 'telepon', 'email',
   'berita', 'linkedin', 'cpns', 'kemdikbud', 'kemdikbudristek', 'freelancer',
+  // Alias markers. "aka" is 3 letters, so without this it passed isNameToken()
+  // and got absorbed into the name ("Bayu Darmawan Aka"), which searched a
+  // different person and dropped the real handle from every derived query.
+  'aka', 'alias', 'nickname', 'panggilan', 'julukan', 'sebagai', 'akun', 'username',
 ]);
 
 function normalized(value: string): string {
@@ -341,6 +345,32 @@ export function extractPersonNameCandidates(text: string): string[] {
   return [...new Set([...quoted, ...names])];
 }
 
+/**
+ * Handles/usernames are the strongest identity signal on the open web — often
+ * stronger than a common Indonesian name. They are extracted separately from
+ * person names so they survive into the query set instead of being swallowed as
+ * a name token or dropped entirely.
+ */
+export function extractHandleCandidates(text: string): string[] {
+  const handles: string[] = [];
+
+  // Explicit @handle or a known alias marker followed by a single word.
+  for (const match of text.matchAll(/@([a-z0-9._-]{3,30})/gi)) {
+    handles.push(match[1]);
+  }
+  for (const match of text.matchAll(/\b(?:aka|a\.?k\.?a\.?|alias|username|akun|panggilan|julukan)\b[\s:]+([a-z0-9._-]{3,30})/gi)) {
+    handles.push(match[1]);
+  }
+
+  const names = new Set(
+    extractPersonNameCandidates(text)
+      .flatMap(name => name.toLowerCase().split(/\s+/)),
+  );
+
+  return [...new Set(handles.map(handle => handle.toLowerCase()))]
+    .filter(handle => !QUERY_STOPWORDS.has(handle) && !names.has(handle));
+}
+
 export function looksLikePersonQuery(text: string): boolean {
   if (extractPersonNameCandidates(text).length > 0) return true;
   return /\b(siapa|who is|who's|who are)\b/i.test(text);
@@ -379,7 +409,16 @@ export function buildSearchQueries(text: string): string[] {
   const extras: string[] = [];
   const indonesia = prefersIndonesiaSources(query);
   const names = extractPersonNameCandidates(text);
+  const handles = extractHandleCandidates(text);
   const deep = isDeepPersonResearch(text);
+
+  // Handle-first: a username pins one identity, while a common name matches many.
+  for (const handle of handles.slice(0, 2)) {
+    extras.push(handle);
+    for (const name of names.slice(0, 1)) extras.push(`${name} ${handle}`);
+    extras.push(`${handle} site:github.com`);
+    extras.push(`${handle} site:linkedin.com`);
+  }
 
   for (const name of names.slice(0, 2)) {
     extras.push(...personOpenWebProbes(name));
@@ -410,18 +449,23 @@ export function buildSearchQueries(text: string): string[] {
 export function buildOpenWebSearchQueries(text: string): string[] {
   const query = simplifySerperQuery(text.replace(/\s+/g, ' ').trim());
   const names = extractPersonNameCandidates(text);
+  const handles = extractHandleCandidates(text);
   const extras = [query];
+  for (const handle of handles.slice(0, 2)) {
+    extras.push(handle);
+    for (const name of names.slice(0, 1)) extras.push(`${name} ${handle}`);
+  }
   for (const name of names.slice(0, 2)) {
     extras.push(...personOpenWebProbes(name));
   }
-  if (!names.length) {
+  if (!names.length && !handles.length) {
     extras.push(`${query} news`);
     extras.push(`${query} berita`);
     if (prefersIndonesiaSources(query) && !/\bindonesia\b/i.test(query)) {
       extras.push(`${query} Indonesia`);
     }
   }
-  const limit = names.length ? MAX_OPEN_WEB_QUERIES : 5;
+  const limit = (names.length || handles.length) ? MAX_OPEN_WEB_QUERIES : 5;
   return [...new Set(extras.map(simplifySerperQuery).filter(Boolean))].slice(0, limit);
 }
 

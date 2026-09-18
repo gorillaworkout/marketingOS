@@ -380,6 +380,51 @@ const sellaBappebtiHtml = `<html><head><title>Bappebti - PT Dupoin Futures Indon
 <p>Sella Susriana tercatat sebagai Wakil Pialang Berjangka di PT Dupoin Futures Indonesia.</p>
 </body></html>`;
 
+test('alias markers and handles do not contaminate the extracted person name', () => {
+  // Regression: "AKA" is a 3-letter token, so it was absorbed into the name and
+  // every derived query became "Bayu Darmawan Aka ...". Serper still answered,
+  // but with a different Bayu Darmawan — and the one word that actually
+  // identifies the person ("gorillaworkout") was dropped from every query.
+  const aliasQuery = 'cari informasi Bayu Darmawan AKA Gorillaworkout';
+
+  assert.deepEqual(extractPersonNameCandidates(aliasQuery), ['Bayu Darmawan']);
+
+  const queries = buildSearchQueries(aliasQuery);
+  // The raw user text is kept verbatim as query #1 by design; what must not
+  // happen is the alias marker being welded onto the *name* in derived queries.
+  const derived = queries.filter(query => query !== aliasQuery);
+  assert.ok(
+    derived.every(query => !/\bAka\b/i.test(query)),
+    `alias marker must not leak into derived queries, got ${derived.join(' | ')}`,
+  );
+  assert.ok(
+    queries.some(query => /gorillaworkout/i.test(query)),
+    `the handle is the strongest identity signal and must be searched, got ${queries.join(' | ')}`,
+  );
+  assert.ok(
+    queries.some(query => /Bayu Darmawan/i.test(query) && /gorillaworkout/i.test(query)),
+    'name and handle must be combined in at least one query',
+  );
+
+  const openWeb = buildOpenWebSearchQueries(aliasQuery);
+  const openWebDerived = openWeb.filter(query => query !== aliasQuery);
+  assert.ok(openWebDerived.every(query => !/\bAka\b/i.test(query)), `open-web queries leaked the alias marker: ${openWebDerived.join(' | ')}`);
+  assert.ok(openWeb.some(query => /gorillaworkout/i.test(query)), 'open-web probes must include the handle');
+});
+
+test('standalone handles are searched even without a person name', () => {
+  const queries = buildSearchQueries('siapa itu @gorillaworkout');
+  assert.ok(
+    queries.some(query => /gorillaworkout/i.test(query)),
+    `handle-only queries must still search the handle, got ${queries.join(' | ')}`,
+  );
+});
+
+test('other alias markers are stripped the same way', () => {
+  assert.deepEqual(extractPersonNameCandidates('Bayu Darmawan alias Gorillaworkout'), ['Bayu Darmawan']);
+  assert.deepEqual(extractPersonNameCandidates('Bayu Darmawan a.k.a Gorillaworkout'), ['Bayu Darmawan']);
+});
+
 test('person + Dupoin queries extract names and run a multi-query regulator browse', () => {
   assert.deepEqual(extractPersonNameCandidates(sellaQuery), ['Sella Susriana']);
   assert.equal(isDeepPersonResearch(sellaQuery), true);
