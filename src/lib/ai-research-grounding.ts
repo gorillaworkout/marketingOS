@@ -29,12 +29,17 @@ export interface GatherResearchOptions {
 
 export const AI_RESEARCH_CONTEXT_HEADER = 'GROUNDING_SOURCES';
 export const AI_RESEARCH_NO_INVENT_FACTS =
-  'Do not invent company, licensing, address, officer, or numeric facts. If a fact is missing from the sources, say the grounded sources do not confirm it.';
+  'Do not invent company, licensing, address, officer, or numeric facts. If a fact is missing from the sources, say the grounded sources do not confirm it. If a retrieved source does state the fact, summarize it with a citation instead of refusing.';
+export const AI_RESEARCH_SYNTHESIZE_HITS =
+  'Relevant grounded sources were retrieved. Synthesize a rich answer from everything they state (role, institution, other public traces) and cite titles + URLs. Prefer summarizing grounded hits over saying no verified source was found. Only say a fact is unverified when these excerpts truly do not mention it.';
 
-const DEFAULT_TIMEOUT_MS = 12_000;
+const DEFAULT_TIMEOUT_MS = 16_000;
 const DEFAULT_MAX_BYTES = 500_000;
-const MAX_SOURCES = 6;
-const MAX_SNIPPET = 1_400;
+export const AI_RESEARCH_MAX_SOURCES = 10;
+const MAX_SOURCES = AI_RESEARCH_MAX_SOURCES;
+const MAX_PAGE_FETCHES = 12;
+const MAX_SEARCH_QUERIES = 10;
+const MAX_SNIPPET = 2_200;
 const MAX_URL_LENGTH = 2_048;
 const RESEARCH_USER_AGENT =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
@@ -59,21 +64,71 @@ const INDONESIA_HOST_MARKERS = [
   'id.wikipedia.org',
 ];
 
+const DUPOIN_SEEDS = [
+  'https://www.dupoin.co.id/',
+  'https://www.dupoin.co.id/about-us/licenses',
+  'https://www.dupoin.co.id/about-us',
+  'https://www.dupoin.co.id/tentang',
+  'https://www.dupoin.com/',
+];
+
+const BAPPEBTI_SEEDS = [
+  'https://bappebti.go.id/',
+  'https://bappebti.go.id/pialang_berjangka',
+  'https://bappebti.go.id/pialang_berjangka/detail/423',
+  'https://bappebti.go.id/pialang_berjangka_wakil_pialang',
+  'https://ceklegalitas.bappebti.go.id/',
+  'https://www.bappebti.go.id/',
+];
+
+const OJK_SEEDS = [
+  'https://www.ojk.go.id/',
+];
+
 const OFFICIAL_SEEDS: Array<{ pattern: RegExp; urls: string[] }> = [
-  {
-    pattern: /\bdupoin\b/i,
-    urls: [
-      'https://www.dupoin.co.id/',
-      'https://www.dupoin.co.id/about-us/licenses',
-      'https://www.dupoin.com/',
-    ],
-  },
+  { pattern: /\bdupoin\b/i, urls: DUPOIN_SEEDS },
+  { pattern: /\b(bappebti|wakil pialang|pialang berjangka)\b/i, urls: BAPPEBTI_SEEDS },
+  { pattern: /\bojk\b/i, urls: OJK_SEEDS },
+];
+
+const PREFERRED_OFFICIAL_HOSTS = [
+  'bappebti.go.id',
+  'ojk.go.id',
+  'bi.go.id',
+  'dupoin.co.id',
+  'dupoin.com',
 ];
 
 const FACT_NEEDLES = [
   'bappebti', 'ojk', 'licensed', 'regulated', 'perizinan', 'lisensi',
   'izin', 'terdaftar', 'anggota', 'aspebtindo',
+  'wakil pialang', 'pialang berjangka', 'pialang', 'pengurus',
 ];
+
+const QUERY_STOPWORDS = new Set([
+  'siapa', 'sih', 'jir', 'di', 'yang', 'untuk', 'dari', 'dengan', 'tidak',
+  'sudah', 'bisa', 'apa', 'apakah', 'bagaimana', 'mengapa', 'dimana', 'kapan',
+  'tentang', 'halo', 'hai', 'the', 'a', 'an', 'is', 'are', 'who', 'what',
+  'and', 'or', 'of', 'in', 'on', 'to', 'pt', 'tbk', 'ini', 'itu', 'kah',
+  'dong', 'deh', 'kok', 'ya', 'yah', 'aja', 'nih', 'lah', 'pun', 'juga',
+  'saja', 'kalau', 'kalo', 'gimana', 'kenapa', 'mana', 'ada', 'gak', 'nggak',
+  'ga', 'ngga', 'gw', 'gue', 'lu', 'loe', 'bro', 'bang', 'kak',
+]);
+
+const COMMON_NON_NAME_WORDS = new Set([
+  ...QUERY_STOPWORDS,
+  'fakta', 'resmi', 'indonesia', 'indonesian', 'perusahaan', 'perizinan',
+  'izin', 'lisensi', 'regulasi', 'terdaftar', 'kantor', 'alamat',
+  'futures', 'gold', 'emas', 'forex', 'trading', 'market', 'news', 'artikel',
+  'konten', 'strategi', 'pialang', 'broker', 'berjangka', 'licenses', 'about',
+  'team', 'dupoin', 'bappebti', 'ojk', 'aspebtindo', 'jakarta', 'official',
+  'licensed', 'regulated', 'company', 'license', 'director', 'direktur',
+  'wakil', 'pengurus', 'karyawan', 'staff', 'tim', 'orang', 'ceo', 'cfo',
+  'cto', 'manager', 'analis', 'analyst', 'kyc', 'aml', 'compliance',
+  'ceritakan', 'jelaskan', 'sebutkan', 'daftar', 'info', 'informasi',
+  'profil', 'profile', 'legal', 'hukum', 'nomor', 'telepon', 'email',
+  'berita', 'linkedin',
+]);
 
 function normalized(value: string): string {
   return value.toLowerCase().normalize('NFKD').replace(/\s+/g, ' ').trim();
@@ -154,25 +209,113 @@ export function shouldResearchQuery(text: string): boolean {
   const haystack = normalized(text);
   if (!haystack || haystack === normalized(AI_RESEARCH_IMAGE_ONLY_PROMPT)) return false;
   if (TRIVIAL_QUERIES.has(haystack)) return false;
+  if (isDeepPersonResearch(text) || looksLikePersonQuery(text)) return true;
   if (haystack.length < 8 && !/\b(dupoin|bappebti|ojk|broker|forex|emas|gold)\b/.test(haystack)) {
     return false;
   }
   return true;
 }
 
+function titleCaseName(value: string): string {
+  return value
+    .split(/\s+/)
+    .filter(Boolean)
+    .map(part => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
+    .join(' ');
+}
+
+function isNameToken(token: string): boolean {
+  if (token.length < 3 || token.length > 16) return false;
+  if (COMMON_NON_NAME_WORDS.has(token)) return false;
+  if (/^\d+$/.test(token)) return false;
+  return /^[a-z]{3,16}$/.test(token);
+}
+
+export function extractPersonNameCandidates(text: string): string[] {
+  const quoted = [...text.matchAll(/"([^"]{3,80})"|'([^']{3,80})'/g)]
+    .map(match => (match[1] || match[2] || '').replace(/\s+/g, ' ').trim())
+    .filter(Boolean)
+    .map(titleCaseName);
+
+  const tokens = normalized(text).split(/[^a-z0-9]+/).filter(Boolean);
+  const names: string[] = [];
+  for (let i = 0; i < tokens.length - 1; i++) {
+    if (!isNameToken(tokens[i]) || !isNameToken(tokens[i + 1])) continue;
+    const third = tokens[i + 2];
+    const raw = third && isNameToken(third)
+      ? `${tokens[i]} ${tokens[i + 1]} ${third}`
+      : `${tokens[i]} ${tokens[i + 1]}`;
+    names.push(titleCaseName(raw));
+    i += raw.split(' ').length - 1;
+  }
+  return [...new Set([...quoted, ...names])];
+}
+
+export function looksLikePersonQuery(text: string): boolean {
+  if (extractPersonNameCandidates(text).length > 0) return true;
+  return /\b(siapa|who is|who's|who are)\b/i.test(text);
+}
+
+export function looksLikeBrokerContext(text: string): boolean {
+  return /\b(dupoin|broker|pialang|berjangka|bappebti|ojk)\b/i.test(text);
+}
+
+export function isDeepPersonResearch(text: string): boolean {
+  return looksLikePersonQuery(text) && looksLikeBrokerContext(text);
+}
+
 export function buildSearchQueries(text: string): string[] {
   const query = text.replace(/\s+/g, ' ').trim();
-  const queries = [query];
+  const prioritized = [query];
+  const extras: string[] = [];
   const indonesia = prefersIndonesiaSources(query);
-  if (indonesia && !/\bindonesia\b/i.test(query)) {
-    queries.push(`${query} Indonesia`);
+  const names = extractPersonNameCandidates(query);
+  const deep = isDeepPersonResearch(query);
+
+  for (const name of names.slice(0, 2)) {
+    extras.push(`"${name}" Dupoin`);
+    extras.push(`"${name}" Bappebti`);
+    extras.push(`"${name}" "wakil pialang"`);
+    extras.push(`"${name}" site:bappebti.go.id`);
+    extras.push(`"${name}" site:dupoin.co.id`);
+    extras.push(`"${name}" Dupoin site:linkedin.com`);
+    extras.push(`"${name}" Dupoin berita`);
+  }
+
+  if (deep) {
+    extras.push('wakil pialang Dupoin');
+    extras.push('daftar pialang berjangka Dupoin site:bappebti.go.id');
+    extras.push('PT Dupoin Futures Indonesia wakil pialang site:bappebti.go.id');
+  }
+
+  if (indonesia && !/\bindonesia\b/i.test(query) && !deep) {
+    extras.push(`${query} Indonesia`);
   }
   if (/\bdupoin\b/i.test(query)) {
-    queries.push('Dupoin Futures Indonesia BAPPEBTI site:dupoin.co.id');
+    extras.push('Dupoin Futures Indonesia BAPPEBTI site:dupoin.co.id');
+    extras.push('PT Dupoin Futures Indonesia Bappebti site:bappebti.go.id');
   } else if (indonesia && looksLikeEntityQuery(query)) {
-    queries.push(`${query} site:.id`);
+    extras.push(`${query} site:.id`);
   }
-  return [...new Set(queries)].slice(0, 3);
+  return [...new Set([...prioritized, ...extras])].slice(0, MAX_SEARCH_QUERIES);
+}
+
+export function buildFallbackSearchQueries(text: string): string[] {
+  const names = extractPersonNameCandidates(text);
+  const extras: string[] = [
+    'wakil pialang Dupoin site:bappebti.go.id',
+    'PT Dupoin Futures Indonesia site:bappebti.go.id',
+    'daftar wakil pialang berjangka Bappebti',
+    'Dupoin Futures Indonesia news OR berita',
+  ];
+  for (const name of names.slice(0, 2)) {
+    extras.unshift(`"${name}" "PT Dupoin Futures Indonesia"`);
+    extras.unshift(`"${name}" wakil pialang berjangka`);
+    extras.push(`"${name}" site:linkedin.com`);
+  }
+  if (/\bojk\b/i.test(text)) extras.push('Dupoin site:ojk.go.id');
+  const already = new Set(buildSearchQueries(text));
+  return extras.filter(query => !already.has(query)).slice(0, 6);
 }
 
 function looksLikeEntityQuery(text: string): boolean {
@@ -180,7 +323,21 @@ function looksLikeEntityQuery(text: string): boolean {
 }
 
 export function officialSeedUrls(text: string): string[] {
-  return OFFICIAL_SEEDS.flatMap(seed => seed.pattern.test(text) ? seed.urls : []);
+  const urls = OFFICIAL_SEEDS.flatMap(seed => seed.pattern.test(text) ? seed.urls : []);
+  if (isDeepPersonResearch(text) || /\bdupoin\b/i.test(text)) {
+    urls.push(...BAPPEBTI_SEEDS, ...DUPOIN_SEEDS);
+  }
+  if (/\bojk\b/i.test(text)) urls.push(...OJK_SEEDS);
+  return [...new Set(urls)];
+}
+
+export function isOfficialResearchHost(url: string): boolean {
+  try {
+    const host = new URL(url).hostname.toLowerCase().replace(/^www\./, '');
+    return PREFERRED_OFFICIAL_HOSTS.some(official => host === official || host.endsWith(`.${official}`));
+  } catch {
+    return false;
+  }
 }
 
 export function htmlToPlainText(html: string): string {
@@ -217,6 +374,12 @@ function metaContent(html: string, name: string): string {
 
 export function extractRelevantWindow(text: string, query = ''): string {
   const haystack = text.toLowerCase();
+  const nameHit = extractPersonNameCandidates(query)
+    .flatMap(name => name.toLowerCase().split(' '))
+    .filter(token => token.length > 2)
+    .map(token => haystack.indexOf(token))
+    .filter(idx => idx >= 0)
+    .sort((a, b) => a - b)[0];
   const factHit = FACT_NEEDLES
     .map(needle => haystack.indexOf(needle))
     .filter(idx => idx >= 0)
@@ -227,7 +390,7 @@ export function extractRelevantWindow(text: string, query = ''): string {
     .map(token => haystack.indexOf(token))
     .filter(idx => idx >= 0)
     .sort((a, b) => a - b)[0];
-  const best = factHit ?? queryHit;
+  const best = nameHit ?? factHit ?? queryHit;
   if (best == null || best < 0) return text.slice(0, MAX_SNIPPET);
   const start = Math.max(0, best - 180);
   return text.slice(start, start + MAX_SNIPPET);
@@ -333,19 +496,30 @@ export function rankResearchSources(
   sources: ResearchSource[],
   indonesiaPreferred: boolean,
   query = '',
+  limit = MAX_SOURCES,
 ): ResearchSource[] {
-  const officialHosts = officialSeedUrls(query).map(url => {
+  const officialHosts = [...PREFERRED_OFFICIAL_HOSTS, ...officialSeedUrls(query).map(url => {
     try { return new URL(url).hostname.replace(/^www\./, ''); } catch { return ''; }
-  }).filter(Boolean);
+  })].filter(Boolean);
+  const names = extractPersonNameCandidates(query).map(name => name.toLowerCase());
 
   const scored = sources.map((source, index) => {
     let score = 0;
+    const blob = `${source.title} ${source.snippet} ${source.url}`.toLowerCase();
     try {
       const host = new URL(source.url).hostname.replace(/^www\./, '');
       if (officialHosts.some(official => host === official || host.endsWith(`.${official}`))) score += 50;
+      if (host === 'bappebti.go.id' || host.endsWith('.bappebti.go.id')) score += 20;
+      if (host === 'ojk.go.id' || host.endsWith('.ojk.go.id')) score += 10;
+      if (host.includes('linkedin.com') && names.some(name => blob.includes(name))) score += 15;
     } catch { /* ignore */ }
     if (indonesiaPreferred && source.origin === 'indonesia') score += 20;
+    if (names.some(name => blob.includes(name))) score += 30;
+    if (/wakil pialang|pialang berjangka/.test(blob)) score += 20;
+    if (!source.snippet.trim()) score -= 80;
+    else if (source.snippet.length < 40) score -= 20;
     if (source.snippet.length > 80) score += 5;
+    if (source.snippet.length > 400) score += 4;
     return { source, index, score };
   });
 
@@ -355,7 +529,15 @@ export function rankResearchSources(
     const key = row.source.url.replace(/\/$/, '');
     if (!unique.has(key)) unique.set(key, row.source);
   }
-  return [...unique.values()].slice(0, MAX_SOURCES);
+  return [...unique.values()].slice(0, limit);
+}
+
+export function sourcesHaveUsefulHits(context: ResearchContext): boolean {
+  return context.sources.some(source => {
+    const blob = `${source.title} ${source.snippet} ${source.url}`.toLowerCase();
+    return source.snippet.trim().length >= 40
+      || /bappebti|wakil pialang|pialang|ojk|dupoin/i.test(blob);
+  });
 }
 
 export function formatResearchContext(context: ResearchContext): string {
@@ -370,6 +552,9 @@ export function formatResearchContext(context: ResearchContext): string {
   if (context.sources.length === 0) {
     lines.push('No web sources were retrieved. Do not invent company facts.');
     return lines.join('\n');
+  }
+  if (sourcesHaveUsefulHits(context)) {
+    lines.push(AI_RESEARCH_SYNTHESIZE_HITS);
   }
   context.sources.forEach((source, index) => {
     lines.push('');
@@ -547,7 +732,7 @@ async function fetchPageSource(
       return { title: candidate.title, url: candidate.url, snippet: candidate.snippet, origin };
     }
     const extracted = extractPageSnippet(page.text, query);
-    const snippet = (extracted.snippet.length > 40 ? extracted.snippet : candidate.snippet || extracted.snippet).slice(0, MAX_SNIPPET);
+    const snippet = pickRicherSnippet(extracted.snippet, candidate.snippet, query).slice(0, MAX_SNIPPET);
     return {
       title: extracted.title || candidate.title,
       url: page.url,
@@ -557,6 +742,30 @@ async function fetchPageSource(
   } catch {
     return { title: candidate.title, url: candidate.url, snippet: candidate.snippet, origin };
   }
+}
+
+function pickRicherSnippet(extracted: string, fallback: string, query: string): string {
+  const names = extractPersonNameCandidates(query).map(name => name.toLowerCase());
+  const extractedHit = names.some(name => extracted.toLowerCase().includes(name));
+  const fallbackHit = names.some(name => fallback.toLowerCase().includes(name));
+  if (fallbackHit && !extractedHit) return fallback || extracted;
+  if (extractedHit && !fallbackHit) return extracted || fallback;
+  if (extracted.length > 40) return extracted;
+  return fallback || extracted;
+}
+
+function uniqueSourceCount(sources: ResearchSource[]): number {
+  return new Set(sources.map(source => source.url.replace(/\/$/, ''))).size;
+}
+
+function isUsableResearchSource(source: ResearchSource, query: string): boolean {
+  const blob = `${source.title} ${source.snippet} ${source.url}`.toLowerCase();
+  const names = extractPersonNameCandidates(query).map(name => name.toLowerCase());
+  return source.snippet.trim().length >= 40
+    || isOfficialResearchHost(source.url)
+    || source.url.includes('dupoin')
+    || names.some(name => blob.includes(name))
+    || /wakil pialang|bappebti|pialang berjangka/.test(blob);
 }
 
 export async function gatherAiResearchContext(
@@ -572,6 +781,8 @@ export async function gatherAiResearchContext(
   const timeoutMs = options.timeoutMs || DEFAULT_TIMEOUT_MS;
   const now = options.now || Date.now;
   const deadline = now() + timeoutMs;
+  const names = extractPersonNameCandidates(query);
+  const deep = isDeepPersonResearch(query);
 
   const queries = buildSearchQueries(query);
   const found: ResearchSource[] = officialSeedUrls(query).map(url => ({
@@ -581,24 +792,44 @@ export async function gatherAiResearchContext(
     origin: classifySourceOrigin(url),
   }));
 
-  const searchBudget = Math.max(1_500, Math.floor(remainingMs(deadline, now) * 0.55));
+  const searchBudget = Math.max(1_500, Math.floor(remainingMs(deadline, now) * 0.5));
+  const wikiQuery = names[0] || (deep ? '' : query);
   const searches = await Promise.allSettled([
     ...queries.map(item => searchDuckDuckGo(item, fetchImpl, maxBytes, searchBudget)),
-    searchWikipedia(query, indonesiaPreferred, fetchImpl, maxBytes, searchBudget),
+    ...(wikiQuery ? [searchWikipedia(wikiQuery, indonesiaPreferred, fetchImpl, maxBytes, searchBudget)] : []),
   ]);
+  let searchHits = 0;
   for (const result of searches) {
-    if (result.status === 'fulfilled') found.push(...result.value);
+    if (result.status === 'fulfilled' && result.value.length) {
+      found.push(...result.value);
+      searchHits += result.value.length;
+    }
   }
 
-  const ranked = rankResearchSources(found, indonesiaPreferred, query);
+  if (searchHits < 3 || uniqueSourceCount(found) < 4) {
+    const fallbackQueries = buildFallbackSearchQueries(query);
+    const fallbackBudget = Math.max(1_200, Math.floor(remainingMs(deadline, now) * 0.45));
+    if (fallbackQueries.length && fallbackBudget > 0) {
+      const extras = await Promise.allSettled(
+        fallbackQueries.map(item => searchDuckDuckGo(item, fetchImpl, maxBytes, fallbackBudget)),
+      );
+      for (const result of extras) {
+        if (result.status === 'fulfilled') found.push(...result.value);
+      }
+    }
+  }
+
+  const ranked = rankResearchSources(found, indonesiaPreferred, query, MAX_PAGE_FETCHES);
   if (ranked.length === 0) return empty;
 
   const fetchBudget = Math.max(1_200, remainingMs(deadline, now));
   const fetched = await Promise.all(ranked.map(source => fetchPageSource(source, query, fetchImpl, maxBytes, fetchBudget)));
-  const usable = fetched.filter(source => source.snippet.trim().length >= 40 || source.url.includes('dupoin'));
+  const withText = fetched.filter(source => source.snippet.trim().length >= 40);
+  const usable = fetched.filter(source => isUsableResearchSource(source, query));
+  const selected = withText.length >= 3 ? withText : usable.length ? usable : fetched;
   return {
     query,
     indonesiaPreferred,
-    sources: rankResearchSources(usable.length ? usable : fetched, indonesiaPreferred, query),
+    sources: rankResearchSources(selected, indonesiaPreferred, query),
   };
 }

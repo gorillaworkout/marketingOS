@@ -9,15 +9,19 @@ import {
 } from '../src/lib/ai-research';
 import {
   AI_RESEARCH_CONTEXT_HEADER,
+  AI_RESEARCH_MAX_SOURCES,
   AI_RESEARCH_NO_INVENT_FACTS,
   buildAiResearchChatMessages,
+  buildFallbackSearchQueries,
   buildSearchQueries,
   classifySourceOrigin,
+  extractPersonNameCandidates,
   formatResearchContext,
   gatherAiResearchContext,
   extractPageSnippet,
   htmlToPlainText,
   injectResearchContext,
+  isDeepPersonResearch,
   officialSeedUrls,
   parseDuckDuckGoResults,
   parseWikipediaExtract,
@@ -25,6 +29,7 @@ import {
   prefersIndonesiaSources,
   rankResearchSources,
   shouldResearchQuery,
+  sourcesHaveUsefulHits,
   unwrapSearchResultUrl,
 } from '../src/lib/ai-research-grounding';
 
@@ -56,11 +61,13 @@ test('research query helpers prefer Indonesia sources and skip trivial turns', (
   assert.equal(shouldResearchQuery(AI_RESEARCH_IMAGE_ONLY_PROMPT), false);
   assert.equal(shouldResearchQuery('Apa fakta resmi Dupoin Indonesia?'), true);
   assert.ok(buildSearchQueries('Apa fakta resmi Dupoin?').some(query => /dupoin\.co\.id/i.test(query)));
-  assert.deepEqual(officialSeedUrls('Ceritakan Dupoin Indonesia'), [
-    'https://www.dupoin.co.id/',
-    'https://www.dupoin.co.id/about-us/licenses',
-    'https://www.dupoin.com/',
-  ]);
+  const dupoinSeeds = officialSeedUrls('Ceritakan Dupoin Indonesia');
+  assert.ok(dupoinSeeds.includes('https://www.dupoin.co.id/'));
+  assert.ok(dupoinSeeds.includes('https://www.dupoin.co.id/about-us/licenses'));
+  assert.ok(dupoinSeeds.includes('https://www.dupoin.com/'));
+  assert.ok(dupoinSeeds.some(url => /bappebti\.go\.id/i.test(url)));
+  assert.ok(dupoinSeeds.some(url => /about-us|tentang/i.test(url)));
+  assert.ok(AI_RESEARCH_MAX_SOURCES >= 8);
 });
 
 test('search parsers unwrap public results and drop private hosts', () => {
@@ -130,6 +137,17 @@ test('Wikipedia parsers keep extracts as grounded snippets', () => {
   assert.match(extract!.snippet, /pialang berjangka/);
 });
 
+test('ranking prefers snippet-rich official hits over empty regulator shells', () => {
+  const ranked = rankResearchSources([
+    { title: 'Empty Bappebti home', url: 'https://bappebti.go.id/', snippet: '', origin: 'indonesia' },
+    { title: 'Dupoin licenses', url: 'https://www.dupoin.co.id/about-us/licenses', snippet: 'PT Dupoin Futures Indonesia is fully licensed and regulated by BAPPEBTI.', origin: 'indonesia' },
+    { title: 'Sella listing', url: 'https://bappebti.go.id/pialang_berjangka/detail/423', snippet: 'Sella Susriana tercatat sebagai Wakil Pialang Berjangka pada PT Dupoin Futures Indonesia.', origin: 'indonesia' },
+  ], true, 'sella susriana siapa sih jir di dupoin');
+  assert.equal(ranked[0].url, 'https://bappebti.go.id/pialang_berjangka/detail/423');
+  assert.ok(ranked.some(source => source.url.includes('dupoin.co.id')));
+  assert.notEqual(ranked[0].snippet, '');
+});
+
 test('ranking prefers official and Indonesia sources for Indonesian queries', () => {
   const ranked = rankResearchSources([
     { title: 'Wire', url: 'https://www.reuters.com/markets/dupoin', snippet: 'International brief about the broker.', origin: 'international' },
@@ -162,6 +180,7 @@ test('injects research context into the chat path when sources are available', (
   assert.match(String(messages[1].content), /dupoin\.co\.id/);
   assert.match(String(messages[1].content), /BAPPEBTI/);
   assert.match(String(messages[1].content), new RegExp(AI_RESEARCH_NO_INVENT_FACTS));
+  assert.match(String(messages[1].content), /Synthesize a rich answer/);
   assert.equal(messages[2].content, research.query);
 
   const withoutSources = injectResearchContext(
@@ -225,6 +244,121 @@ test('AI Research chat route grounds answers, raises the token budget, and updat
   assert.match(lib, /utamakan sumber Indonesia/);
   assert.equal(AI_RESEARCH_MAX_OUTPUT_TOKENS, 4000);
   assert.match(AI_RESEARCH_SYSTEM_PROMPT, /Cantumkan sitasi/);
+});
+
+const sellaQuery = 'sella susriana siapa sih jir di dupoin';
+
+const sellaDdgHtml = `
+<div class="result">
+  <a rel="nofollow" class="result__a" href="https://duckduckgo.com/l/?uddg=https%3A%2F%2Fbappebti.go.id%2Fpialang_berjangka%2Fdetail%2F423">Bappebti - PT Dupoin Futures Indonesia</a>
+  <a class="result__snippet">Sella Susriana tercatat sebagai Wakil Pialang Berjangka pada PT Dupoin Futures Indonesia di database Bappebti.</a>
+</div>
+<div class="result">
+  <a class="result__a" href="https://www.dupoin.co.id/about-us">Tim dan perizinan Dupoin</a>
+  <a class="result__snippet">Halaman resmi PT Dupoin Futures Indonesia.</a>
+</div>
+<div class="result">
+  <a class="result__a" href="https://www.linkedin.com/in/sella-susriana">Sella Susriana | Public profile</a>
+  <a class="result__snippet">Public LinkedIn mention of Sella Susriana in financial services.</a>
+</div>
+`;
+
+const sellaBappebtiHtml = `<html><head><title>Bappebti - PT Dupoin Futures Indonesia</title></head><body>
+<h1>PT DUPOIN FUTURES INDONESIA</h1>
+<h2>WAKIL PIALANG</h2>
+<p>Daftar wakil pialang berjangka terdaftar Bappebti:</p>
+<ul>
+  <li>Gunawan Herman</li>
+  <li>Sella Susriana</li>
+  <li>Andy Nugraha Sentosa</li>
+</ul>
+<p>Sella Susriana tercatat sebagai Wakil Pialang Berjangka di PT Dupoin Futures Indonesia.</p>
+</body></html>`;
+
+test('person + Dupoin queries extract names and run a multi-query regulator browse', () => {
+  assert.deepEqual(extractPersonNameCandidates(sellaQuery), ['Sella Susriana']);
+  assert.equal(isDeepPersonResearch(sellaQuery), true);
+  assert.equal(shouldResearchQuery(sellaQuery), true);
+  assert.equal(extractPersonNameCandidates('Apa fakta resmi Dupoin Indonesia?').length, 0);
+
+  const queries = buildSearchQueries(sellaQuery);
+  assert.ok(queries.length >= 5, `expected a broad query set, got ${queries.length}`);
+  assert.ok(queries.some(query => /"Sella Susriana" Dupoin/i.test(query)));
+  assert.ok(queries.some(query => /"Sella Susriana" Bappebti/i.test(query)));
+  assert.ok(queries.some(query => /site:bappebti\.go\.id/i.test(query)));
+  assert.ok(queries.some(query => /wakil pialang/i.test(query)));
+  assert.ok(queries.some(query => /linkedin\.com/i.test(query)));
+
+  const fallback = buildFallbackSearchQueries(sellaQuery);
+  assert.ok(fallback.length >= 1);
+  assert.ok([...queries, ...fallback].some(query => /site:bappebti\.go\.id/i.test(query)));
+
+  const seeds = officialSeedUrls(sellaQuery);
+  assert.ok(seeds.some(url => /bappebti\.go\.id/i.test(url)));
+  assert.ok(seeds.some(url => /pialang_berjangka/i.test(url)));
+  assert.ok(seeds.some(url => /dupoin\.co\.id/i.test(url)));
+});
+
+test('Sella Susriana + Dupoin research grounds Bappebti wakil pialang hits instead of an empty refuse', async () => {
+  const calls: string[] = [];
+  const fetchImpl: typeof fetch = async input => {
+    const url = String(input);
+    calls.push(url);
+    if (url.includes('html.duckduckgo.com')) {
+      return new Response(sellaDdgHtml, { status: 200, headers: { 'content-type': 'text/html' } });
+    }
+    if (url.includes('api.php')) {
+      return new Response(JSON.stringify({ query: { search: [] } }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }
+    if (url.includes('bappebti.go.id')) {
+      return new Response(sellaBappebtiHtml, { status: 200, headers: { 'content-type': 'text/html' } });
+    }
+    if (url.includes('dupoin.co.id') || url.includes('dupoin.com')) {
+      return new Response(officialHtml, { status: 200, headers: { 'content-type': 'text/html' } });
+    }
+    if (url.includes('linkedin.com')) {
+      return new Response('<html><title>Sella Susriana</title><body>Public profile mentioning Sella Susriana in financial services.</body></html>', {
+        status: 200,
+        headers: { 'content-type': 'text/html' },
+      });
+    }
+    return new Response('not found', { status: 404 });
+  };
+
+  const result = await gatherAiResearchContext(sellaQuery, { fetchImpl, timeoutMs: 8_000 });
+  const grounded = formatResearchContext(result);
+  const ddgQueries = calls
+    .filter(url => url.includes('html.duckduckgo.com'))
+    .map(url => decodeURIComponent(new URL(url).searchParams.get('q') || ''));
+
+  assert.ok(ddgQueries.length >= 5, `expected multi-query browse, got ${ddgQueries.length}`);
+  assert.ok(ddgQueries.some(query => /Sella Susriana/i.test(query)));
+  assert.ok(ddgQueries.some(query => /bappebti/i.test(query)));
+  assert.ok(calls.some(url => /bappebti\.go\.id/i.test(url)));
+  assert.ok(result.sources.length >= 2);
+  assert.ok(result.sources.some(source => /bappebti\.go\.id/i.test(source.url)));
+  assert.ok(result.sources.some(source => /Sella Susriana/i.test(source.snippet)));
+  assert.ok(result.sources.some(source => /wakil pialang/i.test(source.snippet)));
+  assert.equal(sourcesHaveUsefulHits(result), true);
+  assert.match(grounded, /bappebti/i);
+  assert.match(grounded, /wakil pialang/i);
+  assert.match(grounded, /Sella Susriana/);
+  assert.match(grounded, /Synthesize a rich answer/);
+  assert.doesNotMatch(grounded, /No web sources were retrieved/);
+
+  const messages = buildAiResearchChatMessages({
+    systemPrompt: AI_RESEARCH_SYSTEM_PROMPT,
+    history: [],
+    incoming: [{ role: 'user', content: sellaQuery }],
+    research: result,
+  });
+  assert.match(String(messages[1].content), /GROUNDING_SOURCES/);
+  assert.match(String(messages[1].content), /Bappebti|bappebti/);
+  assert.match(AI_RESEARCH_SYSTEM_PROMPT, /apa yang sumber sebutkan/);
+  assert.match(AI_RESEARCH_SYSTEM_PROMPT, /belum terverifikasi/);
 });
 
 test('AI Research UI shows a thinking bubble before tokens and keeps the stream cursor after', () => {
