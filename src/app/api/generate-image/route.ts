@@ -5,6 +5,7 @@ import { rateLimit } from '@/lib/rate-limit';
 import { createImageJobStore, type ImageJob, type ImageJobResult } from '@/lib/image-job-status';
 import { getImageGenerationSpec, parseImageAspectRatio, type ImageAspectRatio } from '@/lib/image-aspect-ratio';
 import { applyDupoinImagePromptLocks } from '@/lib/dupoin-image-prompt';
+import { compositeDupoinLogo } from '@/lib/dupoin-logo-composite';
 import {
   generateWithAntigravityCapacityFallback,
   isCapacityOrRateLimitFailure,
@@ -132,6 +133,11 @@ async function runImageJob(job: ImageJob, prompt: string, brief: string, type: s
     }
 
     if (imageBytes.length < 10_000) throw new Error('Image API returned a suspiciously small image.');
+
+    // Stamp the real wordmark. The model is told to leave this corner clear
+    // rather than draw the logo, because text-to-image cannot reproduce a
+    // specific script logotype from a description — it invents one.
+    imageBytes = await compositeDupoinLogo(imageBytes);
 
     const directory = path.join(cwd, 'public', 'outputs', 'images');
     if (!fs.existsSync(directory)) fs.mkdirSync(directory, { recursive: true });

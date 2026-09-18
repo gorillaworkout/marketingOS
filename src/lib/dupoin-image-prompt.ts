@@ -11,10 +11,17 @@ export const DUPOIN_BLUE_RGB = '46,181,196';
 
 /**
  * Required logo line for AI image prompts.
- * Official graphic mark + wordmark only — never text-only or an invented mark.
+ *
+ * The model must NOT draw the logo. The real Dupoin wordmark is composited onto
+ * the finished image by src/lib/dupoin-logo-composite.ts, because text-to-image
+ * cannot reproduce a specific script logotype from a description — it invents one.
+ * The prompt's only job is to reserve clean, uncluttered space for it.
+ *
+ * For reference, the official mark is WORDMARK-ONLY: the word "Dupoin" in teal
+ * #2EB5C4 brush script. There is no icon, symbol, monogram, or graphic mark.
  */
 export const DUPOIN_LOGO_REQUIRED_LINE =
-  'small official Dupoin logo (graphic mark + wordmark), lower-right, ~1x capital x-height clear space';
+  'clean empty space in the lower-right corner reserved for the brand logo — draw no logo, no wordmark, no monogram, no symbol there'
 
 /** @deprecated Use DUPOIN_LOGO_REQUIRED_LINE — image prompts must include the official mark. */
 export const DUPOIN_LOGO_IN_PROMPT_LINE = DUPOIN_LOGO_REQUIRED_LINE;
@@ -36,7 +43,7 @@ FORMAT:
 - Safe zone: 80px dari tepi — no critical type/logo in the margin
 
 HIERARKI VISUAL (wajib urutan ini):
-Exact headline → subheadline → visual → CTA → Dupoin logo
+Exact headline → subheadline → visual → CTA → reserved logo space (lower-right)
 
 COPY:
 - Exact headline, Subheadline, dan CTA harus ditulis persis dalam tanda kutip agar image generator merender copy iklan tersebut
@@ -45,12 +52,12 @@ COPY:
 - Text needs contrast panel / gradient behind copy
 - Atur posisi, ukuran relatif, kontras, alignment, dan text-safe background
 
-LOGO (REQUIRED):
+LOGO (JANGAN DIGAMBAR — dikomposit otomatis):
+- Logo Dupoin asli ditempel otomatis setelah gambar jadi. Model TIDAK BOLEH menggambarnya.
 - MUST include: "${DUPOIN_LOGO_REQUIRED_LINE}"
-- Official graphic mark + wordmark only. Never text-only Dupoin. Never invent a diamond-D / alternate mark.
-- Clear space: keep ~1x capital x-height empty around the logo
-- Treatments: full color on light/dark; white logo on Dupoin Blue ${DUPOIN_BLUE_HEX}; no skew, neon glow, emboss, busy photo behind logo
-- Do not omit the logo. Do not replace it with later-composite-only instructions.
+- Sudut kanan-bawah harus bersih: tanpa teks, tanpa objek ramai, tanpa pola sibuk, kontras rendah agar logo terbaca
+- Jangan menggambar logo/wordmark/monogram/simbol/lambang apa pun di gambar
+- Jangan menulis kata "Dupoin" sebagai bagian desain — nama brand datang dari logo yang dikomposit
 
 PROMPT RECIPE — tulis dalam urutan ini:
 1. Format + job — e.g. Premium Instagram advertising poster, exact size and aspect from the brief
@@ -59,8 +66,8 @@ PROMPT RECIPE — tulis dalam urutan ini:
 4. Scene — concrete subjects (Indonesian trader, desk, chart UI)
 5. Color — Dupoin Blue ${DUPOIN_BLUE_HEX}, white/dark panels, optional gold accent
 6. Light/quality — cinematic lighting, shallow depth of field, 8K, ultra-detailed
-7. Logo line — MUST include official Dupoin logo (graphic mark + wordmark) lower-right with ~1x capital x-height clear space
-8. Negatives — no hashtags, no long captions, no fake claims/numbers not in brief, no wrong teal, no invented logos, no text-only mark, no generic stock look
+7. Logo space — reserve a clean, uncluttered lower-right area for the brand logo; draw nothing there
+8. Negatives — no hashtags, no long captions, no fake claims/numbers not in brief, no wrong teal, no logo/wordmark/monogram of any kind, no "Dupoin" lettering drawn into the art, no generic stock look
 
 Konteks Dupoin:
 - Broker forex teregulasi BAPPEBTI
@@ -80,8 +87,8 @@ Subheadline: 'Kelola risiko sebelum entry' in clean navy sans-serif under the he
 CTA button: 'PELAJARI SEKARANG' in a compact button using Dupoin Blue ${DUPOIN_BLUE_HEX} with subtle gold accent.
 Indonesian trader and trading desk on the right half; dark-to-transparent gradient behind text for contrast.
 Brand colors: Dupoin Blue ${DUPOIN_BLUE_HEX}, white, deep charcoal. Keep all copy inside an 80px safe zone.
-Include a small official Dupoin logo (graphic mark + wordmark), lower-right, ~1x capital x-height clear space.
-Cinematic lighting, shallow depth of field, 8K, ultra-detailed. No hashtags, no invented logos, no text-only mark, no busy background behind type."
+Leave the lower-right corner clean and uncluttered as reserved brand logo space — draw no logo or wordmark there.
+Cinematic lighting, shallow depth of field, 8K, ultra-detailed. No hashtags, no logo of any kind, no 'Dupoin' lettering drawn into the art, no busy background behind type."
 
 Tulis prompt langsung tanpa pembuka. Cukup creative brief visualnya.`;
 
@@ -94,17 +101,18 @@ export interface SocialPostImagePromptInput {
   aspectRatio?: ImageAspectRatio;
 }
 
-function hasOfficialDupoinLogo(prompt: string): boolean {
-  return /official Dupoin logo \(graphic mark \+ wordmark\)/i.test(prompt)
-    && /lower-right/i.test(prompt)
-    && /1x capital x-height/i.test(prompt);
+/** True when the prompt already reserves clean lower-right space for the composited logo. */
+function hasReservedLogoSpace(prompt: string): boolean {
+  return /lower-right/i.test(prompt)
+    && /(reserved|reserve|empty|clean)/i.test(prompt)
+    && /draw no logo|no logo/i.test(prompt);
 }
 
 /** Guarantee official logo language is present in image-prompt text. */
 export function ensureOfficialDupoinLogo(prompt: string): string {
   const trimmed = String(prompt || '').trim();
-  if (hasOfficialDupoinLogo(trimmed)) return trimmed;
-  const logoLine = `Include a ${DUPOIN_LOGO_REQUIRED_LINE}. Primary color Dupoin Blue ${DUPOIN_BLUE_HEX}. Never text-only Dupoin. Never invent a mark.`;
+  if (hasReservedLogoSpace(trimmed)) return trimmed;
+  const logoLine = `Leave ${DUPOIN_LOGO_REQUIRED_LINE}. Primary color Dupoin Blue ${DUPOIN_BLUE_HEX}. The real logo is composited afterwards — draw no logo, wordmark, monogram, or "Dupoin" lettering anywhere in the image.`;
   return trimmed ? `${trimmed}\n\n${logoLine}` : logoLine;
 }
 
@@ -130,12 +138,12 @@ Selected hook: ${input.hook}
 Selected caption: ${input.caption}
 
 Write the image prompt in this order: format → exact copy → layout → scene → color → quality → logo line → negatives.
-Lock Exact headline (≤6 words), Subheadline (≤10), CTA (≤4) in quotes. Visual hierarchy: Exact headline → subheadline → visual → CTA → Dupoin logo.
+Lock Exact headline (≤6 words), Subheadline (≤10), CTA (≤4) in quotes. Visual hierarchy: Exact headline → subheadline → visual → CTA → reserved logo space (lower-right).
 Format must lock ${spec.size} ${spec.orientation} (${aspectRatio}). ${spec.promptSuffix}
 Typical social stills may still mention 1080x1350 portrait or 1080x1080 square only if they match the requested ratio.
 Keep all critical type/logo inside an 80px safe zone.
 Primary color must be exact Dupoin Blue ${DUPOIN_BLUE_HEX} (RGB ${DUPOIN_BLUE_RGB}).
-Logo: MUST include "${DUPOIN_LOGO_REQUIRED_LINE}". Never text-only Dupoin. Never invent a mark.
-Treatments: full color light/dark; white logo on Dupoin Blue; no skew/emboss/busy background behind logo.
-Negatives: no hashtags, no long captions, no fake claims/numbers not in the brief, no wrong teal, no invented logos, no text-only mark, no generic stock look.`;
+Logo: do NOT draw one. Leave "${DUPOIN_LOGO_REQUIRED_LINE}" — the real Dupoin wordmark is composited onto the finished image automatically.
+Keep that corner low-contrast and free of text or busy detail so the logo stays legible.
+Negatives: no hashtags, no long captions, no fake claims/numbers not in the brief, no wrong teal, no logo/wordmark/monogram/symbol of any kind, no "Dupoin" lettering drawn into the art, no generic stock look.`;
 }
