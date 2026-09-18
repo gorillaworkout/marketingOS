@@ -41,15 +41,15 @@ export const AI_RESEARCH_CONTEXT_HEADER = 'GROUNDING_SOURCES';
 export const AI_RESEARCH_NO_INVENT_FACTS =
   'Do not invent company, licensing, address, officer, or numeric facts. If a fact is missing from the sources, say the grounded sources do not confirm it. If a retrieved source does state the fact, summarize it with a citation instead of refusing.';
 export const AI_RESEARCH_SYNTHESIZE_HITS =
-  'Relevant grounded sources were retrieved. Synthesize a rich answer from everything they state (role, institution, other public traces) and cite titles + URLs. Prefer summarizing grounded hits over saying no verified source was found. Only say a fact is unverified when these excerpts truly do not mention it. When several excerpts mention the same person name, cover all of them and do not collapse them into a roster-only one-liner.';
+  'Relevant grounded sources were retrieved. Synthesize a rich answer from everything they state (role, institution, other public traces) and cite titles + URLs. Prefer summarizing grounded hits over saying no verified source was found. Only say a fact is unverified when these excerpts truly do not mention it. When several excerpts mention the same person name, surface all of them — do not withhold, over-curate, or collapse them into a roster-only one-liner.';
 export const AI_RESEARCH_PERSON_NAME_HIT =
   'The person name from the user query appears in the retrieved excerpts. Treat official roster hits as verified for that role. Synthesize the stated role, institution, and ALL other public traces and cite the titles + URLs. Clearly separate the official Dupoin/Bappebti role from other public name matches that may or may not be the same person. Do not refuse with “no verified public sources” or “belum ada sumber publik terverifikasi” when the name is present. Do not invent a biography beyond what these excerpts state.';
 export const AI_RESEARCH_GROUNDED_PERSON_HEADER = 'GROUNDED_PERSON_FACT:';
 export const AI_RESEARCH_PERSON_FACT_PREFIX = 'PERSON_FACT:';
 export const AI_RESEARCH_SYNTHESIZE_ALL_TRACES =
-  'Synthesize ALL grounded traces with citations. Separate official Dupoin/Bappebti role from other public name matches that may or may not be the same person.';
+  'Surface ALL retrieved grounded traces with citations — do not withhold or over-curate. Separate official Dupoin/Bappebti role from other public name matches that may or may not be the same person. The user decides which traces to trust.';
 export const AI_RESEARCH_GROUNDED_PERSON_MUST_ANSWER =
-  'Cite that URL. Do not say unconfirmed / tidak terkonfirmasi. Do not say “belum bisa dipastikan” or “tidak ada sumber terkonfirmasi”. State this official roster role, then synthesize ALL other grounded excerpts with citations. Separate (a) official Dupoin/Bappebti role from (b) other public name matches that may or may not be the same person. Do not invent a biography or merge identities without evidence. Prefer a richer cited multi-trace answer over a roster-only one-liner.';
+  'Cite that URL. Do not say unconfirmed / tidak terkonfirmasi. Do not say “belum bisa dipastikan” or “tidak ada sumber terkonfirmasi”. State this official roster role, then surface ALL other grounded excerpts with citations. Separate (a) official Dupoin/Bappebti role from (b) other public name matches that may or may not be the same person. Do not invent a biography or merge identities without evidence. Do not withhold other traces. Prefer completeness over a roster-only one-liner.';
 export const AI_RESEARCH_DEFAULT_TEMPERATURE = 0.7;
 export const AI_RESEARCH_PERSON_HIT_TEMPERATURE = 0.25;
 
@@ -175,7 +175,18 @@ const ROLE_HEADING_NEEDLES: Array<{ needle: string; weight: number }> = [
 ];
 
 const ROLE_SNIPPET_RE = /wakil pialang|daftar wakil|pialang berjangka|\bpialang\b|pengurus|cpns|pranata laboratorium|freelancer|ilmu tanah/;
-const OPEN_WEB_PERSON_TRACE_RE = /cpns|kemdikbud|freelancer|ilmu tanah|kyc|pranata laboratorium|linkedin|sribulancer|sscasn|universitas andalas/;
+const OPEN_WEB_PERSON_TRACE_RE = /cpns|kemdikbud|freelancer|ilmu tanah|kyc|pranata laboratorium|linkedin|sribulancer|sscasn|universitas andalas|unand|cake\.me/;
+const SOCIAL_CROWD_HOSTS = [
+  'facebook.com',
+  'fb.com',
+  'youtube.com',
+  'youtu.be',
+  'pinterest.com',
+  'tiktok.com',
+  'twitter.com',
+  'x.com',
+];
+const HIGH_VALUE_PERSON_HOST_RE = /cake\.me|freelancer\.|sribulancer|sscasn|bkn\.go\.id|linkedin|projects\.co\.id|scholar/;
 const NAME_WINDOW_LOOKBACK = 800;
 const ROLE_WINDOW_LOOKBACK = 16;
 const ROLE_WINDOW_SIZE = 360;
@@ -351,6 +362,7 @@ export function buildSearchQueries(text: string): string[] {
     extras.push(`"${name}"`);
     extras.push(`"${name}" CPNS OR Kemdikbudristek OR freelancer`);
     extras.push(`"${name}" "ilmu tanah" OR administrasi OR KYC`);
+    extras.push(`"${name}" "Universitas Andalas" OR unand OR scholar`);
     extras.push(`"${name}" berita OR news OR linkedin`);
     extras.push(`"${name}" site:linkedin.com`);
     extras.push(`"${name}" Dupoin`);
@@ -385,6 +397,7 @@ export function buildOpenWebSearchQueries(text: string): string[] {
     extras.push(`"${name}"`);
     extras.push(`"${name}" CPNS OR Kemdikbudristek OR freelancer`);
     extras.push(`"${name}" "ilmu tanah" OR administrasi OR KYC`);
+    extras.push(`"${name}" "Universitas Andalas" OR unand OR scholar`);
     extras.push(`"${name}" news OR berita OR linkedin`);
     extras.push(`"${name}" Dupoin OR Bappebti OR "wakil pialang"`);
   }
@@ -1046,6 +1059,19 @@ function prefersIndonesiaTitle(title: string): boolean {
   return /\b(indonesia|bappebti|jakarta|rupiah)\b/i.test(title);
 }
 
+export function isSocialCrowdHost(url: string): boolean {
+  const host = researchSourceHost(url);
+  if (!host) return false;
+  return SOCIAL_CROWD_HOSTS.some(marker => host === marker || host.endsWith(`.${marker}`));
+}
+
+export function isHighValuePersonTraceHost(url: string): boolean {
+  const host = researchSourceHost(url);
+  if (!host) return false;
+  if (host.endsWith('.ac.id') || host.includes('scholar')) return true;
+  return HIGH_VALUE_PERSON_HOST_RE.test(host);
+}
+
 export function rankResearchSources(
   sources: ResearchSource[],
   indonesiaPreferred: boolean,
@@ -1067,6 +1093,7 @@ export function rankResearchSources(
       if (host === 'bappebti.go.id' || host.endsWith('.bappebti.go.id')) score += 20;
       if (host === 'ojk.go.id' || host.endsWith('.ojk.go.id')) score += 10;
       if (host.includes('linkedin.com') && names.some(name => blob.includes(name))) score += 15;
+      if (host.endsWith('.ac.id') && names.some(name => blob.includes(name))) score += 16;
     } catch { /* ignore */ }
     if (indonesiaPreferred && source.origin === 'indonesia') score += 20;
     if (names.some(name => blob.includes(name))) score += 30;
@@ -1076,6 +1103,10 @@ export function rankResearchSources(
     if (names.some(name => blob.includes(name)) && OPEN_WEB_PERSON_TRACE_RE.test(blob)) {
       score += 18;
     }
+    if (names.some(name => blob.includes(name)) && isHighValuePersonTraceHost(source.url)) {
+      score += 16;
+    }
+    if (isSocialCrowdHost(source.url)) score -= 28;
     if (/wakil pialang|pialang berjangka/.test(blob)) score += 20;
     const snippetLower = source.snippet.toLowerCase();
     if (names.some(name => snippetLower.includes(name)) && ROLE_SNIPPET_RE.test(snippetLower)) {
@@ -1190,6 +1221,10 @@ export function selectFetchCandidates(
   const ranked = rankResearchSources(sources, indonesiaPreferred, query, sources.length, 'fetch');
   const official = ranked.filter(source => isOfficialResearchHost(source.url));
   const namedWeb = ranked.filter(source => isOpenWebPersonTrace(source, query));
+  const namedHighValue = namedWeb.filter(source => (
+    isHighValuePersonTraceHost(source.url) || !isSocialCrowdHost(source.url)
+  ));
+  const namedSocial = namedWeb.filter(source => isSocialCrowdHost(source.url));
   const otherWeb = ranked.filter(source => (
     !isOfficialResearchHost(source.url) && !isOpenWebPersonTrace(source, query)
   ));
@@ -1201,9 +1236,9 @@ export function selectFetchCandidates(
   const namedBudget = personQuery
     ? Math.min(remaining, Math.max(RESERVED_OPEN_WEB_PERSON_TRACES, Math.ceil(remaining * 0.6)))
     : remaining;
-  const namedPicked = diversifyResearchSources(namedWeb, namedBudget, MAX_SOURCES_PER_HOST);
+  const namedPicked = diversifyResearchSources(namedHighValue, namedBudget, MAX_SOURCES_PER_HOST);
   const leftover = Math.max(0, remaining - namedPicked.length);
-  const otherPicked = diversifyResearchSources(otherWeb, leftover, MAX_SOURCES_PER_HOST);
+  const otherPicked = diversifyResearchSources([...otherWeb, ...namedSocial], leftover, MAX_SOURCES_PER_HOST);
   const combined = [...floor, ...namedPicked, ...otherPicked];
   if (combined.length < limit) {
     pushUniqueSources(combined, ranked, limit, MAX_SOURCES_PER_HOST);
@@ -1232,15 +1267,20 @@ export function selectFinalResearchSources(
     isOfficialResearchHost(source.url) && !sourceMentionsPersonName(source, query)
   ));
   const openWebName = ranked.filter(source => isOpenWebPersonTrace(source, query));
+  const openWebHighValue = openWebName.filter(source => (
+    isHighValuePersonTraceHost(source.url) || !isSocialCrowdHost(source.url)
+  ));
+  const openWebSocial = openWebName.filter(source => isSocialCrowdHost(source.url));
   const rest = ranked.filter(source => (
     !isOfficialResearchHost(source.url) && !isOpenWebPersonTrace(source, query)
   ));
 
   const picked: ResearchSource[] = [];
   pushUniqueSources(picked, officialName, Math.min(4, limit), MAX_SOURCES_PER_HOST);
-  pushUniqueSources(picked, openWebName, limit, MAX_SOURCES_PER_HOST);
-  pushUniqueSources(picked, officialOther, limit, MAX_SOURCES_PER_HOST);
+  pushUniqueSources(picked, openWebHighValue, limit, MAX_SOURCES_PER_HOST);
+  pushUniqueSources(picked, officialOther, Math.min(picked.length + 4, limit), MAX_SOURCES_PER_HOST);
   pushUniqueSources(picked, rest, limit, MAX_SOURCES_PER_HOST);
+  pushUniqueSources(picked, openWebSocial, limit, MAX_SOURCES_PER_HOST);
   if (picked.length < limit) {
     pushUniqueSources(picked, ranked, limit, Number.POSITIVE_INFINITY);
   }

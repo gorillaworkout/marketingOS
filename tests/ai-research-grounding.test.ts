@@ -387,11 +387,13 @@ test('person + Dupoin queries extract names and run a multi-query regulator brow
   assert.ok(queries.some(query => /linkedin\.com|berita OR news/i.test(query)));
   assert.ok(queries.some(query => /CPNS|Kemdikbud|freelancer/i.test(query)));
   assert.ok(queries.some(query => /ilmu tanah|administrasi|KYC/i.test(query)));
+  assert.ok(queries.some(query => /Universitas Andalas|unand|scholar/i.test(query)));
 
   const openWeb = buildOpenWebSearchQueries(sellaQuery);
   assert.ok(openWeb.some(query => /^"Sella Susriana"$/i.test(query)), 'Serper must run a bare-name query');
   assert.ok(openWeb.some(query => /Sella Susriana/i.test(query)));
   assert.ok(openWeb.some(query => /CPNS|freelancer/i.test(query)));
+  assert.ok(openWeb.some(query => /Universitas Andalas|unand|scholar/i.test(query)));
   assert.ok(openWeb.some(query => /news OR berita OR linkedin/i.test(query)));
   assert.ok(!openWeb.every(query => /site:/i.test(query)), 'open-web queries must not be site-restricted');
   assert.ok(openWeb.length >= 5, `expected more open-web person queries, got ${openWeb.length}`);
@@ -487,6 +489,7 @@ test('Sella Susriana + Dupoin research grounds Bappebti wakil pialang hits inste
   assert.match(AI_RESEARCH_SYSTEM_PROMPT, /belum ada sumber publik terverifikasi/);
   assert.match(AI_RESEARCH_SYSTEM_PROMPT, /daftar CPNS|profil freelancer/);
   assert.match(AI_RESEARCH_SYSTEM_PROMPT, /Jangan menggabungkan identitas/);
+  assert.match(AI_RESEARCH_SYSTEM_PROMPT, /pengguna yang memutuskan/);
 });
 
 test('long Bappebti broker pages keep wakil pialang heading with a late person name', () => {
@@ -673,8 +676,9 @@ test('multi-source person fixture keeps PERSON_FACT and requires covering other 
   assert.ok(instruction);
   assert.match(instruction!, /PERSON_FACT: Sella Susriana \| Wakil Pialang/);
   assert.equal(instruction!.includes(AI_RESEARCH_GROUNDED_PERSON_MUST_ANSWER), true);
-  assert.match(instruction!, /synthesize ALL other grounded excerpts/i);
+  assert.match(instruction!, /surface ALL other grounded excerpts/i);
   assert.match(instruction!, /may or may not be the same person/i);
+  assert.match(instruction!, /Do not withhold other traces/);
   assert.doesNotMatch(instruction!, /MUST answer from this roster fact/);
 
   const grounded = formatResearchContext(sellaMultiTraceResearch);
@@ -720,6 +724,47 @@ test('final source selection reserves CPNS and freelancer traces instead of offi
   const fetched = selectFetchCandidates(crowded, sellaQuery, true, 8);
   assert.ok(fetched.some(source => /sscasn\.bkn\.go\.id|bkn\.go\.id/.test(source.url)));
   assert.ok(fetched.some(source => /sribulancer\.com/.test(source.url)));
+});
+
+test('Serper-like organic name hits survive official seeds and Facebook/YouTube crowding', () => {
+  const liveMix = [
+    { title: 'Bappebti Dupoin', url: 'https://bappebti.go.id/pialang_berjangka/detail/423', snippet: 'Sella Susriana tercatat sebagai Wakil Pialang.', origin: 'indonesia' as const },
+    { title: 'Bappebti home', url: 'https://bappebti.go.id/', snippet: 'Portal resmi Bappebti.', origin: 'indonesia' as const },
+    { title: 'Dupoin home', url: 'https://www.dupoin.co.id/', snippet: 'PT Dupoin Futures Indonesia.', origin: 'indonesia' as const },
+    { title: 'Dupoin licenses', url: 'https://www.dupoin.co.id/about-us/licenses', snippet: 'Lisensi Bappebti.', origin: 'indonesia' as const },
+    { title: 'Wikipedia Bappebti', url: 'https://id.wikipedia.org/wiki/Bappebti', snippet: 'Regulator PBK Indonesia.', origin: 'indonesia' as const },
+    { title: 'Facebook Dupoin', url: 'https://www.facebook.com/dupoin', snippet: 'Sella Susriana mentioned on a Dupoin page.', origin: 'international' as const },
+    { title: 'YouTube clip', url: 'https://www.youtube.com/watch?v=sella', snippet: 'Video mentioning Sella Susriana.', origin: 'international' as const },
+    { title: 'Pinterest pin', url: 'https://www.pinterest.com/pin/sella', snippet: 'Sella Susriana pin.', origin: 'international' as const },
+    { title: 'Sella Susriana | cake.me', url: 'https://www.cake.me/sella-susriana', snippet: 'Public resume for Sella Susriana, administrasi and KYC.', origin: 'international' as const },
+    { title: 'Freelancer Sella Susriana', url: 'https://www.freelancer.co.nz/u/sellasusriana', snippet: 'Sella Susriana freelancer profile, Ilmu Tanah Universitas Andalas.', origin: 'international' as const },
+    { title: 'Scholar Unand', url: 'https://scholar.unand.ac.id/sella-susriana', snippet: 'Sella Susriana, Ilmu Tanah, Universitas Andalas.', origin: 'indonesia' as const },
+  ];
+  const selected = selectFinalResearchSources(liveMix, sellaQuery, true, 14);
+  const urls = selected.map(source => source.url).join(' ');
+  assert.ok(/bappebti\.go\.id\/pialang_berjangka\/detail\/423/.test(urls), 'official roster stays');
+  assert.ok(/cake\.me/.test(urls), 'cake.me resume must be reserved');
+  assert.ok(/freelancer\.co\.nz/.test(urls), 'freelancer.co.nz must be reserved');
+  assert.ok(/scholar\.unand\.ac\.id/.test(urls), 'Unand scholar page must be reserved');
+  const fetched = selectFetchCandidates(liveMix, sellaQuery, true, 12);
+  const fetchUrls = fetched.map(source => source.url).join(' ');
+  assert.ok(/cake\.me/.test(fetchUrls));
+  assert.ok(/freelancer\.co\.nz/.test(fetchUrls));
+  assert.ok(/scholar\.unand\.ac\.id/.test(fetchUrls));
+
+  const research = {
+    query: sellaQuery,
+    indonesiaPreferred: true,
+    sources: selected.filter(source => (
+      /bappebti\.go\.id\/pialang_berjangka\/detail\/423|cake\.me|freelancer\.co\.nz|scholar\.unand\.ac\.id/.test(source.url)
+    )),
+  };
+  const grounded = formatResearchContext(research);
+  assert.match(grounded, /PERSON_FACT: Sella Susriana \| Wakil Pialang/);
+  assert.equal(grounded.includes(AI_RESEARCH_SYNTHESIZE_ALL_TRACES), true);
+  assert.match(grounded, /cake\.me/);
+  assert.match(grounded, /freelancer\.co\.nz/);
+  assert.match(grounded, /scholar\.unand\.ac\.id/);
 });
 
 test('AI Research UI shows a thinking bubble before tokens and keeps the stream cursor after', () => {
