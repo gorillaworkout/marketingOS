@@ -96,7 +96,7 @@ test('AI Research UI adds a file picker, previews, and sends images with the pro
   assert.match(page, /accept=\{AI_RESEARCH_FILE_PICKER_ACCEPT\}/);
   assert.match(page, /multiple/);
   assert.match(page, /previewUrl/);
-  assert.match(page, /JSON\.stringify\(\{ messages: \[userMsg\], conversationId: activeConvoId \}\)/);
+  assert.match(page, /JSON\.stringify\(\{[\s\S]*messages: \[userMsg\][\s\S]*conversationId: activeConvoId[\s\S]*pinnedSourceUrls/);
   assert.match(page, /fileToChatImage\(item\.file\)/);
   assert.match(page, /skipNextLoadRef/);
   assert.match(page, /d\.type === 'start'/);

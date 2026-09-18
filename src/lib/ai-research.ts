@@ -338,11 +338,12 @@ export function normalizeChatMessage(
 export function parseChatRequest(body: unknown): {
   messages: AiResearchChatMessage[];
   conversationId?: string;
+  pinnedSourceUrls: string[];
 } {
   if (!body || typeof body !== 'object') {
     throw imageAttachmentError('Invalid JSON body');
   }
-  const raw = body as { messages?: unknown; conversationId?: unknown };
+  const raw = body as { messages?: unknown; conversationId?: unknown; pinnedSourceUrls?: unknown };
   if (!Array.isArray(raw.messages) || raw.messages.length === 0) {
     throw imageAttachmentError('Messages are required');
   }
@@ -368,7 +369,10 @@ export function parseChatRequest(body: unknown): {
   const conversationId = typeof raw.conversationId === 'string' && raw.conversationId.trim()
     ? raw.conversationId.trim()
     : undefined;
-  return { messages, conversationId };
+  const pinnedSourceUrls = Array.isArray(raw.pinnedSourceUrls)
+    ? raw.pinnedSourceUrls.filter((item): item is string => typeof item === 'string').map(item => item.trim()).filter(Boolean).slice(0, 32)
+    : [];
+  return { messages, conversationId, pinnedSourceUrls };
 }
 
 export function conversationTitleFromMessages(messages: AiResearchChatMessage[]): string {

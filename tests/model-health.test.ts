@@ -226,7 +226,7 @@ test('AI Research health route is feature-gated, rate-limited, and scoped to all
   assert.match(page, /status === 'stale'/);
   assert.match(page, /result\.snippet/);
   assert.match(page, /type="file"/);
-  assert.match(page, /JSON\.stringify\(\{ messages: \[userMsg\], conversationId: activeConvoId \}\)/);
+  assert.match(page, /JSON\.stringify\(\{[\s\S]*messages: \[userMsg\][\s\S]*conversationId: activeConvoId[\s\S]*pinnedSourceUrls/);
 
   assert.match(lib, /process\.env\.GORILLAWORKOUT_API_BASE/);
   assert.match(lib, /process\.env\.GORILLAWORKOUT_API_KEY/);

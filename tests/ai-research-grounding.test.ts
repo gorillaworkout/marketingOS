@@ -337,6 +337,10 @@ test('AI Research chat route grounds answers, raises the token budget, and updat
   assert.match(route, /export const maxDuration = 60/);
   assert.match(route, /type: 'research'/);
   assert.match(route, /sourceCount/);
+  assert.match(route, /buildResearchSsePayload/);
+  assert.match(route, /Boolean\(history\)/);
+  assert.match(route, /pinnedSourceUrls/);
+  assert.match(route, /applyPinnedResearchSources/);
   assert.match(route, /resolveAiResearchTemperature/);
   assert.doesNotMatch(route, /temperature:\s*0\.7/);
   assert.doesNotMatch(route, /max_tokens:\s*2000/);
@@ -1125,6 +1129,10 @@ test('AI Research UI shows a thinking bubble before tokens and keeps the stream 
   assert.match(page, /Sedang meneliti/);
   assert.match(page, /d\.type === 'research'/);
   assert.match(page, /sourceCount/);
+  assert.match(page, /Sumber yang dipakai/);
+  assert.match(page, /pinnedSourceUrls/);
+  assert.match(page, /RESEARCH_FAILED_BANNER/);
+  assert.match(page, /RESEARCH_DISCONNECT_BANNER/);
   assert.match(page, /ai-research-stream-cursor/);
   assert.match(page, /animate-spin/);
 });
