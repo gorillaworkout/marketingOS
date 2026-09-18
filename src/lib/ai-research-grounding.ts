@@ -1156,10 +1156,11 @@ export function sourcesMentionPersonName(context: ResearchContext): boolean {
 
 const SECTION_LABEL_RE = /\[Section:\s*([^\]]+)\]/i;
 const REKENING_NOISE_PATTERNS = [
-  /\bnomor rekening(?:\s+[a-z0-9]+)*/gi,
-  /\brekening(?:\s+(?:bank|penampung|dana|nasabah))+/gi,
+  /nomor\s+rekening(?:\s+bank)?(?:\s+penampung)?(?:\s+dana)?(?:\s+nasabah)?(?:\s+dan)?/gi,
+  /\brekening(?:\s+penampung)?/gi,
   /\b(?:bca|mandiri|bni|bri|btn)\s+\d{6,}\b/gi,
-  /\b\d{10,}\b/g,
+  /\b(?:bca|mandiri|bni|bri|btn)\b/gi,
+  /\b\d{8,}\b/g,
 ];
 
 export function trimPersonRosterNoise(text: string): string {
