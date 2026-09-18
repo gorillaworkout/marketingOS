@@ -1,12 +1,21 @@
 'use client';
 
 import { useEffect, useRef, useState, useCallback } from 'react';
+import { AiResearchFileChip, AiResearchMarkdown } from '@/components/AiResearchMarkdown';
 import {
-  AI_RESEARCH_ALLOWED_IMAGE_TYPES,
+  AI_RESEARCH_ASSISTANT_NAME,
+  AI_RESEARCH_ATTACHMENT_ONLY_PROMPT,
+  AI_RESEARCH_FILE_ONLY_PROMPT,
+  AI_RESEARCH_FILE_PICKER_ACCEPT,
   AI_RESEARCH_IMAGE_ONLY_PROMPT,
+  AI_RESEARCH_MAX_FILE_BYTES,
+  AI_RESEARCH_MAX_FILES,
   AI_RESEARCH_MAX_IMAGE_BYTES,
   AI_RESEARCH_MAX_IMAGES,
+  AI_RESEARCH_MAX_TOTAL_FILE_BYTES,
   AI_RESEARCH_MAX_TOTAL_IMAGE_BYTES,
+  inferSpreadsheetType,
+  isAllowedImageType,
 } from '@/lib/ai-research';
 
 interface ChatImage {
@@ -15,10 +24,18 @@ interface ChatImage {
   name?: string;
 }
 
+interface ChatFile {
+  mimeType: string;
+  dataUrl?: string;
+  name?: string;
+  extractedText?: string;
+}
+
 interface Message {
   role: 'user' | 'assistant';
   content: string;
   images?: ChatImage[];
+  files?: ChatFile[];
 }
 
 interface Conversation {
@@ -42,10 +59,23 @@ interface ModelHealthResult {
   latencyMs: number;
 }
 
-interface PendingImage {
+interface PendingAttachment {
   id: string;
   file: File;
-  previewUrl: string;
+  kind: 'image' | 'file';
+  previewUrl?: string;
+}
+
+function attachmentKind(file: File): 'image' | 'file' | null {
+  if (isAllowedImageType(file.type)) return 'image';
+  if (inferSpreadsheetType(file.type, file.name)) return 'file';
+  return null;
+}
+
+function defaultPromptForAttachments(images: number, files: number): string {
+  if (images && files) return AI_RESEARCH_ATTACHMENT_ONLY_PROMPT;
+  if (files) return AI_RESEARCH_FILE_ONLY_PROMPT;
+  return AI_RESEARCH_IMAGE_ONLY_PROMPT;
 }
 
 function readFileAsDataUrl(file: File): Promise<string> {
@@ -89,7 +119,7 @@ export default function AIResearchPage() {
   const [activeConvoId, setActiveConvoId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
-  const [pendingImages, setPendingImages] = useState<PendingImage[]>([]);
+  const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([]);
   const [loading, setLoading] = useState(false);
   const [streaming, setStreaming] = useState('');
   const [error, setError] = useState('');
@@ -124,9 +154,11 @@ export default function AIResearchPage() {
 
   useEffect(() => {
     return () => {
-      pendingImages.forEach(image => URL.revokeObjectURL(image.previewUrl));
+      pendingAttachments.forEach(item => {
+        if (item.previewUrl) URL.revokeObjectURL(item.previewUrl);
+      });
     };
-  }, [pendingImages]);
+  }, [pendingAttachments]);
 
   const checkModelHealth = async () => {
     setHealthChecking(true);
@@ -201,75 +233,115 @@ export default function AIResearchPage() {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, streaming, loading]);
 
-  const clearPendingImages = () => {
-    setPendingImages(prev => {
-      prev.forEach(image => URL.revokeObjectURL(image.previewUrl));
+  const clearPendingAttachments = () => {
+    setPendingAttachments(prev => {
+      prev.forEach(item => {
+        if (item.previewUrl) URL.revokeObjectURL(item.previewUrl);
+      });
       return [];
     });
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
-  const addImages = (files: FileList | File[]) => {
+  const addAttachments = (files: FileList | File[]) => {
     const incoming = Array.from(files);
     if (!incoming.length) return;
 
     setError('');
-    setPendingImages(prev => {
+    setPendingAttachments(prev => {
       const next = [...prev];
       for (const file of incoming) {
-        if (!AI_RESEARCH_ALLOWED_IMAGE_TYPES.includes(file.type as typeof AI_RESEARCH_ALLOWED_IMAGE_TYPES[number])) {
-          setError('Unsupported image type. Use JPEG, PNG, WebP, or GIF.');
+        const kind = attachmentKind(file);
+        if (!kind) {
+          setError('Unsupported attachment. Use JPEG, PNG, WebP, GIF, XLSX, XLS, or CSV.');
           continue;
         }
-        if (file.size > AI_RESEARCH_MAX_IMAGE_BYTES) {
-          setError(`${file.name} is larger than 4 MB.`);
+        const images = next.filter(item => item.kind === 'image');
+        const spreadsheets = next.filter(item => item.kind === 'file');
+        if (kind === 'image') {
+          if (file.size > AI_RESEARCH_MAX_IMAGE_BYTES) {
+            setError(`${file.name} is larger than 4 MB.`);
+            continue;
+          }
+          if (images.length >= AI_RESEARCH_MAX_IMAGES) {
+            setError(`You can attach up to ${AI_RESEARCH_MAX_IMAGES} images per message.`);
+            break;
+          }
+          const total = images.reduce((sum, item) => sum + item.file.size, 0) + file.size;
+          if (total > AI_RESEARCH_MAX_TOTAL_IMAGE_BYTES) {
+            setError('Attached images exceed the 6 MB total limit.');
+            break;
+          }
+          next.push({
+            id: `${file.name}-${file.size}-${file.lastModified}-${next.length}`,
+            file,
+            kind,
+            previewUrl: URL.createObjectURL(file),
+          });
           continue;
         }
-        if (next.length >= AI_RESEARCH_MAX_IMAGES) {
-          setError(`You can attach up to ${AI_RESEARCH_MAX_IMAGES} images per message.`);
+        if (file.size > AI_RESEARCH_MAX_FILE_BYTES) {
+          setError(`${file.name} is larger than 2 MB.`);
+          continue;
+        }
+        if (spreadsheets.length >= AI_RESEARCH_MAX_FILES) {
+          setError(`You can attach up to ${AI_RESEARCH_MAX_FILES} spreadsheets per message.`);
           break;
         }
-        const total = next.reduce((sum, item) => sum + item.file.size, 0) + file.size;
-        if (total > AI_RESEARCH_MAX_TOTAL_IMAGE_BYTES) {
-          setError('Attached images exceed the 6 MB total limit.');
+        const total = spreadsheets.reduce((sum, item) => sum + item.file.size, 0) + file.size;
+        if (total > AI_RESEARCH_MAX_TOTAL_FILE_BYTES) {
+          setError('Attached spreadsheets exceed the 4 MB total limit.');
           break;
         }
-        next.push({ id: `${file.name}-${file.size}-${file.lastModified}-${next.length}`, file, previewUrl: URL.createObjectURL(file) });
+        next.push({
+          id: `${file.name}-${file.size}-${file.lastModified}-${next.length}`,
+          file,
+          kind,
+        });
       }
       return next;
     });
   };
 
-  const removePendingImage = (id: string) => {
-    setPendingImages(prev => {
-      const target = prev.find(image => image.id === id);
-      if (target) URL.revokeObjectURL(target.previewUrl);
-      return prev.filter(image => image.id !== id);
+  const removePendingAttachment = (id: string) => {
+    setPendingAttachments(prev => {
+      const target = prev.find(item => item.id === id);
+      if (target?.previewUrl) URL.revokeObjectURL(target.previewUrl);
+      return prev.filter(item => item.id !== id);
     });
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
   const sendMessage = async () => {
     const trimmed = input.trim();
-    if ((!trimmed && pendingImages.length === 0) || loading) return;
+    if ((!trimmed && pendingAttachments.length === 0) || loading) return;
     setError('');
 
+    const pendingImages = pendingAttachments.filter(item => item.kind === 'image');
+    const pendingFiles = pendingAttachments.filter(item => item.kind === 'file');
     let images: ChatImage[] = [];
+    let files: ChatFile[] = [];
     try {
       images = await Promise.all(pendingImages.map(item => fileToChatImage(item.file)));
+      files = await Promise.all(pendingFiles.map(async item => ({
+        mimeType: inferSpreadsheetType(item.file.type, item.file.name) || item.file.type || 'text/csv',
+        dataUrl: await readFileAsDataUrl(item.file),
+        name: item.file.name,
+      })));
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not read the attached image');
+      setError(e instanceof Error ? e.message : 'Could not read the attached file');
       return;
     }
 
     const userMsg: Message = {
       role: 'user',
-      content: trimmed || AI_RESEARCH_IMAGE_ONLY_PROMPT,
+      content: trimmed || defaultPromptForAttachments(images.length, files.length),
       images: images.length ? images : undefined,
+      files: files.length ? files : undefined,
     };
     setMessages(prev => [...prev, userMsg]);
     setInput('');
-    clearPendingImages();
+    clearPendingAttachments();
     setStreaming('');
     setLoading(true);
     if (inputRef.current) inputRef.current.style.height = 'auto';
@@ -325,7 +397,7 @@ export default function AIResearchPage() {
 
   const newConversation = () => {
     setActiveConvoId(null); setMessages([]); setStreaming(''); setError(''); setModel('');
-    clearPendingImages();
+    clearPendingAttachments();
     setTimeout(() => inputRef.current?.focus(), 50);
     if (window.innerWidth < 768) setSidebarOpen(false);
   };
@@ -346,7 +418,7 @@ export default function AIResearchPage() {
     el.style.height = Math.min(el.scrollHeight, 160) + 'px';
   };
 
-  const canSend = !loading && Boolean(input.trim() || pendingImages.length);
+  const canSend = !loading && Boolean(input.trim() || pendingAttachments.length);
   const selectedModelId = currentModel || defaultModel;
   const selectedHealth = healthResults?.find(result => result.model === selectedModelId);
   const failCount = healthResults?.filter(result => result.status === 'fail').length || 0;
@@ -543,9 +615,9 @@ export default function AIResearchPage() {
                       <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" />
                     </svg>
                   </div>
-                  <h2 className="text-xl font-semibold text-[var(--mos-text)] mb-2">GorillaWorkout AI</h2>
+                  <h2 className="text-xl font-semibold text-[var(--mos-text)] mb-2">{AI_RESEARCH_ASSISTANT_NAME}</h2>
                   <p className="text-sm text-[var(--mos-text-muted)] max-w-md">
-                    Ask anything — riset topik trading, analisis berita, strategi marketing, atau lampirkan gambar untuk dibaca AI.
+                    Ask anything — riset topik trading, analisis berita, strategi marketing, atau lampirkan gambar, Excel, atau CSV untuk dibaca AI.
                   </p>
                   <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 gap-2 w-full max-w-lg">
                     {[
@@ -578,7 +650,7 @@ export default function AIResearchPage() {
                     </div>
                     <div className="min-w-0">
                       <p className="text-[10px] font-semibold text-[var(--mos-text-muted)] mb-1 px-1">
-                        {msg.role === 'user' ? 'You' : 'GorillaWorkout AI'}
+                        {msg.role === 'user' ? 'You' : AI_RESEARCH_ASSISTANT_NAME}
                       </p>
                       {msg.images && msg.images.length > 0 && (
                         <div className={`mb-2 flex flex-wrap gap-2 ${msg.role === 'user' ? 'justify-end' : ''}`}>
@@ -592,12 +664,21 @@ export default function AIResearchPage() {
                           ))}
                         </div>
                       )}
-                      <div className={`px-4 py-2.5 text-sm leading-relaxed whitespace-pre-wrap ${
+                      {msg.files && msg.files.length > 0 && (
+                        <div className={`mb-2 flex flex-wrap gap-2 ${msg.role === 'user' ? 'justify-end' : ''}`}>
+                          {msg.files.map((file, fileIndex) => (
+                            <AiResearchFileChip key={`${file.name || 'file'}-${fileIndex}`} name={file.name || `Spreadsheet ${fileIndex + 1}`} />
+                          ))}
+                        </div>
+                      )}
+                      <div className={`px-4 py-2.5 text-sm leading-relaxed ${
                         msg.role === 'user'
-                          ? 'bg-indigo-600 text-white rounded-2xl rounded-tr-md'
+                          ? 'bg-indigo-600 text-white rounded-2xl rounded-tr-md whitespace-pre-wrap'
                           : 'bg-[var(--mos-raised)] border border-[var(--mos-border)] text-[var(--mos-text)] rounded-2xl rounded-tl-md'
                       }`}>
-                        {msg.content}
+                        {msg.role === 'assistant'
+                          ? <AiResearchMarkdown text={msg.content} />
+                          : msg.content}
                       </div>
                     </div>
                   </div>
@@ -606,14 +687,14 @@ export default function AIResearchPage() {
 
               {/* Thinking / typing bubble before the first stream token */}
               {loading && !streaming && (
-                <div className="flex justify-start" role="status" aria-live="polite" aria-label="GorillaWorkout AI is researching">
+                <div className="flex justify-start" role="status" aria-live="polite" aria-label={`${AI_RESEARCH_ASSISTANT_NAME} is researching`}>
                   <div className="flex gap-3 max-w-[85%] sm:max-w-[75%]">
                     <div className="w-7 h-7 rounded-full bg-emerald-600 flex items-center justify-center flex-shrink-0 mt-0.5">
                       <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.5"><path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" /></svg>
                     </div>
                     <div className="min-w-0">
                       <p className="text-[10px] font-semibold text-[var(--mos-text-muted)] mb-1 px-1 flex items-center gap-2">
-                        GorillaWorkout AI
+                        {AI_RESEARCH_ASSISTANT_NAME}
                         <span className="text-[9px] font-medium text-emerald-300/80">Sedang meneliti</span>
                       </p>
                       <div
@@ -641,12 +722,14 @@ export default function AIResearchPage() {
                     </div>
                     <div className="min-w-0">
                       <p className="text-[10px] font-semibold text-[var(--mos-text-muted)] mb-1 px-1 flex items-center gap-2">
-                        GorillaWorkout AI
+                        {AI_RESEARCH_ASSISTANT_NAME}
                         <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
                       </p>
-                      <div className="px-4 py-2.5 bg-[var(--mos-raised)] border border-[var(--mos-border)] text-[var(--mos-text)] rounded-2xl rounded-tl-md text-sm leading-relaxed whitespace-pre-wrap">
-                        {streaming}
-                        <span className="inline-block w-1 h-4 bg-indigo-400 animate-pulse ml-0.5 align-middle" data-testid="ai-research-stream-cursor" />
+                      <div className="px-4 py-2.5 bg-[var(--mos-raised)] border border-[var(--mos-border)] text-[var(--mos-text)] rounded-2xl rounded-tl-md text-sm leading-relaxed">
+                        <AiResearchMarkdown
+                          text={streaming}
+                          trailing={<span className="inline-block w-1 h-4 bg-indigo-400 animate-pulse ml-0.5 align-middle" data-testid="ai-research-stream-cursor" />}
+                        />
                       </div>
                     </div>
                   </div>
@@ -670,24 +753,32 @@ export default function AIResearchPage() {
           {/* Input — sticky at bottom */}
           <div className="flex-shrink-0 border-t border-[var(--mos-border)] bg-[var(--mos-bg)] px-4 py-3">
             <div className="max-w-3xl mx-auto">
-              {pendingImages.length > 0 && (
+              {pendingAttachments.length > 0 && (
                 <div className="mb-2 flex flex-wrap gap-2">
-                  {pendingImages.map(image => (
-                    <div key={image.id} className="relative">
-                      <img
-                        src={image.previewUrl}
-                        alt={image.file.name}
-                        className="h-16 w-16 rounded-lg border border-[var(--mos-border)] object-cover"
+                  {pendingAttachments.map(item => (
+                    item.kind === 'image' && item.previewUrl ? (
+                      <div key={item.id} className="relative">
+                        <img
+                          src={item.previewUrl}
+                          alt={item.file.name}
+                          className="h-16 w-16 rounded-lg border border-[var(--mos-border)] object-cover"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => removePendingAttachment(item.id)}
+                          className="absolute -right-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-red-600 text-[10px] text-white"
+                          title={`Remove ${item.file.name}`}
+                        >
+                          ×
+                        </button>
+                      </div>
+                    ) : (
+                      <AiResearchFileChip
+                        key={item.id}
+                        name={item.file.name}
+                        onRemove={() => removePendingAttachment(item.id)}
                       />
-                      <button
-                        type="button"
-                        onClick={() => removePendingImage(image.id)}
-                        className="absolute -right-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-red-600 text-[10px] text-white"
-                        title={`Remove ${image.file.name}`}
-                      >
-                        ×
-                      </button>
-                    </div>
+                    )
                   ))}
                 </div>
               )}
@@ -695,11 +786,11 @@ export default function AIResearchPage() {
                 <input
                   ref={fileInputRef}
                   type="file"
-                  accept={AI_RESEARCH_ALLOWED_IMAGE_TYPES.join(',')}
+                  accept={AI_RESEARCH_FILE_PICKER_ACCEPT}
                   multiple
                   className="hidden"
                   onChange={e => {
-                    if (e.target.files) addImages(e.target.files);
+                    if (e.target.files) addAttachments(e.target.files);
                   }}
                 />
                 <button
@@ -707,8 +798,8 @@ export default function AIResearchPage() {
                   onClick={() => fileInputRef.current?.click()}
                   disabled={loading}
                   className="text-[var(--mos-text-muted)] hover:text-[var(--mos-text)] disabled:opacity-30 p-2 rounded-xl transition-colors flex-shrink-0"
-                  title="Attach images"
-                  aria-label="Attach images"
+                  title="Attach images or spreadsheets"
+                  aria-label="Attach images or spreadsheets"
                 >
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.8">
                     <path strokeLinecap="round" strokeLinejoin="round" d="M18.375 12.739l-7.693 7.693a4.5 4.5 0 01-6.364-6.364l10.94-10.94A3 3 0 1119.5 8.25l-10.94 10.939a1.5 1.5 0 01-2.121-2.121l8.485-8.486" />
@@ -719,7 +810,7 @@ export default function AIResearchPage() {
                   value={input}
                   onChange={autoResize}
                   onKeyDown={handleKeyDown}
-                  placeholder="Tanyakan apapun atau lampirkan gambar..."
+                  placeholder="Tanyakan apapun atau lampirkan gambar, Excel, atau CSV..."
                   disabled={loading}
                   rows={1}
                   className="flex-1 min-h-[24px] max-h-[160px] resize-none bg-transparent border-none text-sm text-[var(--mos-text)] placeholder-[var(--mos-text-muted)] focus:outline-none"
@@ -743,7 +834,7 @@ export default function AIResearchPage() {
                 </button>
               </div>
               <p className="text-[9px] text-[var(--mos-text-faint)] text-center mt-2">
-                GorillaWorkout AI may produce inaccurate information. Enter to send · Shift+Enter for newline · JPEG/PNG/WebP/GIF up to 4 images.
+                {AI_RESEARCH_ASSISTANT_NAME} may produce inaccurate information. Enter to send · Shift+Enter for newline · Images and Excel/CSV up to 4 each.
               </p>
             </div>
           </div>
