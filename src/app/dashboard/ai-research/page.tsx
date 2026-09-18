@@ -121,6 +121,7 @@ export default function AIResearchPage() {
   const [input, setInput] = useState('');
   const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([]);
   const [loading, setLoading] = useState(false);
+  const [streaming, setStreaming] = useState('');
   const [researchSourceCount, setResearchSourceCount] = useState<number | null>(null);
   const [error, setError] = useState('');
   const [model, setModel] = useState('');
