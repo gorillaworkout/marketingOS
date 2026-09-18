@@ -1155,13 +1155,19 @@ export function sourcesMentionPersonName(context: ResearchContext): boolean {
 }
 
 const SECTION_LABEL_RE = /\[Section:\s*([^\]]+)\]/i;
-const REKENING_NOISE_RE = /\bnomor rekening bank penampung dana nasabah\b|\brekening penampung\b|\b(?:bca|mandiri|bni|bri|btn)\s+\d{6,}\b|\b\d{10,}\b/gi;
+const REKENING_NOISE_PATTERNS = [
+  /\bnomor rekening(?:\s+[a-z0-9]+)*/gi,
+  /\brekening(?:\s+(?:bank|penampung|dana|nasabah))+/gi,
+  /\b(?:bca|mandiri|bni|bri|btn)\s+\d{6,}\b/gi,
+  /\b\d{10,}\b/g,
+];
 
 export function trimPersonRosterNoise(text: string): string {
-  return text
-    .replace(REKENING_NOISE_RE, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
+  let cleaned = text;
+  for (const pattern of REKENING_NOISE_PATTERNS) {
+    cleaned = cleaned.replace(pattern, ' ');
+  }
+  return cleaned.replace(/\s+/g, ' ').trim();
 }
 
 function shouldTrimRosterNoise(query: string, snippet: string): boolean {
