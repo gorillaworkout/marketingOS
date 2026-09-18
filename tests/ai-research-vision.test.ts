@@ -100,6 +100,7 @@ test('AI Research UI adds a file picker, previews, and sends images with the pro
   assert.match(page, /fileToChatImage\(item\.file\)/);
   assert.match(page, /skipNextLoadRef/);
   assert.match(page, /d\.type === 'start'/);
+  assert.match(page, /d\.type === 'research'/);
   assert.doesNotMatch(page, /setMessages\(data\.messages \|\| \[\]\)/);
   assert.match(page, /canSend/);
   assert.match(page, /loading && !streaming/);
