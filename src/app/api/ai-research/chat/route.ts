@@ -143,6 +143,10 @@ export async function POST(request: NextRequest) {
         } catch {
           research = null;
         }
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+          type: 'research',
+          sourceCount: research?.sources.length || 0,
+        })}\n\n`));
 
         const apiMessages = buildAiResearchChatMessages({
           systemPrompt: AI_RESEARCH_SYSTEM_PROMPT,

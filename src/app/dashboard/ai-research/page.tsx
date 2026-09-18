@@ -121,7 +121,7 @@ export default function AIResearchPage() {
   const [input, setInput] = useState('');
   const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([]);
   const [loading, setLoading] = useState(false);
-  const [streaming, setStreaming] = useState('');
+  const [researchSourceCount, setResearchSourceCount] = useState<number | null>(null);
   const [error, setError] = useState('');
   const [model, setModel] = useState('');
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -343,6 +343,7 @@ export default function AIResearchPage() {
     setInput('');
     clearPendingAttachments();
     setStreaming('');
+    setResearchSourceCount(null);
     setLoading(true);
     if (inputRef.current) inputRef.current.style.height = 'auto';
 
@@ -367,7 +368,7 @@ export default function AIResearchPage() {
         for (const line of lines) {
           const t = line.trim();
           if (!t.startsWith('data: ')) continue;
-          let d: { type?: string; content?: string; conversationId?: string; model?: string; error?: string };
+          let d: { type?: string; content?: string; conversationId?: string; model?: string; error?: string; sourceCount?: number };
           try { d = JSON.parse(t.slice(6)); } catch { continue; }
           if (d.type === 'start') {
             if (d.conversationId && !activeConvoId) {
@@ -376,6 +377,8 @@ export default function AIResearchPage() {
             }
             if (d.model) setModel(d.model);
             loadConversations();
+          } else if (d.type === 'research') {
+            if (typeof d.sourceCount === 'number') setResearchSourceCount(d.sourceCount);
           } else if (d.type === 'token') { content += d.content || ''; setStreaming(content); }
           else if (d.type === 'done') {
             setStreaming('');
@@ -396,7 +399,7 @@ export default function AIResearchPage() {
   };
 
   const newConversation = () => {
-    setActiveConvoId(null); setMessages([]); setStreaming(''); setError(''); setModel('');
+    setActiveConvoId(null); setMessages([]); setStreaming(''); setResearchSourceCount(null); setError(''); setModel('');
     clearPendingAttachments();
     setTimeout(() => inputRef.current?.focus(), 50);
     if (window.innerWidth < 768) setSidebarOpen(false);
@@ -695,7 +698,9 @@ export default function AIResearchPage() {
                     <div className="min-w-0">
                       <p className="text-[10px] font-semibold text-[var(--mos-text-muted)] mb-1 px-1 flex items-center gap-2">
                         {AI_RESEARCH_ASSISTANT_NAME}
-                        <span className="text-[9px] font-medium text-emerald-300/80">Sedang meneliti</span>
+                        <span className="text-[9px] font-medium text-emerald-300/80">
+                          {researchSourceCount ? `Sedang meneliti ${researchSourceCount} sumber` : 'Sedang meneliti'}
+                        </span>
                       </p>
                       <div
                         data-testid="ai-research-thinking"
