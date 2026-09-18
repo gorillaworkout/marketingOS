@@ -15,6 +15,7 @@ import {
   classifySourceOrigin,
   formatResearchContext,
   gatherAiResearchContext,
+  extractPageSnippet,
   htmlToPlainText,
   injectResearchContext,
   officialSeedUrls,
@@ -57,6 +58,7 @@ test('research query helpers prefer Indonesia sources and skip trivial turns', (
   assert.ok(buildSearchQueries('Apa fakta resmi Dupoin?').some(query => /dupoin\.co\.id/i.test(query)));
   assert.deepEqual(officialSeedUrls('Ceritakan Dupoin Indonesia'), [
     'https://www.dupoin.co.id/',
+    'https://www.dupoin.co.id/about-us/licenses',
     'https://www.dupoin.com/',
   ]);
 });
@@ -65,6 +67,10 @@ test('search parsers unwrap public results and drop private hosts', () => {
   assert.equal(
     unwrapSearchResultUrl('https://duckduckgo.com/l/?uddg=https%3A%2F%2Fwww.dupoin.co.id%2F'),
     'https://www.dupoin.co.id/',
+  );
+  assert.equal(
+    unwrapSearchResultUrl('//duckduckgo.com/l/?uddg=https%3A%2F%2Fwww.dupoin.co.id%2Fabout%2Dus%2Flicenses&rut=abc'),
+    'https://www.dupoin.co.id/about-us/licenses',
   );
   assert.equal(unwrapSearchResultUrl('https://127.0.0.1/secret'), null);
   assert.equal(classifySourceOrigin('https://www.dupoin.co.id/tentang'), 'indonesia');
@@ -75,7 +81,38 @@ test('search parsers unwrap public results and drop private hosts', () => {
   assert.equal(parsed.length, 2);
   assert.equal(parsed[0].url, 'https://www.dupoin.co.id/tentang');
   assert.match(parsed[0].snippet, /BAPPEBTI/);
+
+  const liveStyle = parseDuckDuckGoResults(`
+    <div class="links_main links_deep result__body">
+      <h2 class="result__title">
+        <a rel="nofollow" class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fwww.dupoin.co.id%2Fabout%2Dus%2Flicenses&amp;rut=abc">Licenses and Regulated Broker</a>
+      </h2>
+      <a class="result__snippet">PT Dupoin Futures Indonesia is fully licensed.</a>
+    </div>
+    <div class="links_main links_deep result__body">
+      <h2 class="result__title">
+        <a rel="nofollow" class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fid.wikipedia.org%2Fwiki%2FDupoin">Wikipedia Dupoin</a>
+      </h2>
+    </div>
+  `);
+  assert.equal(liveStyle.length, 2);
+  assert.equal(liveStyle[0].url, 'https://www.dupoin.co.id/about-us/licenses');
+  assert.match(liveStyle[0].snippet, /fully licensed/);
   assert.equal(htmlToPlainText('<p>Hello <b>world</b></p>'), 'Hello world');
+});
+
+test('page extraction prefers meta and buried company-license facts over nav chrome', () => {
+  const html = `<html><head><title>Licenses | Dupoin</title>
+    <meta name="description" content="Explore our licenses and regulations.">
+    </head><body>
+    <header>English Bahasa Indonesia Sign In Sign Up Products Forex Metals</header>
+    ${'Menu utama navigasi '.repeat(80)}
+    <div>PT Dupoin Futures Indonesia is fully licensed and regulated by BAPPEBTI, OJK, and BI.</div>
+    </body></html>`;
+  const extracted = extractPageSnippet(html, 'Apa fakta resmi Dupoin Indonesia?');
+  assert.equal(extracted.title, 'Licenses | Dupoin');
+  assert.match(extracted.snippet, /BAPPEBTI/);
+  assert.match(extracted.snippet, /licenses and regulations/i);
 });
 
 test('Wikipedia parsers keep extracts as grounded snippets', () => {

@@ -32,7 +32,7 @@ export const AI_RESEARCH_NO_INVENT_FACTS =
   'Do not invent company, licensing, address, officer, or numeric facts. If a fact is missing from the sources, say the grounded sources do not confirm it.';
 
 const DEFAULT_TIMEOUT_MS = 12_000;
-const DEFAULT_MAX_BYTES = 220_000;
+const DEFAULT_MAX_BYTES = 500_000;
 const MAX_SOURCES = 6;
 const MAX_SNIPPET = 1_400;
 const MAX_URL_LENGTH = 2_048;
@@ -64,9 +64,15 @@ const OFFICIAL_SEEDS: Array<{ pattern: RegExp; urls: string[] }> = [
     pattern: /\bdupoin\b/i,
     urls: [
       'https://www.dupoin.co.id/',
+      'https://www.dupoin.co.id/about-us/licenses',
       'https://www.dupoin.com/',
     ],
   },
+];
+
+const FACT_NEEDLES = [
+  'bappebti', 'ojk', 'licensed', 'regulated', 'perizinan', 'lisensi',
+  'izin', 'terdaftar', 'anggota', 'aspebtindo',
 ];
 
 function normalized(value: string): string {
@@ -203,26 +209,63 @@ function htmlTitle(html: string): string {
   return match ? htmlToPlainText(match[1]).slice(0, 180) : '';
 }
 
+function metaContent(html: string, name: string): string {
+  const named = html.match(new RegExp(`<meta[^>]+(?:name|property)=["']${name}["'][^>]+content=["']([^"']+)["'][^>]*>`, 'i'))
+    || html.match(new RegExp(`<meta[^>]+content=["']([^"']+)["'][^>]+(?:name|property)=["']${name}["'][^>]*>`, 'i'));
+  return named ? htmlToPlainText(named[1]) : '';
+}
+
+export function extractRelevantWindow(text: string, query = ''): string {
+  const haystack = text.toLowerCase();
+  const factHit = FACT_NEEDLES
+    .map(needle => haystack.indexOf(needle))
+    .filter(idx => idx >= 0)
+    .sort((a, b) => a - b)[0];
+  const queryHit = normalized(query)
+    .split(' ')
+    .filter(token => token.length > 3)
+    .map(token => haystack.indexOf(token))
+    .filter(idx => idx >= 0)
+    .sort((a, b) => a - b)[0];
+  const best = factHit ?? queryHit;
+  if (best == null || best < 0) return text.slice(0, MAX_SNIPPET);
+  const start = Math.max(0, best - 180);
+  return text.slice(start, start + MAX_SNIPPET);
+}
+
+export function extractPageSnippet(html: string, query = ''): { title: string; snippet: string } {
+  const title = htmlTitle(html);
+  const meta = metaContent(html, 'description') || metaContent(html, 'og:description');
+  const cleaned = html
+    .replace(/<nav\b[\s\S]*?<\/nav>/gi, ' ')
+    .replace(/<header\b[\s\S]*?<\/header>/gi, ' ')
+    .replace(/<footer\b[\s\S]*?<\/footer>/gi, ' ');
+  const body = htmlToPlainText(cleaned);
+  const window = extractRelevantWindow(body, query);
+  const combined = meta && window && !window.toLowerCase().includes(meta.slice(0, 32).toLowerCase())
+    ? `${window} ${meta}`
+    : window || meta;
+  return { title, snippet: combined.replace(/\s+/g, ' ').trim().slice(0, MAX_SNIPPET) };
+}
+
 export function parseDuckDuckGoResults(html: string): Array<{ title: string; url: string; snippet: string }> {
   const results: Array<{ title: string; url: string; snippet: string }> = [];
   const seen = new Set<string>();
-  const blocks = html.split(/class="(?:result(?:__body)?|links_main|web-result)"/i);
-  const chunks = blocks.length > 1 ? blocks.slice(1) : [html];
-
-  for (const chunk of chunks) {
-    const linkMatch = chunk.match(/<a[^>]+class="[^"]*result__a[^"]*"[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/i)
-      || chunk.match(/<a[^>]+href="([^"]+)"[^>]*class="[^"]*result__a[^"]*"[^>]*>([\s\S]*?)<\/a>/i)
-      || chunk.match(/<a[^>]+rel="nofollow"[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/i);
-    if (!linkMatch) continue;
-    const url = unwrapSearchResultUrl(decodeHtmlAttr(linkMatch[1]));
+  const linkRe = /<a\b[^>]*class="[^"]*result__a[^"]*"[^>]*>[\s\S]*?<\/a>/gi;
+  let match: RegExpExecArray | null;
+  while ((match = linkRe.exec(html))) {
+    const tag = match[0];
+    const href = tag.match(/href="([^"]+)"/i)?.[1];
+    const titleHtml = tag.replace(/^[\s\S]*?>/, '').replace(/<\/a>$/i, '');
+    const url = href ? unwrapSearchResultUrl(decodeHtmlAttr(href)) : null;
     if (!url || isSearchHost(url)) continue;
-    const title = htmlToPlainText(linkMatch[2]).slice(0, 180);
-    const snippetMatch = chunk.match(/class="[^"]*result__snippet[^"]*"[^>]*>([\s\S]*?)<\//i)
-      || chunk.match(/class="[^"]*result-snippet[^"]*"[^>]*>([\s\S]*?)<\//i);
+    const after = html.slice(match.index, match.index + 1800);
+    const snippetMatch = after.match(/class="[^"]*result__snippet[^"]*"[^>]*>([\s\S]*?)<\//i)
+      || after.match(/class="[^"]*result-snippet[^"]*"[^>]*>([\s\S]*?)<\//i);
     const snippet = snippetMatch ? htmlToPlainText(snippetMatch[1]).slice(0, MAX_SNIPPET) : '';
     if (seen.has(url)) continue;
     seen.add(url);
-    results.push({ title: title || url, url, snippet });
+    results.push({ title: htmlToPlainText(titleHtml).slice(0, 180) || url, url, snippet });
   }
   return results.slice(0, 10);
 }
@@ -486,6 +529,7 @@ async function searchWikipedia(
 
 async function fetchPageSource(
   candidate: { title: string; url: string; snippet: string },
+  query: string,
   fetchImpl: typeof fetch,
   maxBytes: number,
   timeoutMs: number,
@@ -502,10 +546,14 @@ async function fetchPageSource(
     if (!isPublicHttpUrl(page.url)) {
       return { title: candidate.title, url: candidate.url, snippet: candidate.snippet, origin };
     }
-    const text = htmlToPlainText(page.text);
-    const title = htmlTitle(page.text) || candidate.title;
-    const snippet = (text.length > 80 ? text : candidate.snippet || text).slice(0, MAX_SNIPPET);
-    return { title, url: page.url, snippet, origin: classifySourceOrigin(page.url) };
+    const extracted = extractPageSnippet(page.text, query);
+    const snippet = (extracted.snippet.length > 40 ? extracted.snippet : candidate.snippet || extracted.snippet).slice(0, MAX_SNIPPET);
+    return {
+      title: extracted.title || candidate.title,
+      url: page.url,
+      snippet,
+      origin: classifySourceOrigin(page.url),
+    };
   } catch {
     return { title: candidate.title, url: candidate.url, snippet: candidate.snippet, origin };
   }
@@ -546,7 +594,7 @@ export async function gatherAiResearchContext(
   if (ranked.length === 0) return empty;
 
   const fetchBudget = Math.max(1_200, remainingMs(deadline, now));
-  const fetched = await Promise.all(ranked.map(source => fetchPageSource(source, fetchImpl, maxBytes, fetchBudget)));
+  const fetched = await Promise.all(ranked.map(source => fetchPageSource(source, query, fetchImpl, maxBytes, fetchBudget)));
   const usable = fetched.filter(source => source.snippet.trim().length >= 40 || source.url.includes('dupoin'));
   return {
     query,
