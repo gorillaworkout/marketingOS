@@ -102,6 +102,8 @@ test('AI Research UI adds a file picker, previews, and sends images with the pro
   assert.match(page, /d\.type === 'start'/);
   assert.doesNotMatch(page, /setMessages\(data\.messages \|\| \[\]\)/);
   assert.match(page, /canSend/);
+  assert.match(page, /loading && !streaming/);
+  assert.match(page, /ai-research-thinking/);
 });
 
 test('AI Research chat route forwards multimodal content to the existing gateway', () => {
@@ -109,7 +111,8 @@ test('AI Research chat route forwards multimodal content to the existing gateway
   assert.match(route, /requireFeature\(request, 'ai-research'\)/);
   assert.match(route, /rateLimit\(request\)/);
   assert.match(route, /parseChatRequest/);
-  assert.match(route, /buildGatewayMessages/);
+  assert.match(route, /buildAiResearchChatMessages/);
+  assert.match(route, /gatherAiResearchContext/);
   assert.match(route, /persistConversation/);
   assert.match(route, /type: 'start'/);
   assert.match(route, /jsonb_array_elements\(messages\)/);
