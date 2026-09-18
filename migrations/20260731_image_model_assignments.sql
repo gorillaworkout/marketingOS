@@ -1,3 +1,7 @@
+-- SUPERSEDED by db/migrations/013_image_model_assignments.sql
+-- scripts/migrate.ts only reads db/migrations/. Do not apply this file:
+-- it seeds retired gpt-5.6-terra / gpt-image-2 model ids.
+--
 -- Migration: Add image_model_assignments table
 -- Date: 2026-07-31
 -- Purpose: Admin control for which image generation models are available to users
