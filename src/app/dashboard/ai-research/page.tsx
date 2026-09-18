@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { AiResearchFileChip, AiResearchMarkdown } from '@/components/AiResearchMarkdown';
+import { AiResearchSourcesPanel } from '@/components/AiResearchSourcesPanel';
 import {
   AI_RESEARCH_ASSISTANT_NAME,
   AI_RESEARCH_ATTACHMENT_ONLY_PROMPT,
@@ -17,6 +18,13 @@ import {
   inferSpreadsheetType,
   isAllowedImageType,
 } from '@/lib/ai-research';
+import {
+  RESEARCH_DISCONNECT_BANNER,
+  RESEARCH_FAILED_BANNER,
+  normalizeInspectorSource,
+  type InspectorResearchSource,
+  type ResearchGatherStatus,
+} from '@/lib/ai-research-inspector';
 
 interface ChatImage {
   mimeType: string;
@@ -123,6 +131,11 @@ export default function AIResearchPage() {
   const [loading, setLoading] = useState(false);
   const [streaming, setStreaming] = useState('');
   const [researchSourceCount, setResearchSourceCount] = useState<number | null>(null);
+  const [inspectorSources, setInspectorSources] = useState<InspectorResearchSource[]>([]);
+  const [groundingStatus, setGroundingStatus] = useState<ResearchGatherStatus | null>(null);
+  const [pinnedSourceUrls, setPinnedSourceUrls] = useState<string[]>([]);
+  const [sourcesPanelOpen, setSourcesPanelOpen] = useState(false);
+  const [researchNotice, setResearchNotice] = useState<{ tone: 'warning' | 'danger'; text: string } | null>(null);
   const [error, setError] = useState('');
   const [model, setModel] = useState('');
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -223,6 +236,11 @@ export default function AIResearchPage() {
         if (cancelled) return;
         setMessages(data.messages);
         setModel(data.model || '');
+        setInspectorSources([]);
+        setGroundingStatus(null);
+        setResearchSourceCount(null);
+        setResearchNotice(null);
+        setPinnedSourceUrls([]);
       })
       .catch(() => {
         if (!cancelled) setError('Failed to load conversation');
@@ -345,13 +363,20 @@ export default function AIResearchPage() {
     clearPendingAttachments();
     setStreaming('');
     setResearchSourceCount(null);
+    setInspectorSources([]);
+    setGroundingStatus(null);
+    setResearchNotice(null);
     setLoading(true);
     if (inputRef.current) inputRef.current.style.height = 'auto';
 
     try {
       const res = await fetch('/api/ai-research/chat', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: [userMsg], conversationId: activeConvoId }),
+        body: JSON.stringify({
+          messages: [userMsg],
+          conversationId: activeConvoId,
+          pinnedSourceUrls,
+        }),
       });
       if (!res.ok) {
         const d = await res.json().catch(() => ({}));
@@ -360,6 +385,7 @@ export default function AIResearchPage() {
       const reader = res.body!.getReader();
       const decoder = new TextDecoder();
       let buffer = '', content = '';
+      let streamCompleted = false;
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
@@ -369,7 +395,16 @@ export default function AIResearchPage() {
         for (const line of lines) {
           const t = line.trim();
           if (!t.startsWith('data: ')) continue;
-          let d: { type?: string; content?: string; conversationId?: string; model?: string; error?: string; sourceCount?: number };
+          let d: {
+            type?: string;
+            content?: string;
+            conversationId?: string;
+            model?: string;
+            error?: string;
+            sourceCount?: number;
+            grounding?: ResearchGatherStatus;
+            sources?: InspectorResearchSource[];
+          };
           try { d = JSON.parse(t.slice(6)); } catch { continue; }
           if (d.type === 'start') {
             if (d.conversationId && !activeConvoId) {
@@ -379,9 +414,27 @@ export default function AIResearchPage() {
             if (d.model) setModel(d.model);
             loadConversations();
           } else if (d.type === 'research') {
-            if (typeof d.sourceCount === 'number') setResearchSourceCount(d.sourceCount);
+            const sources = Array.isArray(d.sources)
+              ? d.sources.flatMap(item => {
+                  const normalized = normalizeInspectorSource(item);
+                  return normalized ? [normalized] : [];
+                })
+              : [];
+            const count = typeof d.sourceCount === 'number' ? d.sourceCount : sources.length;
+            setResearchSourceCount(count);
+            setInspectorSources(sources);
+            if (d.grounding === 'ok' || d.grounding === 'failed' || d.grounding === 'skipped' || d.grounding === 'empty') {
+              setGroundingStatus(d.grounding);
+            }
+            if (d.grounding === 'failed') {
+              setResearchNotice({ tone: 'danger', text: RESEARCH_FAILED_BANNER });
+              setSourcesPanelOpen(true);
+            } else if (sources.length > 0) {
+              setSourcesPanelOpen(true);
+            }
           } else if (d.type === 'token') { content += d.content || ''; setStreaming(content); }
           else if (d.type === 'done') {
+            streamCompleted = true;
             setStreaming('');
             setMessages(prev => [...prev, { role: 'assistant', content }]);
             if (d.conversationId && !activeConvoId) {
@@ -390,8 +443,18 @@ export default function AIResearchPage() {
             }
             setModel(d.model || model);
             loadConversations();
-          } else if (d.type === 'error') throw new Error(d.error);
+          } else if (d.type === 'error') {
+            streamCompleted = true;
+            throw new Error(d.error);
+          }
         }
+      }
+      if (!streamCompleted) {
+        if (content) {
+          setMessages(prev => [...prev, { role: 'assistant', content }]);
+        }
+        setStreaming('');
+        setResearchNotice({ tone: 'warning', text: RESEARCH_DISCONNECT_BANNER });
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'An error occurred');
@@ -400,10 +463,23 @@ export default function AIResearchPage() {
   };
 
   const newConversation = () => {
-    setActiveConvoId(null); setMessages([]); setStreaming(''); setResearchSourceCount(null); setError(''); setModel('');
+    setActiveConvoId(null);
+    setMessages([]);
+    setStreaming('');
+    setResearchSourceCount(null);
+    setInspectorSources([]);
+    setGroundingStatus(null);
+    setPinnedSourceUrls([]);
+    setResearchNotice(null);
+    setError('');
+    setModel('');
     clearPendingAttachments();
     setTimeout(() => inputRef.current?.focus(), 50);
     if (window.innerWidth < 768) setSidebarOpen(false);
+  };
+
+  const togglePinnedSource = (url: string) => {
+    setPinnedSourceUrls(prev => prev.includes(url) ? prev.filter(item => item !== url) : [...prev, url]);
   };
 
   const deleteConversation = async (id: string) => {
@@ -456,7 +532,7 @@ export default function AIResearchPage() {
   };
 
   return (
-    <div className="h-[calc(100vh-64px)] flex flex-col bg-[var(--mos-bg)]">
+    <div className="h-[calc(100vh-64px)] flex flex-col bg-[var(--mos-bg)] relative overflow-hidden">
       {/* Top bar */}
       <div className="flex items-center gap-3 px-4 py-2.5 border-b border-[var(--mos-border)] bg-[var(--mos-bg)] flex-shrink-0 flex-wrap">
         <button
@@ -551,6 +627,15 @@ export default function AIResearchPage() {
         </div>
 
         <button
+          type="button"
+          onClick={() => setSourcesPanelOpen(open => !open)}
+          aria-expanded={sourcesPanelOpen}
+          className="min-h-7 flex-shrink-0 rounded-lg border border-[var(--mos-border)] bg-[var(--mos-raised)] px-2 py-1 text-[11px] font-medium text-[var(--mos-text)] hover:bg-[var(--mos-hover)] transition-colors"
+          title="Sumber yang dipakai"
+        >
+          Sumber{typeof researchSourceCount === 'number' ? ` (${researchSourceCount})` : inspectorSources.length ? ` (${inspectorSources.length})` : ''}
+        </button>
+        <button
           onClick={newConversation}
           className="bg-indigo-600 hover:bg-indigo-500 text-white text-[11px] font-medium py-1.5 px-3 rounded-lg transition-colors flex-shrink-0"
         >
@@ -625,10 +710,10 @@ export default function AIResearchPage() {
                   </p>
                   <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 gap-2 w-full max-w-lg">
                     {[
+                      'Sella Susriana siapa di Dupoin?',
                       'What affects gold prices today?',
                       'Buatkan strategi konten Instagram untuk broker forex',
                       'Analisis sentimen pasar setelah Fed rate decision',
-                      'Impact of OPEC+ on crude oil prices',
                     ].map(s => (
                       <button
                         key={s}
@@ -700,7 +785,11 @@ export default function AIResearchPage() {
                       <p className="text-[10px] font-semibold text-[var(--mos-text-muted)] mb-1 px-1 flex items-center gap-2">
                         {AI_RESEARCH_ASSISTANT_NAME}
                         <span className="text-[9px] font-medium text-emerald-300/80">
-                          {researchSourceCount ? `Sedang meneliti ${researchSourceCount} sumber` : 'Sedang meneliti'}
+                          {groundingStatus === 'failed'
+                            ? 'Pencarian sumber gagal'
+                            : researchSourceCount
+                              ? `Sedang meneliti ${researchSourceCount} sumber`
+                              : 'Sedang meneliti'}
                         </span>
                       </p>
                       <div
@@ -738,6 +827,20 @@ export default function AIResearchPage() {
                         />
                       </div>
                     </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Gather / disconnect banners */}
+              {researchNotice && (
+                <div className="flex justify-center" role="status" aria-live="polite">
+                  <div className={`text-sm px-4 py-2.5 rounded-xl text-center max-w-md border ${
+                    researchNotice.tone === 'danger'
+                      ? 'bg-red-500/10 border-red-400/20 text-red-300'
+                      : 'bg-amber-400/10 border-amber-400/20 text-amber-100'
+                  }`}>
+                    {researchNotice.text}
+                    <button onClick={() => setResearchNotice(null)} className="ml-2 underline hover:opacity-80">Tutup</button>
                   </div>
                 </div>
               )}
@@ -845,6 +948,15 @@ export default function AIResearchPage() {
             </div>
           </div>
         </div>
+        <AiResearchSourcesPanel
+          open={sourcesPanelOpen}
+          onClose={() => setSourcesPanelOpen(false)}
+          sources={inspectorSources}
+          grounding={groundingStatus}
+          pinnedUrls={pinnedSourceUrls}
+          onTogglePin={togglePinnedSource}
+          loading={loading}
+        />
       </div>
       <style>{`
         .ai-research-typing-dots {

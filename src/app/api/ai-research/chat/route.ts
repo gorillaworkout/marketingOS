@@ -14,7 +14,13 @@ import {
   buildAiResearchChatMessages,
   gatherAiResearchContext,
   resolveAiResearchTemperature,
+  type ResearchContext,
 } from '@/lib/ai-research-grounding';
+import {
+  applyPinnedResearchSources,
+  buildResearchSsePayload,
+  parsePinnedSourceUrls,
+} from '@/lib/ai-research-inspector';
 import { AVAILABLE_MODELS } from '@/lib/openai';
 import { logTokenUsage } from '@/lib/token-log';
 import {
@@ -45,11 +51,11 @@ async function persistConversation(
 ) {
   const payload = JSON.stringify(messages);
   if (exists) {
-    await execute(
+    const updated = await execute(
       'UPDATE ai_research_conversations SET messages = ?, model = ?, updated_at = NOW() WHERE id = ? AND user_id = ?',
       [payload, model, id, userId],
     );
-    return;
+    if (updated > 0) return;
   }
   await execute(
     'INSERT INTO ai_research_conversations (id, user_id, messages, model, created_at, updated_at) VALUES (?, ?, ?, ?, NOW(), NOW())',
@@ -97,7 +103,7 @@ export async function POST(request: NextRequest) {
     return jsonError(auth.error, auth.status);
   }
 
-  let parsed: { messages: AiResearchChatMessage[]; conversationId?: string };
+  let parsed: { messages: AiResearchChatMessage[]; conversationId?: string; pinnedSourceUrls: string[] };
   try {
     parsed = parseChatRequest(await request.json());
     parsed.messages = hydrateMessageFiles(parsed.messages);
@@ -109,6 +115,7 @@ export async function POST(request: NextRequest) {
   }
 
   const { messages, conversationId } = parsed;
+  const pinnedSourceUrls = parsePinnedSourceUrls(parsed.pinnedSourceUrls);
   let model: string;
   try {
     model = await resolveFeatureModel(auth.id, 'ai-research');
@@ -117,8 +124,9 @@ export async function POST(request: NextRequest) {
   }
 
   let dbMessages: AiResearchChatMessage[] = [];
+  let history: { messages: unknown } | undefined;
   if (conversationId) {
-    const history = await queryOne<{ messages: unknown }>(
+    history = await queryOne<{ messages: unknown }>(
       'SELECT messages FROM ai_research_conversations WHERE id = ? AND user_id = ?',
       [conversationId, auth.id],
     );
@@ -130,7 +138,7 @@ export async function POST(request: NextRequest) {
   const latestUser = messages[messages.length - 1];
 
   try {
-    await persistConversation(convId, auth.id, pendingMessages, model, Boolean(conversationId));
+    await persistConversation(convId, auth.id, pendingMessages, model, Boolean(history));
   } catch (error) {
     return jsonError(error instanceof Error ? error.message : 'Failed to save conversation', 500);
   }
@@ -141,24 +149,34 @@ export async function POST(request: NextRequest) {
       try {
         controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'start', conversationId: convId, model })}\n\n`));
 
-        let research = null;
+        let research: ResearchContext | null = null;
+        let gatherFailed = false;
+        const query = latestUser?.content || '';
         try {
-          research = await gatherAiResearchContext(latestUser?.content || '');
+          research = await gatherAiResearchContext(query);
         } catch (error) {
           console.error('[ai-research] gatherAiResearchContext failed:', error);
+          gatherFailed = true;
           research = null;
         }
+        const researchEvent = buildResearchSsePayload({ query, research, failed: gatherFailed });
         controller.enqueue(encoder.encode(`data: ${JSON.stringify({
           type: 'research',
-          sourceCount: research?.sources.length || 0,
+          sourceCount: researchEvent.sourceCount,
+          grounding: researchEvent.grounding,
+          sources: researchEvent.sources,
         })}\n\n`));
+
+        const modelResearch = research && pinnedSourceUrls.length
+          ? applyPinnedResearchSources(research, pinnedSourceUrls)
+          : research;
 
         const apiMessages = buildAiResearchChatMessages({
           systemPrompt: AI_RESEARCH_SYSTEM_PROMPT,
           history: dbMessages,
           incoming: messages,
           maxHistory: MAX_HISTORY,
-          research,
+          research: modelResearch,
         });
 
         const response = await fetch(`${GORILLAWORKOUT_API_BASE}/chat/completions`, {
