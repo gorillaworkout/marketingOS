@@ -114,7 +114,6 @@ export const AI_RESEARCH_JINA_READER_PREFIX = 'https://r.jina.ai/';
 export const DDG_HTML_BLOCKED_WARNING =
   '[ai-research] DuckDuckGo HTML search was blocked (bot challenge / anomaly). Falling back to official seeds, Wikipedia, Instant Answer, optional search APIs, and Jina-backed page fetch.';
 const MAX_JINA_FETCHES = 12;
-const KNOWN_INCOMPLETE_TLS_HOSTS = new Set(['bappebti.go.id', 'www.bappebti.go.id']);
 
 const FACT_NEEDLES = [
   'bappebti', 'ojk', 'licensed', 'regulated', 'perizinan', 'lisensi',
@@ -514,15 +513,6 @@ export function isDuckDuckGoAnomalyPage(html: string): boolean {
     return true;
   }
   return false;
-}
-
-export function shouldPreferJinaReader(url: string): boolean {
-  try {
-    const host = new URL(url).hostname.toLowerCase();
-    return KNOWN_INCOMPLETE_TLS_HOSTS.has(host);
-  } catch {
-    return false;
-  }
 }
 
 export function jinaReaderUrl(target: string): string | null {
@@ -1255,8 +1245,9 @@ async function fetchPageSource(
     }
   };
 
-  const preferJina = shouldPreferJinaReader(candidate.url);
-  const attempts = preferJina ? [tryJina, tryDirect] : [tryDirect, tryJina];
+  // Native fetch first (VPS now has the Sectigo intermediate for bappebti.go.id).
+  // Jina stays a fallback for TLS/network failures and hosts that bot-block datacenters.
+  const attempts = [tryDirect, tryJina];
   let best: ResearchSource | null = null;
   for (const attempt of attempts) {
     const result = await attempt();

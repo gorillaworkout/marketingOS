@@ -42,7 +42,6 @@ import {
   rankResearchSources,
   researchSourceHost,
   selectFetchCandidates,
-  shouldPreferJinaReader,
   shouldResearchQuery,
   sourcesHaveUsefulHits,
   unwrapSearchResultUrl,
@@ -465,9 +464,6 @@ function tlsLeafError(): never {
 test('detects DDG anomaly pages and never wraps private URLs with Jina', () => {
   assert.equal(isDuckDuckGoAnomalyPage(ddgAnomalyHtml), true);
   assert.equal(isDuckDuckGoAnomalyPage(ddgHtml), false);
-  assert.equal(shouldPreferJinaReader('https://bappebti.go.id/pialang_berjangka/detail/423'), true);
-  assert.equal(shouldPreferJinaReader('https://www.bappebti.go.id/'), true);
-  assert.equal(shouldPreferJinaReader('https://ceklegalitas.bappebti.go.id/'), false);
   assert.equal(
     jinaReaderUrl('https://bappebti.go.id/pialang_berjangka/detail/423'),
     'https://r.jina.ai/https://bappebti.go.id/pialang_berjangka/detail/423',
@@ -654,6 +650,39 @@ test('TLS leaf-signature failures fall back to Jina Reader for official pages', 
   assert.ok(calls.some(url => url.startsWith('https://r.jina.ai/https://www.dupoin.co.id')));
   assert.ok(result.sources.some(source => source.url.includes('dupoin.co.id') && /BAPPEBTI/i.test(source.snippet)));
   assert.ok(!result.sources.some(source => source.url.startsWith('https://r.jina.ai/')));
+});
+
+test('native Bappebti HTTP 200 is used first; Jina remains fallback only', async () => {
+  const calls: string[] = [];
+  const fetchImpl: typeof fetch = async input => {
+    const url = String(input);
+    calls.push(url);
+    if (url.includes('html.duckduckgo.com')) {
+      return new Response(ddgAnomalyHtml, { status: 202, headers: { 'content-type': 'text/html' } });
+    }
+    if (url.includes('api.duckduckgo.com') || url.includes('api.php')) {
+      return new Response(JSON.stringify({ query: { search: [] }, Heading: '', AbstractText: '', Results: [] }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }
+    if (url.includes('bappebti.go.id') && !url.startsWith('https://r.jina.ai/')) {
+      return new Response(sellaBappebtiHtml, { status: 200, headers: { 'content-type': 'text/html' } });
+    }
+    if (url.includes('dupoin.co.id') || url.includes('dupoin.com')) {
+      return new Response(officialHtml, { status: 200, headers: { 'content-type': 'text/html' } });
+    }
+    return new Response('not found', { status: 404 });
+  };
+
+  const result = await gatherAiResearchContext(sellaQuery, {
+    fetchImpl,
+    timeoutMs: 8_000,
+    logger: { warn() { /* DDG blocked */ } },
+  });
+  assert.ok(calls.some(url => url.includes('bappebti.go.id') && !url.startsWith('https://r.jina.ai/')));
+  assert.ok(!calls.some(url => url.startsWith('https://r.jina.ai/') && url.includes('bappebti.go.id')));
+  assert.ok(result.sources.some(source => /Sella Susriana/i.test(source.snippet)));
 });
 
 test('optional Serper API is used when DDG HTML is blocked', async () => {
