@@ -137,6 +137,17 @@ test('Wikipedia parsers keep extracts as grounded snippets', () => {
   assert.match(extract!.snippet, /pialang berjangka/);
 });
 
+test('ranking prefers snippet-rich official hits over empty regulator shells', () => {
+  const ranked = rankResearchSources([
+    { title: 'Empty Bappebti home', url: 'https://bappebti.go.id/', snippet: '', origin: 'indonesia' },
+    { title: 'Dupoin licenses', url: 'https://www.dupoin.co.id/about-us/licenses', snippet: 'PT Dupoin Futures Indonesia is fully licensed and regulated by BAPPEBTI.', origin: 'indonesia' },
+    { title: 'Sella listing', url: 'https://bappebti.go.id/pialang_berjangka/detail/423', snippet: 'Sella Susriana tercatat sebagai Wakil Pialang Berjangka pada PT Dupoin Futures Indonesia.', origin: 'indonesia' },
+  ], true, 'sella susriana siapa sih jir di dupoin');
+  assert.equal(ranked[0].url, 'https://bappebti.go.id/pialang_berjangka/detail/423');
+  assert.ok(ranked.some(source => source.url.includes('dupoin.co.id')));
+  assert.notEqual(ranked[0].snippet, '');
+});
+
 test('ranking prefers official and Indonesia sources for Indonesian queries', () => {
   const ranked = rankResearchSources([
     { title: 'Wire', url: 'https://www.reuters.com/markets/dupoin', snippet: 'International brief about the broker.', origin: 'international' },

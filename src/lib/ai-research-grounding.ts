@@ -76,6 +76,8 @@ const BAPPEBTI_SEEDS = [
   'https://bappebti.go.id/',
   'https://bappebti.go.id/pialang_berjangka',
   'https://bappebti.go.id/pialang_berjangka/detail/423',
+  'https://bappebti.go.id/pialang_berjangka_wakil_pialang',
+  'https://ceklegalitas.bappebti.go.id/',
   'https://www.bappebti.go.id/',
 ];
 
@@ -514,6 +516,8 @@ export function rankResearchSources(
     if (indonesiaPreferred && source.origin === 'indonesia') score += 20;
     if (names.some(name => blob.includes(name))) score += 30;
     if (/wakil pialang|pialang berjangka/.test(blob)) score += 20;
+    if (!source.snippet.trim()) score -= 80;
+    else if (source.snippet.length < 40) score -= 20;
     if (source.snippet.length > 80) score += 5;
     if (source.snippet.length > 400) score += 4;
     return { source, index, score };
@@ -820,10 +824,12 @@ export async function gatherAiResearchContext(
 
   const fetchBudget = Math.max(1_200, remainingMs(deadline, now));
   const fetched = await Promise.all(ranked.map(source => fetchPageSource(source, query, fetchImpl, maxBytes, fetchBudget)));
+  const withText = fetched.filter(source => source.snippet.trim().length >= 40);
   const usable = fetched.filter(source => isUsableResearchSource(source, query));
+  const selected = withText.length >= 3 ? withText : usable.length ? usable : fetched;
   return {
     query,
     indonesiaPreferred,
-    sources: rankResearchSources(usable.length ? usable : fetched, indonesiaPreferred, query),
+    sources: rankResearchSources(selected, indonesiaPreferred, query),
   };
 }
