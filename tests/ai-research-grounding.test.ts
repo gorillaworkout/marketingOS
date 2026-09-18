@@ -14,6 +14,7 @@ import {
   AI_RESEARCH_GROUNDED_PERSON_MUST_ANSWER,
   AI_RESEARCH_MAX_SOURCES,
   AI_RESEARCH_NO_INVENT_FACTS,
+  AI_RESEARCH_OTHER_PUBLIC_TRACE_PREFIX,
   AI_RESEARCH_PERSON_FACT_PREFIX,
   AI_RESEARCH_PERSON_HIT_TEMPERATURE,
   AI_RESEARCH_PERSON_NAME_HIT,
@@ -489,7 +490,7 @@ test('Sella Susriana + Dupoin research grounds Bappebti wakil pialang hits inste
   assert.match(AI_RESEARCH_SYSTEM_PROMPT, /belum ada sumber publik terverifikasi/);
   assert.match(AI_RESEARCH_SYSTEM_PROMPT, /daftar CPNS|profil freelancer/);
   assert.match(AI_RESEARCH_SYSTEM_PROMPT, /Jangan menggabungkan identitas/);
-  assert.match(AI_RESEARCH_SYSTEM_PROMPT, /pengguna yang memutuskan/);
+  assert.match(AI_RESEARCH_SYSTEM_PROMPT, /[Pp]engguna yang memutuskan/);
 });
 
 test('long Bappebti broker pages keep wakil pialang heading with a late person name', () => {
@@ -676,14 +677,20 @@ test('multi-source person fixture keeps PERSON_FACT and requires covering other 
   assert.ok(instruction);
   assert.match(instruction!, /PERSON_FACT: Sella Susriana \| Wakil Pialang/);
   assert.equal(instruction!.includes(AI_RESEARCH_GROUNDED_PERSON_MUST_ANSWER), true);
-  assert.match(instruction!, /surface ALL other grounded excerpts/i);
+  assert.match(instruction!, /dump every OTHER_PUBLIC_TRACE/i);
   assert.match(instruction!, /may or may not be the same person/i);
   assert.match(instruction!, /Do not withhold other traces/);
   assert.doesNotMatch(instruction!, /MUST answer from this roster fact/);
+  assert.match(instruction!, new RegExp(`${AI_RESEARCH_OTHER_PUBLIC_TRACE_PREFIX} Sella Susriana`));
+  assert.match(instruction!, /OTHER_PUBLIC_TRACE:.*sscasn\.bkn\.go\.id|OTHER_PUBLIC_TRACE:.*sribulancer\.com/);
+  assert.match(instruction!, /sscasn\.bkn\.go\.id/);
+  assert.match(instruction!, /sribulancer\.com/);
 
   const grounded = formatResearchContext(sellaMultiTraceResearch);
   assert.match(grounded, /PERSON_FACT: Sella Susriana \| Wakil Pialang/);
   assert.equal(grounded.includes(AI_RESEARCH_SYNTHESIZE_ALL_TRACES), true);
+  assert.match(grounded, /OTHER_PUBLIC_TRACE:/);
+  assert.match(grounded, /do not withhold, over-curate, or save traces for later/);
   assert.match(grounded, /Pranata Laboratorium Pendidikan Ahli Pertama/);
   assert.match(grounded, /Ilmu Tanah Universitas Andalas/);
   assert.match(grounded, /administrasi dan KYC/);
@@ -698,6 +705,7 @@ test('multi-source person fixture keeps PERSON_FACT and requires covering other 
   });
   const blob = messages.map(message => String(message.content)).join('\n');
   assert.match(blob, /PERSON_FACT: Sella Susriana \| Wakil Pialang/);
+  assert.match(blob, /OTHER_PUBLIC_TRACE:/);
   assert.match(blob, new RegExp(AI_RESEARCH_SYNTHESIZE_ALL_TRACES.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
   assert.match(blob, /bappebti\.go\.id/);
   assert.match(blob, /sscasn\.bkn\.go\.id|bkn\.go\.id/);

@@ -46,10 +46,11 @@ export const AI_RESEARCH_PERSON_NAME_HIT =
   'The person name from the user query appears in the retrieved excerpts. Treat official roster hits as verified for that role. Synthesize the stated role, institution, and ALL other public traces and cite the titles + URLs. Clearly separate the official Dupoin/Bappebti role from other public name matches that may or may not be the same person. Do not refuse with “no verified public sources” or “belum ada sumber publik terverifikasi” when the name is present. Do not invent a biography beyond what these excerpts state.';
 export const AI_RESEARCH_GROUNDED_PERSON_HEADER = 'GROUNDED_PERSON_FACT:';
 export const AI_RESEARCH_PERSON_FACT_PREFIX = 'PERSON_FACT:';
+export const AI_RESEARCH_OTHER_PUBLIC_TRACE_PREFIX = 'OTHER_PUBLIC_TRACE:';
 export const AI_RESEARCH_SYNTHESIZE_ALL_TRACES =
-  'Surface ALL retrieved grounded traces with citations — do not withhold or over-curate. Separate official Dupoin/Bappebti role from other public name matches that may or may not be the same person. The user decides which traces to trust.';
+  'Surface ALL retrieved grounded traces with citations — do not withhold, over-curate, or save traces for later. List every PERSON_FACT and OTHER_PUBLIC_TRACE. Separate official Dupoin/Bappebti role from other public name matches that may or may not be the same person. The user decides which traces to trust.';
 export const AI_RESEARCH_GROUNDED_PERSON_MUST_ANSWER =
-  'Cite that URL. Do not say unconfirmed / tidak terkonfirmasi. Do not say “belum bisa dipastikan” or “tidak ada sumber terkonfirmasi”. State this official roster role, then surface ALL other grounded excerpts with citations. Separate (a) official Dupoin/Bappebti role from (b) other public name matches that may or may not be the same person. Do not invent a biography or merge identities without evidence. Do not withhold other traces. Prefer completeness over a roster-only one-liner.';
+  'Cite that URL. Do not say unconfirmed / tidak terkonfirmasi. Do not say “belum bisa dipastikan” or “tidak ada sumber terkonfirmasi”. State this official roster PERSON_FACT, then dump every OTHER_PUBLIC_TRACE and GROUNDING_SOURCES excerpt with citations. Separate (a) official Dupoin/Bappebti role from (b) other public name matches that may or may not be the same person. Do not invent a biography or merge identities without evidence. Do not withhold other traces. Prefer completeness over a roster-only one-liner.';
 export const AI_RESEARCH_DEFAULT_TEMPERATURE = 0.7;
 export const AI_RESEARCH_PERSON_HIT_TEMPERATURE = 0.25;
 
@@ -1368,18 +1369,27 @@ export function extractGroundedPersonFacts(context: ResearchContext): GroundedPe
   return facts;
 }
 
+export function isOfficialPersonFact(fact: GroundedPersonFact): boolean {
+  return isOfficialResearchHost(fact.url);
+}
+
 export function formatGroundedPersonFactLine(fact: GroundedPersonFact): string {
   const section = fact.section || 'listed in excerpt';
-  return `${AI_RESEARCH_PERSON_FACT_PREFIX} ${fact.name} | ${section} | ${fact.url}`;
+  const prefix = isOfficialPersonFact(fact)
+    ? AI_RESEARCH_PERSON_FACT_PREFIX
+    : AI_RESEARCH_OTHER_PUBLIC_TRACE_PREFIX;
+  return `${prefix} ${fact.name} | ${section} | ${fact.url}`;
 }
 
 export function formatGroundedPersonInstruction(facts: GroundedPersonFact[]): string | null {
   if (!facts.length) return null;
+  const official = facts.filter(isOfficialPersonFact);
+  const other = facts.filter(fact => !isOfficialPersonFact(fact));
   return [
     AI_RESEARCH_GROUNDED_PERSON_HEADER,
     AI_RESEARCH_GROUNDED_PERSON_MUST_ANSWER,
     '',
-    ...facts.slice(0, 6).map(formatGroundedPersonFactLine),
+    ...[...official, ...other].slice(0, 8).map(formatGroundedPersonFactLine),
   ].join('\n');
 }
 
