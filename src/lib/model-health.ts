@@ -1,3 +1,5 @@
+import { GORILLAWORKOUT_API_BASE, GORILLAWORKOUT_API_KEY } from '@/lib/gateway-config';
+
 export const MODEL_HEALTH_TIMEOUT_MS = 18_000;
 export const MODEL_HEALTH_MAX_TOKENS = 48;
 export const MODEL_HEALTH_PROMPT = 'ping';
@@ -6,9 +8,6 @@ export const MODEL_HEALTH_ERROR_MAX_LENGTH = 180;
 /** Cloudflare 1010 blocks non-browser User-Agents on the production gateway. */
 export const GATEWAY_BROWSER_USER_AGENT =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
-
-const GORILLAWORKOUT_API_BASE = process.env.GORILLAWORKOUT_API_BASE || 'https://llmdupoin.gorillaworkout.id/v1';
-const GORILLAWORKOUT_API_KEY = process.env.GORILLAWORKOUT_API_KEY || '';
 
 export type ModelHealthStatus = 'ok' | 'fail' | 'stale';
 

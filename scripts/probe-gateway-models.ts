@@ -1,18 +1,37 @@
+/**
+ * Probe the GorillaWorkout OpenAI-compatible gateway for live chat models.
+ *
+ * Default host is llmdupoin (override with GORILLAWORKOUT_API_BASE).
+ * Requires GORILLAWORKOUT_API_KEY — do not commit secrets.
+ *
+ * VPS / production verify:
+ *   GORILLAWORKOUT_API_BASE=https://llmdupoin.gorillaworkout.id/v1 \
+ *   GORILLAWORKOUT_API_KEY=... \
+ *     npx tsx scripts/probe-gateway-models.ts
+ *
+ * Optional extra ids: pass them as argv (probed even if /models omitted them).
+ */
 import { config } from 'dotenv';
 import { parseGatewayCompletion } from '../src/lib/gateway-response';
+import { resolveGorillaWorkoutApiBase, resolveGorillaWorkoutApiKey } from '../src/lib/gateway-config';
+import { GATEWAY_BROWSER_USER_AGENT } from '../src/lib/model-health';
 
 config({ path: '.env.local' });
+config();
 
-const BASE = process.env.GORILLAWORKOUT_API_BASE || 'https://llm.gorillaworkout.id/v1';
-const KEY = process.env.GORILLAWORKOUT_API_KEY || '';
-
-async function probe(model: string): Promise<{ model: string; ok: boolean; note: string }> {
+async function probe(base: string, key: string, model: string): Promise<{ model: string; ok: boolean; note: string }> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 90_000);
   try {
-    const response = await fetch(`${BASE}/chat/completions`, {
+    const response = await fetch(`${base}/chat/completions`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${KEY}` },
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${key}`,
+        'User-Agent': GATEWAY_BROWSER_USER_AGENT,
+        'HTTP-Referer': 'https://marketing-aws.gorillaworkout.id',
+        'X-Title': 'MarketingOS gateway probe',
+      },
       body: JSON.stringify({
         model,
         messages: [{ role: 'user', content: 'Reply with exactly: OK' }],
@@ -45,7 +64,20 @@ async function probe(model: string): Promise<{ model: string; ok: boolean; note:
 }
 
 async function main() {
-  const listed = await fetch(`${BASE}/models`, { headers: { Authorization: `Bearer ${KEY}` } })
+  const BASE = resolveGorillaWorkoutApiBase();
+  const KEY = resolveGorillaWorkoutApiKey();
+  if (!KEY) {
+    console.error('GORILLAWORKOUT_API_KEY is not set. Load .env.local or export it, then re-run.');
+    console.error(`Would probe: ${BASE}`);
+    process.exit(2);
+  }
+
+  const listed = await fetch(`${BASE}/models`, {
+    headers: {
+      Authorization: `Bearer ${KEY}`,
+      'User-Agent': GATEWAY_BROWSER_USER_AGENT,
+    },
+  })
     .then(r => r.json())
     .then(d => (d.data || []).map((m: { id: string }) => m.id) as string[])
     .catch(() => [] as string[]);
@@ -58,7 +90,7 @@ async function main() {
   const results: { model: string; ok: boolean; note: string }[] = [];
   const CONCURRENCY = 4;
   for (let i = 0; i < models.length; i += CONCURRENCY) {
-    const batch = await Promise.all(models.slice(i, i + CONCURRENCY).map(probe));
+    const batch = await Promise.all(models.slice(i, i + CONCURRENCY).map(model => probe(BASE, KEY, model)));
     for (const entry of batch) {
       console.log(`${entry.ok ? 'PASS' : 'FAIL'}  ${entry.model.padEnd(38)} ${entry.note}`);
       results.push(entry);
@@ -72,7 +104,7 @@ async function main() {
     console.log(`\n--- retrying ${retryable.length} failures once ---`);
     for (const entry of retryable) {
       await new Promise(resolve => setTimeout(resolve, 3_000));
-      const second = await probe(entry.model);
+      const second = await probe(BASE, KEY, entry.model);
       console.log(`${second.ok ? 'PASS' : 'FAIL'}  ${second.model.padEnd(38)} ${second.note}`);
       const index = results.findIndex(r => r.model === entry.model);
       results[index] = second;

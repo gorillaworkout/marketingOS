@@ -1,5 +1,5 @@
 import { queryOne } from '@/lib/database';
-import { AVAILABLE_MODELS, type ModelInfo } from '@/lib/openai';
+import { AVAILABLE_MODELS, PREFERRED_CODEX_MODEL, type ModelInfo } from '@/lib/openai';
 
 export const GENERATION_FEATURES = [
   'social-post',
@@ -59,7 +59,7 @@ export const FEATURE_METADATA: Record<GenerationFeature, FeatureMetadata> = {
 };
 
 // Every id here must exist in AVAILABLE_MODELS and pass scripts/probe-gateway-models.ts.
-const DEFAULT_FEATURE_ASSIGNMENTS: Record<GenerationFeature, {
+export const DEFAULT_FEATURE_ASSIGNMENTS: Record<GenerationFeature, {
   allowedModels: string[];
   defaultModel: string;
 }> = {
@@ -84,8 +84,16 @@ const DEFAULT_FEATURE_ASSIGNMENTS: Record<GenerationFeature, {
     defaultModel: 'ag/claude-sonnet-4-6',
   },
   'ai-research': {
-    allowedModels: ['ag/gemini-3-flash', 'ag/gemini-3.6-flash-high', 'ag/claude-sonnet-4-6', 'ag/gemini-3.1-pro-low'],
-    defaultModel: 'ag/gemini-3-flash',
+    allowedModels: [
+      PREFERRED_CODEX_MODEL,
+      'cx/gpt-5.6-terra',
+      'cx/gpt-5.6-luna',
+      'ag/gemini-3-flash',
+      'ag/gemini-3.6-flash-high',
+      'ag/claude-sonnet-4-6',
+      'ag/gemini-3.1-pro-low',
+    ],
+    defaultModel: PREFERRED_CODEX_MODEL,
   },
 };
 

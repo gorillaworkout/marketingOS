@@ -40,6 +40,26 @@ test('012 creates ai_research_conversations and expands department features idem
   assert.deepEqual(missing, [], '012 would write models that are not in AVAILABLE_MODELS');
 });
 
+test('014 restores Codex on AI Research, drops residual Kimi, and is idempotent', () => {
+  const restore = readFileSync('db/migrations/014_restore_codex_ai_research.sql', 'utf8');
+  const executable = withoutSqlComments(restore);
+  assert.match(restore, /BEGIN;[\s\S]*COMMIT;/);
+  assert.match(restore, /ON CONFLICT \(feature_key\) DO NOTHING/);
+  assert.doesNotMatch(restore, /DROP TABLE|DELETE FROM|TRUNCATE/i);
+  assert.match(executable, /cx\/gpt-5\.6-sol/);
+  assert.match(executable, /cx\/gpt-5\.6-terra/);
+  assert.match(executable, /cx\/gpt-5\.6-luna/);
+  assert.match(executable, /feature_key = 'ai-research'/);
+  assert.match(executable, /kimi\/%/);
+  assert.match(executable, /tr\/moonshotai\/%/);
+  assert.doesNotMatch(executable, /kimi\/k3|kimi\/kimi/);
+  const quoted = [...executable.matchAll(/'((?:ag|cc|cx|kimi|tr|lr)\/[^']+|pecut-free)'/g)]
+    .map(match => match[1])
+    .filter(id => !id.includes('%'));
+  const missing = quoted.filter(id => !catalog.has(id));
+  assert.deepEqual(missing, [], '014 would write models that are not in AVAILABLE_MODELS');
+});
+
 test('013 creates image_model_assignments with the current catalog and is safe on existing prod', () => {
   const executable = withoutSqlComments(imageAssignments);
   assert.match(imageAssignments, /CREATE TABLE IF NOT EXISTS image_model_assignments/);
