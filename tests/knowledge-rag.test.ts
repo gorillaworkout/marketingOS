@@ -4,10 +4,11 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import {
   buildSimilarEntriesQuery,
+  findSimilarEntries,
   getEmbedding,
   rankSimilarEntries,
 } from '../src/lib/embeddings';
-import { formatKnowledgeContext } from '../src/lib/openai';
+import { fetchKnowledgeContext, formatKnowledgeContext } from '../src/lib/openai';
 
 const root = path.resolve(import.meta.dirname, '..');
 const read = (file: string) => readFileSync(path.join(root, file), 'utf8');
@@ -40,6 +41,12 @@ test('rankSimilarEntries prefers the closer brief and ignores invalid embeddings
   const ranked = rankSimilarEntries(query, [otherUser, broken, mine], 5);
   assert.deepEqual(ranked.map(entry => entry.id), ['mine', 'theirs']);
   assert.equal(ranked[0].user_id, 'user-a');
+});
+
+test('empty user or query never retrieves knowledge context', async () => {
+  assert.deepEqual(await findSimilarEntries('risk management', { userId: '' }), []);
+  assert.equal(await fetchKnowledgeContext('', 'risk management', 'social-post', 5), '');
+  assert.equal(await fetchKnowledgeContext('user-a', '   ', 'social-post', 5), '');
 });
 
 test('formatKnowledgeContext builds a RAG prompt block and stays empty without hits', () => {
