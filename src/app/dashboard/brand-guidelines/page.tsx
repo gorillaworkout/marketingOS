@@ -60,6 +60,7 @@ export default function BrandGuidelinesPage() {
   const handleSave = async () => {
     if (!form.brand_name) return;
     const body = {
+      ...(editing ? { id: editing.id } : {}),
       brand_name: form.brand_name,
       tone_of_voice: form.tone_of_voice || null,
       target_market: form.target_market || null,
@@ -70,8 +71,7 @@ export default function BrandGuidelinesPage() {
     };
 
     const method = editing ? 'PUT' : 'POST';
-    const url = editing ? `/api/brand-guidelines?id=${editing.id}` : '/api/brand-guidelines';
-    const res = await fetch(url, {
+    const res = await fetch('/api/brand-guidelines', {
       method,
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
@@ -81,7 +81,10 @@ export default function BrandGuidelinesPage() {
       setTimeout(() => setSaveMsg(''), 3000);
       resetForm();
       fetchGuidelines();
+      return;
     }
+    const data = await res.json().catch(() => ({})) as { error?: string };
+    setSaveMsg(data.error || 'Failed to save guideline.');
   };
 
   const handleDelete = async (id: string) => {
@@ -96,7 +99,11 @@ export default function BrandGuidelinesPage() {
         <Button variant="primary" onClick={() => { resetForm(); setShowForm(true); }}>New guideline</Button>
       } />
 
-      {saveMsg && <div className="bg-green-500/10 border border-green-500/20 text-green-400 px-4 py-3 rounded-lg">{saveMsg}</div>}
+      {saveMsg && (
+        <div className={`px-4 py-3 rounded-lg border ${saveMsg.startsWith('Failed') || saveMsg.includes('required') || saveMsg.includes('not found')
+          ? 'bg-red-500/10 border-red-500/20 text-red-400'
+          : 'bg-green-500/10 border-green-500/20 text-green-400'}`}>{saveMsg}</div>
+      )}
 
       {/* Form */}
       {showForm && (
