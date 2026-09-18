@@ -13,6 +13,7 @@ import {
   AI_RESEARCH_NO_INVENT_FACTS,
   buildAiResearchChatMessages,
   buildFallbackSearchQueries,
+  buildNewsRssQueries,
   buildOpenWebSearchQueries,
   buildSearchQueries,
   buildWikipediaQueries,
@@ -28,13 +29,18 @@ import {
   injectResearchContext,
   isDeepPersonResearch,
   isDuckDuckGoAnomalyPage,
+  isEmptyOrLoginWallSource,
+  isLikelyLoginWallHost,
   jinaReaderUrl,
   officialSeedUrls,
   parseBraveResults,
   parseDuckDuckGoInstantAnswer,
   parseDuckDuckGoResults,
+  parseNewsRss,
   parseSerperResults,
   parseTavilyResults,
+  parseWikidataEntities,
+  parseWikidataSearch,
   parseWikipediaExtract,
   parseWikipediaOpensearch,
   parseWikipediaSearch,
@@ -42,9 +48,11 @@ import {
   rankResearchSources,
   researchSourceHost,
   selectFetchCandidates,
+  SERPER_EXHAUSTED_WARNING,
   shouldResearchQuery,
   sourcesHaveUsefulHits,
   unwrapSearchResultUrl,
+  wikipediaSearchHosts,
 } from '../src/lib/ai-research-grounding';
 
 const read = (path: string) => readFileSync(path, 'utf8');
@@ -291,6 +299,8 @@ test('AI Research chat route grounds answers, raises the token budget, and updat
   assert.match(envExample, /SERPER_API_KEY=/);
   assert.match(envExample, /BRAVE_SEARCH_API_KEY=/);
   assert.match(envExample, /TAVILY_API_KEY=/);
+  assert.match(envExample, /Brave is not required/);
+  assert.match(envExample, /Serper free tier/);
   assert.match(lib, /Jangan mengarang fakta perusahaan/);
   assert.match(lib, /utamakan sumber Indonesia/);
   assert.equal(AI_RESEARCH_MAX_OUTPUT_TOKENS, 4000);
@@ -349,6 +359,9 @@ test('person + Dupoin queries extract names and run a multi-query regulator brow
   assert.ok(wikiQueries.some(query => /Sella Susriana/i.test(query)));
   assert.ok(wikiQueries.some(query => /Dupoin Futures Indonesia/i.test(query)));
   assert.ok(wikiQueries.some(query => /Bappebti/i.test(query)));
+  assert.deepEqual(wikipediaSearchHosts(true), ['id.wikipedia.org', 'en.wikipedia.org']);
+  assert.deepEqual(wikipediaSearchHosts(false), ['en.wikipedia.org', 'id.wikipedia.org']);
+  assert.ok(buildNewsRssQueries(sellaQuery).some(query => /Sella Susriana/i.test(query)));
 
   const fallback = buildFallbackSearchQueries(sellaQuery);
   assert.ok(fallback.length >= 1);
@@ -493,10 +506,24 @@ test('structured search parsers keep public hits from Instant Answer and optiona
     organic: [
       { title: 'Wakil pialang Dupoin', link: 'https://bappebti.go.id/pialang_berjangka/detail/423', snippet: 'Sella Susriana tercatat sebagai wakil pialang.' },
       { title: 'Nope', link: 'https://html.duckduckgo.com/html/?q=x', snippet: 'search' },
+      { title: 'IG', link: 'https://www.instagram.com/p/abc123/', snippet: 'Log in to Instagram to see photos and videos.' },
     ],
+    news: [
+      { title: 'CNBC Dupoin', link: 'https://www.cnbcindonesia.com/market/dupoin', snippet: 'Liputan pialang berjangka.' },
+    ],
+    knowledgeGraph: {
+      title: 'Bappebti',
+      description: 'Badan Pengawas Perdagangan Berjangka Komoditi.',
+      website: 'https://www.bappebti.go.id/',
+      descriptionLink: 'https://id.wikipedia.org/wiki/Bappebti',
+    },
   });
-  assert.equal(serper.length, 1);
-  assert.match(serper[0].snippet, /Sella Susriana/);
+  assert.ok(serper.some(source => source.url.includes('bappebti.go.id/pialang_berjangka')));
+  assert.ok(serper.some(source => source.url.includes('cnbcindonesia.com')));
+  assert.ok(serper.some(source => source.url.includes('wikipedia.org')));
+  assert.ok(!serper.some(source => source.url.includes('instagram.com')));
+  assert.ok(!serper.some(source => source.url.includes('html.duckduckgo.com')));
+  assert.match(serper.find(source => source.url.includes('pialang_berjangka'))!.snippet, /Sella Susriana/);
 
   const brave = parseBraveResults({
     web: { results: [{ title: 'Dupoin', url: 'https://www.dupoin.co.id/about-us', description: 'Lisensi Bappebti.' }] },
@@ -761,9 +788,362 @@ test('optional Serper API is used when DDG HTML is blocked', async () => {
     logger: { warn() { /* DDG still blocked; Serper supplies URLs */ } },
   });
   const hosts = new Set(result.sources.map(source => researchSourceHost(source.url)));
+  const serperCalls = calls.filter(url => url.includes('google.serper.dev/search'));
+  const ddgHtmlCalls = calls.filter(url => url.includes('html.duckduckgo.com'));
+  assert.ok(serperCalls.length >= 2, `Serper must run multiple open-web queries, got ${serperCalls.length}`);
+  assert.equal(ddgHtmlCalls.length, 0, 'Serper hits skip DuckDuckGo HTML');
+  assert.ok(!calls.some(url => url.includes('api.search.brave.com')), 'Brave is not required');
   assert.ok(calls.some(url => url.includes('google.serper.dev/search')));
   assert.ok(result.sources.some(source => /Sella Susriana/i.test(source.snippet)));
   assert.ok(result.sources.some(source => /bappebti\.go\.id/i.test(source.url)), 'official seeds remain a floor');
   assert.ok(result.sources.some(source => source.url.includes('linkedin.com') || source.url.includes('cnbcindonesia.com') || source.url.includes('bloomberg.com')));
   assert.ok(hosts.size >= 4, `search APIs must keep diverse domains, got ${[...hosts].join(', ')}`);
+  assert.match(formatResearchContext(result), /Synthesize a rich answer/);
+  assert.match(formatResearchContext(result), new RegExp(AI_RESEARCH_NO_INVENT_FACTS));
+});
+
+const instagramLoginHtml = `<html><head><title>Instagram</title></head><body>
+<h1>Log in to Instagram</h1>
+<p>See photos and videos from your friends.</p>
+<form><input placeholder="Phone number, username, or email"><button>Log in</button></form>
+<p>Sign up to see photos and videos.</p>
+</body></html>`;
+
+const newsRssXml = `<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0"><channel>
+<title>Google News</title>
+<item>
+  <title>Sella Susriana disebut wakil pialang Dupoin - CNBC Indonesia</title>
+  <link>https://www.cnbcindonesia.com/market/sella-susriana-dupoin</link>
+  <description>Liputan Sella Susriana sebagai wakil pialang di PT Dupoin Futures Indonesia.</description>
+</item>
+<item>
+  <title>Login bait</title>
+  <link>https://www.instagram.com/p/hidden/</link>
+  <description>Log in to Instagram to continue.</description>
+</item>
+</channel></rss>`;
+
+test('detects Instagram login walls and keeps official pages', () => {
+  assert.equal(isLikelyLoginWallHost('https://www.instagram.com/p/abc/'), true);
+  assert.equal(isLikelyLoginWallHost('https://www.dupoin.co.id/'), false);
+  assert.equal(isEmptyOrLoginWallSource(instagramLoginHtml, 'https://www.instagram.com/p/abc/', 'Instagram'), true);
+  assert.equal(isEmptyOrLoginWallSource(officialHtml, 'https://www.dupoin.co.id/', 'Dupoin'), false);
+
+  const wikiHits = parseWikidataSearch({
+    search: [{
+      id: 'Q123456',
+      label: 'Bappebti',
+      description: 'Indonesian commodity futures regulator',
+      concepturi: 'https://www.wikidata.org/wiki/Q123456',
+    }],
+  });
+  assert.equal(wikiHits[0].id, 'Q123456');
+  assert.match(wikiHits[0].url, /wikidata\.org\/wiki\/Q123456/);
+
+  const entities = parseWikidataEntities({
+    entities: {
+      Q123456: {
+        id: 'Q123456',
+        labels: { id: { value: 'Bappebti' }, en: { value: 'Bappebti' } },
+        descriptions: { en: { value: 'Indonesian futures regulator' } },
+        sitelinks: {
+          idwiki: { title: 'Badan Pengawas Perdagangan Berjangka Komoditi' },
+          enwiki: { title: 'Commodity Futures Trading Regulatory Agency' },
+        },
+      },
+    },
+  });
+  assert.ok(entities.some(source => source.url.includes('id.wikipedia.org')));
+  assert.ok(entities.some(source => source.url.includes('en.wikipedia.org')));
+
+  const rss = parseNewsRss(newsRssXml);
+  assert.equal(rss.length, 1);
+  assert.equal(rss[0].url, 'https://www.cnbcindonesia.com/market/sella-susriana-dupoin');
+  assert.match(rss[0].snippet, /wakil pialang/);
+});
+
+test('prefers Serper early for open-web queries and does not call Brave', async () => {
+  const calls: string[] = [];
+  const fetchImpl: typeof fetch = async (input, init) => {
+    const url = String(input);
+    calls.push(url);
+    if (url.includes('api.search.brave.com') || url.includes('api.tavily.com')) {
+      throw new Error('Brave/Tavily must not be required');
+    }
+    if (url.includes('google.serper.dev/search')) {
+      assert.equal((init?.headers as Record<string, string>)?.['X-API-KEY'] || (init?.headers as Headers | undefined)?.get?.('X-API-KEY'), 'early-serper');
+      return new Response(JSON.stringify({
+        organic: [
+          { title: 'Bappebti Dupoin', link: 'https://bappebti.go.id/pialang_berjangka/detail/423', snippet: 'Sella Susriana tercatat sebagai wakil pialang.' },
+          { title: 'CNBC', link: 'https://www.cnbcindonesia.com/market/sella', snippet: 'Liputan Sella Susriana di industri pialang.' },
+          { title: 'LinkedIn', link: 'https://www.linkedin.com/in/sella-susriana', snippet: 'Public profile mentioning Sella Susriana.' },
+        ],
+        news: [
+          { title: 'Berita Dupoin', link: 'https://www.kontan.co.id/dupoin-sella', snippet: 'Sella Susriana disebut di berita pasar.' },
+        ],
+      }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }
+    if (url.includes('html.duckduckgo.com')) {
+      return new Response(ddgAnomalyHtml, { status: 202, headers: { 'content-type': 'text/html' } });
+    }
+    if (url.includes('bappebti.go.id') && !url.startsWith('https://r.jina.ai/')) {
+      return new Response(sellaBappebtiHtml, { status: 200, headers: { 'content-type': 'text/html' } });
+    }
+    if (url.includes('dupoin.co.id') || url.includes('dupoin.com')) {
+      return new Response(officialHtml, { status: 200, headers: { 'content-type': 'text/html' } });
+    }
+    if (url.includes('cnbcindonesia.com') || url.includes('kontan.co.id')) {
+      return new Response('<html><title>News</title><body>Liputan Sella Susriana sebagai wakil pialang Dupoin di pasar berjangka Indonesia.</body></html>', {
+        status: 200,
+        headers: { 'content-type': 'text/html' },
+      });
+    }
+    if (url.includes('linkedin.com')) {
+      return new Response('<html><title>Sella</title><body>Public profile mentioning Sella Susriana in financial services.</body></html>', {
+        status: 200,
+        headers: { 'content-type': 'text/html' },
+      });
+    }
+    return new Response('not found', { status: 404 });
+  };
+
+  const result = await gatherAiResearchContext(sellaQuery, {
+    fetchImpl,
+    timeoutMs: 8_000,
+    searchApiKeys: { serper: 'early-serper' },
+  });
+  const serperIdx = calls.findIndex(url => url.includes('google.serper.dev/search'));
+  const ddgIdx = calls.findIndex(url => url.includes('html.duckduckgo.com'));
+  assert.ok(serperIdx >= 0, 'Serper must run');
+  assert.equal(ddgIdx, -1, 'successful Serper path skips DDG HTML');
+  assert.ok(serperIdx === 0 || calls.slice(0, serperIdx).every(url => !url.includes('html.duckduckgo.com')));
+  assert.ok(!calls.some(url => url.includes('api.search.brave.com')));
+  assert.ok(result.sources.some(source => /Sella Susriana/i.test(source.snippet)));
+  assert.ok(result.sources.some(source => /bappebti\.go\.id|cnbcindonesia|kontan|linkedin/i.test(source.url)));
+  assert.match(formatResearchContext(result), /Synthesize a rich answer/);
+  assert.doesNotMatch(formatResearchContext(result), /No web sources were retrieved/);
+});
+
+test('Serper exhaustion uses free Wikipedia, Wikidata, Instant Answer, and news RSS', async () => {
+  const warnings: string[] = [];
+  const calls: string[] = [];
+  const fetchImpl: typeof fetch = async input => {
+    const url = String(input);
+    calls.push(url);
+    if (url.includes('google.serper.dev/search')) {
+      return new Response('quota exceeded', { status: 429, headers: { 'content-type': 'text/plain' } });
+    }
+    if (url.includes('api.search.brave.com')) {
+      throw new Error('Brave must not be the Serper fallback');
+    }
+    if (url.includes('html.duckduckgo.com')) {
+      return new Response(ddgAnomalyHtml, { status: 202, headers: { 'content-type': 'text/html' } });
+    }
+    if (url.includes('wikidata.org') && url.includes('wbsearchentities')) {
+      return new Response(JSON.stringify({
+        search: [{
+          id: 'Q390858',
+          label: 'Bappebti',
+          description: 'Indonesian commodity futures regulator',
+          concepturi: 'https://www.wikidata.org/wiki/Q390858',
+        }],
+      }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }
+    if (url.includes('wikidata.org') && url.includes('wbgetentities')) {
+      return new Response(JSON.stringify({
+        entities: {
+          Q390858: {
+            id: 'Q390858',
+            labels: { id: { value: 'Bappebti' } },
+            descriptions: { id: { value: 'Regulator perdagangan berjangka Indonesia' } },
+            sitelinks: { idwiki: { title: 'Bappebti' }, enwiki: { title: 'Bappebti' } },
+          },
+        },
+      }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }
+    if (url.includes('news.google.com/rss')) {
+      return new Response(newsRssXml, { status: 200, headers: { 'content-type': 'application/rss+xml' } });
+    }
+    if (url.includes('api.duckduckgo.com')) {
+      return new Response(JSON.stringify({
+        Heading: 'Bappebti',
+        AbstractText: 'Badan Pengawas Perdagangan Berjangka Komoditi mengawasi pialang berjangka.',
+        AbstractURL: 'https://id.wikipedia.org/wiki/Bappebti',
+        Results: [],
+        RelatedTopics: [],
+      }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }
+    if (url.includes('id.wikipedia.org') && url.includes('list=search')) {
+      return new Response(JSON.stringify({
+        query: { search: [{ title: 'Bappebti', snippet: 'Regulator PBK Indonesia' }] },
+      }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }
+    if (url.includes('en.wikipedia.org') && url.includes('list=search')) {
+      return new Response(JSON.stringify({
+        query: { search: [{ title: 'Bappebti', snippet: 'Indonesian futures regulator' }] },
+      }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }
+    if (url.includes('api.php') && url.includes('prop=extracts')) {
+      const host = url.includes('en.wikipedia.org') ? 'en.wikipedia.org' : 'id.wikipedia.org';
+      return new Response(JSON.stringify({
+        query: { pages: { '1': { title: 'Bappebti', extract: `Bappebti mengawasi pialang berjangka di Indonesia (${host}).` } } },
+      }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }
+    if (url.includes('cnbcindonesia.com')) {
+      return new Response('<html><title>CNBC</title><body>Liputan Sella Susriana sebagai wakil pialang di PT Dupoin Futures Indonesia.</body></html>', {
+        status: 200,
+        headers: { 'content-type': 'text/html' },
+      });
+    }
+    if (url.includes('dupoin.co.id') || url.includes('dupoin.com')) {
+      return new Response(officialHtml, { status: 200, headers: { 'content-type': 'text/html' } });
+    }
+    if (url.includes('bappebti.go.id') && !url.startsWith('https://r.jina.ai/')) {
+      return new Response(sellaBappebtiHtml, { status: 200, headers: { 'content-type': 'text/html' } });
+    }
+    if (url.startsWith('https://r.jina.ai/') && url.includes('bappebti.go.id')) {
+      return new Response(sellaJinaMarkdown, { status: 200, headers: { 'content-type': 'text/plain' } });
+    }
+    return new Response('not found', { status: 404 });
+  };
+
+  const result = await gatherAiResearchContext(sellaQuery, {
+    fetchImpl,
+    timeoutMs: 8_000,
+    searchApiKeys: { serper: 'exhausted-serper' },
+    logger: { warn: (message: unknown) => warnings.push(String(message)) },
+  });
+  const grounded = formatResearchContext(result);
+  assert.ok(warnings.some(message => message.includes(SERPER_EXHAUSTED_WARNING)));
+  assert.ok(calls.some(url => url.includes('id.wikipedia.org')));
+  assert.ok(calls.some(url => url.includes('en.wikipedia.org')));
+  assert.ok(calls.some(url => url.includes('wikidata.org') && url.includes('wbsearchentities')));
+  assert.ok(calls.some(url => url.includes('news.google.com/rss')));
+  assert.ok(calls.some(url => url.includes('api.duckduckgo.com')));
+  assert.ok(!calls.some(url => url.includes('api.search.brave.com')));
+  assert.ok(result.sources.length > 0);
+  assert.ok(result.sources.some(source => /bappebti|dupoin|Sella Susriana/i.test(`${source.snippet} ${source.url}`)));
+  assert.equal(sourcesHaveUsefulHits(result), true);
+  assert.match(grounded, /Synthesize a rich answer/);
+  assert.match(grounded, new RegExp(AI_RESEARCH_NO_INVENT_FACTS));
+  assert.doesNotMatch(grounded, /No web sources were retrieved/);
+});
+
+test('free path without Serper still uses Wikipedia languages, Wikidata, and news RSS', async () => {
+  const calls: string[] = [];
+  const fetchImpl: typeof fetch = async input => {
+    const url = String(input);
+    calls.push(url);
+    if (url.includes('google.serper.dev') || url.includes('api.search.brave.com')) {
+      throw new Error('paid search must not be required on the free path');
+    }
+    if (url.includes('html.duckduckgo.com')) {
+      return new Response(ddgAnomalyHtml, { status: 202, headers: { 'content-type': 'text/html' } });
+    }
+    if (url.includes('wikidata.org') && url.includes('wbsearchentities')) {
+      return new Response(JSON.stringify({
+        search: [{ id: 'Q390858', label: 'Bappebti', description: 'Regulator PBK', concepturi: 'https://www.wikidata.org/wiki/Q390858' }],
+      }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }
+    if (url.includes('wikidata.org') && url.includes('wbgetentities')) {
+      return new Response(JSON.stringify({
+        entities: {
+          Q390858: {
+            id: 'Q390858',
+            labels: { id: { value: 'Bappebti' } },
+            descriptions: { id: { value: 'Regulator perdagangan berjangka' } },
+            sitelinks: { idwiki: { title: 'Bappebti' } },
+          },
+        },
+      }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }
+    if (url.includes('news.google.com/rss')) {
+      return new Response(newsRssXml, { status: 200, headers: { 'content-type': 'application/rss+xml' } });
+    }
+    if (url.includes('api.duckduckgo.com')) {
+      return new Response(JSON.stringify({
+        Heading: 'Bappebti',
+        AbstractText: 'Regulator pialang berjangka.',
+        AbstractURL: 'https://id.wikipedia.org/wiki/Bappebti',
+        Results: [],
+        RelatedTopics: [],
+      }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }
+    if (url.includes('wikipedia.org') && url.includes('list=search')) {
+      return new Response(JSON.stringify({
+        query: { search: [{ title: 'Bappebti', snippet: 'Regulator PBK' }] },
+      }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }
+    if (url.includes('api.php') && url.includes('prop=extracts')) {
+      return new Response(JSON.stringify({
+        query: { pages: { '1': { title: 'Bappebti', extract: 'Bappebti mengawasi pialang berjangka dan wakil pialang di Indonesia.' } } },
+      }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }
+    if (url.includes('cnbcindonesia.com')) {
+      return new Response('<html><title>CNBC</title><body>Liputan Sella Susriana sebagai wakil pialang Dupoin.</body></html>', {
+        status: 200,
+        headers: { 'content-type': 'text/html' },
+      });
+    }
+    if (url.includes('dupoin.co.id') || url.includes('dupoin.com')) {
+      return new Response(officialHtml, { status: 200, headers: { 'content-type': 'text/html' } });
+    }
+    if (url.includes('bappebti.go.id')) {
+      return new Response(sellaBappebtiHtml, { status: 200, headers: { 'content-type': 'text/html' } });
+    }
+    return new Response('not found', { status: 404 });
+  };
+
+  const result = await gatherAiResearchContext(sellaQuery, {
+    fetchImpl,
+    timeoutMs: 8_000,
+    searchApiKeys: { serper: '', brave: '', tavily: '' },
+    logger: { warn() { /* DDG blocked */ } },
+  });
+  assert.ok(!calls.some(url => url.includes('google.serper.dev')));
+  assert.ok(!calls.some(url => url.includes('api.search.brave.com')));
+  assert.ok(calls.some(url => url.includes('id.wikipedia.org')));
+  assert.ok(calls.some(url => url.includes('en.wikipedia.org')));
+  assert.ok(calls.some(url => url.includes('wikidata.org')));
+  assert.ok(calls.some(url => url.includes('news.google.com/rss')));
+  assert.ok(result.sources.length > 0);
+  assert.equal(sourcesHaveUsefulHits(result), true);
+  assert.match(formatResearchContext(result), /Synthesize a rich answer/);
+});
+
+test('gather skips Instagram login-wall hits even when search returns them', async () => {
+  const calls: string[] = [];
+  const fetchImpl: typeof fetch = async input => {
+    const url = String(input);
+    calls.push(url);
+    if (url.includes('html.duckduckgo.com')) {
+      return new Response(`
+        <div class="result">
+          <a class="result__a" href="https://www.instagram.com/p/dupoin-sella">Instagram post</a>
+          <a class="result__snippet">See photos and videos from Dupoin.</a>
+        </div>
+        <div class="result">
+          <a class="result__a" href="https://www.dupoin.co.id/about-us">Dupoin resmi</a>
+          <a class="result__snippet">PT Dupoin Futures Indonesia terdaftar BAPPEBTI.</a>
+        </div>
+      `, { status: 200, headers: { 'content-type': 'text/html' } });
+    }
+    if (url.includes('instagram.com')) {
+      return new Response(instagramLoginHtml, { status: 200, headers: { 'content-type': 'text/html' } });
+    }
+    if (url.includes('dupoin.co.id') || url.includes('dupoin.com')) {
+      return new Response(officialHtml, { status: 200, headers: { 'content-type': 'text/html' } });
+    }
+    if (url.includes('bappebti.go.id')) {
+      return new Response(sellaBappebtiHtml, { status: 200, headers: { 'content-type': 'text/html' } });
+    }
+    return new Response('not found', { status: 404 });
+  };
+
+  const result = await gatherAiResearchContext('Apa fakta resmi Dupoin Indonesia?', { fetchImpl, timeoutMs: 8_000 });
+  assert.ok(!calls.some(url => url.includes('instagram.com')), 'login-wall hosts are not fetched');
+  assert.ok(!result.sources.some(source => source.url.includes('instagram.com')));
+  assert.ok(result.sources.some(source => source.url.includes('dupoin.co.id')));
+  assert.ok(!result.sources.some(source => /log in to instagram/i.test(source.snippet)));
 });
