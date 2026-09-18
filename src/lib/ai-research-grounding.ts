@@ -41,6 +41,8 @@ export const AI_RESEARCH_NO_INVENT_FACTS =
   'Do not invent company, licensing, address, officer, or numeric facts. If a fact is missing from the sources, say the grounded sources do not confirm it. If a retrieved source does state the fact, summarize it with a citation instead of refusing.';
 export const AI_RESEARCH_SYNTHESIZE_HITS =
   'Relevant grounded sources were retrieved. Synthesize a rich answer from everything they state (role, institution, other public traces) and cite titles + URLs. Prefer summarizing grounded hits over saying no verified source was found. Only say a fact is unverified when these excerpts truly do not mention it.';
+export const AI_RESEARCH_PERSON_NAME_HIT =
+  'The person name from the user query appears in the retrieved excerpts. Treat that as a verified public listing (for example an official broker or Bappebti roster). Synthesize the stated role, institution, and other public traces and cite the titles + URLs. Do not refuse with “no verified public sources” or “belum ada sumber publik terverifikasi” when the name is present. Do not invent a biography beyond what these excerpts state.';
 
 const DEFAULT_TIMEOUT_MS = 20_000;
 const DEFAULT_MAX_BYTES = 500_000;
@@ -140,6 +142,19 @@ const FACT_NEEDLES = [
   'izin', 'terdaftar', 'anggota', 'aspebtindo',
   'wakil pialang', 'pialang berjangka', 'pialang', 'pengurus',
 ];
+
+const ROLE_HEADING_NEEDLES: Array<{ needle: string; weight: number }> = [
+  { needle: 'wakil pialang', weight: 100 },
+  { needle: 'daftar wakil', weight: 80 },
+  { needle: 'pialang berjangka', weight: 70 },
+  { needle: 'pengurus', weight: 50 },
+  { needle: 'pialang', weight: 30 },
+];
+
+const ROLE_SNIPPET_RE = /wakil pialang|daftar wakil|pialang berjangka|\bpialang\b|pengurus/;
+const NAME_WINDOW_LOOKBACK = 800;
+const ROLE_WINDOW_LOOKBACK = 16;
+const ROLE_WINDOW_SIZE = 360;
 
 const QUERY_STOPWORDS = new Set([
   'siapa', 'sih', 'jir', 'di', 'yang', 'untuk', 'dari', 'dengan', 'tidak',
@@ -426,15 +441,105 @@ function metaContent(html: string, name: string): string {
   return named ? htmlToPlainText(named[1]) : '';
 }
 
-export function extractRelevantWindow(text: string, query = ''): string {
-  const haystack = text.toLowerCase();
-  const nameTokens = extractPersonNameCandidates(query)
-    .flatMap(name => name.toLowerCase().split(' '))
-    .filter(token => token.length > 2);
-  const nameHit = nameTokens
+function findAllIndexes(haystack: string, needle: string): number[] {
+  const hits: number[] = [];
+  if (!needle) return hits;
+  let from = 0;
+  while (from < haystack.length) {
+    const idx = haystack.indexOf(needle, from);
+    if (idx < 0) break;
+    hits.push(idx);
+    from = idx + Math.max(1, needle.length);
+  }
+  return hits;
+}
+
+function findPersonNameIndex(haystack: string, query: string): number {
+  const names = extractPersonNameCandidates(query).map(name => name.toLowerCase());
+  for (const name of names) {
+    const idx = haystack.indexOf(name);
+    if (idx >= 0) return idx;
+  }
+  const tokenHits = names
+    .flatMap(name => name.split(' '))
+    .filter(token => token.length > 2)
     .map(token => haystack.indexOf(token))
     .filter(idx => idx >= 0)
-    .sort((a, b) => a - b)[0];
+    .sort((a, b) => a - b);
+  return tokenHits[0] ?? -1;
+}
+
+function findNearestRoleHeading(haystack: string, nameIdx: number): { index: number; needle: string } | null {
+  let best: { index: number; needle: string; score: number } | null = null;
+  for (const { needle, weight } of ROLE_HEADING_NEEDLES) {
+    for (const idx of findAllIndexes(haystack, needle)) {
+      const before = nameIdx < 0 || idx <= nameIdx;
+      const distance = nameIdx < 0 ? idx : Math.abs(nameIdx - idx);
+      const score = (before ? 50_000 : 0) + weight * 1_000 - Math.min(distance, 200_000) / 100;
+      if (!best || score > best.score) best = { index: idx, needle, score };
+    }
+  }
+  return best;
+}
+
+function sliceRange(textLength: number, center: number, lookback: number, size: number): { start: number; end: number } {
+  const start = Math.max(0, center - lookback);
+  return { start, end: Math.min(textLength, start + size) };
+}
+
+function mergeTextRanges(text: string, ranges: Array<{ start: number; end: number }>, maxLen: number): string {
+  const sorted = [...ranges]
+    .filter(range => range.end > range.start)
+    .sort((a, b) => a.start - b.start || b.end - a.end);
+  if (!sorted.length) return '';
+
+  const merged: Array<{ start: number; end: number }> = [];
+  for (const range of sorted) {
+    const last = merged[merged.length - 1];
+    if (last && range.start <= last.end + 40) {
+      last.end = Math.max(last.end, range.end);
+    } else {
+      merged.push({ ...range });
+    }
+  }
+
+  const spanStart = merged[0].start;
+  const spanEnd = merged[merged.length - 1].end;
+  if (spanEnd - spanStart <= maxLen) {
+    return text.slice(spanStart, spanEnd);
+  }
+
+  const parts: string[] = [];
+  let used = 0;
+  const sep = ' […] ';
+  for (const range of merged) {
+    const extra = parts.length ? sep.length : 0;
+    const remaining = maxLen - used - extra;
+    if (remaining <= 20) break;
+    const chunk = text.slice(range.start, range.end).slice(0, remaining);
+    parts.push(chunk);
+    used += extra + chunk.length;
+  }
+  return parts.join(sep);
+}
+
+export function extractRelevantWindow(text: string, query = ''): string {
+  const haystack = text.toLowerCase();
+  const names = extractPersonNameCandidates(query);
+  const nameIdx = names.length ? findPersonNameIndex(haystack, query) : -1;
+
+  if (names.length && nameIdx >= 0) {
+    const role = findNearestRoleHeading(haystack, nameIdx);
+    const nameRange = sliceRange(text.length, nameIdx, NAME_WINDOW_LOOKBACK, MAX_SNIPPET);
+    if (!role) return text.slice(nameRange.start, nameRange.end);
+    const roleInNameWindow = role.index >= nameRange.start && role.index < nameRange.end;
+    const ranges = roleInNameWindow
+      ? [nameRange]
+      : [sliceRange(text.length, role.index, ROLE_WINDOW_LOOKBACK, ROLE_WINDOW_SIZE), nameRange];
+    const label = `[Section: ${titleCaseName(role.needle)}] `;
+    return `${label}${mergeTextRanges(text, ranges, MAX_SNIPPET - label.length)}`.slice(0, MAX_SNIPPET);
+  }
+
   const factHit = FACT_NEEDLES
     .map(needle => haystack.indexOf(needle))
     .filter(idx => idx >= 0)
@@ -445,10 +550,9 @@ export function extractRelevantWindow(text: string, query = ''): string {
     .map(token => haystack.indexOf(token))
     .filter(idx => idx >= 0)
     .sort((a, b) => a - b)[0];
-  const best = nameHit ?? factHit ?? queryHit;
+  const best = factHit ?? queryHit;
   if (best == null || best < 0) return text.slice(0, MAX_SNIPPET);
-  const lookback = nameTokens.length ? 800 : 180;
-  const start = Math.max(0, best - lookback);
+  const start = Math.max(0, best - 180);
   return text.slice(start, start + MAX_SNIPPET);
 }
 
@@ -934,6 +1038,10 @@ export function rankResearchSources(
     if (indonesiaPreferred && source.origin === 'indonesia') score += 20;
     if (names.some(name => blob.includes(name))) score += 30;
     if (/wakil pialang|pialang berjangka/.test(blob)) score += 20;
+    const snippetLower = source.snippet.toLowerCase();
+    if (names.some(name => snippetLower.includes(name)) && ROLE_SNIPPET_RE.test(snippetLower)) {
+      score += 40;
+    }
     if (/pialang_berjangka\/detail\/|pialang_berjangka_wakil|\/pialang_berjangka(?:\/|$)/i.test(source.url)) {
       score += 35;
     }
@@ -1022,13 +1130,24 @@ export function selectFetchCandidates(
   return combined.slice(0, limit);
 }
 
+export function sourcesMentionPersonName(context: ResearchContext): boolean {
+  const names = extractPersonNameCandidates(context.query).map(name => name.toLowerCase());
+  if (!names.length) return false;
+  return context.sources.some(source => {
+    const blob = `${source.title} ${source.snippet}`.toLowerCase();
+    return names.some(name => blob.includes(name));
+  });
+}
+
 export function sourcesHaveUsefulHits(context: ResearchContext): boolean {
+  const names = extractPersonNameCandidates(context.query).map(name => name.toLowerCase());
   return context.sources.some(source => {
     if (isLikelyLoginWallHost(source.url) || isEmptyOrLoginWallSource(source.snippet, source.url, source.title)) {
       return false;
     }
     const blob = `${source.title} ${source.snippet} ${source.url}`.toLowerCase();
     return source.snippet.trim().length >= 40
+      || names.some(name => blob.includes(name))
       || /bappebti|wakil pialang|pialang|ojk|dupoin/i.test(blob);
   });
 }
@@ -1048,6 +1167,9 @@ export function formatResearchContext(context: ResearchContext): string {
   }
   if (sourcesHaveUsefulHits(context)) {
     lines.push(AI_RESEARCH_SYNTHESIZE_HITS);
+  }
+  if (sourcesMentionPersonName(context)) {
+    lines.push(AI_RESEARCH_PERSON_NAME_HIT);
   }
   context.sources.forEach((source, index) => {
     lines.push('');
@@ -1504,12 +1626,22 @@ async function fetchPageSource(
   return best || fallback;
 }
 
-function pickRicherSnippet(extracted: string, fallback: string, query: string): string {
+function snippetGroundingScore(text: string, query: string): number {
   const names = extractPersonNameCandidates(query).map(name => name.toLowerCase());
-  const extractedHit = names.some(name => extracted.toLowerCase().includes(name));
-  const fallbackHit = names.some(name => fallback.toLowerCase().includes(name));
-  if (fallbackHit && !extractedHit) return fallback || extracted;
-  if (extractedHit && !fallbackHit) return extracted || fallback;
+  const lower = text.toLowerCase();
+  let score = 0;
+  if (names.some(name => lower.includes(name))) score += 3;
+  if (ROLE_SNIPPET_RE.test(lower)) score += 2;
+  if (score >= 5) score += 2;
+  if (text.trim().length > 80) score += 1;
+  return score;
+}
+
+function pickRicherSnippet(extracted: string, fallback: string, query: string): string {
+  const extractedScore = snippetGroundingScore(extracted, query);
+  const fallbackScore = snippetGroundingScore(fallback, query);
+  if (fallbackScore > extractedScore) return fallback || extracted;
+  if (extractedScore > fallbackScore) return extracted || fallback;
   if (extracted.length > 40) return extracted;
   return fallback || extracted;
 }
