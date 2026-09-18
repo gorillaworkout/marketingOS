@@ -112,8 +112,28 @@ const PREFERRED_OFFICIAL_HOSTS = [
 
 export const AI_RESEARCH_JINA_READER_PREFIX = 'https://r.jina.ai/';
 export const DDG_HTML_BLOCKED_WARNING =
-  '[ai-research] DuckDuckGo HTML search was blocked (bot challenge / anomaly). Falling back to official seeds, Wikipedia, Instant Answer, optional search APIs, and Jina-backed page fetch.';
+  '[ai-research] DuckDuckGo HTML search was blocked (bot challenge / anomaly). Falling back to official seeds, multi-language Wikipedia, Wikidata, Instant Answer, Google News RSS, and Jina-backed page fetch.';
+export const SERPER_EXHAUSTED_WARNING =
+  '[ai-research] Serper returned no usable hits or was rate-limited. Continuing with free sources only (Wikipedia, Wikidata, Instant Answer, official seeds, news RSS, Jina). Brave is not required.';
 const MAX_JINA_FETCHES = 12;
+const LOGIN_WALL_HOSTS = ['instagram.com', 'threads.net'];
+const LOGIN_WALL_MARKERS = [
+  'log in to instagram',
+  'log into instagram',
+  'see photos and videos from',
+  'log in to facebook',
+  'log into facebook',
+  'log in to continue',
+  'sign in to continue',
+  'you must log in',
+  'please log in to view',
+  'please sign in to view',
+  'create an account or log in',
+  'create new account',
+  'sign up to see',
+  "this content isn't available right now",
+  'this content is not available',
+];
 
 const FACT_NEEDLES = [
   'bappebti', 'ojk', 'licensed', 'regulated', 'perizinan', 'lisensi',
@@ -457,7 +477,7 @@ export function parseDuckDuckGoResults(html: string): Array<{ title: string; url
     const href = tag.match(/href="([^"]+)"/i)?.[1];
     const titleHtml = tag.replace(/^[\s\S]*?>/, '').replace(/<\/a>$/i, '');
     const url = href ? unwrapSearchResultUrl(decodeHtmlAttr(href)) : null;
-    if (!url || isSearchHost(url)) continue;
+    if (!acceptCandidateUrl(url)) continue;
     const after = html.slice(match.index, match.index + 1800);
     const snippetMatch = after.match(/class="[^"]*result__snippet[^"]*"[^>]*>([\s\S]*?)<\//i)
       || after.match(/class="[^"]*result-snippet[^"]*"[^>]*>([\s\S]*?)<\//i);
@@ -492,6 +512,28 @@ function isSearchHost(url: string): boolean {
   } catch {
     return true;
   }
+}
+
+export function isLikelyLoginWallHost(url: string): boolean {
+  const host = researchSourceHost(url);
+  if (!host) return false;
+  return LOGIN_WALL_HOSTS.some(marker => host === marker || host.endsWith(`.${marker}`));
+}
+
+export function isEmptyOrLoginWallSource(text: string, url = '', title = ''): boolean {
+  if (url && isLikelyLoginWallHost(url)) return true;
+  const looksHtml = /<[^>]+>/.test(text);
+  const plain = (looksHtml ? htmlToPlainText(text) : text).replace(/\s+/g, ' ').trim();
+  const blob = `${title} ${plain}`.toLowerCase();
+  if (LOGIN_WALL_MARKERS.some(marker => blob.includes(marker))) {
+    const withoutChrome = plain.replace(/log in|sign up|sign in|cookie|privacy|terms|instagram|facebook/gi, '').trim();
+    return withoutChrome.length < 400;
+  }
+  return false;
+}
+
+function acceptCandidateUrl(url: string | null): url is string {
+  return Boolean(url && isPublicHttpUrl(url) && !isSearchHost(url) && !isLikelyLoginWallHost(url));
 }
 
 export function resolveSearchApiKeys(overrides?: SearchApiKeys): Required<SearchApiKeys> {
@@ -540,7 +582,7 @@ export function parseWikipediaOpensearch(payload: unknown): Array<{ title: strin
   for (let i = 0; i < titles.length && results.length < 3; i++) {
     const title = typeof titles[i] === 'string' ? titles[i].trim() : '';
     const url = typeof urls[i] === 'string' ? unwrapSearchResultUrl(urls[i]) : null;
-    if (!title || !url || isSearchHost(url)) continue;
+    if (!title || !acceptCandidateUrl(url)) continue;
     results.push({
       title,
       url,
@@ -558,7 +600,7 @@ function collectInstantAnswerTopics(items: unknown, sink: ResearchSource[]): voi
     if (Array.isArray(node.Topics)) collectInstantAnswerTopics(node.Topics, sink);
     const url = typeof node.FirstURL === 'string' ? unwrapSearchResultUrl(node.FirstURL) : null;
     const text = typeof node.Text === 'string' ? htmlToPlainText(node.Text) : '';
-    if (!url || isSearchHost(url) || sink.some(source => source.url === url)) continue;
+    if (!acceptCandidateUrl(url) || sink.some(source => source.url === url)) continue;
     sink.push({
       title: (text.split(' - ')[0] || url).slice(0, 180),
       url,
@@ -577,7 +619,7 @@ export function parseDuckDuckGoInstantAnswer(payload: unknown): ResearchSource[]
     ? row.AbstractText.trim()
     : typeof row.Abstract === 'string' ? row.Abstract.trim() : '';
   const abstractUrl = typeof row.AbstractURL === 'string' ? unwrapSearchResultUrl(row.AbstractURL) : null;
-  if (abstractUrl && (abstract || heading) && !isSearchHost(abstractUrl)) {
+  if (acceptCandidateUrl(abstractUrl) && (abstract || heading)) {
     sources.push({
       title: heading || abstractUrl,
       url: abstractUrl,
@@ -602,7 +644,7 @@ function parseSearchApiList(
     const row = item as Record<string, unknown>;
     const rawUrl = urlKeys.map(key => row[key]).find(value => typeof value === 'string') as string | undefined;
     const url = rawUrl ? unwrapSearchResultUrl(rawUrl) : null;
-    if (!url || isSearchHost(url)) continue;
+    if (!acceptCandidateUrl(url)) continue;
     const title = (titleKeys.map(key => row[key]).find(value => typeof value === 'string') as string | undefined)?.trim() || url;
     const snippet = (snippetKeys.map(key => row[key]).find(value => typeof value === 'string') as string | undefined) || '';
     sources.push({
@@ -617,10 +659,40 @@ function parseSearchApiList(
 
 export function parseSerperResults(payload: unknown): ResearchSource[] {
   if (!payload || typeof payload !== 'object') return [];
-  const organic = (payload as { organic?: unknown }).organic;
-  return Array.isArray(organic)
-    ? parseSearchApiList(organic, ['link', 'url'], ['title'], ['snippet', 'description']).slice(0, 12)
-    : [];
+  const row = payload as Record<string, unknown>;
+  const sources: ResearchSource[] = [];
+  if (Array.isArray(row.organic)) {
+    sources.push(...parseSearchApiList(row.organic, ['link', 'url'], ['title'], ['snippet', 'description']));
+  }
+  if (Array.isArray(row.news)) {
+    sources.push(...parseSearchApiList(row.news, ['link', 'url'], ['title'], ['snippet', 'description']));
+  }
+  if (Array.isArray(row.topStories)) {
+    sources.push(...parseSearchApiList(row.topStories, ['link', 'url'], ['title'], ['snippet', 'description']));
+  }
+  const graph = row.knowledgeGraph;
+  if (graph && typeof graph === 'object') {
+    const kg = graph as Record<string, unknown>;
+    const title = typeof kg.title === 'string' ? kg.title.trim() : '';
+    const snippet = typeof kg.description === 'string' ? htmlToPlainText(kg.description) : '';
+    const urls = [kg.website, kg.descriptionLink]
+      .map(value => typeof value === 'string' ? unwrapSearchResultUrl(value) : null)
+      .filter(acceptCandidateUrl);
+    for (const url of urls) {
+      sources.push({
+        title: (title || url).slice(0, 180),
+        url,
+        snippet: snippet.slice(0, MAX_SNIPPET),
+        origin: classifySourceOrigin(url),
+      });
+    }
+  }
+  const unique = new Map<string, ResearchSource>();
+  for (const source of sources) {
+    const key = source.url.replace(/\/$/, '');
+    if (!unique.has(key)) unique.set(key, source);
+  }
+  return [...unique.values()].slice(0, 16);
 }
 
 export function parseBraveResults(payload: unknown): ResearchSource[] {
@@ -658,6 +730,12 @@ export function extractFetchedContent(text: string, query = '', contentType = ''
   return { title: titleLine, snippet };
 }
 
+export function wikipediaSearchHosts(indonesiaPreferred: boolean): string[] {
+  return indonesiaPreferred
+    ? ['id.wikipedia.org', 'en.wikipedia.org']
+    : ['en.wikipedia.org', 'id.wikipedia.org'];
+}
+
 export function buildWikipediaQueries(text: string): string[] {
   const names = extractPersonNameCandidates(text);
   const queries: string[] = [];
@@ -672,6 +750,123 @@ export function buildWikipediaQueries(text: string): string[] {
     queries.push(text.replace(/\s+/g, ' ').trim());
   }
   return [...new Set(queries)].slice(0, 3);
+}
+
+export function buildNewsRssQueries(text: string): string[] {
+  const names = extractPersonNameCandidates(text);
+  const extras: string[] = [];
+  if (names[0]) extras.push(`"${names[0]}" Dupoin OR Bappebti`);
+  if (/\bdupoin\b/i.test(text) || isDeepPersonResearch(text)) {
+    extras.push('Dupoin Futures Indonesia');
+  }
+  if (!extras.length) extras.push(text.replace(/\s+/g, ' ').trim());
+  return [...new Set(extras.filter(Boolean))].slice(0, 2);
+}
+
+export function parseWikidataSearch(payload: unknown): Array<{ id: string; title: string; snippet: string; url: string }> {
+  if (!payload || typeof payload !== 'object') return [];
+  const search = (payload as { search?: unknown }).search;
+  if (!Array.isArray(search)) return [];
+  return search.flatMap(item => {
+    if (!item || typeof item !== 'object') return [];
+    const row = item as { id?: unknown; label?: unknown; description?: unknown; concepturi?: unknown };
+    if (typeof row.id !== 'string' || !/^Q\d+$/i.test(row.id)) return [];
+    const title = typeof row.label === 'string' && row.label.trim() ? row.label.trim() : row.id;
+    const snippet = typeof row.description === 'string' ? htmlToPlainText(row.description) : '';
+    const rawUrl = typeof row.concepturi === 'string' ? row.concepturi : `https://www.wikidata.org/wiki/${row.id}`;
+    const url = unwrapSearchResultUrl(rawUrl);
+    if (!acceptCandidateUrl(url)) return [];
+    return [{ id: row.id, title, snippet, url }];
+  }).slice(0, 5);
+}
+
+export function parseWikidataEntities(payload: unknown): ResearchSource[] {
+  if (!payload || typeof payload !== 'object') return [];
+  const entities = (payload as { entities?: Record<string, unknown> }).entities;
+  if (!entities) return [];
+  const sources: ResearchSource[] = [];
+  for (const value of Object.values(entities)) {
+    if (!value || typeof value !== 'object') continue;
+    const entity = value as {
+      id?: unknown;
+      labels?: Record<string, { value?: string }>;
+      descriptions?: Record<string, { value?: string }>;
+      sitelinks?: Record<string, { title?: string }>;
+    };
+    const id = typeof entity.id === 'string' ? entity.id : '';
+    const title = entity.labels?.id?.value || entity.labels?.en?.value || id;
+    const snippet = entity.descriptions?.id?.value || entity.descriptions?.en?.value || '';
+    if (id && /^Q\d+$/i.test(id)) {
+      const url = `https://www.wikidata.org/wiki/${id}`;
+      if (acceptCandidateUrl(url)) {
+        sources.push({
+          title: (title || id).slice(0, 180),
+          url,
+          snippet: htmlToPlainText(snippet).slice(0, MAX_SNIPPET),
+          origin: classifySourceOrigin(url),
+        });
+      }
+    }
+    const sitelinks = entity.sitelinks || {};
+    const wikiSites: Array<[string, string]> = [
+      ['idwiki', 'id.wikipedia.org'],
+      ['enwiki', 'en.wikipedia.org'],
+    ];
+    for (const [site, host] of wikiSites) {
+      const pageTitle = sitelinks[site]?.title?.trim();
+      if (!pageTitle) continue;
+      const url = `https://${host}/wiki/${encodeURIComponent(pageTitle.replace(/ /g, '_'))}`;
+      if (!acceptCandidateUrl(url)) continue;
+      sources.push({
+        title: pageTitle.slice(0, 180),
+        url,
+        snippet: htmlToPlainText(snippet || pageTitle).slice(0, MAX_SNIPPET),
+        origin: classifySourceOrigin(url),
+      });
+    }
+  }
+  return sources.slice(0, 8);
+}
+
+function decodeXmlText(value: string): string {
+  return value
+    .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1')
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;|&apos;/g, "'")
+    .replace(/&#(\d+);/g, (_, code: string) => String.fromCodePoint(Number(code)))
+    .replace(/&#x([0-9a-f]+);/gi, (_, code: string) => String.fromCodePoint(Number.parseInt(code, 16)))
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+export function parseNewsRss(xml: string): Array<{ title: string; url: string; snippet: string }> {
+  if (!xml || !/<item\b/i.test(xml)) return [];
+  const items = xml.match(/<item\b[\s\S]*?<\/item>/gi) || [];
+  const results: Array<{ title: string; url: string; snippet: string }> = [];
+  const seen = new Set<string>();
+  for (const item of items) {
+    const title = decodeXmlText(item.match(/<title(?:\s[^>]*)?>([\s\S]*?)<\/title>/i)?.[1] || '');
+    const link = decodeXmlText(item.match(/<link(?:\s[^>]*)?>([\s\S]*?)<\/link>/i)?.[1] || '');
+    const sourceUrl = item.match(/<source\b[^>]*url=["']([^"']+)["'][^>]*>/i)?.[1] || '';
+    const snippet = decodeXmlText(
+      item.match(/<description(?:\s[^>]*)?>([\s\S]*?)<\/description>/i)?.[1] || '',
+    );
+    const url = unwrapSearchResultUrl(link) || unwrapSearchResultUrl(sourceUrl);
+    if (!title || !acceptCandidateUrl(url) || seen.has(url)) continue;
+    seen.add(url);
+    results.push({
+      title: title.slice(0, 180),
+      url,
+      snippet: snippet.slice(0, MAX_SNIPPET),
+    });
+    if (results.length >= 8) break;
+  }
+  return results;
 }
 
 export function parseWikipediaSearch(payload: unknown): Array<{ title: string; snippet: string }> {
@@ -689,7 +884,7 @@ export function parseWikipediaSearch(payload: unknown): Array<{ title: string; s
   }).slice(0, 3);
 }
 
-export function parseWikipediaExtract(payload: unknown): { title: string; url: string; snippet: string } | null {
+export function parseWikipediaExtract(payload: unknown, host?: string): { title: string; url: string; snippet: string } | null {
   if (!payload || typeof payload !== 'object') return null;
   const pages = (payload as { query?: { pages?: Record<string, unknown> } }).query?.pages;
   if (!pages) return null;
@@ -700,7 +895,7 @@ export function parseWikipediaExtract(payload: unknown): { title: string; url: s
     const title = page.title.trim();
     const snippet = typeof page.extract === 'string' ? page.extract.replace(/\s+/g, ' ').trim() : '';
     if (!title || !snippet) continue;
-    const wikiHost = prefersIndonesiaTitle(title) ? 'id.wikipedia.org' : 'en.wikipedia.org';
+    const wikiHost = host || (prefersIndonesiaTitle(title) ? 'id.wikipedia.org' : 'en.wikipedia.org');
     return {
       title,
       url: `https://${wikiHost}/wiki/${encodeURIComponent(title.replace(/ /g, '_'))}`,
@@ -741,6 +936,9 @@ export function rankResearchSources(
     if (/wakil pialang|pialang berjangka/.test(blob)) score += 20;
     if (/pialang_berjangka\/detail\/|pialang_berjangka_wakil|\/pialang_berjangka(?:\/|$)/i.test(source.url)) {
       score += 35;
+    }
+    if (isLikelyLoginWallHost(source.url) || isEmptyOrLoginWallSource(source.snippet, source.url, source.title)) {
+      score -= 200;
     }
     if (!source.snippet.trim()) {
       if (phase === 'fetch') {
@@ -826,6 +1024,9 @@ export function selectFetchCandidates(
 
 export function sourcesHaveUsefulHits(context: ResearchContext): boolean {
   return context.sources.some(source => {
+    if (isLikelyLoginWallHost(source.url) || isEmptyOrLoginWallSource(source.snippet, source.url, source.title)) {
+      return false;
+    }
     const blob = `${source.title} ${source.snippet} ${source.url}`.toLowerCase();
     return source.snippet.trim().length >= 40
       || /bappebti|wakil pialang|pialang|ojk|dupoin/i.test(blob);
@@ -1011,7 +1212,7 @@ async function wikipediaHitsToSources(
         headers: { Accept: 'application/json', 'User-Agent': RESEARCH_USER_AGENT },
         redirect: 'follow',
       }, maxBytes, timeoutMs);
-      const parsed = parseWikipediaExtract(jsonPayload(extracted.text));
+      const parsed = parseWikipediaExtract(jsonPayload(extracted.text), host);
       if (parsed) {
         sources.push({
           title: parsed.title,
@@ -1034,14 +1235,13 @@ async function wikipediaHitsToSources(
   return sources;
 }
 
-async function searchWikipedia(
+async function searchWikipediaOnHost(
   query: string,
-  indonesiaPreferred: boolean,
+  host: string,
   fetchImpl: typeof fetch,
   maxBytes: number,
   timeoutMs: number,
 ): Promise<ResearchSource[]> {
-  const host = indonesiaPreferred ? 'id.wikipedia.org' : 'en.wikipedia.org';
   try {
     const searchUrl = `https://${host}/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(query)}&format=json&srlimit=3&utf8=1`;
     const { text } = await fetchBounded(fetchImpl, searchUrl, {
@@ -1070,88 +1270,123 @@ async function searchWikipedia(
   }
 }
 
+async function searchWikipedia(
+  query: string,
+  indonesiaPreferred: boolean,
+  fetchImpl: typeof fetch,
+  maxBytes: number,
+  timeoutMs: number,
+): Promise<ResearchSource[]> {
+  const hosts = wikipediaSearchHosts(indonesiaPreferred);
+  const settled = await Promise.allSettled(
+    hosts.map(host => searchWikipediaOnHost(query, host, fetchImpl, maxBytes, timeoutMs)),
+  );
+  const sources: ResearchSource[] = [];
+  for (const result of settled) {
+    if (result.status === 'fulfilled') sources.push(...result.value);
+  }
+  return sources;
+}
+
+type SerperAttempt = { sources: ResearchSource[]; exhausted: boolean };
+
 async function searchSerper(
   query: string,
   apiKey: string,
   fetchImpl: typeof fetch,
   maxBytes: number,
   timeoutMs: number,
-): Promise<ResearchSource[]> {
-  const { text } = await fetchBounded(fetchImpl, 'https://google.serper.dev/search', {
-    method: 'POST',
-    headers: {
-      Accept: 'application/json',
-      'Content-Type': 'application/json',
-      'X-API-KEY': apiKey,
-      'User-Agent': RESEARCH_USER_AGENT,
-    },
-    body: JSON.stringify({ q: query, num: 12, gl: 'id', hl: 'id' }),
-  }, maxBytes, timeoutMs);
-  return parseSerperResults(jsonPayload(text));
+): Promise<SerperAttempt> {
+  try {
+    const { text } = await fetchBounded(fetchImpl, 'https://google.serper.dev/search', {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+        'X-API-KEY': apiKey,
+        'User-Agent': RESEARCH_USER_AGENT,
+      },
+      body: JSON.stringify({ q: query, num: 12, gl: 'id', hl: 'id' }),
+    }, maxBytes, timeoutMs);
+    return { sources: parseSerperResults(jsonPayload(text)), exhausted: false };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return {
+      sources: [],
+      exhausted: /HTTP 429|HTTP 402|HTTP 403/.test(message),
+    };
+  }
 }
 
-async function searchBrave(
+async function searchWikidata(
   query: string,
-  apiKey: string,
+  indonesiaPreferred: boolean,
   fetchImpl: typeof fetch,
   maxBytes: number,
   timeoutMs: number,
 ): Promise<ResearchSource[]> {
-  const url = `https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(query)}&count=12`;
-  const { text } = await fetchBounded(fetchImpl, url, {
-    headers: {
-      Accept: 'application/json',
-      'X-Subscription-Token': apiKey,
-      'User-Agent': RESEARCH_USER_AGENT,
-    },
-    redirect: 'follow',
-  }, maxBytes, timeoutMs);
-  return parseBraveResults(jsonPayload(text));
+  const language = indonesiaPreferred ? 'id' : 'en';
+  const searchUrl = `https://www.wikidata.org/w/api.php?action=wbsearchentities&search=${encodeURIComponent(query)}&language=${language}&uselang=${language}&format=json&limit=5&type=item`;
+  try {
+    const { text } = await fetchBounded(fetchImpl, searchUrl, {
+      headers: { Accept: 'application/json', 'User-Agent': RESEARCH_USER_AGENT },
+      redirect: 'follow',
+    }, maxBytes, timeoutMs);
+    const hits = parseWikidataSearch(jsonPayload(text));
+    const sources: ResearchSource[] = hits.map(hit => ({
+      title: hit.title,
+      url: hit.url,
+      snippet: hit.snippet.slice(0, MAX_SNIPPET),
+      origin: classifySourceOrigin(hit.url),
+    }));
+    const ids = hits.map(hit => hit.id).slice(0, 3);
+    if (!ids.length) return sources;
+    const entityUrl = `https://www.wikidata.org/w/api.php?action=wbgetentities&ids=${ids.join('|')}&props=labels|descriptions|sitelinks&sitefilter=enwiki|idwiki&languages=en|id&format=json`;
+    try {
+      const entities = await fetchBounded(fetchImpl, entityUrl, {
+        headers: { Accept: 'application/json', 'User-Agent': RESEARCH_USER_AGENT },
+        redirect: 'follow',
+      }, maxBytes, timeoutMs);
+      sources.push(...parseWikidataEntities(jsonPayload(entities.text)));
+    } catch {
+      // Search hits alone are still usable.
+    }
+    return sources;
+  } catch {
+    return [];
+  }
 }
 
-async function searchTavily(
+function googleNewsRssUrl(query: string, indonesiaPreferred: boolean): string {
+  const locale = indonesiaPreferred
+    ? 'hl=id&gl=ID&ceid=ID:id'
+    : 'hl=en-US&gl=US&ceid=US:en';
+  return `https://news.google.com/rss/search?q=${encodeURIComponent(query)}&${locale}`;
+}
+
+async function searchNewsRss(
   query: string,
-  apiKey: string,
+  indonesiaPreferred: boolean,
   fetchImpl: typeof fetch,
   maxBytes: number,
   timeoutMs: number,
 ): Promise<ResearchSource[]> {
-  const { text } = await fetchBounded(fetchImpl, 'https://api.tavily.com/search', {
-    method: 'POST',
-    headers: {
-      Accept: 'application/json',
-      'Content-Type': 'application/json',
-      'User-Agent': RESEARCH_USER_AGENT,
-    },
-    body: JSON.stringify({
-      api_key: apiKey,
-      query,
-      search_depth: 'basic',
-      max_results: 10,
-      include_answer: false,
-    }),
-  }, maxBytes, timeoutMs);
-  return parseTavilyResults(jsonPayload(text));
-}
-
-async function searchCommercialApis(
-  query: string,
-  keys: Required<SearchApiKeys>,
-  fetchImpl: typeof fetch,
-  maxBytes: number,
-  timeoutMs: number,
-): Promise<ResearchSource[]> {
-  const sources: ResearchSource[] = [];
-  if (keys.serper) {
-    try { sources.push(...await searchSerper(query, keys.serper, fetchImpl, maxBytes, timeoutMs)); } catch { /* optional */ }
+  const url = googleNewsRssUrl(query, indonesiaPreferred);
+  try {
+    const { text } = await fetchBounded(fetchImpl, url, {
+      headers: {
+        Accept: 'application/rss+xml, application/xml, text/xml',
+        'User-Agent': RESEARCH_USER_AGENT,
+      },
+      redirect: 'follow',
+    }, maxBytes, timeoutMs);
+    return parseNewsRss(text).map(result => ({
+      ...result,
+      origin: classifySourceOrigin(result.url),
+    }));
+  } catch {
+    return [];
   }
-  if (sources.length < 8 && keys.brave) {
-    try { sources.push(...await searchBrave(query, keys.brave, fetchImpl, maxBytes, timeoutMs)); } catch { /* optional */ }
-  }
-  if (sources.length < 8 && keys.tavily) {
-    try { sources.push(...await searchTavily(query, keys.tavily, fetchImpl, maxBytes, timeoutMs)); } catch { /* optional */ }
-  }
-  return sources;
 }
 
 type PageFetchOptions = {
@@ -1174,7 +1409,7 @@ async function fetchPageSource(
     snippet: candidate.snippet,
     origin,
   };
-  if (!isPublicHttpUrl(candidate.url)) return fallback;
+  if (!isPublicHttpUrl(candidate.url) || isLikelyLoginWallHost(candidate.url)) return fallback;
 
   try {
     const host = new URL(candidate.url).hostname.toLowerCase();
@@ -1199,10 +1434,16 @@ async function fetchPageSource(
         },
         redirect: 'follow',
       }, maxBytes, timeoutMs);
-      if (!isPublicHttpUrl(page.url)) return null;
+      if (!isPublicHttpUrl(page.url) || isLikelyLoginWallHost(page.url)) return null;
+      if (isEmptyOrLoginWallSource(page.text, page.url, htmlTitle(page.text))) {
+        if (candidate.snippet.trim().length >= 40 && !isEmptyOrLoginWallSource(candidate.snippet, candidate.url, candidate.title)) {
+          return { title: candidate.title, url: candidate.url, snippet: candidate.snippet.slice(0, MAX_SNIPPET), origin };
+        }
+        return null;
+      }
       const extracted = extractFetchedContent(page.text, query, page.contentType);
       const snippet = pickRicherSnippet(extracted.snippet, candidate.snippet, query).slice(0, MAX_SNIPPET);
-      if (!snippet.trim()) return null;
+      if (!snippet.trim() || isEmptyOrLoginWallSource(snippet, page.url, extracted.title)) return null;
       return {
         title: extracted.title || candidate.title,
         url: page.url,
@@ -1231,9 +1472,15 @@ async function fetchPageSource(
       if (/just a moment|cf-browser-verification|challenge-platform|target url returned error|failed to fetch/i.test(page.text.slice(0, 500))) {
         return null;
       }
+      if (isEmptyOrLoginWallSource(page.text, candidate.url)) {
+        if (candidate.snippet.trim().length >= 40 && !isEmptyOrLoginWallSource(candidate.snippet, candidate.url, candidate.title)) {
+          return { title: candidate.title, url: candidate.url, snippet: candidate.snippet.slice(0, MAX_SNIPPET), origin };
+        }
+        return null;
+      }
       const extracted = extractFetchedContent(page.text, query, page.contentType);
       const snippet = pickRicherSnippet(extracted.snippet, candidate.snippet, query).slice(0, MAX_SNIPPET);
-      if (!snippet.trim()) return null;
+      if (!snippet.trim() || isEmptyOrLoginWallSource(snippet, candidate.url, extracted.title)) return null;
       return {
         title: extracted.title || candidate.title,
         url: candidate.url,
@@ -1272,6 +1519,9 @@ function uniqueSourceCount(sources: ResearchSource[]): number {
 }
 
 function isUsableResearchSource(source: ResearchSource, query: string): boolean {
+  if (isLikelyLoginWallHost(source.url) || isEmptyOrLoginWallSource(source.snippet, source.url, source.title)) {
+    return false;
+  }
   const blob = `${source.title} ${source.snippet} ${source.url}`.toLowerCase();
   const names = extractPersonNameCandidates(query).map(name => name.toLowerCase());
   return source.snippet.trim().length >= 40
@@ -1296,14 +1546,15 @@ export async function gatherAiResearchContext(
   const deadline = now() + timeoutMs;
   const names = extractPersonNameCandidates(query);
   const keys = resolveSearchApiKeys(options.searchApiKeys);
-  const hasSearchApiKeys = Boolean(keys.serper || keys.brave || keys.tavily);
+  const serperKey = keys.serper;
   const logger = options.logger || console;
   const enableJina = options.enableJinaFallback !== false;
   const jinaState = { count: 0 };
 
   const queries = buildSearchQueries(query);
-  const apiQueries = hasSearchApiKeys ? buildOpenWebSearchQueries(query) : [];
+  const serperQueries = serperKey ? buildOpenWebSearchQueries(query) : [];
   const wikiQueries = buildWikipediaQueries(query);
+  const newsQueries = buildNewsRssQueries(query);
   const instantQueries = [...new Set([
     query,
     names[0] || '',
@@ -1317,25 +1568,48 @@ export async function gatherAiResearchContext(
     origin: classifySourceOrigin(url),
   }));
 
+  let serperHits = 0;
+  let serperExhausted = !serperKey;
+  if (serperKey && serperQueries.length) {
+    const serperBudget = Math.max(1_500, Math.floor(remainingMs(deadline, now) * 0.35));
+    const serperSettled = await Promise.allSettled(
+      serperQueries.map(item => searchSerper(item, serperKey, fetchImpl, maxBytes, serperBudget)),
+    );
+    let quotaHit = false;
+    for (const result of serperSettled) {
+      if (result.status !== 'fulfilled') continue;
+      if (result.value.exhausted) quotaHit = true;
+      if (result.value.sources.length) {
+        found.push(...result.value.sources);
+        serperHits += result.value.sources.length;
+      }
+    }
+    serperExhausted = quotaHit || serperHits === 0;
+    if (serperExhausted) logger.warn(SERPER_EXHAUSTED_WARNING);
+  }
+
+  const needHtmlSearch = !serperKey || serperHits < 3;
   const searchBudget = Math.max(1_500, Math.floor(remainingMs(deadline, now) * 0.4));
-  const [ddgProbe, wikiSettled, instantSettled, apiSettled] = await Promise.all([
-    searchDuckDuckGoHtml(queries[0], fetchImpl, maxBytes, Math.min(3_000, searchBudget)),
+  const [ddgProbe, wikiSettled, instantSettled, wikidataSettled, newsSettled] = await Promise.all([
+    needHtmlSearch
+      ? searchDuckDuckGoHtml(queries[0], fetchImpl, maxBytes, Math.min(3_000, searchBudget))
+      : Promise.resolve({ sources: [], blocked: false } as HtmlSearchResult),
     Promise.allSettled(wikiQueries.map(item => (
       searchWikipedia(item, indonesiaPreferred, fetchImpl, maxBytes, searchBudget)
     ))),
     Promise.allSettled(instantQueries.map(item => (
       searchDuckDuckGoInstantAnswer(item, fetchImpl, maxBytes, searchBudget)
     ))),
-    hasSearchApiKeys
-      ? Promise.allSettled(apiQueries.map(item => (
-        searchCommercialApis(item, keys, fetchImpl, maxBytes, searchBudget)
-      )))
-      : Promise.resolve([] as PromiseSettledResult<ResearchSource[]>[]),
+    Promise.allSettled(wikiQueries.map(item => (
+      searchWikidata(item, indonesiaPreferred, fetchImpl, maxBytes, searchBudget)
+    ))),
+    Promise.allSettled(newsQueries.map(item => (
+      searchNewsRss(item, indonesiaPreferred, fetchImpl, maxBytes, searchBudget)
+    ))),
   ]);
 
   let htmlSearchBlocked = ddgProbe.blocked;
   let searchHits = ddgProbe.sources.length;
-  let apiHits = 0;
   found.push(...ddgProbe.sources);
 
   for (const result of wikiSettled) {
@@ -1344,14 +1618,14 @@ export async function gatherAiResearchContext(
   for (const result of instantSettled) {
     if (result.status === 'fulfilled') found.push(...result.value);
   }
-  for (const result of apiSettled) {
-    if (result.status === 'fulfilled' && result.value.length) {
-      found.push(...result.value);
-      apiHits += result.value.length;
-    }
+  for (const result of wikidataSettled) {
+    if (result.status === 'fulfilled') found.push(...result.value);
+  }
+  for (const result of newsSettled) {
+    if (result.status === 'fulfilled') found.push(...result.value);
   }
 
-  if (!htmlSearchBlocked && !apiHits && queries.length > 1) {
+  if (needHtmlSearch && !htmlSearchBlocked && serperHits < 3 && queries.length > 1) {
     const rest = await Promise.allSettled(
       queries.slice(1).map(item => searchDuckDuckGoHtml(item, fetchImpl, maxBytes, searchBudget)),
     );
@@ -1363,11 +1637,11 @@ export async function gatherAiResearchContext(
     }
   }
 
-  if (htmlSearchBlocked && !apiHits) {
+  if (htmlSearchBlocked && serperHits < 3) {
     logger.warn(DDG_HTML_BLOCKED_WARNING);
   }
 
-  if (!htmlSearchBlocked && !apiHits && (searchHits < 3 || uniqueSourceCount(found) < 4)) {
+  if (needHtmlSearch && !htmlSearchBlocked && serperHits < 3 && (searchHits < 3 || uniqueSourceCount(found) < 4)) {
     const fallbackQueries = buildFallbackSearchQueries(query);
     const fallbackBudget = Math.max(1_200, Math.floor(remainingMs(deadline, now) * 0.35));
     if (fallbackQueries.length && fallbackBudget > 0) {
@@ -1382,7 +1656,12 @@ export async function gatherAiResearchContext(
     }
   }
 
-  const ranked = selectFetchCandidates(found, query, indonesiaPreferred, MAX_PAGE_FETCHES);
+  const ranked = selectFetchCandidates(
+    found.filter(source => !isLikelyLoginWallHost(source.url)),
+    query,
+    indonesiaPreferred,
+    MAX_PAGE_FETCHES,
+  );
   if (ranked.length === 0) return empty;
 
   const fetchBudget = Math.max(1_200, remainingMs(deadline, now));
@@ -1394,9 +1673,13 @@ export async function gatherAiResearchContext(
     fetchBudget,
     { enableJina, jinaState },
   )));
-  const withText = fetched.filter(source => source.snippet.trim().length >= 40);
-  const usable = fetched.filter(source => isUsableResearchSource(source, query));
-  const selected = withText.length >= 3 ? withText : usable.length ? usable : fetched;
+  const cleaned = fetched.filter(source => (
+    !isLikelyLoginWallHost(source.url)
+    && !isEmptyOrLoginWallSource(source.snippet, source.url, source.title)
+  ));
+  const withText = cleaned.filter(source => source.snippet.trim().length >= 40);
+  const usable = cleaned.filter(source => isUsableResearchSource(source, query));
+  const selected = withText.length >= 3 ? withText : usable.length ? usable : cleaned;
   return {
     query,
     indonesiaPreferred,
