@@ -1,15 +1,18 @@
--- Restore Codex chat models on the llmdupoin gateway for AI Research.
+-- Restore Codex chat models on the llmdupoin gateway for AI Research
+-- and the /dashboard/models catalog (AVAILABLE_MODELS).
 --
--- Migration 011 retired cx/* after a probe against llm.gorillaworkout.id saw
--- Codex OAuth 401. Production (marketing-aws) uses
--- https://llmdupoin.gorillaworkout.id — Codex may work there. Re-probe with
--- scripts/probe-gateway-models.ts before removing these ids again.
+-- VPS live probe 2026-09-18: GET https://llmdupoin.gorillaworkout.id/v1/models
+-- returned HTTP 200 with 51 ids, including cx/gpt-5.6-sol and
+-- cx/gpt-5.3-codex-spark. Migration 011 had retired cx/* after a 401 on
+-- llm.gorillaworkout.id. Current prod ai-research is Gemini/Claude only.
 --
--- Kimi / moonshot stay retired (no API key). Any residual kimi/* or
--- tr/moonshotai/* allowlist entries or preferences are dropped.
+-- Kimi stays out, including gateway-listed cmc/moonshotai/Kimi-K2.5 and
+-- Kimi-K2.6. Residual kimi/*, tr/moonshotai/*, and cmc/moonshotai/* rows
+-- are dropped from allowlists and preferences.
 --
 -- Forward-only, idempotent, and non-destructive: no table or user row is
--- dropped. Safe to re-run on production.
+-- dropped. Safe to re-run on production. Deploy applies this; do not write
+-- the VPS database from a cloud agent.
 
 BEGIN;
 
@@ -28,12 +31,14 @@ UPDATE feature_model_assignments SET
             WITH ORDINALITY AS existing(model, ordinality)
           WHERE model NOT LIKE 'kimi/%'
             AND model NOT LIKE 'tr/moonshotai/%'
+            AND model NOT LIKE 'cmc/moonshotai/%'
           UNION ALL
           SELECT model, ord
           FROM (VALUES
             ('cx/gpt-5.6-sol', 1),
-            ('cx/gpt-5.6-terra', 2),
-            ('cx/gpt-5.6-luna', 3)
+            ('cx/gpt-5.3-codex-spark', 2),
+            ('cx/gpt-5.6-terra', 3),
+            ('cx/gpt-5.6-luna', 4)
           ) AS codex(model, ord)
           WHERE feature_key = 'ai-research'
         ) AS combined
@@ -62,13 +67,15 @@ UPDATE feature_model_assignments SET
       WHEN 'article-market-news' THEN '["ag/claude-sonnet-4-6","lr/claude-sonnet-4.5","ag/gemini-3.1-pro-low"]'::jsonb
       WHEN 'market-research'     THEN '["ag/claude-sonnet-4-6","lr/claude-sonnet-4.5","ag/gemini-3.1-pro-low"]'::jsonb
       WHEN 'event-plan'          THEN '["ag/gemini-3-flash","ag/gemini-3.1-pro-low","ag/claude-sonnet-4-6"]'::jsonb
-      WHEN 'ai-research'         THEN '["cx/gpt-5.6-sol","cx/gpt-5.6-terra","cx/gpt-5.6-luna","ag/gemini-3-flash","ag/gemini-3.6-flash-high","ag/claude-sonnet-4-6","ag/gemini-3.1-pro-low"]'::jsonb
+      WHEN 'ai-research'         THEN '["cx/gpt-5.6-sol","cx/gpt-5.3-codex-spark","cx/gpt-5.6-terra","cx/gpt-5.6-luna","ag/gemini-3-flash","ag/gemini-3.6-flash-high","ag/claude-sonnet-4-6","ag/gemini-3.1-pro-low"]'::jsonb
       ELSE '["ag/gemini-3-flash","ag/gemini-3.6-flash-medium","ag/claude-sonnet-4-6"]'::jsonb
     END
   ),
   default_model = CASE
     WHEN feature_key = 'ai-research' THEN 'cx/gpt-5.6-sol'
-    WHEN default_model LIKE 'kimi/%' OR default_model LIKE 'tr/moonshotai/%' THEN
+    WHEN default_model LIKE 'kimi/%'
+      OR default_model LIKE 'tr/moonshotai/%'
+      OR default_model LIKE 'cmc/moonshotai/%' THEN
       CASE feature_key
         WHEN 'article-market-news' THEN 'ag/claude-sonnet-4-6'
         WHEN 'market-research' THEN 'ag/claude-sonnet-4-6'
@@ -89,7 +96,7 @@ WHERE NOT (allowed_models @> jsonb_build_array(default_model));
 INSERT INTO feature_model_assignments (feature_key, allowed_models, default_model)
 VALUES (
   'ai-research',
-  '["cx/gpt-5.6-sol","cx/gpt-5.6-terra","cx/gpt-5.6-luna","ag/gemini-3-flash","ag/gemini-3.6-flash-high","ag/claude-sonnet-4-6","ag/gemini-3.1-pro-low"]'::jsonb,
+  '["cx/gpt-5.6-sol","cx/gpt-5.3-codex-spark","cx/gpt-5.6-terra","cx/gpt-5.6-luna","ag/gemini-3-flash","ag/gemini-3.6-flash-high","ag/claude-sonnet-4-6","ag/gemini-3.1-pro-low"]'::jsonb,
   'cx/gpt-5.6-sol'
 )
 ON CONFLICT (feature_key) DO NOTHING;
@@ -104,6 +111,7 @@ WHERE assignment.feature_key = preference.task_type
   AND (
     preference.model LIKE 'kimi/%'
     OR preference.model LIKE 'tr/moonshotai/%'
+    OR preference.model LIKE 'cmc/moonshotai/%'
     OR NOT (assignment.allowed_models @> jsonb_build_array(preference.model))
   );
 

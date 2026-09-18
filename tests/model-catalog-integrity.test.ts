@@ -60,12 +60,14 @@ test('AI Research defaults include GPT-5.6 Sol and no Kimi', () => {
   const assignment = DEFAULT_FEATURE_ASSIGNMENTS['ai-research'];
   assert.equal(assignment.defaultModel, PREFERRED_CODEX_MODEL);
   assert.ok(assignment.allowedModels.includes(PREFERRED_CODEX_MODEL));
+  assert.ok(assignment.allowedModels.includes('cx/gpt-5.3-codex-spark'));
   assert.ok(assignment.allowedModels.includes('cx/gpt-5.6-terra'));
   assert.ok(assignment.allowedModels.includes('cx/gpt-5.6-luna'));
   assert.ok(assignment.allowedModels.includes('ag/gemini-3-flash'));
   assert.ok(assignment.allowedModels.includes(assignment.defaultModel));
   assert.ok(assignment.allowedModels.every(id => catalog.has(id)));
-  assert.ok(!assignment.allowedModels.some(id => id.startsWith('kimi/') || id.startsWith('tr/')));
+  assert.ok(!assignment.allowedModels.some(id =>
+    id.startsWith('kimi/') || id.startsWith('tr/') || id.startsWith('cmc/moonshotai/') || id.toLowerCase().includes('kimi')));
 });
 
 test('the Codex restore migration only writes catalog models and never writes Kimi', () => {
@@ -76,6 +78,8 @@ test('the Codex restore migration only writes catalog models and never writes Ki
   assert.doesNotMatch(restore.replace(/--.*$/gm, ''), /kimi\/k|tr\/moonshotai\/kimi/);
   assert.match(restore, /kimi\/%/);
   assert.match(restore, /tr\/moonshotai\/%/);
+  assert.match(restore, /cmc\/moonshotai\/%/);
+  assert.match(restore, /cx\/gpt-5\.3-codex-spark/);
   assert.doesNotMatch(restore, /DROP TABLE|DELETE FROM|TRUNCATE/i);
   assert.match(restore, /BEGIN;[\s\S]*COMMIT;/);
   assert.match(restore, /ON CONFLICT \(feature_key\) DO NOTHING/);
@@ -83,6 +87,9 @@ test('the Codex restore migration only writes catalog models and never writes Ki
 
 test('catalog itself contains Codex and excludes Kimi', () => {
   assert.ok(catalog.has(PREFERRED_CODEX_MODEL));
+  assert.ok(catalog.has('cx/gpt-5.3-codex-spark'));
   assert.ok([...catalog].some(id => id.startsWith('cx/')));
-  assert.ok(![...catalog].some(id => id.startsWith('kimi/') || id.startsWith('tr/')));
+  assert.ok(![...catalog].some(id =>
+    id.startsWith('kimi/') || id.startsWith('tr/') || id.startsWith('cmc/moonshotai/') || id.toLowerCase().includes('kimi')));
+  assert.ok(![...catalog].some(id => id.endsWith('-review')), 'do not dump unverified *-review Codex ids');
 });

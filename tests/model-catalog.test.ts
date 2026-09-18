@@ -3,8 +3,9 @@ import { AVAILABLE_MODELS, PREFERRED_CODEX_MODEL } from '../src/lib/openai';
 
 /**
  * Catalog contract. Gemini 3.6 ids were verified with a real completion via
- * scripts/probe-gateway-models.ts on 2026-09-18. Codex `cx/*` is restored for
- * the llmdupoin gateway (Bayu / AI Research) — re-probe before removing.
+ * scripts/probe-gateway-models.ts. Codex `cx/*` is restored from the VPS
+ * llmdupoin GET /v1/models probe (HTTP 200, 51 ids, 2026-09-18) so
+ * /dashboard/models is not empty of GPT-5.6 Sol. Re-probe before removing.
  * `ag/gemini-3.7-*` was previously asserted as required but the gateway
  * answers 404; the live Flash generation is 3.6.
  */
@@ -26,8 +27,9 @@ assert(ids.includes('cx/gpt-5.4'), 'GPT-5.4 must be offered');
 assert(ids.includes('cx/gpt-5.4-mini'), 'GPT-5.4 Mini must be offered');
 assert(ids.includes('cx/gpt-5.3-codex-spark'), 'GPT-5.3 Codex Spark must be offered');
 
-assert(!ids.some(id => id.startsWith('kimi/') || id.startsWith('tr/')), 'Kimi / moonshot must stay removed');
-assert(!ids.some(id => id.startsWith('cc/') || id.startsWith('cmc/')), 'retired Claude Code / Command Code must stay out');
+assert(!ids.some(id => id.startsWith('kimi/') || id.startsWith('tr/') || id.startsWith('cmc/moonshotai/') || id.toLowerCase().includes('kimi')), 'Kimi / moonshot must stay removed');
+assert(!ids.some(id => id.startsWith('cc/')), 'retired Claude Code must stay out');
+assert(!ids.some(id => id.endsWith('-review')), 'unverified Codex *-review ids stay out');
 assert(!ids.includes('pecut-free'), 'pecut-free must stay retired');
 
 console.log('model catalog contract passed');

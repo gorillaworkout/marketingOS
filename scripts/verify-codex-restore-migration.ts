@@ -33,7 +33,7 @@ async function main() {
   await execute('DELETE FROM feature_model_assignments');
   await execute(`INSERT INTO feature_model_assignments (feature_key, allowed_models, default_model) VALUES
     ('social-post', '["ag/gemini-3-flash","ag/gemini-3.6-flash-medium","ag/claude-sonnet-4-6"]'::jsonb, 'ag/gemini-3-flash'),
-    ('video-script', '["ag/gemini-3-flash","kimi/k3","ag/claude-sonnet-4-6"]'::jsonb, 'kimi/k3'),
+    ('video-script', '["ag/gemini-3-flash","kimi/k3","cmc/moonshotai/Kimi-K2.6","ag/claude-sonnet-4-6"]'::jsonb, 'kimi/k3'),
     ('event-plan', '["ag/gemini-3-flash","ag/gemini-3.1-pro-low","ag/claude-sonnet-4-6"]'::jsonb, 'ag/gemini-3.1-pro-low'),
     ('article-market-news', '["ag/claude-sonnet-4-6","lr/claude-sonnet-4.5","ag/gemini-3.1-pro-low"]'::jsonb, 'ag/claude-sonnet-4-6'),
     ('market-research', '["ag/claude-sonnet-4-6","lr/claude-sonnet-4.5","ag/gemini-3.1-pro-low"]'::jsonb, 'ag/claude-sonnet-4-6'),
@@ -69,6 +69,7 @@ async function main() {
       assert.ok(live.has(model), `${row.feature_key} allows unknown model ${model}`);
       assert.ok(!model.startsWith('kimi/'), `${row.feature_key} still allows ${model}`);
       assert.ok(!model.startsWith('tr/'), `${row.feature_key} still allows ${model}`);
+      assert.ok(!model.startsWith('cmc/moonshotai/'), `${row.feature_key} still allows ${model}`);
     }
     assert.ok(live.has(row.default_model), `${row.feature_key} defaults to unknown model ${row.default_model}`);
     assert.ok(row.allowed_models.includes(row.default_model), `${row.feature_key} default is inside its allowlist`);
@@ -78,6 +79,7 @@ async function main() {
   assert.ok(aiResearch);
   assert.equal(aiResearch.default_model, PREFERRED_CODEX_MODEL);
   assert.ok(aiResearch.allowed_models.includes('cx/gpt-5.6-sol'));
+  assert.ok(aiResearch.allowed_models.includes('cx/gpt-5.3-codex-spark'));
   assert.ok(aiResearch.allowed_models.includes('cx/gpt-5.6-terra'));
   assert.ok(aiResearch.allowed_models.includes('cx/gpt-5.6-luna'));
   assert.ok(aiResearch.allowed_models.includes('ag/gemini-3-flash'));

@@ -86,6 +86,7 @@ export const DEFAULT_FEATURE_ASSIGNMENTS: Record<GenerationFeature, {
   'ai-research': {
     allowedModels: [
       PREFERRED_CODEX_MODEL,
+      'cx/gpt-5.3-codex-spark',
       'cx/gpt-5.6-terra',
       'cx/gpt-5.6-luna',
       'ag/gemini-3-flash',

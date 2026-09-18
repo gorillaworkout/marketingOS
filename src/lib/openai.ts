@@ -29,20 +29,19 @@ export interface ModelInfo {
 // Catalog IDs for the GorillaWorkout OpenAI-compatible gateway
 // (default https://llmdupoin.gorillaworkout.id/v1, override with GORILLAWORKOUT_API_BASE).
 //
-// Codex `cx/*` was removed in migration 011 after a probe against
-// llm.gorillaworkout.id saw Codex OAuth 401. They may work on llmdupoin —
-// ALWAYS re-probe with scripts/probe-gateway-models.ts before removing them
-// again. A listed model is not a working model.
+// VPS live probe (authoritative, 2026-09-18): GET /v1/models on llmdupoin
+// returned HTTP 200 with 51 ids. Codex `cx/*` below were on that list.
+// Migration 011 had removed them after a 401 on llm.gorillaworkout.id —
+// re-probe with scripts/probe-gateway-models.ts before removing them again.
+// Do not dump every `*-review` variant unless a short completion is verified.
 //
-// Still out (do not re-add without a live completion):
-//   kimi/*, tr/moonshotai/*  — no API key at all (owner removed it).
-//   cmc/*                    — Command Code account not topped up (400 BAD_REQUEST).
-//   cc/*                     — Claude Code OAuth token expired (401).
-//   ag/gemini-3.7-*          — 404 Requested entity was not found (never existed upstream).
-//   ag/gemini-3.5-*, ag/gemini-3-flash-agent — retired upstream; they return HTTP 200
-//                              whose body is a retirement notice, so a status check
-//                              alone does NOT catch them.
-//   pecut-free               — upstream 400 "Unsupported model mimo-auto".
+// Still out (do not re-add):
+//   kimi/*, tr/moonshotai/*              — retired; no Kimi API key.
+//   cmc/moonshotai/Kimi-K2.5, Kimi-K2.6  — listed on the gateway; do not catalog.
+//   cc/*                                 — Claude Code OAuth expired (401).
+//   ag/gemini-3.7-*                      — 404, never existed upstream.
+//   ag/gemini-3.5-*, ag/gemini-3-flash-agent — retired (HTTP 200 retirement notice).
+//   pecut-free                           — upstream 400 "Unsupported model mimo-auto".
 export const AVAILABLE_MODELS: ModelInfo[] = [
   { id: 'ag/gemini-3-flash', name: 'Gemini 3 Flash', tier: 'budget', provider: 'gorillaworkout', input: 0, output: 0 },
   { id: 'ag/gemini-3.6-flash-low', name: 'Gemini 3.6 Flash Low', tier: 'budget', provider: 'gorillaworkout', input: 0, output: 0 },

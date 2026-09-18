@@ -47,11 +47,13 @@ test('014 restores Codex on AI Research, drops residual Kimi, and is idempotent'
   assert.match(restore, /ON CONFLICT \(feature_key\) DO NOTHING/);
   assert.doesNotMatch(restore, /DROP TABLE|DELETE FROM|TRUNCATE/i);
   assert.match(executable, /cx\/gpt-5\.6-sol/);
+  assert.match(executable, /cx\/gpt-5\.3-codex-spark/);
   assert.match(executable, /cx\/gpt-5\.6-terra/);
   assert.match(executable, /cx\/gpt-5\.6-luna/);
   assert.match(executable, /feature_key = 'ai-research'/);
   assert.match(executable, /kimi\/%/);
   assert.match(executable, /tr\/moonshotai\/%/);
+  assert.match(executable, /cmc\/moonshotai\/%/);
   assert.doesNotMatch(executable, /kimi\/k3|kimi\/kimi/);
   const quoted = [...executable.matchAll(/'((?:ag|cc|cx|kimi|tr|lr)\/[^']+|pecut-free)'/g)]
     .map(match => match[1])
