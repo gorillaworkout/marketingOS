@@ -49,6 +49,8 @@ import {
   mentionsPersonName,
   mergeOrganicSearchHits,
   officialSeedUrls,
+  searchSerper,
+  simplifySerperQuery,
   parseBraveResults,
   parseDuckDuckGoInstantAnswer,
   parseDuckDuckGoResults,
@@ -386,24 +388,31 @@ test('person + Dupoin queries extract names and run a multi-query regulator brow
 
   const queries = buildSearchQueries(sellaQuery);
   assert.ok(queries.length >= 5, `expected a broad query set, got ${queries.length}`);
-  assert.ok(queries.some(query => /^"Sella Susriana"$/i.test(query)));
-  assert.ok(queries.some(query => /"Sella Susriana" Dupoin/i.test(query)));
-  assert.ok(queries.some(query => /"Sella Susriana" Bappebti/i.test(query)));
+  assert.ok(queries.every(query => !/"/.test(query)), `search queries must stay unquoted for free Serper, got ${queries.join(' | ')}`);
+  assert.ok(queries.some(query => /^Sella Susriana$/i.test(query)));
+  assert.ok(queries.some(query => /Sella Susriana Dupoin/i.test(query)));
+  assert.ok(queries.some(query => /Sella Susriana Bappebti/i.test(query)));
   assert.ok(queries.some(query => /site:bappebti\.go\.id/i.test(query)));
   assert.ok(queries.some(query => /wakil pialang/i.test(query)));
-  assert.ok(queries.some(query => /linkedin\.com|berita OR news/i.test(query)));
-  assert.ok(queries.some(query => /CPNS|Kemdikbud|freelancer/i.test(query)));
-  assert.ok(queries.some(query => /ilmu tanah|administrasi|KYC/i.test(query)));
-  assert.ok(queries.some(query => /Universitas Andalas|unand|scholar/i.test(query)));
+  assert.ok(queries.some(query => /LinkedIn|linkedin\.com/i.test(query)));
+  assert.ok(queries.some(query => /CPNS|freelancer/i.test(query)));
+  assert.ok(queries.some(query => /ilmu tanah/i.test(query)));
+  assert.ok(queries.some(query => /Unand/i.test(query)));
 
   const openWeb = buildOpenWebSearchQueries(sellaQuery);
-  assert.ok(openWeb.some(query => /^"Sella Susriana"$/i.test(query)), 'Serper must run a bare-name query');
-  assert.ok(openWeb.some(query => /Sella Susriana/i.test(query)));
-  assert.ok(openWeb.some(query => /CPNS|freelancer/i.test(query)));
-  assert.ok(openWeb.some(query => /Universitas Andalas|unand|scholar/i.test(query)));
-  assert.ok(openWeb.some(query => /news OR berita OR linkedin/i.test(query)));
+  assert.ok(openWeb.every(query => !/"/.test(query)), `Serper person queries must not wrap names in quotes, got ${openWeb.join(' | ')}`);
+  assert.ok(openWeb.some(query => /^Sella Susriana$/i.test(query)), 'Serper must run a bare-name query');
+  assert.ok(openWeb.some(query => /Sella Susriana freelancer/i.test(query)));
+  assert.ok(openWeb.some(query => /Sella Susriana Unand/i.test(query)));
+  assert.ok(openWeb.some(query => /Sella Susriana CPNS/i.test(query)));
+  assert.ok(openWeb.some(query => /Sella Susriana ilmu tanah/i.test(query)));
   assert.ok(!openWeb.every(query => /site:/i.test(query)), 'open-web queries must not be site-restricted');
+  assert.ok(!openWeb.some(query => /\bOR\b/.test(query)), 'open-web person probes must avoid heavy OR patterns');
   assert.ok(openWeb.length >= 5, `expected more open-web person queries, got ${openWeb.length}`);
+  assert.equal(simplifySerperQuery('"Sella Susriana" CPNS OR freelancer'), 'Sella Susriana CPNS OR freelancer');
+  const quotedUser = buildOpenWebSearchQueries('"Sella Susriana" siapa sih jir di dupoin');
+  assert.ok(quotedUser.every(query => !/"/.test(query)), `quoted user input must be stripped before Serper, got ${quotedUser.join(' | ')}`);
+  assert.ok(quotedUser.some(query => /^Sella Susriana$/i.test(query)));
 
   const wikiQueries = buildWikipediaQueries(sellaQuery);
   assert.ok(wikiQueries.some(query => /Sella Susriana/i.test(query)));
@@ -834,11 +843,13 @@ test('URL slugs and compact handles count as open-web person traces', () => {
 
 test('Serper organic name hits survive failed fetches and emit OTHER_PUBLIC_TRACE', async () => {
   const calls: string[] = [];
+  const serperBodies: string[] = [];
   const fetchImpl: typeof fetch = async (input, init) => {
     const url = String(input);
     calls.push(url);
     if (url.includes('google.serper.dev/search')) {
       assert.equal((init?.headers as Record<string, string>)?.['X-API-KEY'] || (init?.headers as Headers | undefined)?.get?.('X-API-KEY'), 'organic-keep-serper');
+      serperBodies.push(String(init?.body || ''));
       return new Response(JSON.stringify({
         organic: [
           {
@@ -922,6 +933,15 @@ test('Serper organic name hits survive failed fetches and emit OTHER_PUBLIC_TRAC
   });
   const urls = result.sources.map(source => source.url).join(' ');
   assert.ok(calls.some(url => url.includes('google.serper.dev/search')));
+  const serperQs = serperBodies.map(body => JSON.parse(body).q as string);
+  assert.ok(serperQs.length >= 2, `expected multiple Serper person probes, got ${serperQs.length}`);
+  for (const q of serperQs) {
+    assert.doesNotMatch(q, /"/, `Serper q must not quote person names: ${q}`);
+    assert.match(q, /Sella Susriana/i);
+  }
+  assert.ok(serperQs.some(q => /Sella Susriana freelancer/i.test(q)));
+  assert.ok(serperQs.some(q => /Sella Susriana Unand/i.test(q)));
+  assert.ok(serperQs.some(q => /Sella Susriana CPNS/i.test(q)));
   assert.ok(/bappebti\.go\.id\/pialang_berjangka\/detail\/423/.test(urls), 'official Bappebti floor stays');
   assert.ok(/cake\.me/.test(urls), 'cake.me Serper organic must survive failed fetch');
   assert.ok(/freelancer\.co\.nz/.test(urls), 'freelancer.co.nz Serper organic must survive failed fetch');
@@ -967,6 +987,43 @@ test('Serper organic name hits survive failed fetches and emit OTHER_PUBLIC_TRAC
   assert.ok(otherTraceLines.some(line => /cake\.me/.test(line)));
   assert.ok(otherTraceLines.some(line => /freelancer\.co\.nz/.test(line)));
   assert.ok(otherTraceLines.some(line => /unand/.test(line)));
+});
+
+test('Serper HTTP 400 query-pattern errors strip quotes and retry once', async () => {
+  const queries: string[] = [];
+  const fetchImpl: typeof fetch = async (input, init) => {
+    const url = String(input);
+    if (!url.includes('google.serper.dev/search')) {
+      return new Response('not found', { status: 404 });
+    }
+    const q = JSON.parse(String(init?.body || '{}')).q as string;
+    queries.push(q);
+    if (/"/.test(q)) {
+      return new Response('Query pattern not allowed for free accounts', {
+        status: 400,
+        headers: { 'content-type': 'text/plain' },
+      });
+    }
+    return new Response(JSON.stringify({
+      organic: [{
+        title: 'CakeResume',
+        link: 'https://www.cake.me/sella-susriana',
+        snippet: 'Sella Susriana resume for administrasi and KYC.',
+      }],
+    }), { status: 200, headers: { 'content-type': 'application/json' } });
+  };
+
+  const quoted = '"Sella Susriana" CPNS OR freelancer';
+  const result = await searchSerper(quoted, 'retry-serper', fetchImpl, 50_000, 5_000);
+  assert.deepEqual(queries, [quoted, simplifySerperQuery(quoted)]);
+  assert.equal(simplifySerperQuery(quoted), 'Sella Susriana CPNS OR freelancer');
+  assert.ok(result.sources.some(source => source.url.includes('cake.me')));
+  assert.equal(result.exhausted, false);
+
+  const again = await searchSerper(quoted, 'retry-serper', fetchImpl, 50_000, 5_000);
+  assert.equal(queries.filter(query => query === quoted).length, 2, 'quoted pattern is attempted once per call');
+  assert.equal(queries.filter(query => query === 'Sella Susriana CPNS OR freelancer').length, 2);
+  assert.ok(again.sources.some(source => source.url.includes('cake.me')));
 });
 
 test('mergeOrganicSearchHits injects unfetched Serper name hits using search snippets', () => {

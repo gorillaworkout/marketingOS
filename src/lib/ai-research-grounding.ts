@@ -354,26 +354,39 @@ export function isDeepPersonResearch(text: string): boolean {
   return looksLikePersonQuery(text) && looksLikeBrokerContext(text);
 }
 
+const SEARCH_QUERY_QUOTE_RE = /[\u201C\u201D\u201E"]/g;
+
+/** Serper free tier rejects double-quoted query patterns with HTTP 400. */
+export function simplifySerperQuery(query: string): string {
+  return query.replace(SEARCH_QUERY_QUOTE_RE, ' ').replace(/\s+/g, ' ').trim();
+}
+
+function personOpenWebProbes(name: string): string[] {
+  return [
+    name,
+    `${name} freelancer`,
+    `${name} Unand`,
+    `${name} CPNS`,
+    `${name} ilmu tanah`,
+    `${name} Dupoin`,
+    `${name} Bappebti`,
+  ];
+}
+
 export function buildSearchQueries(text: string): string[] {
-  const query = text.replace(/\s+/g, ' ').trim();
-  const prioritized = [query];
+  const query = simplifySerperQuery(text.replace(/\s+/g, ' ').trim());
+  const prioritized = [query].filter(Boolean);
   const extras: string[] = [];
   const indonesia = prefersIndonesiaSources(query);
-  const names = extractPersonNameCandidates(query);
-  const deep = isDeepPersonResearch(query);
+  const names = extractPersonNameCandidates(text);
+  const deep = isDeepPersonResearch(text);
 
   for (const name of names.slice(0, 2)) {
-    extras.push(`"${name}"`);
-    extras.push(`"${name}" CPNS OR Kemdikbudristek OR freelancer`);
-    extras.push(`"${name}" "ilmu tanah" OR administrasi OR KYC`);
-    extras.push(`"${name}" "Universitas Andalas" OR unand OR scholar`);
-    extras.push(`"${name}" berita OR news OR linkedin`);
-    extras.push(`"${name}" site:linkedin.com`);
-    extras.push(`"${name}" Dupoin`);
-    extras.push(`"${name}" Bappebti`);
-    extras.push(`"${name}" "wakil pialang"`);
-    extras.push(`"${name}" site:bappebti.go.id`);
-    extras.push(`"${name}" site:dupoin.co.id`);
+    extras.push(...personOpenWebProbes(name));
+    extras.push(`${name} LinkedIn`);
+    extras.push(`${name} wakil pialang`);
+    extras.push(`${name} site:bappebti.go.id`);
+    extras.push(`${name} site:dupoin.co.id`);
   }
 
   if (deep) {
@@ -390,29 +403,26 @@ export function buildSearchQueries(text: string): string[] {
   } else if (indonesia && looksLikeEntityQuery(query)) {
     extras.push(`${query} site:.id`);
   }
-  return [...new Set([...prioritized, ...extras])].slice(0, MAX_SEARCH_QUERIES);
+  return [...new Set([...prioritized, ...extras].map(simplifySerperQuery).filter(Boolean))]
+    .slice(0, MAX_SEARCH_QUERIES);
 }
 
 export function buildOpenWebSearchQueries(text: string): string[] {
-  const query = text.replace(/\s+/g, ' ').trim();
-  const names = extractPersonNameCandidates(query);
+  const query = simplifySerperQuery(text.replace(/\s+/g, ' ').trim());
+  const names = extractPersonNameCandidates(text);
   const extras = [query];
   for (const name of names.slice(0, 2)) {
-    extras.push(`"${name}"`);
-    extras.push(`"${name}" CPNS OR Kemdikbudristek OR freelancer`);
-    extras.push(`"${name}" "ilmu tanah" OR administrasi OR KYC`);
-    extras.push(`"${name}" "Universitas Andalas" OR unand OR scholar`);
-    extras.push(`"${name}" news OR berita OR linkedin`);
-    extras.push(`"${name}" Dupoin OR Bappebti OR "wakil pialang"`);
+    extras.push(...personOpenWebProbes(name));
   }
   if (!names.length) {
-    extras.push(`${query} news OR berita`);
+    extras.push(`${query} news`);
+    extras.push(`${query} berita`);
     if (prefersIndonesiaSources(query) && !/\bindonesia\b/i.test(query)) {
       extras.push(`${query} Indonesia`);
     }
   }
   const limit = names.length ? MAX_OPEN_WEB_QUERIES : 5;
-  return [...new Set(extras.filter(Boolean))].slice(0, limit);
+  return [...new Set(extras.map(simplifySerperQuery).filter(Boolean))].slice(0, limit);
 }
 
 export function buildFallbackSearchQueries(text: string): string[] {
@@ -421,17 +431,21 @@ export function buildFallbackSearchQueries(text: string): string[] {
     'wakil pialang Dupoin site:bappebti.go.id',
     'PT Dupoin Futures Indonesia site:bappebti.go.id',
     'daftar wakil pialang berjangka Bappebti',
-    'Dupoin Futures Indonesia news OR berita',
+    'Dupoin Futures Indonesia news berita',
   ];
   for (const name of names.slice(0, 2)) {
-    extras.unshift(`"${name}" CPNS OR freelancer`);
-    extras.unshift(`"${name}" "PT Dupoin Futures Indonesia"`);
-    extras.unshift(`"${name}" wakil pialang berjangka`);
-    extras.push(`"${name}" site:linkedin.com`);
+    extras.unshift(`${name} CPNS`);
+    extras.unshift(`${name} freelancer`);
+    extras.unshift(`${name} PT Dupoin Futures Indonesia`);
+    extras.unshift(`${name} wakil pialang berjangka`);
+    extras.push(`${name} site:linkedin.com`);
   }
   if (/\bojk\b/i.test(text)) extras.push('Dupoin site:ojk.go.id');
   const already = new Set(buildSearchQueries(text));
-  return extras.filter(query => !already.has(query)).slice(0, 6);
+  return extras
+    .map(simplifySerperQuery)
+    .filter(query => query && !already.has(query))
+    .slice(0, 6);
 }
 
 function looksLikeEntityQuery(text: string): boolean {
@@ -914,14 +928,14 @@ export function buildWikipediaQueries(text: string): string[] {
 export function buildNewsRssQueries(text: string): string[] {
   const names = extractPersonNameCandidates(text);
   const extras: string[] = [];
-  if (names[0]) extras.push(`"${names[0]}"`);
-  if (names[0]) extras.push(`"${names[0]}" Dupoin OR Bappebti`);
-  if (names[0]) extras.push(`"${names[0]}" CPNS OR freelancer`);
+  if (names[0]) extras.push(names[0]);
+  if (names[0]) extras.push(`${names[0]} Dupoin`);
+  if (names[0]) extras.push(`${names[0]} CPNS`);
   if (/\bdupoin\b/i.test(text) || isDeepPersonResearch(text)) {
     extras.push('Dupoin Futures Indonesia');
   }
-  if (!extras.length) extras.push(text.replace(/\s+/g, ' ').trim());
-  return [...new Set(extras.filter(Boolean))].slice(0, names[0] ? 3 : 2);
+  if (!extras.length) extras.push(simplifySerperQuery(text.replace(/\s+/g, ' ').trim()));
+  return [...new Set(extras.map(simplifySerperQuery).filter(Boolean))].slice(0, names[0] ? 3 : 2);
 }
 
 export function parseWikidataSearch(payload: unknown): Array<{ id: string; title: string; snippet: string; url: string }> {
@@ -1831,13 +1845,13 @@ async function searchWikipedia(
 
 type SerperAttempt = { sources: ResearchSource[]; exhausted: boolean };
 
-async function searchSerper(
+async function postSerperSearch(
   query: string,
   apiKey: string,
   fetchImpl: typeof fetch,
   maxBytes: number,
   timeoutMs: number,
-): Promise<SerperAttempt> {
+): Promise<SerperAttempt & { statusError?: string }> {
   try {
     const { text } = await fetchBounded(fetchImpl, 'https://google.serper.dev/search', {
       method: 'POST',
@@ -1855,8 +1869,28 @@ async function searchSerper(
     return {
       sources: [],
       exhausted: /HTTP 429|HTTP 402|HTTP 403/.test(message),
+      statusError: message,
     };
   }
+}
+
+export async function searchSerper(
+  query: string,
+  apiKey: string,
+  fetchImpl: typeof fetch,
+  maxBytes: number,
+  timeoutMs: number,
+): Promise<SerperAttempt> {
+  const first = await postSerperSearch(query, apiKey, fetchImpl, maxBytes, timeoutMs);
+  if (first.sources.length || first.exhausted) {
+    return { sources: first.sources, exhausted: first.exhausted };
+  }
+  const simplified = simplifySerperQuery(query);
+  if (first.statusError && /HTTP 400/.test(first.statusError) && simplified && simplified !== query) {
+    const retry = await postSerperSearch(simplified, apiKey, fetchImpl, maxBytes, timeoutMs);
+    return { sources: retry.sources, exhausted: retry.exhausted };
+  }
+  return { sources: first.sources, exhausted: first.exhausted };
 }
 
 async function searchWikidata(
