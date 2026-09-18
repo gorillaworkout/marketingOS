@@ -9,6 +9,8 @@ import {
 } from '../src/lib/ai-research';
 import {
   AI_RESEARCH_CONTEXT_HEADER,
+  AI_RESEARCH_GROUNDED_PERSON_HEADER,
+  AI_RESEARCH_GROUNDED_PERSON_MUST_ANSWER,
   AI_RESEARCH_MAX_SOURCES,
   AI_RESEARCH_NO_INVENT_FACTS,
   AI_RESEARCH_PERSON_NAME_HIT,
@@ -21,9 +23,11 @@ import {
   classifySourceOrigin,
   DDG_HTML_BLOCKED_WARNING,
   diversifyResearchSources,
+  extractGroundedPersonFacts,
   extractPersonNameCandidates,
   extractFetchedContent,
   extractRelevantWindow,
+  formatGroundedPersonInstruction,
   formatResearchContext,
   gatherAiResearchContext,
   extractPageSnippet,
@@ -455,6 +459,12 @@ test('Sella Susriana + Dupoin research grounds Bappebti wakil pialang hits inste
   });
   assert.match(String(messages[1].content), /GROUNDING_SOURCES/);
   assert.match(String(messages[1].content), /Bappebti|bappebti/);
+  const lastUserIdx = messages.map(message => message.role).lastIndexOf('user');
+  assert.ok(lastUserIdx > 0);
+  assert.equal(messages[lastUserIdx].content, sellaQuery);
+  assert.equal(messages[lastUserIdx - 1].role, 'system');
+  assert.match(String(messages[lastUserIdx - 1].content), new RegExp(AI_RESEARCH_GROUNDED_PERSON_HEADER));
+  assert.match(String(messages[lastUserIdx - 1].content), /Sella Susriana \| section: Wakil Pialang/i);
   assert.match(AI_RESEARCH_SYSTEM_PROMPT, /apa yang sumber sebutkan/);
   assert.match(AI_RESEARCH_SYSTEM_PROMPT, /belum terverifikasi/);
   assert.match(AI_RESEARCH_SYSTEM_PROMPT, /LinkedIn publik|berita, direktori/);
@@ -504,12 +514,93 @@ test('long Bappebti broker pages keep wakil pialang heading with a late person n
       origin: 'indonesia' as const,
     }],
   };
+  const facts = extractGroundedPersonFacts(research);
+  assert.equal(facts.length, 1);
+  assert.equal(facts[0].name, 'Sella Susriana');
+  assert.match(facts[0].section || '', /Wakil Pialang/i);
+  assert.equal(facts[0].url, 'https://bappebti.go.id/pialang_berjangka/detail/423');
+
+  const instruction = formatGroundedPersonInstruction(facts);
+  assert.ok(instruction);
+  assert.match(instruction!, new RegExp(AI_RESEARCH_GROUNDED_PERSON_HEADER));
+  assert.equal(instruction!.includes(AI_RESEARCH_GROUNDED_PERSON_MUST_ANSWER), true);
+  assert.match(instruction!, /Sella Susriana \| section: Wakil Pialang/);
+  assert.match(instruction!, /bappebti\.go\.id\/pialang_berjangka\/detail\/423/);
+  assert.doesNotMatch(instruction!, /If a fact is missing from the sources, say the grounded sources do not confirm it/);
+  assert.doesNotMatch(instruction!, /Prefer summarizing grounded hits over saying no verified source was found/);
+
   const grounded = formatResearchContext(research);
   assert.match(grounded, /Sella Susriana/);
   assert.match(grounded, /wakil pialang/i);
   assert.equal(grounded.includes(AI_RESEARCH_PERSON_NAME_HIT), true);
+  assert.equal(grounded.includes(AI_RESEARCH_GROUNDED_PERSON_MUST_ANSWER), true);
+  assert.match(grounded, /Sella Susriana \| section: Wakil Pialang/);
   assert.equal(sourcesMentionPersonName(research), true);
   assert.match(grounded, /Synthesize a rich answer/);
+
+  const messages = buildAiResearchChatMessages({
+    systemPrompt: AI_RESEARCH_SYSTEM_PROMPT,
+    history: [
+      { role: 'user', content: 'halo' },
+      { role: 'assistant', content: 'Halo, ada yang bisa dibantu?' },
+    ],
+    incoming: [{ role: 'user', content: sellaQuery }],
+    research,
+  });
+  const lastUserIdx = messages.map(message => message.role).lastIndexOf('user');
+  assert.equal(messages[lastUserIdx].content, sellaQuery);
+  assert.equal(messages[lastUserIdx - 1].role, 'system');
+  assert.equal(messages[lastUserIdx - 1].content, instruction);
+  assert.match(String(messages[1].content), /GROUNDING_SOURCES/);
+  assert.ok(String(messages[1].content).includes(AI_RESEARCH_GROUNDED_PERSON_MUST_ANSWER));
+});
+
+test('long 14-source grounding still pins a short roster fact next to the latest user turn', () => {
+  const pad = 'Nomor rekening bank penampung dana nasabah BCA 1234567890 Mandiri 0987654321 '.repeat(28);
+  const sources = Array.from({ length: 14 }, (_, index) => {
+    if (index === 0) {
+      return {
+        title: 'Bappebti - PT Dupoin Futures Indonesia',
+        url: 'https://bappebti.go.id/pialang_berjangka/detail/423',
+        snippet: `[Section: Wakil Pialang] Daftar wakil pialang berjangka: Gunawan Herman ${pad} Sella Susriana Andy Nugraha Sentosa`,
+        origin: 'indonesia' as const,
+      };
+    }
+    return {
+      title: `Background source ${index}`,
+      url: `https://www.dupoin.co.id/page-${index}`,
+      snippet: pad,
+      origin: 'indonesia' as const,
+    };
+  });
+  const research = {
+    query: sellaQuery,
+    indonesiaPreferred: true,
+    sources,
+  };
+  const grounded = formatResearchContext(research);
+  assert.ok(grounded.length > 20_000, `expected a bulky grounding block, got ${grounded.length}`);
+  assert.match(grounded, /Sella Susriana \| section: Wakil Pialang/);
+  assert.equal(grounded.includes(AI_RESEARCH_GROUNDED_PERSON_MUST_ANSWER), true);
+
+  const messages = buildAiResearchChatMessages({
+    systemPrompt: AI_RESEARCH_SYSTEM_PROMPT,
+    history: [],
+    incoming: [{ role: 'user', content: sellaQuery }],
+    research,
+  });
+  const lastUserIdx = messages.map(message => message.role).lastIndexOf('user');
+  const adjacent = String(messages[lastUserIdx - 1].content);
+  assert.equal(messages[lastUserIdx].content, sellaQuery);
+  assert.equal(messages[lastUserIdx - 1].role, 'system');
+  assert.ok(adjacent.length < 1_200, `adjacent instruction must stay short, got ${adjacent.length}`);
+  assert.match(adjacent, new RegExp(AI_RESEARCH_GROUNDED_PERSON_HEADER));
+  assert.equal(adjacent.includes(AI_RESEARCH_GROUNDED_PERSON_MUST_ANSWER), true);
+  assert.match(adjacent, /Sella Susriana \| section: Wakil Pialang/);
+  assert.match(adjacent, /bappebti\.go\.id\/pialang_berjangka\/detail\/423/);
+  assert.doesNotMatch(adjacent, /If a fact is missing from the sources, say the grounded sources do not confirm it/);
+  assert.doesNotMatch(adjacent, /Background source 13/);
+  assert.ok(String(messages[1].content).length > 20_000);
 });
 
 test('AI Research UI shows a thinking bubble before tokens and keeps the stream cursor after', () => {
