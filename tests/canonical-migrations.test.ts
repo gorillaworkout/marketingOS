@@ -51,6 +51,7 @@ test('014 restores Codex on AI Research, drops residual Kimi, and is idempotent'
   assert.match(executable, /cx\/gpt-5\.6-terra/);
   assert.match(executable, /cx\/gpt-5\.6-luna/);
   assert.match(executable, /feature_key = 'ai-research'/);
+  assert.match(restore, /\/dashboard\/models/);
   assert.match(executable, /kimi\/%/);
   assert.match(executable, /tr\/moonshotai\/%/);
   assert.match(executable, /cmc\/moonshotai\/%/);
