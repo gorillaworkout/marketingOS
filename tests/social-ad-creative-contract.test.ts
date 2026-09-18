@@ -27,27 +27,24 @@ test('image-prompt system encodes Dupoin Brand Guidelines 2026 locks', () => {
   for (const prompt of [systemPrompt, smartPrompt]) {
     assert.match(prompt, /#2EB5C4/, 'must lock official Dupoin Blue hex');
     assert.equal(prompt.includes(DUPOIN_BLUE_HEX), true);
-    assert.match(prompt, /RGB 46,181,196/);
     assert.match(prompt, /80px/);
     assert.match(prompt, /1080x1350/);
     assert.match(prompt, /1080x1080/);
-    assert.match(prompt, /Exact headline/i);
-    assert.match(prompt, /Subheadline/i);
+    assert.match(prompt, /[Hh]eadline/);
+    assert.match(prompt, /[Ss]ubheadline/i);
     assert.match(prompt, /CTA/);
-    assert.match(prompt, /visual hierarchy/i);
     // The model must RESERVE space, never draw the logo: the official wordmark
     // is composited from public/brand/dupoin-logo.png after generation.
-    assert.match(prompt, /lower-right/);
-    assert.equal(prompt.includes(DUPOIN_LOGO_REQUIRED_LINE), true);
-    assert.match(prompt, /draw no logo|Jangan menggambar logo/i);
+    assert.match(prompt, /kanan-bawah/i);
+    assert.match(prompt, /Jangan gambar logo|Jangan menggambar logo/i);
     assert.doesNotMatch(prompt, /graphic mark \+ wordmark/,
       'the real Dupoin logo is wordmark-only — there is no graphic mark to draw');
-    assert.match(prompt, /professional, stable, trustworthy/i);
-    assert.match(prompt, /Indonesian traders 25-45/i);
+    assert.match(prompt, /[Tt]rader Indonesia usia 25-45/);
     assert.match(prompt, /no hashtags/i);
-    assert.match(prompt, /wrong teal/i);
-    assert.match(prompt, /no logo\/wordmark\/monogram of any kind/i);
-    assert.match(prompt, /generic stock/i);
+    assert.match(prompt, /stock-photo look|generic stock/i);
+    // The scene must stay integrated: no slab pasted over the art.
+    assert.match(prompt, /JANGAN pernah sebut overlay/i);
+    assert.match(prompt, /JANGAN pernah sebut nilai opacity/i);
     assert.doesNotMatch(prompt, /#2eb5c4/);
     assert.doesNotMatch(prompt, /JANGAN (minta|tulis)[^\n]*teks/i);
     // Old guidance told the model to draw the mark; it must not.
@@ -68,22 +65,23 @@ test('sample image-prompt builder requires official logo, brand hex, and dropdow
 
   assert.match(sample, /#2EB5C4/);
   assert.equal(sample.includes(DUPOIN_BLUE_HEX), true);
-  assert.match(sample, /lower-right/i);
-  assert.match(sample, /draw no logo/i);
+  assert.match(sample, /kanan-bawah/i);
   assert.doesNotMatch(sample, /graphic mark \+ wordmark/);
   assert.match(sample, /80px/);
   assert.match(sample, /Exact headline/);
   assert.match(sample, /Subheadline/);
   assert.match(sample, /CTA/);
-  assert.match(sample, /visual hierarchy/i);
-  assert.match(sample, /composited onto the finished image/i);
-  assert.match(sample, /do NOT draw one/i);
-  assert.equal(sample.includes(DUPOIN_LOGO_REQUIRED_LINE), true);
+  assert.match(sample, /ditempel otomatis/i);
+  assert.match(sample, /JANGAN digambar/i);
+  assert.match(sample, /DILARANG/);
+  assert.equal(sample.includes(DUPOIN_LOGO_REQUIRED_LINE), false,
+    'the user message now speaks Indonesian art direction, not the raw constant');
   assert.match(sample, /Rencana dulu, baru entry/, 'must use the selected hook');
   assert.match(sample, /Kelola risiko sebelum membuka posisi/, 'must use the selected caption');
   assert.match(sample, /no hashtags/i);
   assert.match(sample, /no logo\/wordmark\/monogram\/symbol of any kind/i);
   assert.match(sample, /"Dupoin" lettering drawn into the art/i);
+  assert.match(sample, /bukan sebagai lapisan/i);
   assert.match(sample, new RegExp(spec.size));
   assert.match(sample, /9:16/);
   assert.match(sample, /portrait/);
@@ -100,6 +98,7 @@ test('applyDupoinImagePromptLocks reserves logo space and locks the selected siz
   assert.match(locked, /reserved/i);
   assert.match(locked, /#2EB5C4/);
   assert.match(locked, /draw no logo/i);
+  assert.match(locked, /No overlay/i, 'scene-integrity negatives ride along with every prompt');
   assert.doesNotMatch(locked, /graphic mark \+ wordmark/);
   assert.equal(locked.includes(spec.promptSuffix), true);
   assert.equal(applyDupoinImagePromptLocks(locked, '4:3'), locked, 'locks must be idempotent for the same ratio');

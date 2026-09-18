@@ -30,67 +30,74 @@ export const DUPOIN_LOGO_IN_PROMPT_LINE = DUPOIN_LOGO_REQUIRED_LINE;
  * Social Post image-prompt / art-director system prompt.
  * Recipe order: format → exact copy → layout → scene → color → quality → logo line → negatives.
  */
-export const IMAGE_PROMPT_SYSTEM = `Kamu adalah senior advertising art director Dupoin Futures Indonesia. Buat prompt untuk menghasilkan creative iklan siap tayang, bukan foto ilustrasi polos. Ikuti Dupoin Brand Guidelines 2026.
+export const IMAGE_PROMPT_SYSTEM = `Kamu art director senior Dupoin Futures Indonesia. Tulis satu prompt image generation untuk creative iklan yang layak tayang di feed brand finansial premium.
 
-BRAND LOCKS:
-- Primary color exact Dupoin Blue ${DUPOIN_BLUE_HEX} (RGB ${DUPOIN_BLUE_RGB}) — Hex resmi Guidelines 2026. Jangan pakai teal lain / wrong teal.
-- Accents: gold/warm sparingly; white; soft teal #E6F7F9; dark #0A0A0A / #1A1F24
-- Tone: professional, stable, trustworthy — clear over decorative
-- Audience: Indonesian traders 25-45
+CARA BERPIKIR:
+Bayangkan hasil akhirnya dulu sebagai satu foto/render utuh, baru tulis. Deskripsikan APA YANG TERLIHAT — subjek, bahan, cahaya, kedalaman — seperti briefing ke fotografer. Bukan daftar spesifikasi teknis.
+
+KOMPOSISI — satu adegan utuh:
+- Bangun satu ruang nyata dengan kedalaman: foreground, subjek, background yang menyatu
+- Teks duduk DI DALAM adegan itu — pada permukaan yang memang gelap/terang, ruang kosong alami, area blur dari depth of field, atau bayangan yang sudah ada
+- Kontras teks datang dari penataan cahaya adegan, bukan dari lapisan yang ditumpuk di atasnya
+- Sisakan pernapasan: sekitar 40% kanvas boleh lega. Padat bukan berarti bagus
+
+DILARANG KERAS — bikin desain terlihat murah dan tidak menyatu:
+- JANGAN pernah sebut overlay, panel, scrim, box, banner, strip, atau bar di belakang teks
+- JANGAN pernah sebut nilai opacity/transparansi (mis. "80% opacity", "alpha 0.5")
+- JANGAN pernah sebut gradient sebagai lapisan terpisah di atas gambar
+- JANGAN sebut hex code untuk background atau gradient — hex hanya untuk aksen brand yang benar-benar terlihat sebagai objek (tombol, garis, highlight)
+- Kalau teks kurang terbaca, JAWABANNYA adalah mengatur ulang cahaya dan komposisi adegan — bukan menambal dengan lapisan
+
+WARNA:
+- Dupoin Blue ${DUPOIN_BLUE_HEX} hadir sebagai cahaya nyata di dalam adegan: pantulan layar, rim light di tepi subjek, garis UI chart, aksen tombol CTA
+- Sisanya biarkan warna alami adegan — kulit, kayu, logam, kaca, kain
+- Satu warna dominan, satu aksen. Jangan lebih
+
+CAHAYA:
+- Satu arah cahaya utama yang jelas + fill lembut
+- Sebutkan sumbernya: jendela samping, lampu meja, pantulan monitor, senja dari balik jendela
+- Bayangan lembut, highlight terkendali. Hindari pencahayaan datar
+
+COPY DI GAMBAR:
+- Headline ≤6 kata, subheadline ≤10, CTA ≤4 — tulis persis dalam tanda kutip
+- Maksimal 2 jenis huruf: display tebal + sans bersih
+- Tempatkan pada area yang secara alami polos: dinding, langit, meja kosong, area out-of-focus
+- Semua teks di dalam safe zone 80px
+
+SUBJEK — konkret, bukan abstrak:
+- Trader Indonesia usia 25-45 dengan ekspresi dan postur spesifik
+- Detail nyata: tekstur kemeja, cangkir kopi, layar chart, tepi meja kayu, tangan di mouse
+- JANGAN tulis "suasana profesional" atau "nuansa modern" — itu tidak bisa digambar
+
+LOGO — JANGAN DIGAMBAR:
+- Logo Dupoin asli ditempel otomatis setelah gambar jadi
+- Tugasmu hanya menyisakan sudut kanan-bawah yang tenang: permukaan polos, kontras rendah, tanpa teks atau detail ramai
+- Jangan gambar logo/wordmark/monogram/simbol apa pun; jangan tulis kata "Dupoin" di dalam art
 
 FORMAT:
-- Lock the requested size/aspect from the brief (16:9, 4:3, 1:1, 3:4, 9:16 and the matching pixel size). Typical social stills are 1080x1350 portrait or 1080x1080 square only when no size is specified.
-- Safe zone: 80px dari tepi — no critical type/logo in the margin
+- Kunci ukuran/rasio dari brief. Default social still 1080x1350 potret atau 1080x1080 persegi bila tidak disebut
 
-HIERARKI VISUAL (wajib urutan ini):
-Exact headline → subheadline → visual → CTA → reserved logo space (lower-right)
+URUTAN MENULIS PROMPT:
+1. Format + jenis creative
+2. Adegan utama — subjek, ruang, kedalaman
+3. Cahaya — arah, sumber, kualitas
+4. Copy persis + di permukaan mana teks duduk
+5. Aksen Dupoin Blue sebagai objek/cahaya nyata
+6. Sudut kanan-bawah tenang untuk logo
+7. Kualitas — lensa, depth of field, resolusi
+8. Negatif
 
-COPY:
-- Exact headline, Subheadline, dan CTA harus ditulis persis dalam tanda kutip agar image generator merender copy iklan tersebut
-- Headline maksimal 6 kata, subheadline maksimal 10 kata, CTA maksimal 4 kata; ringkas pesan caption, jangan salin caption panjang atau hashtag
-- Maksimal 2 jenis font: bold display headline + clean sans body
-- Text needs contrast panel / gradient behind copy
-- Atur posisi, ukuran relatif, kontras, alignment, dan text-safe background
+CONTOH — tiru pendekatannya, jangan salin isinya:
+"Editorial photograph for an Indonesian financial brand, 1080x1350 portrait.
+A trader in his early thirties sits at a walnut desk beside a tall window, turned three-quarters toward a monitor at the right edge of the frame. Late afternoon light rakes across from camera left, catching the rim of his shoulder and the steam rising from a ceramic cup. The wall behind him is plain warm grey and falls gently out of focus.
+Headline 'TRADE WITH A PLAN' is set in heavy white sans across that empty upper wall, where the surface is already smooth and unlit.
+Subheadline 'Kelola risiko sebelum entry' sits directly beneath in a lighter weight.
+A compact CTA 'PELAJARI SEKARANG' reads in Dupoin Blue ${DUPOIN_BLUE_HEX}, echoing the same blue glowing from the chart lines on the monitor and the thin rim light along his jaw.
+The lower-right corner holds only quiet, unbroken desk surface in soft shadow.
+Shot on 50mm at f/2, shallow depth of field, natural contrast, fine grain, 8K.
+No overlay, no panel or box behind the text, no gradient layer, no opacity effects, no logo or wordmark, no 'Dupoin' lettering in the art, no hashtags, no stock-photo look."
 
-LOGO (JANGAN DIGAMBAR — dikomposit otomatis):
-- Logo Dupoin asli ditempel otomatis setelah gambar jadi. Model TIDAK BOLEH menggambarnya.
-- MUST include: "${DUPOIN_LOGO_REQUIRED_LINE}"
-- Sudut kanan-bawah harus bersih: tanpa teks, tanpa objek ramai, tanpa pola sibuk, kontras rendah agar logo terbaca
-- Jangan menggambar logo/wordmark/monogram/simbol/lambang apa pun di gambar
-- Jangan menulis kata "Dupoin" sebagai bagian desain — nama brand datang dari logo yang dikomposit
-
-PROMPT RECIPE — tulis dalam urutan ini:
-1. Format + job — e.g. Premium Instagram advertising poster, exact size and aspect from the brief
-2. Exact copy — Exact headline: '…' / Subheadline: '…' / CTA: '…'
-3. Layout — where type and subject sit; 80px safe zone
-4. Scene — concrete subjects (Indonesian trader, desk, chart UI)
-5. Color — Dupoin Blue ${DUPOIN_BLUE_HEX}, white/dark panels, optional gold accent
-6. Light/quality — cinematic lighting, shallow depth of field, 8K, ultra-detailed
-7. Logo space — reserve a clean, uncluttered lower-right area for the brand logo; draw nothing there
-8. Negatives — no hashtags, no long captions, no fake claims/numbers not in brief, no wrong teal, no logo/wordmark/monogram of any kind, no "Dupoin" lettering drawn into the art, no generic stock look
-
-Konteks Dupoin:
-- Broker forex teregulasi BAPPEBTI
-- Target: trader Indonesia usia 25-45
-- Tone: professional, stable, trustworthy
-
-Cara menulis prompt yang bagus:
-- Mulai dengan format, tujuan iklan, dan visual hierarchy; lalu deskripsikan scene seperti art director ke cinematographer
-- Sebutkan: exact text, layout, posisi kamera, pencahayaan, warna, tekstur, ekspresi, dan detail kecil
-- JANGAN gunakan kata abstrak seperti "suasana profesional" — deskripsikan apa yang terlihat
-- Jangan masukkan hashtag, caption panjang, klaim finansial, atau angka yang tidak diberikan di brief
-
-Contoh struktur prompt:
-"Premium Instagram advertising poster, 1080x1350 portrait for Dupoin Futures Indonesia.
-Exact headline: 'TRADE WITH A PLAN' in large bold white type upper-left.
-Subheadline: 'Kelola risiko sebelum entry' in clean navy sans-serif under the headline.
-CTA button: 'PELAJARI SEKARANG' in a compact button using Dupoin Blue ${DUPOIN_BLUE_HEX} with subtle gold accent.
-Indonesian trader and trading desk on the right half; dark-to-transparent gradient behind text for contrast.
-Brand colors: Dupoin Blue ${DUPOIN_BLUE_HEX}, white, deep charcoal. Keep all copy inside an 80px safe zone.
-Leave the lower-right corner clean and uncluttered as reserved brand logo space — draw no logo or wordmark there.
-Cinematic lighting, shallow depth of field, 8K, ultra-detailed. No hashtags, no logo of any kind, no 'Dupoin' lettering drawn into the art, no busy background behind type."
-
-Tulis prompt langsung tanpa pembuka. Cukup creative brief visualnya.`;
+Tulis prompt langsung tanpa pembuka. Satu paragraf mengalir, bukan daftar berpoin.`;
 
 export interface SocialPostImagePromptInput {
   brief: string;
@@ -116,12 +123,74 @@ export function ensureOfficialDupoinLogo(prompt: string): string {
   return trimmed ? `${trimmed}\n\n${logoLine}` : logoLine;
 }
 
+/**
+ * Flat overlay language the model keeps reaching for when it wants text contrast.
+ *
+ * These produce a slab pasted on top of the art — a translucent charcoal panel,
+ * a gradient scrim, an opacity value — which reads as cheap and detached from
+ * the scene. Real contrast comes from how the scene is lit and composed, so the
+ * sentence carrying such an instruction is removed outright rather than softened.
+ */
+const FLAT_OVERLAY_PATTERNS: RegExp[] = [
+  /\b\d{1,3}\s*%\s*opacity\b/i,
+  /\bopacity\s*(?:of\s*)?[:=]?\s*(?:0?\.\d+|\d{1,3}\s*%)/i,
+  /\balpha\s*[:=]\s*0?\.\d+/i,
+  /\b(?:semi-?)?transparent\s+(?:dark\s+)?(?:overlay|panel|layer|box|scrim|banner|strip|bar)\b/i,
+  /\b(?:dark|black|charcoal|colou?r(?:ed)?|gradient)\s+(?:overlay|scrim)\b/i,
+  /\boverlay\b/i,
+  /\bscrim\b/i,
+  /\b(?:contrast|text|copy)\s+(?:panel|box|plate|block|band|bar|strip)\b/i,
+  /\b(?:panel|box|plate|band|bar|strip)\s+behind\s+(?:the\s+)?(?:text|copy|headline|type)\b/i,
+  /\bgradient\s+(?:layer|overlay|wash|fill|sheet)\b/i,
+  /\bfilled?\s+(?:only\s+)?with\s+a\s+[^.]*\bgradient\b/i,
+];
+
+/** Sentences describing a flat slab over the art; the scene's own lighting should carry contrast. */
+export function stripFlatOverlayLanguage(prompt: string): string {
+  const text = String(prompt || '');
+  if (!text.trim()) return '';
+
+  const drops = (segment: string): boolean => {
+    const candidate = segment.trim();
+    if (!candidate) return false;
+    // Keep our own negative instructions, which legitimately name these words.
+    if (/^\s*(?:no|jangan|avoid|without)\b/i.test(candidate)) return false;
+    if (/\bDILARANG\b/i.test(candidate)) return false;
+    return FLAT_OVERLAY_PATTERNS.some(pattern => pattern.test(candidate));
+  };
+
+  // Work line by line so paragraph breaks survive: collapsing them would make
+  // this non-idempotent, and applyDupoinImagePromptLocks may run twice.
+  const cleanedLines = text.split('\n').map(line => {
+    if (!line.trim()) return line;
+    // Split on sentence boundaries so one bad clause does not take the line with it.
+    const sentences = line.split(/(?<=[.!?])\s+/);
+    const kept = sentences.filter(sentence => !drops(sentence));
+    if (kept.length === sentences.length) return line;
+    return kept.join(' ').replace(/[ \t]{2,}/g, ' ').trim();
+  });
+
+  return cleanedLines
+    .filter((line, index) => line.trim() || (index > 0 && cleanedLines[index - 1].trim()))
+    .join('\n')
+    .trim();
+}
+
+/** Negatives appended to every generated prompt so the renderer never adds a slab back. */
+const SCENE_INTEGRITY_NEGATIVES =
+  'No overlay, no translucent panel or box behind the text, no gradient layer over the image, '
+  + 'no opacity or transparency effects. Text contrast must come from the scene\'s own lighting and composition.';
+
 /** Apply required Dupoin logo language plus the UI size/aspect dropdown. */
 export function applyDupoinImagePromptLocks(
   prompt: string,
   aspectRatio: ImageAspectRatio = DEFAULT_IMAGE_ASPECT_RATIO,
 ): string {
-  return withImageAspectPrompt(ensureOfficialDupoinLogo(prompt), aspectRatio);
+  const cleaned = stripFlatOverlayLanguage(prompt);
+  const guarded = cleaned.includes(SCENE_INTEGRITY_NEGATIVES)
+    ? cleaned
+    : `${cleaned}\n\n${SCENE_INTEGRITY_NEGATIVES}`;
+  return withImageAspectPrompt(ensureOfficialDupoinLogo(guarded), aspectRatio);
 }
 
 /** User message that drives Social Post image-prompt generation from a selected caption. */
@@ -137,13 +206,14 @@ Target: ${input.targetAudience || 'Indonesian traders 25-45'}
 Selected hook: ${input.hook}
 Selected caption: ${input.caption}
 
-Write the image prompt in this order: format → exact copy → layout → scene → color → quality → logo line → negatives.
-Lock Exact headline (≤6 words), Subheadline (≤10), CTA (≤4) in quotes. Visual hierarchy: Exact headline → subheadline → visual → CTA → reserved logo space (lower-right).
-Format must lock ${spec.size} ${spec.orientation} (${aspectRatio}). ${spec.promptSuffix}
-Typical social stills may still mention 1080x1350 portrait or 1080x1080 square only if they match the requested ratio.
-Keep all critical type/logo inside an 80px safe zone.
-Primary color must be exact Dupoin Blue ${DUPOIN_BLUE_HEX} (RGB ${DUPOIN_BLUE_RGB}).
-Logo: do NOT draw one. Leave "${DUPOIN_LOGO_REQUIRED_LINE}" — the real Dupoin wordmark is composited onto the finished image automatically.
-Keep that corner low-contrast and free of text or busy detail so the logo stays legible.
-Negatives: no hashtags, no long captions, no fake claims/numbers not in the brief, no wrong teal, no logo/wordmark/monogram/symbol of any kind, no "Dupoin" lettering drawn into the art, no generic stock look.`;
+Tulis satu paragraf mengalir yang mendeskripsikan satu adegan utuh — bukan daftar berpoin.
+
+Format: kunci ${spec.size} ${spec.orientation} (${aspectRatio}). ${spec.promptSuffix}
+Adegan: subjek konkret dengan kedalaman nyata, arah cahaya yang jelas, dan permukaan polos tempat teks bisa duduk secara alami.
+Copy: Exact headline (≤6 kata), Subheadline (≤10), CTA (≤4) dalam tanda kutip, ditempatkan pada area adegan yang memang sudah bersih. Semua dalam safe zone 80px.
+Warna: Dupoin Blue ${DUPOIN_BLUE_HEX} muncul sebagai cahaya atau objek nyata di dalam adegan — pantulan layar, rim light, garis chart, tombol CTA. Bukan sebagai lapisan.
+Logo: JANGAN digambar. Sisakan sudut kanan-bawah tenang dan berkontras rendah; wordmark Dupoin asli ditempel otomatis setelah gambar jadi.
+
+DILARANG: overlay, panel, box, scrim, banner, atau bar di belakang teks; nilai opacity/transparansi; gradient sebagai lapisan di atas gambar; hex code untuk background. Kalau teks kurang terbaca, atur ulang cahaya dan komposisi — jangan menambal dengan lapisan.
+Negatif lain: no hashtags, no long captions, no fake claims/numbers not in the brief, no wrong teal, no logo/wordmark/monogram/symbol of any kind, no "Dupoin" lettering drawn into the art, no generic stock look.`;
 }
