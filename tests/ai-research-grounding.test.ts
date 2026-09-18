@@ -11,6 +11,7 @@ import {
   AI_RESEARCH_CONTEXT_HEADER,
   AI_RESEARCH_MAX_SOURCES,
   AI_RESEARCH_NO_INVENT_FACTS,
+  AI_RESEARCH_PERSON_NAME_HIT,
   buildAiResearchChatMessages,
   buildFallbackSearchQueries,
   buildNewsRssQueries,
@@ -22,6 +23,7 @@ import {
   diversifyResearchSources,
   extractPersonNameCandidates,
   extractFetchedContent,
+  extractRelevantWindow,
   formatResearchContext,
   gatherAiResearchContext,
   extractPageSnippet,
@@ -51,6 +53,7 @@ import {
   SERPER_EXHAUSTED_WARNING,
   shouldResearchQuery,
   sourcesHaveUsefulHits,
+  sourcesMentionPersonName,
   unwrapSearchResultUrl,
   wikipediaSearchHosts,
 } from '../src/lib/ai-research-grounding';
@@ -179,6 +182,24 @@ test('ranking prefers snippet-rich official hits over empty regulator shells', (
   assert.notEqual(ranked[0].snippet, '');
 });
 
+test('ranking boosts snippets that contain both the person name and a role needle', () => {
+  const ranked = rankResearchSources([
+    {
+      title: 'Company page name only',
+      url: 'https://www.dupoin.co.id/team',
+      snippet: 'Sella Susriana disebutkan di halaman perusahaan tanpa konteks jabatan resmi.',
+      origin: 'indonesia',
+    },
+    {
+      title: 'Company page roster',
+      url: 'https://www.dupoin.co.id/about-us',
+      snippet: 'Sella Susriana tercatat sebagai wakil pialang di PT Dupoin Futures Indonesia.',
+      origin: 'indonesia',
+    },
+  ], true, 'sella susriana siapa sih jir di dupoin');
+  assert.equal(ranked[0].url, 'https://www.dupoin.co.id/about-us');
+});
+
 test('ranking prefers official and Indonesia sources for Indonesian queries', () => {
   const ranked = rankResearchSources([
     { title: 'Wire', url: 'https://www.reuters.com/markets/dupoin', snippet: 'International brief about the broker.', origin: 'international' },
@@ -234,6 +255,7 @@ test('injects research context into the chat path when sources are available', (
   assert.match(String(messages[1].content), /BAPPEBTI/);
   assert.match(String(messages[1].content), new RegExp(AI_RESEARCH_NO_INVENT_FACTS));
   assert.match(String(messages[1].content), /Synthesize a rich answer/);
+  assert.doesNotMatch(String(messages[1].content), new RegExp(AI_RESEARCH_PERSON_NAME_HIT));
   assert.equal(messages[2].content, research.query);
 
   const withoutSources = injectResearchContext(
@@ -421,6 +443,8 @@ test('Sella Susriana + Dupoin research grounds Bappebti wakil pialang hits inste
   assert.match(grounded, /wakil pialang/i);
   assert.match(grounded, /Sella Susriana/);
   assert.match(grounded, /Synthesize a rich answer/);
+  assert.match(grounded, new RegExp(AI_RESEARCH_PERSON_NAME_HIT));
+  assert.equal(sourcesMentionPersonName(result), true);
   assert.doesNotMatch(grounded, /No web sources were retrieved/);
 
   const messages = buildAiResearchChatMessages({
@@ -434,6 +458,58 @@ test('Sella Susriana + Dupoin research grounds Bappebti wakil pialang hits inste
   assert.match(AI_RESEARCH_SYSTEM_PROMPT, /apa yang sumber sebutkan/);
   assert.match(AI_RESEARCH_SYSTEM_PROMPT, /belum terverifikasi/);
   assert.match(AI_RESEARCH_SYSTEM_PROMPT, /LinkedIn publik|berita, direktori/);
+  assert.match(AI_RESEARCH_SYSTEM_PROMPT, /belum ada sumber publik terverifikasi/);
+});
+
+test('long Bappebti broker pages keep wakil pialang heading with a late person name', () => {
+  const earlyChrome = 'Navigasi beranda berita pengumuman pasar fisik '.repeat(220);
+  const rekeningPad = 'Nomor rekening bank penampung dana nasabah BCA 1234567890 Mandiri 0987654321 '.repeat(360);
+  const html = `<html><head><title>Bappebti - PT Dupoin Futures Indonesia</title></head><body>
+    <div>${earlyChrome}</div>
+    <h2>WAKIL PIALANG</h2>
+    <p>Daftar wakil pialang berjangka terdaftar Bappebti:</p>
+    <ul><li>Gunawan Herman</li><li>Andy Nugraha Sentosa</li></ul>
+    <div>${rekeningPad}</div>
+    <p>Sella Susriana</p>
+    <p>Lulu Sakinah rekening penampung lanjutan</p>
+  </body></html>`;
+
+  const body = htmlToPlainText(html);
+  const headingAt = body.toLowerCase().indexOf('wakil pialang');
+  const nameAt = body.toLowerCase().indexOf('sella susriana');
+  assert.ok(headingAt >= 0 && nameAt > headingAt);
+  assert.ok(nameAt - headingAt > 2_200, `expected a distant roster heading, gap was ${nameAt - headingAt}`);
+
+  const naiveStart = Math.max(0, nameAt - 800);
+  const naiveWindow = body.slice(naiveStart, naiveStart + 2_200);
+  assert.match(naiveWindow, /Sella Susriana/);
+  assert.doesNotMatch(naiveWindow, /wakil pialang/i);
+
+  const window = extractRelevantWindow(body, sellaQuery);
+  assert.match(window, /Sella Susriana/);
+  assert.match(window, /wakil pialang/i);
+  assert.match(window, /\[Section: Wakil Pialang\]/i);
+
+  const extracted = extractPageSnippet(html, sellaQuery);
+  assert.match(extracted.snippet, /Sella Susriana/);
+  assert.match(extracted.snippet, /wakil pialang/i);
+
+  const research = {
+    query: sellaQuery,
+    indonesiaPreferred: true,
+    sources: [{
+      title: extracted.title || 'Bappebti - PT Dupoin Futures Indonesia',
+      url: 'https://bappebti.go.id/pialang_berjangka/detail/423',
+      snippet: extracted.snippet,
+      origin: 'indonesia' as const,
+    }],
+  };
+  const grounded = formatResearchContext(research);
+  assert.match(grounded, /Sella Susriana/);
+  assert.match(grounded, /wakil pialang/i);
+  assert.match(grounded, new RegExp(AI_RESEARCH_PERSON_NAME_HIT));
+  assert.equal(sourcesMentionPersonName(research), true);
+  assert.match(grounded, /Synthesize a rich answer/);
 });
 
 test('AI Research UI shows a thinking bubble before tokens and keeps the stream cursor after', () => {
