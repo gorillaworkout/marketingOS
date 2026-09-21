@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, existsSync } from 'node:fs';
 import path from 'node:path';
-import { AVAILABLE_MODELS } from '../src/lib/openai';
+import { AVAILABLE_MODELS, CLAUDE_OPUS_5_MODEL, CLAUDE_SONNET_5_MODEL } from '../src/lib/openai';
 
 const root = process.cwd();
 const read = (file: string) => readFileSync(path.join(root, file), 'utf8');
@@ -22,6 +22,8 @@ test('Models API exposes only the configured GorillaWorkout gateway catalog', ()
   assert.doesNotMatch(modelsRoute, /OpenRouter|openrouter\.ai|credits/);
   assert.ok(AVAILABLE_MODELS.some(model => model.id === 'cx/gpt-5.6-sol'), 'library page is empty of Sol without this catalog id');
   assert.ok(AVAILABLE_MODELS.some(model => model.id === 'cx/gpt-5.3-codex-spark'), 'library page is empty of Codex Spark without this catalog id');
+  assert.ok(AVAILABLE_MODELS.some(model => model.id === CLAUDE_SONNET_5_MODEL), 'library page is empty of Claude Sonnet 5 without this catalog id');
+  assert.ok(AVAILABLE_MODELS.some(model => model.id === CLAUDE_OPUS_5_MODEL), 'library page is empty of Claude Opus 5 without this catalog id');
   assert.ok(!AVAILABLE_MODELS.some(model => model.id.toLowerCase().includes('kimi')));
   assert.match(modelsPage, /fetch\('\/api\/models'\)/);
   assert.match(modelsPage, /visibleModels\.map/);

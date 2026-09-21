@@ -16,6 +16,10 @@ const PRIMARY_MODEL = 'ag/gemini-3-flash';
 /** Bayu's expected AI Research Codex default. Re-probe before removing. */
 export const PREFERRED_CODEX_MODEL = 'cx/gpt-5.6-sol';
 
+/** VPS GET /v1/models on llmdupoin (2026-09-21): Claude Sonnet 5 / Opus 5. */
+export const CLAUDE_SONNET_5_MODEL = 'cc/claude-sonnet-5';
+export const CLAUDE_OPUS_5_MODEL = 'cc/claude-opus-5';
+
 export type ModelProvider = 'gorillaworkout';
 
 export interface ModelInfo {
@@ -36,10 +40,17 @@ export interface ModelInfo {
 // re-probe with scripts/probe-gateway-models.ts before removing them again.
 // Do not dump every `*-review` variant unless a short completion is verified.
 //
+// Claude Sonnet 5 / Opus 5 (VPS GET /v1/models on llmdupoin, 2026-09-21):
+//   cc/claude-sonnet-5, cc/claude-opus-5. Migration 011 retired cc/* after a
+//   401 on llm.gorillaworkout.id. cc/* may work again on llmdupoin —
+//   re-probe with scripts/probe-gateway-models.ts before removing.
+//   Keep live 4.6 / 4.5 (`ag/claude-sonnet-4-6`, `lr/claude-sonnet-4.5`).
+//
 // Still out (do not re-add):
 //   kimi/*, tr/moonshotai/*              — retired; no Kimi API key.
 //   cmc/moonshotai/Kimi-K2.5, Kimi-K2.6  — listed on the gateway; do not catalog.
-//   cc/*                                 — Claude Code OAuth expired (401).
+//   cc/claude-fable-5, cc/claude-haiku-4-5-20251001 — listed; not cataloged.
+//   ag/claude-opus-4-6-thinking, lr/claude-sonnet-4-6 — listed; not cataloged.
 //   ag/gemini-3.7-*                      — 404, never existed upstream.
 //   ag/gemini-3.5-*, ag/gemini-3-flash-agent — retired (HTTP 200 retirement notice).
 //   pecut-free                           — upstream 400 "Unsupported model mimo-auto".
@@ -52,6 +63,8 @@ export const AVAILABLE_MODELS: ModelInfo[] = [
   { id: 'ag/gemini-pro-agent', name: 'Gemini Pro Agent', tier: 'balanced', provider: 'gorillaworkout', input: 0, output: 0 },
   { id: 'ag/claude-sonnet-4-6', name: 'Claude Sonnet 4.6', tier: 'balanced', provider: 'gorillaworkout', input: 0, output: 0 },
   { id: 'lr/claude-sonnet-4.5', name: 'Claude Sonnet 4.5', tier: 'balanced', provider: 'gorillaworkout', input: 0, output: 0 },
+  { id: CLAUDE_SONNET_5_MODEL, name: 'Claude Sonnet 5', tier: 'balanced', provider: 'gorillaworkout', input: 0, output: 0 },
+  { id: CLAUDE_OPUS_5_MODEL, name: 'Claude Opus 5', tier: 'premium', provider: 'gorillaworkout', input: 0, output: 0 },
   { id: 'ag/gpt-oss-120b-medium', name: 'GPT OSS 120B Medium', tier: 'balanced', provider: 'gorillaworkout', input: 0, output: 0 },
   // Codex chat models restored for llmdupoin. Re-probe before removing again.
   { id: 'cx/gpt-5.6-sol', name: 'GPT-5.6 Sol', tier: 'premium', provider: 'gorillaworkout', input: 0, output: 0 },
