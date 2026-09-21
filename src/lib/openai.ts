@@ -16,6 +16,10 @@ const PRIMARY_MODEL = 'ag/gemini-3-flash';
 /** Bayu's expected AI Research Codex default. Re-probe before removing. */
 export const PREFERRED_CODEX_MODEL = 'cx/gpt-5.6-sol';
 
+/** VPS-expected Claude 5 ids on llmdupoin (Antigravity `ag/*`). Do not use expired `cc/*`. */
+export const CLAUDE_SONNET_5_MODEL = 'ag/claude-sonnet-5';
+export const CLAUDE_OPUS_5_MODEL = 'ag/claude-opus-5';
+
 export type ModelProvider = 'gorillaworkout';
 
 export interface ModelInfo {
@@ -36,6 +40,12 @@ export interface ModelInfo {
 // re-probe with scripts/probe-gateway-models.ts before removing them again.
 // Do not dump every `*-review` variant unless a short completion is verified.
 //
+// Claude Sonnet 5 / Opus 5 (2026-09-21): this cloud agent has no
+// GORILLAWORKOUT_API_KEY, so GET /v1/models returned 401. Ids follow the
+// live Antigravity prefix already used by `ag/claude-sonnet-4-6` plus
+// Anthropic's `claude-sonnet-5` / `claude-opus-5`. Display names are what
+// Bayu asked for. Re-probe before renaming.
+//
 // Still out (do not re-add):
 //   kimi/*, tr/moonshotai/*              — retired; no Kimi API key.
 //   cmc/moonshotai/Kimi-K2.5, Kimi-K2.6  — listed on the gateway; do not catalog.
@@ -52,6 +62,8 @@ export const AVAILABLE_MODELS: ModelInfo[] = [
   { id: 'ag/gemini-pro-agent', name: 'Gemini Pro Agent', tier: 'balanced', provider: 'gorillaworkout', input: 0, output: 0 },
   { id: 'ag/claude-sonnet-4-6', name: 'Claude Sonnet 4.6', tier: 'balanced', provider: 'gorillaworkout', input: 0, output: 0 },
   { id: 'lr/claude-sonnet-4.5', name: 'Claude Sonnet 4.5', tier: 'balanced', provider: 'gorillaworkout', input: 0, output: 0 },
+  { id: CLAUDE_SONNET_5_MODEL, name: 'Claude Sonnet 5', tier: 'balanced', provider: 'gorillaworkout', input: 0, output: 0 },
+  { id: CLAUDE_OPUS_5_MODEL, name: 'Claude Opus 5', tier: 'premium', provider: 'gorillaworkout', input: 0, output: 0 },
   { id: 'ag/gpt-oss-120b-medium', name: 'GPT OSS 120B Medium', tier: 'balanced', provider: 'gorillaworkout', input: 0, output: 0 },
   // Codex chat models restored for llmdupoin. Re-probe before removing again.
   { id: 'cx/gpt-5.6-sol', name: 'GPT-5.6 Sol', tier: 'premium', provider: 'gorillaworkout', input: 0, output: 0 },

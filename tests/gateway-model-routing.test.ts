@@ -29,6 +29,7 @@ const researchRoute = read('src/app/api/market-research/generate/route.ts');
 const gatewayConfig = read('src/lib/gateway-config.ts');
 const envExample = read('.env.example');
 const restoreMigration = read('db/migrations/014_restore_codex_ai_research.sql');
+const claude5Migration = read('db/migrations/015_add_claude_sonnet5_opus5.sql');
 
 test('MarketingOS exposes GorillaWorkout as its only generation gateway', () => {
   assert.match(openai, /export type ModelProvider = 'gorillaworkout'/);
@@ -129,18 +130,28 @@ test('gateway defaults to llmdupoin and is overridable by env', () => {
   assert.doesNotMatch(probe, /https:\/\/llm\.gorillaworkout\.id/);
 });
 
-test('AI Research routing restores Codex and never reintroduces Kimi', () => {
+test('AI Research routing restores Codex and Claude 5 and never reintroduces Kimi', () => {
   assert.match(routing, /PREFERRED_CODEX_MODEL/);
+  assert.match(routing, /CLAUDE_SONNET_5_MODEL/);
+  assert.match(routing, /CLAUDE_OPUS_5_MODEL/);
   assert.match(routing, /cx\/gpt-5\.3-codex-spark/);
   assert.match(routing, /cx\/gpt-5\.6-terra/);
   assert.match(routing, /cx\/gpt-5\.6-luna/);
   assert.ok(!AVAILABLE_MODELS.some(model =>
     model.id.startsWith('kimi/') || model.id.startsWith('tr/') || model.id.startsWith('cmc/moonshotai/') || model.id.toLowerCase().includes('kimi')));
+  assert.ok(!AVAILABLE_MODELS.some(model => model.id.startsWith('cc/')));
   assert.ok(AVAILABLE_MODELS.some(model => model.id === 'cx/gpt-5.6-sol'));
   assert.ok(AVAILABLE_MODELS.some(model => model.id === 'cx/gpt-5.3-codex-spark'));
+  assert.ok(AVAILABLE_MODELS.some(model => model.id === 'ag/claude-sonnet-5'));
+  assert.ok(AVAILABLE_MODELS.some(model => model.id === 'ag/claude-opus-5'));
   assert.match(openai, /cx\/gpt-5\.6-sol/);
+  assert.match(openai, /ag\/claude-sonnet-5/);
+  assert.match(openai, /ag\/claude-opus-5/);
   assert.match(modelsRoute, /AVAILABLE_MODELS/);
   assert.match(restoreMigration, /cx\/gpt-5\.6-sol/);
   assert.match(restoreMigration, /cx\/gpt-5\.3-codex-spark/);
   assert.match(restoreMigration, /feature_key = 'ai-research'/);
+  assert.match(claude5Migration, /ag\/claude-sonnet-5/);
+  assert.match(claude5Migration, /ag\/claude-opus-5/);
+  assert.match(claude5Migration, /'ai-research'/);
 });

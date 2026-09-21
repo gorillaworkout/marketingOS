@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { AVAILABLE_MODELS, PREFERRED_CODEX_MODEL } from '../src/lib/openai';
+import { AVAILABLE_MODELS, CLAUDE_OPUS_5_MODEL, CLAUDE_SONNET_5_MODEL, PREFERRED_CODEX_MODEL } from '../src/lib/openai';
 
 /**
  * Catalog contract. Gemini 3.6 ids were verified with a real completion via
@@ -26,6 +26,14 @@ assert(ids.includes('cx/gpt-5.5'), 'GPT-5.5 must be offered');
 assert(ids.includes('cx/gpt-5.4'), 'GPT-5.4 must be offered');
 assert(ids.includes('cx/gpt-5.4-mini'), 'GPT-5.4 Mini must be offered');
 assert(ids.includes('cx/gpt-5.3-codex-spark'), 'GPT-5.3 Codex Spark must be offered');
+
+assert.equal(CLAUDE_SONNET_5_MODEL, 'ag/claude-sonnet-5');
+assert.equal(CLAUDE_OPUS_5_MODEL, 'ag/claude-opus-5');
+assert(ids.includes(CLAUDE_SONNET_5_MODEL), 'Claude Sonnet 5 must be offered');
+assert(ids.includes(CLAUDE_OPUS_5_MODEL), 'Claude Opus 5 must be offered');
+assert.equal(AVAILABLE_MODELS.find(model => model.id === CLAUDE_SONNET_5_MODEL)?.name, 'Claude Sonnet 5');
+assert.equal(AVAILABLE_MODELS.find(model => model.id === CLAUDE_OPUS_5_MODEL)?.name, 'Claude Opus 5');
+assert.equal(AVAILABLE_MODELS.find(model => model.id === CLAUDE_OPUS_5_MODEL)?.tier, 'premium');
 
 assert(!ids.some(id => id.startsWith('kimi/') || id.startsWith('tr/') || id.startsWith('cmc/moonshotai/') || id.toLowerCase().includes('kimi')), 'Kimi / moonshot must stay removed');
 assert(!ids.some(id => id.startsWith('cc/')), 'retired Claude Code must stay out');
