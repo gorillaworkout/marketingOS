@@ -68,14 +68,16 @@ test('015 adds Claude Sonnet 5 and Opus 5 to every feature, drops residual Kimi,
   assert.match(claude5, /BEGIN;[\s\S]*COMMIT;/);
   assert.match(claude5, /ON CONFLICT \(feature_key\) DO NOTHING/);
   assert.doesNotMatch(claude5, /DROP TABLE|DELETE FROM|TRUNCATE/i);
-  assert.match(executable, /ag\/claude-sonnet-5/);
-  assert.match(executable, /ag\/claude-opus-5/);
+  assert.match(executable, /cc\/claude-sonnet-5/);
+  assert.match(executable, /cc\/claude-opus-5/);
+  assert.match(executable, /ag\/claude-sonnet-4-6/);
+  assert.match(executable, /lr\/claude-sonnet-4\.5/);
   assert.match(executable, /'ai-research'/);
   assert.match(executable, /kimi\/%/);
   assert.match(executable, /tr\/moonshotai\/%/);
   assert.match(executable, /cmc\/moonshotai\/%/);
   assert.doesNotMatch(executable, /kimi\/k3|kimi\/kimi/);
-  assert.doesNotMatch(executable, /cc\/claude-sonnet-5|cc\/claude-opus/);
+  assert.doesNotMatch(executable, /cc\/claude-fable|cc\/claude-haiku/);
   for (const feature of GENERATION_FEATURES) {
     assert.match(claude5, new RegExp(`'${feature}'`));
   }

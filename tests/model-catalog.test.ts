@@ -27,16 +27,18 @@ assert(ids.includes('cx/gpt-5.4'), 'GPT-5.4 must be offered');
 assert(ids.includes('cx/gpt-5.4-mini'), 'GPT-5.4 Mini must be offered');
 assert(ids.includes('cx/gpt-5.3-codex-spark'), 'GPT-5.3 Codex Spark must be offered');
 
-assert.equal(CLAUDE_SONNET_5_MODEL, 'ag/claude-sonnet-5');
-assert.equal(CLAUDE_OPUS_5_MODEL, 'ag/claude-opus-5');
+assert.equal(CLAUDE_SONNET_5_MODEL, 'cc/claude-sonnet-5');
+assert.equal(CLAUDE_OPUS_5_MODEL, 'cc/claude-opus-5');
 assert(ids.includes(CLAUDE_SONNET_5_MODEL), 'Claude Sonnet 5 must be offered');
 assert(ids.includes(CLAUDE_OPUS_5_MODEL), 'Claude Opus 5 must be offered');
+assert(ids.includes('ag/claude-sonnet-4-6'), 'Claude Sonnet 4.6 must stay offered');
+assert(ids.includes('lr/claude-sonnet-4.5'), 'Claude Sonnet 4.5 must stay offered');
 assert.equal(AVAILABLE_MODELS.find(model => model.id === CLAUDE_SONNET_5_MODEL)?.name, 'Claude Sonnet 5');
 assert.equal(AVAILABLE_MODELS.find(model => model.id === CLAUDE_OPUS_5_MODEL)?.name, 'Claude Opus 5');
 assert.equal(AVAILABLE_MODELS.find(model => model.id === CLAUDE_OPUS_5_MODEL)?.tier, 'premium');
 
 assert(!ids.some(id => id.startsWith('kimi/') || id.startsWith('tr/') || id.startsWith('cmc/moonshotai/') || id.toLowerCase().includes('kimi')), 'Kimi / moonshot must stay removed');
-assert(!ids.some(id => id.startsWith('cc/')), 'retired Claude Code must stay out');
+assert(!ids.some(id => id.startsWith('cc/') && id !== CLAUDE_SONNET_5_MODEL && id !== CLAUDE_OPUS_5_MODEL), 'unrequested cc/* stay out');
 assert(!ids.some(id => id.endsWith('-review')), 'unverified Codex *-review ids stay out');
 assert(!ids.includes('pecut-free'), 'pecut-free must stay retired');
 

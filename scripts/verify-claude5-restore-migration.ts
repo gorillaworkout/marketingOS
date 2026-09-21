@@ -69,7 +69,12 @@ async function main() {
       assert.ok(!model.startsWith('kimi/'), `${row.feature_key} still allows ${model}`);
       assert.ok(!model.startsWith('tr/'), `${row.feature_key} still allows ${model}`);
       assert.ok(!model.startsWith('cmc/moonshotai/'), `${row.feature_key} still allows ${model}`);
-      assert.ok(!model.startsWith('cc/'), `${row.feature_key} reintroduced dead Claude Code ${model}`);
+      if (model.startsWith('cc/')) {
+        assert.ok(
+          model === CLAUDE_SONNET_5_MODEL || model === CLAUDE_OPUS_5_MODEL,
+          `${row.feature_key} allows unrequested ${model}`,
+        );
+      }
     }
     assert.ok(live.has(row.default_model), `${row.feature_key} defaults to unknown model ${row.default_model}`);
     assert.ok(row.allowed_models.includes(row.default_model), `${row.feature_key} default is inside its allowlist`);
@@ -96,6 +101,17 @@ async function main() {
   const eventPlan = assignments.find(row => row.feature_key === 'event-plan');
   assert.ok(eventPlan);
   assert.equal(eventPlan.default_model, 'ag/gemini-3.1-pro-low');
+
+  const article = assignments.find(row => row.feature_key === 'article-market-news');
+  assert.ok(article);
+  assert.equal(article.default_model, 'ag/claude-sonnet-4-6');
+  assert.ok(article.allowed_models.includes('ag/claude-sonnet-4-6'));
+  assert.ok(article.allowed_models.includes('lr/claude-sonnet-4.5'));
+
+  const research = assignments.find(row => row.feature_key === 'market-research');
+  assert.ok(research);
+  assert.ok(research.allowed_models.includes('ag/claude-sonnet-4-6'));
+  assert.ok(research.allowed_models.includes('lr/claude-sonnet-4.5'));
 
   const preferences = await queryAll<{ task_type: string; model: string }>(
     'SELECT task_type, model FROM task_model_preferences ORDER BY task_type',

@@ -2,11 +2,14 @@
 -- /dashboard/models Organization checkboxes and AI Research / generators
 -- can select them.
 --
--- Cloud agent GET https://llmdupoin.gorillaworkout.id/v1/models on 2026-09-21
--- returned 401 without GORILLAWORKOUT_API_KEY. Ids follow the live
--- Antigravity prefix (`ag/claude-sonnet-4-6`) plus Anthropic's
--- `claude-sonnet-5` / `claude-opus-5`. Display names: Claude Sonnet 5,
--- Claude Opus 5 (premium). Expired Claude Code `cc/*` stays out.
+-- VPS live probe 2026-09-21: GET https://llmdupoin.gorillaworkout.id/v1/models
+-- lists `cc/claude-sonnet-5` and `cc/claude-opus-5`. Migration 011 retired
+-- cc/* after a 401 on llm.gorillaworkout.id. cc/* may work again on
+-- llmdupoin — re-probe before removing. Keep live 4.6 / 4.5.
+--
+-- Optional listed ids not cataloged: cc/claude-fable-5,
+-- cc/claude-haiku-4-5-20251001, ag/claude-opus-4-6-thinking,
+-- lr/claude-sonnet-4-6.
 --
 -- Kimi stays out. Existing defaults and live user preferences are left
 -- untouched. Forward-only, idempotent, non-destructive. Deploy applies
@@ -16,8 +19,8 @@ BEGIN;
 
 -- 1. Union Sonnet 5 + Opus 5 onto every allowlist. ONE statement so the
 --    allowed_models / default_allowed CHECKs stay satisfied. Append (ord
---    200+) so existing Codex / Gemini ordering is preserved; re-runs keep
---    the earlier position via MIN(ord).
+--    200+) so existing Codex / Gemini / 4.6 ordering is preserved; re-runs
+--    keep the earlier position via MIN(ord).
 UPDATE feature_model_assignments SET
   allowed_models = COALESCE(
     (
@@ -34,8 +37,8 @@ UPDATE feature_model_assignments SET
           UNION ALL
           SELECT model, ord
           FROM (VALUES
-            ('ag/claude-sonnet-5', 200),
-            ('ag/claude-opus-5', 201)
+            ('cc/claude-sonnet-5', 200),
+            ('cc/claude-opus-5', 201)
           ) AS claude5(model, ord)
         ) AS combined
         WHERE model IN (
@@ -47,8 +50,8 @@ UPDATE feature_model_assignments SET
           'ag/gemini-pro-agent',
           'ag/claude-sonnet-4-6',
           'lr/claude-sonnet-4.5',
-          'ag/claude-sonnet-5',
-          'ag/claude-opus-5',
+          'cc/claude-sonnet-5',
+          'cc/claude-opus-5',
           'ag/gpt-oss-120b-medium',
           'cx/gpt-5.6-sol',
           'cx/gpt-5.6-terra',
@@ -62,11 +65,11 @@ UPDATE feature_model_assignments SET
       ) AS deduped
     ),
     CASE feature_key
-      WHEN 'article-market-news' THEN '["ag/claude-sonnet-4-6","lr/claude-sonnet-4.5","ag/gemini-3.1-pro-low","cx/gpt-5.6-sol","cx/gpt-5.3-codex-spark","ag/claude-sonnet-5","ag/claude-opus-5"]'::jsonb
-      WHEN 'market-research'     THEN '["ag/claude-sonnet-4-6","lr/claude-sonnet-4.5","ag/gemini-3.1-pro-low","cx/gpt-5.6-sol","cx/gpt-5.3-codex-spark","ag/claude-sonnet-5","ag/claude-opus-5"]'::jsonb
-      WHEN 'event-plan'          THEN '["ag/gemini-3-flash","ag/gemini-3.1-pro-low","ag/claude-sonnet-4-6","cx/gpt-5.6-sol","cx/gpt-5.3-codex-spark","ag/claude-sonnet-5","ag/claude-opus-5"]'::jsonb
-      WHEN 'ai-research'         THEN '["cx/gpt-5.6-sol","cx/gpt-5.3-codex-spark","cx/gpt-5.6-terra","cx/gpt-5.6-luna","ag/gemini-3-flash","ag/gemini-3.6-flash-high","ag/claude-sonnet-4-6","ag/claude-sonnet-5","ag/claude-opus-5","ag/gemini-3.1-pro-low"]'::jsonb
-      ELSE '["ag/gemini-3-flash","ag/gemini-3.6-flash-medium","ag/claude-sonnet-4-6","cx/gpt-5.6-sol","cx/gpt-5.3-codex-spark","ag/claude-sonnet-5","ag/claude-opus-5"]'::jsonb
+      WHEN 'article-market-news' THEN '["ag/claude-sonnet-4-6","lr/claude-sonnet-4.5","ag/gemini-3.1-pro-low","cx/gpt-5.6-sol","cx/gpt-5.3-codex-spark","cc/claude-sonnet-5","cc/claude-opus-5"]'::jsonb
+      WHEN 'market-research'     THEN '["ag/claude-sonnet-4-6","lr/claude-sonnet-4.5","ag/gemini-3.1-pro-low","cx/gpt-5.6-sol","cx/gpt-5.3-codex-spark","cc/claude-sonnet-5","cc/claude-opus-5"]'::jsonb
+      WHEN 'event-plan'          THEN '["ag/gemini-3-flash","ag/gemini-3.1-pro-low","ag/claude-sonnet-4-6","cx/gpt-5.6-sol","cx/gpt-5.3-codex-spark","cc/claude-sonnet-5","cc/claude-opus-5"]'::jsonb
+      WHEN 'ai-research'         THEN '["cx/gpt-5.6-sol","cx/gpt-5.3-codex-spark","cx/gpt-5.6-terra","cx/gpt-5.6-luna","ag/gemini-3-flash","ag/gemini-3.6-flash-high","ag/claude-sonnet-4-6","cc/claude-sonnet-5","cc/claude-opus-5","ag/gemini-3.1-pro-low"]'::jsonb
+      ELSE '["ag/gemini-3-flash","ag/gemini-3.6-flash-medium","ag/claude-sonnet-4-6","cx/gpt-5.6-sol","cx/gpt-5.3-codex-spark","cc/claude-sonnet-5","cc/claude-opus-5"]'::jsonb
     END
   ),
   -- Same statement: default_model must land in the new allowlist or the
@@ -74,8 +77,7 @@ UPDATE feature_model_assignments SET
   default_model = CASE
     WHEN default_model LIKE 'kimi/%'
       OR default_model LIKE 'tr/moonshotai/%'
-      OR default_model LIKE 'cmc/moonshotai/%'
-      OR default_model LIKE 'cc/%' THEN
+      OR default_model LIKE 'cmc/moonshotai/%' THEN
       CASE feature_key
         WHEN 'article-market-news' THEN 'ag/claude-sonnet-4-6'
         WHEN 'market-research' THEN 'ag/claude-sonnet-4-6'
@@ -96,12 +98,12 @@ WHERE NOT (allowed_models @> jsonb_build_array(default_model));
 -- 3. Seed rows if a feature was never created. Existing rows keep the UPDATE above.
 INSERT INTO feature_model_assignments (feature_key, allowed_models, default_model)
 VALUES
-  ('social-post', '["ag/gemini-3-flash","ag/gemini-3.6-flash-medium","ag/claude-sonnet-4-6","cx/gpt-5.6-sol","cx/gpt-5.3-codex-spark","ag/claude-sonnet-5","ag/claude-opus-5"]'::jsonb, 'ag/gemini-3-flash'),
-  ('video-script', '["ag/gemini-3-flash","ag/gemini-3.6-flash-medium","ag/claude-sonnet-4-6","cx/gpt-5.6-sol","cx/gpt-5.3-codex-spark","ag/claude-sonnet-5","ag/claude-opus-5"]'::jsonb, 'ag/gemini-3-flash'),
-  ('event-plan', '["ag/gemini-3-flash","ag/gemini-3.1-pro-low","ag/claude-sonnet-4-6","cx/gpt-5.6-sol","cx/gpt-5.3-codex-spark","ag/claude-sonnet-5","ag/claude-opus-5"]'::jsonb, 'ag/gemini-3.1-pro-low'),
-  ('article-market-news', '["ag/claude-sonnet-4-6","lr/claude-sonnet-4.5","ag/gemini-3.1-pro-low","cx/gpt-5.6-sol","cx/gpt-5.3-codex-spark","ag/claude-sonnet-5","ag/claude-opus-5"]'::jsonb, 'ag/claude-sonnet-4-6'),
-  ('market-research', '["ag/claude-sonnet-4-6","lr/claude-sonnet-4.5","ag/gemini-3.1-pro-low","cx/gpt-5.6-sol","cx/gpt-5.3-codex-spark","ag/claude-sonnet-5","ag/claude-opus-5"]'::jsonb, 'ag/claude-sonnet-4-6'),
-  ('ai-research', '["cx/gpt-5.6-sol","cx/gpt-5.3-codex-spark","cx/gpt-5.6-terra","cx/gpt-5.6-luna","ag/gemini-3-flash","ag/gemini-3.6-flash-high","ag/claude-sonnet-4-6","ag/claude-sonnet-5","ag/claude-opus-5","ag/gemini-3.1-pro-low"]'::jsonb, 'cx/gpt-5.6-sol')
+  ('social-post', '["ag/gemini-3-flash","ag/gemini-3.6-flash-medium","ag/claude-sonnet-4-6","cx/gpt-5.6-sol","cx/gpt-5.3-codex-spark","cc/claude-sonnet-5","cc/claude-opus-5"]'::jsonb, 'ag/gemini-3-flash'),
+  ('video-script', '["ag/gemini-3-flash","ag/gemini-3.6-flash-medium","ag/claude-sonnet-4-6","cx/gpt-5.6-sol","cx/gpt-5.3-codex-spark","cc/claude-sonnet-5","cc/claude-opus-5"]'::jsonb, 'ag/gemini-3-flash'),
+  ('event-plan', '["ag/gemini-3-flash","ag/gemini-3.1-pro-low","ag/claude-sonnet-4-6","cx/gpt-5.6-sol","cx/gpt-5.3-codex-spark","cc/claude-sonnet-5","cc/claude-opus-5"]'::jsonb, 'ag/gemini-3.1-pro-low'),
+  ('article-market-news', '["ag/claude-sonnet-4-6","lr/claude-sonnet-4.5","ag/gemini-3.1-pro-low","cx/gpt-5.6-sol","cx/gpt-5.3-codex-spark","cc/claude-sonnet-5","cc/claude-opus-5"]'::jsonb, 'ag/claude-sonnet-4-6'),
+  ('market-research', '["ag/claude-sonnet-4-6","lr/claude-sonnet-4.5","ag/gemini-3.1-pro-low","cx/gpt-5.6-sol","cx/gpt-5.3-codex-spark","cc/claude-sonnet-5","cc/claude-opus-5"]'::jsonb, 'ag/claude-sonnet-4-6'),
+  ('ai-research', '["cx/gpt-5.6-sol","cx/gpt-5.3-codex-spark","cx/gpt-5.6-terra","cx/gpt-5.6-luna","ag/gemini-3-flash","ag/gemini-3.6-flash-high","ag/claude-sonnet-4-6","cc/claude-sonnet-5","cc/claude-opus-5","ag/gemini-3.1-pro-low"]'::jsonb, 'cx/gpt-5.6-sol')
 ON CONFLICT (feature_key) DO NOTHING;
 
 -- 4. Point personal preferences at their feature's default only when they

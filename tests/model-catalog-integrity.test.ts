@@ -71,7 +71,6 @@ test('AI Research defaults include GPT-5.6 Sol, Claude 5, and no Kimi', () => {
   assert.ok(assignment.allowedModels.every(id => catalog.has(id)));
   assert.ok(!assignment.allowedModels.some(id =>
     id.startsWith('kimi/') || id.startsWith('tr/') || id.startsWith('cmc/moonshotai/') || id.toLowerCase().includes('kimi')));
-  assert.ok(!assignment.allowedModels.some(id => id.startsWith('cc/')));
 });
 
 test('every workflow allowlist includes Sol, Spark, Claude Sonnet 5, and Opus 5 so /dashboard/models can assign them', () => {
@@ -104,19 +103,21 @@ test('the Codex restore migration only writes catalog models and never writes Ki
   assert.match(restore, /ON CONFLICT \(feature_key\) DO NOTHING/);
 });
 
-test('the Claude 5 restore migration only writes catalog models and never writes Kimi or cc/*', () => {
+test('the Claude 5 restore migration only writes catalog models and never writes Kimi', () => {
   const referenced = [...new Set(quotedModelIds(claude5))];
   assert.ok(referenced.includes(CLAUDE_SONNET_5_MODEL));
   assert.ok(referenced.includes(CLAUDE_OPUS_5_MODEL));
   const missing = referenced.filter(id => !catalog.has(id));
   assert.deepEqual(missing, [], '015 would write models that are not in AVAILABLE_MODELS');
   assert.doesNotMatch(claude5.replace(/--.*$/gm, ''), /kimi\/k|tr\/moonshotai\/kimi/);
-  assert.doesNotMatch(claude5.replace(/--.*$/gm, ''), /cc\/claude/);
+  assert.doesNotMatch(claude5.replace(/--.*$/gm, ''), /cc\/claude-fable|cc\/claude-haiku/);
   assert.match(claude5, /kimi\/%/);
   assert.match(claude5, /tr\/moonshotai\/%/);
   assert.match(claude5, /cmc\/moonshotai\/%/);
-  assert.match(claude5, /ag\/claude-sonnet-5/);
-  assert.match(claude5, /ag\/claude-opus-5/);
+  assert.match(claude5, /cc\/claude-sonnet-5/);
+  assert.match(claude5, /cc\/claude-opus-5/);
+  assert.match(claude5, /ag\/claude-sonnet-4-6/);
+  assert.match(claude5, /lr\/claude-sonnet-4\.5/);
   assert.match(claude5, /'ai-research'/);
   assert.doesNotMatch(claude5, /DROP TABLE|DELETE FROM|TRUNCATE/i);
   assert.match(claude5, /BEGIN;[\s\S]*COMMIT;/);
@@ -128,9 +129,11 @@ test('catalog itself contains Codex, Claude 5, and excludes Kimi', () => {
   assert.ok(catalog.has('cx/gpt-5.3-codex-spark'));
   assert.ok(catalog.has(CLAUDE_SONNET_5_MODEL));
   assert.ok(catalog.has(CLAUDE_OPUS_5_MODEL));
+  assert.ok(catalog.has('ag/claude-sonnet-4-6'));
+  assert.ok(catalog.has('lr/claude-sonnet-4.5'));
   assert.ok([...catalog].some(id => id.startsWith('cx/')));
   assert.ok(![...catalog].some(id =>
     id.startsWith('kimi/') || id.startsWith('tr/') || id.startsWith('cmc/moonshotai/') || id.toLowerCase().includes('kimi')));
-  assert.ok(![...catalog].some(id => id.startsWith('cc/')), 'expired Claude Code ids stay out');
+  assert.ok(![...catalog].some(id => id.startsWith('cc/') && id !== CLAUDE_SONNET_5_MODEL && id !== CLAUDE_OPUS_5_MODEL), 'unrequested cc/* stay out');
   assert.ok(![...catalog].some(id => id.endsWith('-review')), 'do not dump unverified *-review Codex ids');
 });

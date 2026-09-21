@@ -139,19 +139,20 @@ test('AI Research routing restores Codex and Claude 5 and never reintroduces Kim
   assert.match(routing, /cx\/gpt-5\.6-luna/);
   assert.ok(!AVAILABLE_MODELS.some(model =>
     model.id.startsWith('kimi/') || model.id.startsWith('tr/') || model.id.startsWith('cmc/moonshotai/') || model.id.toLowerCase().includes('kimi')));
-  assert.ok(!AVAILABLE_MODELS.some(model => model.id.startsWith('cc/')));
   assert.ok(AVAILABLE_MODELS.some(model => model.id === 'cx/gpt-5.6-sol'));
   assert.ok(AVAILABLE_MODELS.some(model => model.id === 'cx/gpt-5.3-codex-spark'));
-  assert.ok(AVAILABLE_MODELS.some(model => model.id === 'ag/claude-sonnet-5'));
-  assert.ok(AVAILABLE_MODELS.some(model => model.id === 'ag/claude-opus-5'));
+  assert.ok(AVAILABLE_MODELS.some(model => model.id === 'cc/claude-sonnet-5'));
+  assert.ok(AVAILABLE_MODELS.some(model => model.id === 'cc/claude-opus-5'));
+  assert.ok(AVAILABLE_MODELS.some(model => model.id === 'ag/claude-sonnet-4-6'));
+  assert.ok(AVAILABLE_MODELS.some(model => model.id === 'lr/claude-sonnet-4.5'));
   assert.match(openai, /cx\/gpt-5\.6-sol/);
-  assert.match(openai, /ag\/claude-sonnet-5/);
-  assert.match(openai, /ag\/claude-opus-5/);
+  assert.match(openai, /cc\/claude-sonnet-5/);
+  assert.match(openai, /cc\/claude-opus-5/);
   assert.match(modelsRoute, /AVAILABLE_MODELS/);
   assert.match(restoreMigration, /cx\/gpt-5\.6-sol/);
   assert.match(restoreMigration, /cx\/gpt-5\.3-codex-spark/);
   assert.match(restoreMigration, /feature_key = 'ai-research'/);
-  assert.match(claude5Migration, /ag\/claude-sonnet-5/);
-  assert.match(claude5Migration, /ag\/claude-opus-5/);
+  assert.match(claude5Migration, /cc\/claude-sonnet-5/);
+  assert.match(claude5Migration, /cc\/claude-opus-5/);
   assert.match(claude5Migration, /'ai-research'/);
 });
