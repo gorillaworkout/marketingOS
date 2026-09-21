@@ -1,6 +1,14 @@
 import { createHash } from 'node:crypto';
 import { COMPETITOR_BROKERS, normalizeResearchUrl } from './article-market-news';
 import type { MarketNewsCandidate, MarketProductCategory } from './market-research';
+import { EmptyMarketResearchPoolError, type MarketResearchSourceStatus } from './market-research-status';
+
+export {
+  EmptyMarketResearchPoolError,
+  formatEmptyMarketResearchPoolMessage,
+  formatMarketResearchSourceStatus,
+  type MarketResearchSourceStatus,
+} from './market-research-status';
 
 export type MarketResearchOrigin = 'indonesia' | 'international';
 
@@ -22,7 +30,7 @@ export interface MarketResearchSourceResult {
   candidates: MarketNewsCandidate[];
   groupsSearched: MarketProductCategory[];
   groupCandidateCounts: Record<MarketProductCategory, number>;
-  sourceStatus: Array<{ outlet: string; status: 'ok' | 'error'; candidateCount: number; error?: string }>;
+  sourceStatus: MarketResearchSourceStatus[];
 }
 
 export const MARKET_RESEARCH_GROUPS: MarketProductCategory[] = ['Forex', 'Commodity', 'US Indices', 'US Stocks'];
@@ -62,12 +70,12 @@ const SYMBOL_ALIASES: Record<string, string[]> = {
   GBP: ['gbp', 'sterling', 'pound', 'gbpusd', 'bank of england', 'boe'],
   JPY: ['jpy', 'yen', 'usdjpy', 'bank of japan', 'boj'],
   NZD: ['nzd', 'kiwi dollar', 'new zealand dollar', 'nzdusd', 'rbnz'],
-  USD: ['usd', 'dollar', 'dollar index', 'dxy', 'greenback', 'federal reserve', 'fed', 'fomc', 'treasury'],
+  USD: ['usd', 'dollar', 'dolar', 'dolar as', 'dollar index', 'dxy', 'greenback', 'federal reserve', 'fed', 'fomc', 'treasury'],
   IDR: ['idr', 'rupiah', 'usdidr', 'bank indonesia'],
   XAUUSD: ['xauusd', 'xau usd', 'xau', 'gold', 'bullion', 'emas'],
   WTI: ['wti', 'us oil', 'crude', 'crude oil', 'oil price', 'opec', 'minyak'],
   DJIA: ['djia', 'dow jones', 'dow'],
-  SPX: ['spx', 's p 500', 'sp 500', 's and p 500'],
+  SPX: ['spx', 's p 500', 'sp 500', 's and p 500', 's p500'],
   NDX: ['ndx', 'nasdaq 100', 'nasdaq'],
   'US Stocks': ['us stocks', 'wall street', 'earnings', 'shares of', 'stock jumped', 'stock fell'],
 };
@@ -87,6 +95,34 @@ const IMPORTANCE_CATEGORIES: Record<string, string[]> = {
 
 /** Speculation is not a confirmed high-impact development. */
 const SPECULATION_MARKERS = ['predict', 'forecast to', 'could reach', 'may hit', 'analyst says', 'outlook for', 'prediksi', 'diperkirakan'];
+
+/**
+ * Confirmed same-day FX / commodity / major-index price action.
+ * Only applied when the headline already names a tradable symbol in those groups.
+ */
+const MARKET_MOVE_MARKERS = [
+  'melemah', 'melemahnya', 'pelemahan', 'menguat', 'menguatnya', 'penguatan',
+  'tembus', 'menembus', 'anjlok', 'melonjak', 'merosot', 'terjun', 'terpuruk',
+  'menanjak', 'meroket', 'ditutup', 'rebound', 'naik', 'turun', 'jatuh',
+  'rises', 'rise', 'rose', 'risen', 'falls', 'fall', 'fell', 'fallen',
+  'jumps', 'jump', 'jumped', 'slumps', 'slump', 'slumped', 'climbs', 'climb', 'climbed',
+  'drops', 'drop', 'dropped', 'rallies', 'rally', 'rallied', 'plunges', 'plunge', 'plunged',
+  'surges', 'surge', 'surged', 'soars', 'soar', 'soared', 'tumbles', 'tumble', 'tumbled',
+  'weakens', 'weaken', 'weakened', 'weaker', 'strengthens', 'strengthen', 'strengthened', 'stronger',
+  'slides', 'slide', 'slid', 'sinks', 'sink', 'sank', 'gains', 'gained', 'loses', 'lost',
+  'advances', 'advance', 'advanced', 'declines', 'decline', 'declined',
+  'hits', 'hit', 'breaks', 'broke', 'broken', 'selloff', 'sell off',
+  'record high', 'record low', 'all time high',
+];
+
+/** Description fallback skips these generic SOP tokens so blurbs do not flood the pool. */
+const DESCRIPTION_GENERIC_IMPORTANCE = new Set([
+  'growth', 'hiring', 'employment', 'fed', 'bond', 'yield', 'treasury', 'auction',
+  'housing', 'mortgage', 'speech', 'remarks', 'powell', 'layoff',
+]);
+
+const DESCRIPTION_IMPORTANCE_LIMIT = 280;
+const MARKET_RESEARCH_USER_AGENT = 'Mozilla/5.0 (compatible; MarketingOS/1.0; +https://github.com/gorillaworkout/marketingOS)';
 
 
 const DEFAULT_MAX_BYTES = 400_000;
@@ -111,17 +147,53 @@ function normalized(value: string): string {
   return ` ${value.toLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g, ' ').trim()} `;
 }
 
+function containsMarker(haystack: string, marker: string): boolean {
+  return normalized(haystack).includes(` ${normalized(marker).trim()} `);
+}
+
+function containsAnyMarker(haystack: string, markers: readonly string[]): boolean {
+  return markers.some(marker => containsMarker(haystack, marker));
+}
+
+function boundedDescription(description: string): string {
+  return description.replace(/\s+/g, ' ').trim().slice(0, DESCRIPTION_IMPORTANCE_LIMIT);
+}
+
+function isSpeculativeHeadline(text: string): boolean {
+  return containsAnyMarker(text, SPECULATION_MARKERS);
+}
+
+function matchImportanceCategories(haystack: string, allowGeneric = true): string | null {
+  for (const [category, keywords] of Object.entries(IMPORTANCE_CATEGORIES)) {
+    if (keywords.some(keyword => {
+      if (!allowGeneric && DESCRIPTION_GENERIC_IMPORTANCE.has(keyword)) return false;
+      return containsMarker(haystack, keyword);
+    })) return category;
+  }
+  return null;
+}
+
+function isTradableMarketMoveSymbol(symbol: string): boolean {
+  const category = categoryOfSymbol(symbol);
+  return category === 'Forex' || category === 'Commodity' || category === 'US Indices';
+}
+
+function isConfirmedMarketMove(title: string): boolean {
+  const symbols = classifySymbols(title);
+  if (!symbols.some(isTradableMarketMoveSymbol)) return false;
+  return containsAnyMarker(title, MARKET_MOVE_MARKERS);
+}
+
 /**
  * Map a headline to the exact instruments it speaks for.
  * Retail-gold price lists are dropped: they are not tradable-market events.
  */
 export function classifySymbols(title: string): string[] {
-  const headline = normalized(title);
-  const isRetailGold = RETAIL_GOLD_MARKERS.some(marker => headline.includes(` ${normalized(marker).trim()} `));
+  const isRetailGold = containsAnyMarker(title, RETAIL_GOLD_MARKERS);
   const matched: string[] = [];
   for (const [symbol, aliases] of Object.entries(SYMBOL_ALIASES)) {
     if (symbol === 'XAUUSD' && isRetailGold) continue;
-    if (aliases.some(alias => headline.includes(` ${normalized(alias).trim()} `))) matched.push(symbol);
+    if (containsAnyMarker(title, aliases)) matched.push(symbol);
   }
   // Precedence: a specific instrument wins over the generic USD / "US Stocks"
   // buckets, so "Gold XAU/USD after CPI" is XAUUSD only — not XAUUSD + USD.
@@ -138,17 +210,19 @@ export function classifySymbolsForFeed(title: string, outlet: string, defaultSym
   return [...configured];
 }
 
-export function importanceCategoryOf(title: string): string | null {
-  const headline = normalized(title);
-  if (SPECULATION_MARKERS.some(marker => headline.includes(` ${normalized(marker).trim()} `))) return null;
-  for (const [category, keywords] of Object.entries(IMPORTANCE_CATEGORIES)) {
-    if (keywords.some(keyword => headline.includes(` ${normalized(keyword).trim()} `))) return category;
-  }
-  return null;
+export function importanceCategoryOf(title: string, description = ''): string | null {
+  if (isSpeculativeHeadline(title)) return null;
+  const fromTitle = matchImportanceCategories(title, true);
+  if (fromTitle) return fromTitle;
+  if (isConfirmedMarketMove(title)) return 'Market Moves';
+  const snippet = boundedDescription(description);
+  if (!snippet) return null;
+  if (isSpeculativeHeadline(snippet)) return null;
+  return matchImportanceCategories(snippet, false);
 }
 
-export function isHighImportanceHeadline(title: string): boolean {
-  return importanceCategoryOf(title) !== null;
+export function isHighImportanceHeadline(title: string, description = ''): boolean {
+  return importanceCategoryOf(title, description) !== null;
 }
 
 /** At most ONE Indonesian-origin article may reach the selection pool. */
@@ -173,6 +247,11 @@ function mentionsCompetitor(value: string): boolean {
   return COMPETITOR_BROKERS.some(broker => haystack.includes(normalized(broker).replaceAll(' ', '')));
 }
 
+function looksLikeRssXml(body: string): boolean {
+  const head = body.slice(0, 800).toLowerCase();
+  return /<\?xml\b/.test(head) || /<(rss|feed|rdf:rdf)\b/.test(head);
+}
+
 function wibTimestamp(value: string): string | null {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return null;
@@ -185,8 +264,6 @@ function wibTimestamp(value: string): string | null {
 
 async function readBoundedXml(response: Response, maxBytes: number): Promise<string> {
   if (!response.ok) throw new Error(`Publisher RSS returned HTTP ${response.status}.`);
-  const contentType = response.headers.get('content-type')?.toLowerCase() || '';
-  if (!contentType.includes('xml') && !contentType.includes('rss')) throw new Error('Publisher response is not XML/RSS.');
   const declared = Number(response.headers.get('content-length') || 0);
   if (declared > maxBytes) throw new Error('Publisher RSS exceeds the size limit.');
   if (!response.body) throw new Error('Publisher RSS has no response body.');
@@ -206,7 +283,11 @@ async function readBoundedXml(response: Response, maxBytes: number): Promise<str
   const bytes = new Uint8Array(total);
   let offset = 0;
   for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
-  return new TextDecoder().decode(bytes);
+  const body = new TextDecoder().decode(bytes);
+  const contentType = response.headers.get('content-type')?.toLowerCase() || '';
+  const typedXml = contentType.includes('xml') || contentType.includes('rss') || contentType.includes('atom');
+  if (!typedXml && !looksLikeRssXml(body)) throw new Error('Publisher response is not XML/RSS.');
+  return body;
 }
 
 async function fetchFeed(feed: MarketResearchFeed, fetchImpl: typeof fetch, maxBytes: number, timeoutMs: number): Promise<string> {
@@ -214,8 +295,12 @@ async function fetchFeed(feed: MarketResearchFeed, fetchImpl: typeof fetch, maxB
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const response = await fetchImpl(feed.url, {
-      headers: { Accept: 'application/rss+xml, application/xml, text/xml', 'User-Agent': 'MarketingOS/1.0' },
-      redirect: 'error', cache: 'no-store', signal: controller.signal,
+      headers: {
+        Accept: 'application/rss+xml, application/xml, application/atom+xml, text/xml, text/plain;q=0.9, */*;q=0.8',
+        'User-Agent': MARKET_RESEARCH_USER_AGENT,
+        'Accept-Language': 'en-US,en;q=0.9,id;q=0.8',
+      },
+      redirect: 'follow', cache: 'no-store', signal: controller.signal,
     });
     return await readBoundedXml(response, maxBytes);
   } finally {
@@ -223,8 +308,9 @@ async function fetchFeed(feed: MarketResearchFeed, fetchImpl: typeof fetch, maxB
   }
 }
 
-function parseFeed(feed: MarketResearchFeed, xml: string, researchDate: string): MarketNewsCandidate[] {
+function parseFeed(feed: MarketResearchFeed, xml: string, researchDate: string): { candidates: MarketNewsCandidate[]; sameDayCount: number } {
   const items = xml.match(/<item\b[\s\S]*?<\/item>/gi) || [];
+  let sameDayCount = 0;
   const parsedItems = items.slice(0, 100).flatMap(item => {
     const title = xmlField(item, 'title');
     const description = xmlField(item, 'description') || xmlField(item, 'content:encoded');
@@ -234,6 +320,7 @@ function parseFeed(feed: MarketResearchFeed, xml: string, researchDate: string):
     const parsedUpdated = rawUpdated ? wibTimestamp(rawUpdated) : null;
     const updatedAt = parsedUpdated?.slice(0, 10) === researchDate ? parsedUpdated : null;
     if (!title || !link || !publishedAt || publishedAt.slice(0, 10) !== researchDate) return [];
+    sameDayCount += 1;
     if (mentionsCompetitor(`${title} ${description}`)) return [];
     try {
       const url = normalizeResearchUrl(link);
@@ -250,7 +337,7 @@ function parseFeed(feed: MarketResearchFeed, xml: string, researchDate: string):
     // Headline-level gates: exact instrument AND High Importance category.
     const symbols = classifySymbolsForFeed(item.title, feed.outlet, feed.defaultSymbols);
     if (symbols.length === 0) continue;
-    const importanceCategory = importanceCategoryOf(item.title);
+    const importanceCategory = importanceCategoryOf(item.title, item.description);
     if (!importanceCategory) continue;
     const categories = [...new Set(symbols.map(categoryOfSymbol).filter((value): value is MarketProductCategory => value !== null))];
     if (categories.length === 0) continue;
@@ -270,7 +357,7 @@ function parseFeed(feed: MarketResearchFeed, xml: string, researchDate: string):
       evidenceLevel: 'publisher-metadata',
     });
   }
-  return candidates;
+  return { candidates, sameDayCount };
 }
 
 export async function researchLatestMarketNews(researchDate: string, options: MarketResearchSourceOptions = {}): Promise<MarketResearchSourceResult> {
@@ -280,18 +367,18 @@ export async function researchLatestMarketNews(researchDate: string, options: Ma
   const timeoutMs = options.timeoutMs || DEFAULT_TIMEOUT_MS;
   const settled = await Promise.allSettled(feeds.map(async feed => parseFeed(feed, await fetchFeed(feed, fetchImpl, maxBytes, timeoutMs), researchDate)));
   const sourceStatus = settled.map((result, index) => result.status === 'fulfilled'
-    ? { outlet: feeds[index].outlet, status: 'ok' as const, candidateCount: result.value.length }
-    : { outlet: feeds[index].outlet, status: 'error' as const, candidateCount: 0, error: result.reason instanceof Error ? result.reason.message : 'Publisher feed failed.' });
+    ? { outlet: feeds[index].outlet, status: 'ok' as const, candidateCount: result.value.candidates.length, sameDayCount: result.value.sameDayCount }
+    : { outlet: feeds[index].outlet, status: 'error' as const, candidateCount: 0, sameDayCount: 0, error: result.reason instanceof Error ? result.reason.message : 'Publisher feed failed.' });
   const unique = new Map<string, MarketNewsCandidate>();
   for (const result of settled) {
     if (result.status !== 'fulfilled') continue;
-    for (const candidate of result.value) if (!unique.has(candidate.url)) unique.set(candidate.url, candidate);
+    for (const candidate of result.value.candidates) if (!unique.has(candidate.url)) unique.set(candidate.url, candidate);
   }
   const ranked = [...unique.values()]
     .sort((a, b) => (b.updatedAt || b.publishedAt).localeCompare(a.updatedAt || a.publishedAt));
   // One Indonesian-origin article maximum; the rest must come from foreign media.
   const candidates = limitIndonesianOrigin(ranked).slice(0, 60);
-  if (candidates.length === 0) throw new Error('No relevant same-day high-importance market news was found across Forex, Commodity, US Indices, or US Stocks. Try again when publishers release a new factual update.');
+  if (candidates.length === 0) throw new EmptyMarketResearchPoolError(sourceStatus);
   const groupCandidateCounts = Object.fromEntries(MARKET_RESEARCH_GROUPS.map(group => [group, candidates.filter(candidate => candidate.categories.includes(group)).length])) as Record<MarketProductCategory, number>;
   return { candidates, groupsSearched: [...MARKET_RESEARCH_GROUPS], groupCandidateCounts, sourceStatus };
 }

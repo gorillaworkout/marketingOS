@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
 import { buildMarketResearchDocxBlob, marketResearchDocxFilename } from '@/lib/market-research-docx';
 import type { MarketResearchInput, MarketResearchItem } from '@/lib/market-research';
+import { formatMarketResearchSourceStatus, type MarketResearchSourceStatus } from '@/lib/market-research-status';
 import { Button, FormField, Panel, PageHeader, PageStack, SectionHeader, StatusBadge, TextArea, TextInput, Toolbar } from '@/components/ui/dashboard';
 import InlineModelSelector from '@/components/InlineModelSelector';
 
@@ -13,7 +14,7 @@ interface MarketResearchResult {
   model: string;
   groupsSearched: string[];
   groupCandidateCounts: Record<string, number>;
-  sourceStatus: Array<{ outlet: string; status: 'ok' | 'error'; candidateCount: number; error?: string }>;
+  sourceStatus: MarketResearchSourceStatus[];
   candidateCount: number;
   historyId: string;
 }
@@ -37,6 +38,7 @@ export default function MarketResearchPage() {
   const [progress, setProgress] = useState(0);
   const [status, setStatus] = useState('');
   const [error, setError] = useState('');
+  const [errorSourceStatus, setErrorSourceStatus] = useState<MarketResearchSourceStatus[]>([]);
   const [result, setResult] = useState<MarketResearchResult | null>(null);
   const [reviewConfirmed, setReviewConfirmed] = useState(false);
   const [recent, setRecent] = useState<MarketResearchHistoryTask[]>([]);
@@ -82,7 +84,7 @@ export default function MarketResearchPage() {
   const fillExample = () => setBrief('Siapkan morning briefing untuk tim marketing Dupoin. Prioritaskan keputusan bank sentral, data ekonomi resmi, geopolitik, OPEC+, dan perkembangan faktual yang paling berdampak terhadap sentimen trading hari ini.');
 
   const generate = async () => {
-    setLoading(true); setError(''); setResult(null); setReviewConfirmed(false); setProgress(4); setStatus('Preparing secure same-day research…');
+    setLoading(true); setError(''); setErrorSourceStatus([]); setResult(null); setReviewConfirmed(false); setProgress(4); setStatus('Preparing secure same-day research…');
     try {
       const response = await fetch('/api/market-research/generate', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ brief, researchDate }),
@@ -108,7 +110,10 @@ export default function MarketResearchPage() {
           const event = JSON.parse(line.slice(6));
           setProgress(Number(event.progress) || 0);
           setStatus(event.message || '');
-          if (event.step === 'error') throw new Error(event.message || 'Market research failed.');
+          if (event.step === 'error') {
+            if (Array.isArray(event.sourceStatus)) setErrorSourceStatus(event.sourceStatus as MarketResearchSourceStatus[]);
+            throw new Error(event.message || 'Market research failed.');
+          }
           if (event.step === 'done') { setResult(event.result as MarketResearchResult); void fetchRecent(); completed = true; }
         }
       }
@@ -146,14 +151,14 @@ export default function MarketResearchPage() {
         <div className="mt-5 rounded-[var(--mos-radius-panel)] border border-amber-500/25 bg-amber-500/10 p-4 text-sm leading-6 text-amber-100"><strong>Verification boundary:</strong> selection memakai headline dan summary metadata publisher. Latest Update Time ditampilkan hanya jika feed menyediakannya. Buka setiap link dan baca artikel lengkap sebelum menggunakan hasil secara eksternal.</div>
         <Button type="button" variant="primary" onClick={generate} disabled={loading || brief.trim().length < 20} className="mt-5">{loading ? 'Researching…' : 'Generate market research'}</Button>
         {loading && <div className="mt-4"><div className="h-2 overflow-hidden rounded-full bg-[var(--mos-raised)]"><div className="h-full bg-cyan-500 transition-all" style={{ width: `${progress}%` }} /></div><p className="mt-2 text-sm text-[var(--mos-text-muted)]">{status}</p></div>}
-        {error && <div className="mt-4 rounded-[var(--mos-radius-panel)] border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-200">{error}</div>}
+        {error && <div className="mt-4 rounded-[var(--mos-radius-panel)] border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-200"><p>{error}</p>{errorSourceStatus.length > 0 && <div className="mt-3 space-y-1">{errorSourceStatus.map(source => <p key={source.outlet} className={source.status === 'ok' ? 'text-xs text-emerald-200' : 'text-xs text-red-300'}>{source.outlet}: {formatMarketResearchSourceStatus(source)}</p>)}</div>}</div>}
       </Panel>
 
       {result && <section className="space-y-4">
         <Toolbar><SectionHeader title="Selected market news" description={`${result.items.length} dipilih dari ${result.candidateCount} candidate · Model: ${result.model}`} /><Button variant="primary" onClick={() => void download()} disabled={!reviewConfirmed}>Download DOCX</Button></Toolbar>
         <div className="grid gap-3 md:grid-cols-2">
           <Panel padding="compact"><p className="text-xs font-semibold uppercase tracking-wide text-[var(--mos-text-faint)]">Candidate coverage per product</p><div className="mt-3 flex flex-wrap gap-2">{result.groupsSearched.map(group => <StatusBadge key={group}>{group}: {result.groupCandidateCounts?.[group] ?? 0}</StatusBadge>)}</div></Panel>
-          <Panel padding="compact"><p className="text-xs font-semibold uppercase tracking-wide text-[var(--mos-text-faint)]">Publisher feed status</p><div className="mt-3 space-y-2">{result.sourceStatus?.map(source => <div key={source.outlet} className="flex items-start justify-between gap-3 text-xs"><span className="text-[var(--mos-text-secondary)]">{source.outlet}</span><StatusBadge tone={source.status === 'ok' ? 'success' : 'danger'} dot>{source.status === 'ok' ? `OK · ${source.candidateCount} candidate` : `Failed · ${source.error || 'Unavailable'}`}</StatusBadge></div>)}</div></Panel>
+          <Panel padding="compact"><p className="text-xs font-semibold uppercase tracking-wide text-[var(--mos-text-faint)]">Publisher feed status</p><div className="mt-3 space-y-2">{result.sourceStatus?.map(source => <div key={source.outlet} className="flex items-start justify-between gap-3 text-xs"><span className="text-[var(--mos-text-secondary)]">{source.outlet}</span><StatusBadge tone={source.status === 'ok' ? 'success' : 'danger'} dot>{formatMarketResearchSourceStatus(source)}</StatusBadge></div>)}</div></Panel>
         </div>
         {result.items.map((item, index) => <Panel key={item.candidateId}><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-xs font-semibold text-[var(--mos-accent-soft)]">#{index + 1} · {item.symbol || item.productCategory} · {item.productCategory}{item.importanceCategory ? ` · ${item.importanceCategory}` : ''}</p><h3 className="mt-1 text-base font-semibold text-white">{item.articleTitle}</h3><p className="mt-1 text-sm text-[var(--mos-text-muted)]">{item.newsSource}</p></div><div className="text-right text-xs text-[var(--mos-text-muted)]"><p>Published: {item.publicationDate} {item.publicationTime} WIB</p><p>Latest Update Time: {item.latestUpdateTime ? `${item.latestUpdateTime} WIB` : 'Not provided'}</p></div></div><dl className="mt-5 grid gap-4 divide-y divide-[var(--mos-border-subtle)] md:grid-cols-3 md:divide-x md:divide-y-0">{[['Main event', item.mainEvent], ['Latest factual development', item.latestFactualDevelopment], ['Market relevance', item.marketRelevance]].map(([label, value]) => <div key={label} className="py-3 md:px-4 md:py-0 first:pl-0"><dt className="text-xs uppercase tracking-wide text-[var(--mos-text-faint)]">{label}</dt><dd className="mt-2 text-sm leading-6 text-[var(--mos-text-secondary)]">{value}</dd></div>)}</dl><a href={item.articleUrl} target="_blank" rel="noreferrer" className="mt-4 block break-all text-sm text-[var(--mos-accent-soft)] hover:underline">Open publisher article: {item.articleUrl}</a></Panel>)}
         <label className="flex cursor-pointer gap-3 rounded-[var(--mos-radius-panel)] border border-amber-500/25 bg-amber-500/10 p-4 text-sm leading-6 text-amber-100"><input type="checkbox" checked={reviewConfirmed} onChange={event => setReviewConfirmed(event.target.checked)} className="mt-1 h-4 w-4 accent-emerald-500" /><span>Saya sudah membuka seluruh link, membaca artikel lengkap, dan memeriksa title, waktu, main event, factual development, serta market relevance. Aktifkan untuk Download DOCX.</span></label>
