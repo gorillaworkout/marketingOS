@@ -6,7 +6,7 @@ import type { EventPlanResearch } from '@/lib/event-plan-research';
 import { Button, DataTableFrame, FormField, Panel, PageHeader, PageStack, SectionHeader, StatusBadge, TextArea, TextInput, Toolbar } from '@/components/ui/dashboard';
 import InlineModelSelector from '@/components/InlineModelSelector';
 
-type BudgetItem = { category: string; estimatedCost: number; notes: string };
+type BudgetItem = { category: string; estimatedCost: number; notes: string; suggestedVendor?: string; venue?: string };
 type Budget = { currency: 'IDR'; total?: number; items: BudgetItem[]; contingency?: number; preliminary?: boolean };
 type EventPlanOption = {
   style: string;
@@ -62,6 +62,8 @@ function normalizeBudget(value: unknown): Budget | null {
       category: typeof entry.category === 'string' ? entry.category : 'Other',
       estimatedCost: asRupiah(entry.estimatedCost) ?? 0,
       notes: typeof entry.notes === 'string' ? entry.notes : '—',
+      suggestedVendor: typeof entry.suggestedVendor === 'string' ? entry.suggestedVendor : undefined,
+      venue: typeof entry.venue === 'string' ? entry.venue : undefined,
     }];
   }) : [];
   return {
@@ -199,7 +201,7 @@ export default function EventPlanPage() {
             {result.objective && <Detail label="Objective" value={result.objective} />}
             {result.concept && <Detail label="Concept" value={result.concept} />}
             {result.theme && <Detail label="Theme" value={result.theme} />}
-            {result.venue && <Detail label="Venue" value={result.venue} />}
+            <Detail label="Venue / location" value={result.venue?.trim() || location || 'Jakarta'} />
             {targetDate && <Detail label="Event target date" value={formatTargetDate(targetDate)} />}
             {speakers.length > 0 && <div className="mb-4"><label className="text-xs text-[var(--mos-text-faint)] uppercase tracking-wide">Speakers</label><ul className="mt-2 divide-y divide-[var(--mos-border-subtle)] rounded-[var(--mos-radius-control)] border border-[var(--mos-border)]">{speakers.map((speaker, index) => <li key={index} className="px-3 py-2 text-[var(--mos-text-secondary)]">{speaker}</li>)}</ul></div>}
             <BudgetBreakdown budget={displayBudget} />
@@ -219,7 +221,52 @@ function Detail({ label, value, preserveWhitespace = false }: { label: string; v
 
 function BudgetBreakdown({ budget }: { budget: Budget | null }) {
   if (!budget) return <div className="mb-4"><label className="text-xs text-[var(--mos-text-faint)] uppercase tracking-wide">Budget breakdown</label><p className="mt-2 text-sm text-[var(--mos-text-muted)]">Budget details were unavailable for this plan.</p></div>;
-  return <div className="mb-4"><label className="text-xs text-[var(--mos-text-faint)] uppercase tracking-wide">Budget breakdown</label>{budget.preliminary && <p className="mt-1 text-xs text-amber-300">Preliminary IDR allocation based on the budget ceiling. Confirm all figures with vendor quotations.</p>}<DataTableFrame className="mt-2"><table className="w-full text-sm text-left"><thead className="bg-[var(--mos-raised)] text-[var(--mos-text-secondary)]"><tr><th className="p-3">Category</th><th className="p-3">Notes</th><th className="p-3 text-right">Estimated cost</th></tr></thead><tbody>{budget.items.length ? budget.items.map((item, index) => <tr key={index} className="border-t border-[var(--mos-border)] text-[var(--mos-text-secondary)]"><td className="p-3">{item.category}</td><td className="p-3">{item.notes}</td><td className="p-3 text-right whitespace-nowrap">{formatIDR(item.estimatedCost)}</td></tr>) : <tr className="border-t border-[var(--mos-border)] text-[var(--mos-text-muted)]"><td className="p-3" colSpan={3}>No itemized budget details were provided.</td></tr>}</tbody><tfoot className="bg-[var(--mos-raised)] text-white"><tr><td className="p-3 font-medium" colSpan={2}>Contingency</td><td className="p-3 text-right whitespace-nowrap">{formatIDR(budget.contingency ?? 0)}</td></tr><tr><td className="p-3 font-semibold" colSpan={2}>Total</td><td className="p-3 text-right font-semibold whitespace-nowrap">{formatIDR(budget.total ?? 0)}</td></tr></tfoot></table></DataTableFrame></div>;
+  return (
+    <div className="mb-4">
+      <label className="text-xs text-[var(--mos-text-faint)] uppercase tracking-wide">Budget breakdown</label>
+      {budget.preliminary && <p className="mt-1 text-xs text-amber-300">Preliminary IDR allocation based on the budget ceiling. Confirm all figures with vendor quotations.</p>}
+      <p className="mt-1 text-xs text-[var(--mos-text-faint)]">Each line names a suggested vendor and venue (AI proposal). Verify with a written quotation — we do not invent phone numbers, emails, or verified rates.</p>
+      <DataTableFrame className="mt-2">
+        <table className="w-full text-sm text-left">
+          <thead className="bg-[var(--mos-raised)] text-[var(--mos-text-secondary)]">
+            <tr>
+              <th className="p-3">Category</th>
+              <th className="p-3">Suggested vendor</th>
+              <th className="p-3">Notes</th>
+              <th className="p-3 text-right">Estimated cost</th>
+            </tr>
+          </thead>
+          <tbody>
+            {budget.items.length ? budget.items.map((item, index) => (
+              <tr key={index} className="border-t border-[var(--mos-border)] align-top text-[var(--mos-text-secondary)]">
+                <td className="p-3 whitespace-nowrap">{item.category}</td>
+                <td className="p-3 min-w-[12rem]">
+                  <p>{item.suggestedVendor || '—'}</p>
+                  {item.venue && <p className="mt-1 text-xs text-[var(--mos-text-faint)]">{item.venue}</p>}
+                </td>
+                <td className="p-3 max-w-xl whitespace-pre-wrap leading-6">{item.notes}</td>
+                <td className="p-3 text-right whitespace-nowrap">{formatIDR(item.estimatedCost)}</td>
+              </tr>
+            )) : (
+              <tr className="border-t border-[var(--mos-border)] text-[var(--mos-text-muted)]">
+                <td className="p-3" colSpan={4}>No itemized budget details were provided.</td>
+              </tr>
+            )}
+          </tbody>
+          <tfoot className="bg-[var(--mos-raised)] text-white">
+            <tr>
+              <td className="p-3 font-medium" colSpan={3}>Contingency</td>
+              <td className="p-3 text-right whitespace-nowrap">{formatIDR(budget.contingency ?? 0)}</td>
+            </tr>
+            <tr>
+              <td className="p-3 font-semibold" colSpan={3}>Total</td>
+              <td className="p-3 text-right font-semibold whitespace-nowrap">{formatIDR(budget.total ?? 0)}</td>
+            </tr>
+          </tfoot>
+        </table>
+      </DataTableFrame>
+    </div>
+  );
 }
 
 function ResearchPanel({ research }: { research: EventPlanResearch }) {

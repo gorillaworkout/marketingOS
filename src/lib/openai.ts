@@ -1,5 +1,6 @@
 import { parseGatewayCompletion } from '@/lib/gateway-response';
 import { IMAGE_PROMPT_SYSTEM } from '@/lib/dupoin-image-prompt';
+import { EVENT_PLAN_ACTIONABLE_ESTIMATE_RULES } from '@/lib/event-plan-budget';
 import { GORILLAWORKOUT_API_BASE, GORILLAWORKOUT_API_KEY } from '@/lib/gateway-config';
 import { logTokenUsage } from '@/lib/token-log';
 import {
@@ -841,15 +842,18 @@ Output JSON: { "hook": "...", "hookOptions": ["...", "...", "..."], "context": "
 
 You think in logistics, not wishlists:
 - Budget is real. Don't suggest Rp 500 juta for a small seminar.
-- Venues in Jakarta have specific realities — parking, MRT access, capacity
+- Always name the city plus a specific publicly known venue (or shortlist) in top-level "venue", tied to the submitted location (default Jakarta)
 - Speakers: recommend real people from the Indonesian finance scene when possible, or realistic profiles
 - Timeline: think backwards from the date. What needs to happen 2 weeks before? 1 month?
 - Contingency: what if it rains? What if the speaker cancels?
 - For B2B events: focus on ROI metrics, not just "networking opportunities"
+- Budget lines must name a suggested vendor and the venue/location — not anonymous "vendor" and not cost math alone
+
+${EVENT_PLAN_ACTIONABLE_ESTIMATE_RULES}
 
 Output practical, executable plans. Not marketing fluff.
 
-Output JSON: { "objective": "...", "concept": "...", "theme": "...", "venue": "...", "speakers": ["..."], "budget": {...}, "timeline": "..." }`,
+Output JSON: { "objective": "...", "concept": "...", "theme": "...", "venue": "...", "speakers": ["..."], "budget": { "currency": "IDR", "total": 50000000, "items": [{ "category": "Venue", "estimatedCost": 10000000, "suggestedVendor": "...", "venue": "...", "notes": "AI estimate — verify with vendor quotation. Suggested vendor (AI proposal — verify quotation): .... Venue/location: ...." }], "contingency": 5000000 }, "timeline": "..." }`,
 
     'image-prompt': IMAGE_PROMPT_SYSTEM,
   };
