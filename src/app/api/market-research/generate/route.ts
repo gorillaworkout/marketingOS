@@ -5,6 +5,7 @@ import { execute } from '@/lib/database';
 import { rateLimit } from '@/lib/rate-limit';
 import { generateContent, getUserPreferredModel } from '@/lib/openai';
 import { buildMarketResearchPrompts, normalizeMarketResearchInput, validateAndHydrateMarketResearchSelection } from '@/lib/market-research';
+import { EmptyMarketResearchPoolError } from '@/lib/market-research-status';
 import { researchLatestMarketNews } from '@/lib/market-research-sources';
 
 export const maxDuration = 300;
@@ -106,7 +107,13 @@ export async function POST(request: NextRequest) {
           result: { ...report, input, model, groupsSearched: research.groupsSearched, groupCandidateCounts: research.groupCandidateCounts, sourceStatus: research.sourceStatus, candidateCount: research.candidates.length, evidenceSnapshot, historyId, usage: generated.usage },
         })));
       } catch (error) {
-        controller.enqueue(encoder.encode(sseEvent({ step: 'error', progress: 100, message: error instanceof Error ? error.message : 'Market research failed.' })));
+        const payload: Record<string, unknown> = {
+          step: 'error',
+          progress: 100,
+          message: error instanceof Error ? error.message : 'Market research failed.',
+        };
+        if (error instanceof EmptyMarketResearchPoolError) payload.sourceStatus = error.sourceStatus;
+        controller.enqueue(encoder.encode(sseEvent(payload)));
       } finally {
         controller.close();
       }

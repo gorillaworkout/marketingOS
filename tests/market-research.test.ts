@@ -8,7 +8,11 @@ import {
   validateAndHydrateMarketResearchSelection,
   type MarketNewsCandidate,
 } from '../src/lib/market-research';
-import { researchLatestMarketNews, type MarketResearchFeed } from '../src/lib/market-research-sources';
+import {
+  EmptyMarketResearchPoolError,
+  researchLatestMarketNews,
+  type MarketResearchFeed,
+} from '../src/lib/market-research-sources';
 import { buildMarketResearchDocxBlob, marketResearchDocxFilename } from '../src/lib/market-research-docx';
 
 const read = (relative: string) => {
@@ -77,7 +81,10 @@ test('research scans every product group and keeps same-day headline matches sor
   assert.equal(result.candidates.every(candidate => candidate.publishedAt.startsWith('2026-07-27')), true);
   assert.equal(result.groupCandidateCounts.Forex, 1);
   assert.equal(result.groupCandidateCounts.Commodity, 1);
-  assert.equal(result.sourceStatus.every(source => source.status === 'ok'), true);
+  assert.deepEqual(result.sourceStatus, [
+    { outlet: 'Publisher A', status: 'ok', candidateCount: 1, sameDayCount: 1 },
+    { outlet: 'Publisher B', status: 'ok', candidateCount: 1, sameDayCount: 2 },
+  ]);
 });
 
 test('research exposes partial publisher failures instead of implying complete coverage', async () => {
@@ -88,9 +95,96 @@ test('research exposes partial publisher failures instead of implying complete c
   };
   const result = await researchLatestMarketNews('2026-07-27', { feeds, fetchImpl });
   assert.deepEqual(result.sourceStatus, [
-    { outlet: 'Publisher A', status: 'error', candidateCount: 0, error: 'publisher timeout' },
-    { outlet: 'Publisher B', status: 'ok', candidateCount: 1 },
+    { outlet: 'Publisher A', status: 'error', candidateCount: 0, sameDayCount: 0, error: 'publisher timeout' },
+    { outlet: 'Publisher B', status: 'ok', candidateCount: 1, sameDayCount: 1 },
   ]);
+});
+
+test('same-day Rupiah price action fills Forex/IDR while speculation is dropped and CPI still matches', async () => {
+  const fetchImpl: typeof fetch = async input => {
+    const body = String(input).includes('publisher-b') ? rss([
+      { title: 'CPI (Consumer Price Index) release', link: 'https://publisher-b.example/cpi', description: 'Official consumer price index published.', pubDate: 'Mon, 27 Jul 2026 03:00:00 GMT' },
+    ]) : rss([
+      { title: 'Breaking! Rupiah Melemah 0,56%, Dolar AS Tembus Rp17.800', link: 'https://www.cnbcindonesia.com/market/rupiah-melemah', description: 'Rupiah ditutup melemah terhadap dolar AS.', pubDate: 'Mon, 27 Jul 2026 01:00:00 GMT' },
+      { title: 'Prediksi emas naik pekan ini', link: 'https://publisher-a.example/prediksi-emas', description: 'Analis memprediksi harga emas.', pubDate: 'Mon, 27 Jul 2026 02:00:00 GMT' },
+    ]);
+    return new Response(body, { status: 200, headers: { 'content-type': 'application/rss+xml' } });
+  };
+  const localFeeds: MarketResearchFeed[] = [
+    { outlet: 'CNBC Indonesia', url: 'https://publisher-a.example/rss.xml', origin: 'indonesia' },
+    { outlet: 'US BEA', url: 'https://publisher-b.example/rss.xml', origin: 'international', defaultSymbols: ['USD'] },
+  ];
+  const result = await researchLatestMarketNews('2026-07-27', { feeds: localFeeds, fetchImpl });
+  assert.equal(result.candidates.some(candidate => /prediksi emas/i.test(candidate.title)), false);
+  const rupiah = result.candidates.find(candidate => candidate.symbols.includes('IDR'));
+  assert.ok(rupiah);
+  assert.deepEqual(rupiah.categories, ['Forex']);
+  assert.deepEqual(rupiah.symbols, ['IDR']);
+  assert.equal(rupiah.importanceCategory, 'Market Moves');
+  const cpi = result.candidates.find(candidate => /CPI/i.test(candidate.title));
+  assert.ok(cpi);
+  assert.equal(cpi.importanceCategory, 'Inflation');
+  assert.deepEqual(cpi.symbols, ['USD']);
+  assert.equal(result.groupCandidateCounts.Forex, 2);
+});
+
+test('thin titles can inherit bounded description SOP keywords without generic growth blurbs', async () => {
+  const fetchImpl: typeof fetch = async input => {
+    const body = String(input).includes('publisher-a') ? rss([
+      { title: 'USD: latest official print', link: 'https://publisher-a.example/usd-print', description: 'The consumer price index rose 0.3% in August after the official release.', pubDate: 'Mon, 27 Jul 2026 02:00:00 GMT' },
+    ]) : rss([
+      { title: 'Dollar quiet in Asia', link: 'https://publisher-b.example/dollar-quiet', description: 'Traders watch growth across the region while waiting for data.', pubDate: 'Mon, 27 Jul 2026 03:00:00 GMT' },
+    ]);
+    return new Response(body, { status: 200, headers: { 'content-type': 'text/plain' } });
+  };
+  const result = await researchLatestMarketNews('2026-07-27', { feeds, fetchImpl });
+  assert.equal(result.candidates.length, 1);
+  assert.equal(result.candidates[0].importanceCategory, 'Inflation');
+  assert.deepEqual(result.candidates[0].symbols, ['USD']);
+  assert.equal(result.sourceStatus[0].sameDayCount, 1);
+  assert.equal(result.sourceStatus[1].sameDayCount, 1);
+  assert.equal(result.sourceStatus[1].candidateCount, 0);
+});
+
+test('empty same-day pool error reports feed ok counts versus filtered-to-zero', async () => {
+  const fetchImpl: typeof fetch = async input => {
+    if (String(input).includes('publisher-a')) throw new Error('publisher timeout');
+    const body = rss([
+      { title: 'Kebijakan Pemerintah Terbaru', link: 'https://publisher-b.example/kebijakan', description: 'Summary hanya menyebut Nasdaq secara sampingan.', pubDate: 'Mon, 27 Jul 2026 04:00:00 GMT' },
+      { title: 'Prediksi emas naik ke rekor baru', link: 'https://publisher-b.example/prediksi-emas', description: 'Outlook spekulatif.', pubDate: 'Mon, 27 Jul 2026 05:00:00 GMT' },
+    ]);
+    return new Response(body, { status: 200, headers: { 'content-type': 'application/rss+xml' } });
+  };
+  await assert.rejects(
+    () => researchLatestMarketNews('2026-07-27', { feeds, fetchImpl }),
+    (error: unknown) => {
+      assert.equal(error instanceof EmptyMarketResearchPoolError, true);
+      const err = error as EmptyMarketResearchPoolError;
+      assert.match(err.message, /Feeds ok 1\/2/);
+      assert.match(err.message, /same-day items 2/);
+      assert.match(err.message, /kept after symbol\/importance filters 0/);
+      assert.match(err.message, /Publisher A: failed \(publisher timeout\)/);
+      assert.match(err.message, /Publisher B: ok, 2 same-day → 0 kept/);
+      assert.deepEqual(err.sourceStatus, [
+        { outlet: 'Publisher A', status: 'error', candidateCount: 0, sameDayCount: 0, error: 'publisher timeout' },
+        { outlet: 'Publisher B', status: 'ok', candidateCount: 0, sameDayCount: 2 },
+      ]);
+      return true;
+    },
+  );
+});
+
+test('feed fetch follows redirects and sends a compatible user agent', async () => {
+  const inits: RequestInit[] = [];
+  const fetchImpl: typeof fetch = async (_input, init) => {
+    inits.push(init || {});
+    const body = rss([{ title: 'Gold Naik Setelah Data Inflation Resmi Dirilis', link: 'https://publisher-a.example/emas', description: 'Data resmi emas.', pubDate: 'Mon, 27 Jul 2026 02:00:00 GMT' }]);
+    return new Response(body, { status: 200, headers: { 'content-type': 'application/rss+xml' } });
+  };
+  await researchLatestMarketNews('2026-07-27', { feeds: feeds.slice(0, 1), fetchImpl });
+  assert.equal(inits[0].redirect, 'follow');
+  const headers = new Headers(inits[0].headers);
+  assert.match(headers.get('user-agent') || '', /Mozilla\/5\.0 \(compatible; MarketingOS\/1\.0/);
 });
 
 test('selection is candidate-bound, max ten, unique, and rejects unsupported facts', () => {
@@ -169,6 +263,12 @@ test('Market Research is admin-only, gateway-routed, persisted, downloadable, an
   assert.match(route, /getUserPreferredModel\(auth\.id, 'market-research'\)/);
   assert.doesNotMatch(route, /codexTextOnly|getModelProvider|gpt-5\.6-sol/);
   assert.match(route, /researchLatestMarketNews/);
+  assert.match(route, /EmptyMarketResearchPoolError/);
+  assert.match(route, /payload\.sourceStatus/);
+  assert.match(page, /errorSourceStatus/);
+  assert.match(page, /formatMarketResearchSourceStatus/);
+  assert.match(page, /@\/lib\/market-research-status/);
+  assert.doesNotMatch(page, /@\/lib\/market-research-sources/);
   assert.match(route, /validateAndHydrateMarketResearchSelection/);
   assert.match(route, /INSERT INTO tasks/);
   assert.match(route, /'market-research'/);

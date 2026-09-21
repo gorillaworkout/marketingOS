@@ -7,6 +7,8 @@ import {
   MARKET_RESEARCH_SYMBOLS,
   classifySymbols,
   classifySymbolsForFeed,
+  formatMarketResearchSourceStatus,
+  importanceCategoryOf,
   isHighImportanceHeadline,
   limitIndonesianOrigin,
 } from '../src/lib/market-research-sources';
@@ -26,6 +28,7 @@ test('classifies headlines to exact symbols and rejects Antam retail gold pricin
   assert.deepEqual(classifySymbols('Nasdaq 100 rallies as Nvidia earnings beat'), ['NDX']);
   assert.deepEqual(classifySymbols('Harga emas Antam hari ini naik Rp10.000'), []);
   assert.deepEqual(classifySymbols('Rupiah menguat terhadap dolar AS'), ['IDR']);
+  assert.deepEqual(classifySymbols('Breaking! Rupiah Melemah 0,56%, Dolar AS Tembus Rp17.800'), ['IDR']);
 });
 
 test('keeps only high-importance economic categories', () => {
@@ -34,6 +37,17 @@ test('keeps only high-importance economic categories', () => {
   assert.equal(isHighImportanceHeadline('10-year Treasury yields jump after auction'), true);
   assert.equal(isHighImportanceHeadline('Housing starts rebound in August'), true);
   assert.equal(isHighImportanceHeadline('Analyst predicts gold could reach 4000'), false);
+  assert.equal(importanceCategoryOf('US CPI rises more than expected'), 'Inflation');
+  assert.equal(importanceCategoryOf('Fed holds rates after FOMC decision'), 'Central Bank');
+  assert.equal(importanceCategoryOf('Breaking! Rupiah Melemah 0,56%, Dolar AS Tembus Rp17.800'), 'Market Moves');
+  assert.equal(importanceCategoryOf('Rupiah menguat terhadap dolar AS'), 'Market Moves');
+  assert.equal(importanceCategoryOf('Gold jumps to a record high'), 'Market Moves');
+  assert.equal(importanceCategoryOf('Dow Jones drops 400 points'), 'Market Moves');
+  assert.equal(importanceCategoryOf('Prediksi emas naik pekan ini'), null);
+  assert.equal(isHighImportanceHeadline('Prediksi emas naik'), false);
+  assert.equal(importanceCategoryOf('USD: latest official print', 'The consumer price index rose 0.3% in August.'), 'Inflation');
+  assert.equal(importanceCategoryOf('Dollar quiet in Asia', 'Traders watch growth across the region.'), null);
+  assert.equal(formatMarketResearchSourceStatus({ outlet: 'CNBC Indonesia', status: 'ok', candidateCount: 0, sameDayCount: 8 }), 'OK · 0 kept / 8 same-day');
 });
 
 test('production feeds are AWS-probed publishers and official releases inherit their market symbol', () => {

@@ -4,6 +4,7 @@ import { articleDocxFilename, buildArticleDocxBlob } from '@/lib/article-market-
 import type { ArticleSourceInput } from '@/lib/article-market-news';
 import { buildMarketResearchDocxBlob, marketResearchDocxFilename } from '@/lib/market-research-docx';
 import type { MarketResearchItem } from '@/lib/market-research';
+import { formatMarketResearchSourceStatus } from '@/lib/market-research-status';
 import { Button, EmptyState, FilterGroup, LoadingState, Panel, PageHeader, PageStack, StatusBadge, Toolbar } from '@/components/ui/dashboard';
 
 interface HistoryTask {
@@ -198,7 +199,7 @@ export default function HistoryPage() {
                             <div><label className="text-xs text-[var(--mos-text-faint)] uppercase tracking-wide">Candidates Compared</label><p className="mt-1 text-[var(--mos-text-secondary)]">{data.candidateCount || '—'}</p></div>
                             <div><label className="text-xs text-[var(--mos-text-faint)] uppercase tracking-wide">Selected</label><p className="mt-1 text-[var(--mos-text-secondary)]">{items.length}</p></div>
                           </div>
-                          {Array.isArray(data.sourceStatus) && <div className="rounded-[var(--mos-radius-panel)] border border-[var(--mos-border)] bg-[var(--mos-surface)] p-4"><label className="text-xs text-[var(--mos-text-faint)] uppercase tracking-wide">Publisher Feed Status</label><div className="mt-2 space-y-1">{data.sourceStatus.map((source: { outlet: string; status: 'ok' | 'error'; candidateCount: number; error?: string }) => <p key={source.outlet} className={source.status === 'ok' ? 'text-xs text-emerald-400' : 'text-xs text-red-300'}>{source.outlet}: {source.status === 'ok' ? `OK · ${source.candidateCount} candidate` : `Failed · ${source.error || 'Unavailable'}`}</p>)}</div></div>}
+                          {Array.isArray(data.sourceStatus) && <div className="rounded-[var(--mos-radius-panel)] border border-[var(--mos-border)] bg-[var(--mos-surface)] p-4"><label className="text-xs text-[var(--mos-text-faint)] uppercase tracking-wide">Publisher Feed Status</label><div className="mt-2 space-y-1">{data.sourceStatus.map((source: { outlet: string; status: 'ok' | 'error'; candidateCount: number; sameDayCount?: number; error?: string }) => <p key={source.outlet} className={source.status === 'ok' ? 'text-xs text-emerald-400' : 'text-xs text-red-300'}>{source.outlet}: {formatMarketResearchSourceStatus({ ...source, sameDayCount: source.sameDayCount ?? source.candidateCount })}</p>)}</div></div>}
                           <div className="space-y-3">
                             {items.map((item, index) => <article key={item.candidateId} className="rounded-[var(--mos-radius-panel)] border border-[var(--mos-border)] bg-[var(--mos-surface)] p-4">
                               <p className="text-xs font-semibold text-cyan-400">#{index + 1} · {item.symbol || item.productCategory} · {item.productCategory}{item.importanceCategory ? ` · ${item.importanceCategory}` : ''}</p>
