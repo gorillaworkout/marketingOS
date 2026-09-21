@@ -1,8 +1,14 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import Link from 'next/link';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { jakartaDate, validateGeneratedArticle, type ArticleMarketNewsInput, type ArticleQualityCheck } from '@/lib/article-market-news';
 import { articleDocxFilename, buildArticleDocxBlob } from '@/lib/article-market-news-docx';
+import {
+  ARTICLE_MARKET_NEWS_HISTORY_TYPE,
+  restoreArticleMarketNews,
+  type ArticleMarketNewsHistoryTask,
+} from '@/lib/article-market-news-history';
 import { Button, FormField, Panel, SectionHeader, StatusBadge, TextArea, TextInput, Toolbar } from '@/components/ui/dashboard';
 
 interface SourceForm {
@@ -42,6 +48,51 @@ export default function ArticleMarketNewsGenerator() {
   const [result, setResult] = useState<ArticleResult | null>(null);
   const [generatedInput, setGeneratedInput] = useState<ArticleMarketNewsInput | null>(null);
   const [factReviewConfirmed, setFactReviewConfirmed] = useState(false);
+  const [recent, setRecent] = useState<ArticleMarketNewsHistoryTask[]>([]);
+  const [recentError, setRecentError] = useState('');
+
+  const fetchRecent = useCallback(async () => {
+    try {
+      const response = await fetch(`/api/dashboard/history?type=${ARTICLE_MARKET_NEWS_HISTORY_TYPE}`);
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || `History request failed (${response.status}).`);
+      setRecent(Array.isArray(data.tasks) ? data.tasks.slice(0, 10) : []);
+      setRecentError('');
+    } catch (cause) {
+      setRecentError(cause instanceof Error ? cause.message : 'Gagal memuat riwayat Article Market News.');
+    }
+  }, []);
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- standard data-fetch-on-mount pattern used across all dashboard pages
+    void fetchRecent();
+  }, [fetchRecent]);
+
+  const restoreHistory = (task: ArticleMarketNewsHistoryTask) => {
+    try {
+      const restored = restoreArticleMarketNews(task);
+      setKeyword(restored.keyword);
+      setResearchDate(restored.researchDate);
+      setAngle(restored.angle);
+      setCompetitorHeadings(restored.competitorHeadings);
+      setPaaText(restored.paaText);
+      setSources(restored.sources.map(source => ({
+        outlet: source.outlet,
+        title: source.title,
+        url: source.url,
+        publishedAt: source.publishedAt,
+        verifiedFacts: source.verifiedFacts,
+      })));
+      setNoCompetitorBroker(restored.noCompetitorBroker);
+      setResult(restored.result);
+      setGeneratedInput(restored.generatedInput);
+      setFactReviewConfirmed(restored.factReviewConfirmed);
+      setError('');
+      setProgress('');
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Gagal membuka artikel tersimpan.');
+    }
+  };
 
   const paaQuestions = useMemo(() => paaText.split('\n').map(value => value.trim()).filter(Boolean), [paaText]);
   const competitorResearchCount = useMemo(() => new Set([...competitorHeadings.matchAll(/(?:competitor|artikel)\s*([1-5])\s*:/gi)].map(match => match[1])).size, [competitorHeadings]);
@@ -117,6 +168,7 @@ export default function ArticleMarketNewsGenerator() {
           if (event.step === 'done' && event.result) {
             setResult(event.result as ArticleResult);
             setGeneratedInput((event.result as ArticleResult).normalizedInput || requestInput);
+            void fetchRecent();
             completed = true;
           }
         }
@@ -146,10 +198,11 @@ export default function ArticleMarketNewsGenerator() {
   const currentWordCount = currentValidation?.wordCount || 0;
 
   return (
+    <>
     <Panel aria-labelledby="article-generator-title">
       <SectionHeader title="Generate article market news" description="Isi keyword, angle, struktur kompetitor, dan lima PAA. Sistem selalu melakukan research otomatis dari publisher feeds; reference tambahan dari user bersifat opsional." action={
         <div className="flex flex-wrap gap-2">
-          <a href="/dashboard/history" className="rounded-lg border border-[var(--mos-border)] px-3 py-2 text-xs text-[var(--mos-text-secondary)] hover:border-[var(--mos-accent-border)]">Buka History</a>
+          <Link href={`/dashboard/history?type=${ARTICLE_MARKET_NEWS_HISTORY_TYPE}`} className="rounded-lg border border-[var(--mos-border)] px-3 py-2 text-xs text-[var(--mos-text-secondary)] hover:border-[var(--mos-accent-border)]">Buka History</Link>
           <Button size="sm" onClick={fillExample}>Isi contoh</Button>
         </div>
       } />
@@ -244,5 +297,26 @@ export default function ArticleMarketNewsGenerator() {
         </div>
       )}
     </Panel>
+
+    <Panel padding="none">
+      <div className="flex items-center justify-between border-b border-[var(--mos-border-subtle)] px-5 py-4">
+        <SectionHeader title="Recent Generated" description="Buka draf Article Market News yang tersimpan tanpa generate ulang." />
+        <Link href={`/dashboard/history?type=${ARTICLE_MARKET_NEWS_HISTORY_TYPE}`} className="text-sm text-[var(--mos-accent-soft)] hover:underline">View all history</Link>
+      </div>
+      {recentError
+        ? <p className="p-5 text-sm text-red-300">{recentError}</p>
+        : recent.length === 0
+          ? <p className="p-5 text-sm text-[var(--mos-text-muted)]">Belum ada Article Market News tersimpan.</p>
+          : <div className="divide-y divide-[var(--mos-border-subtle)]">{recent.map(task => (
+              <button type="button" key={task.id} onClick={() => restoreHistory(task)} className="flex w-full items-center justify-between gap-4 px-5 py-4 text-left hover:bg-[var(--mos-raised)]">
+                <span className="min-w-0">
+                  <span className="block truncate text-sm font-medium text-white">{task.title}</span>
+                  <span className="block text-xs text-[var(--mos-text-faint)]">{new Date(task.created_at).toLocaleString()}</span>
+                </span>
+                <span className="text-xs text-[var(--mos-accent-soft)]">Open</span>
+              </button>
+            ))}</div>}
+    </Panel>
+    </>
   );
 }

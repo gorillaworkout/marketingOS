@@ -119,6 +119,9 @@ test('successful articles are persisted and downloadable again from History', ()
   assert.match(historyPage, /buildArticleDocxBlob/);
   assert.match(historyPage, /Article Market News/);
   assert.match(historyPage, /Download DOCX/);
+  assert.match(generator, /\/api\/dashboard\/history\?type=\$\{ARTICLE_MARKET_NEWS_HISTORY_TYPE\}/);
+  assert.match(generator, /restoreArticleMarketNews/);
+  assert.match(generator, /Recent Generated/);
 });
 
 test('citation URL gate rejects loopback, private, link-local, metadata, and special IPv6', () => {
