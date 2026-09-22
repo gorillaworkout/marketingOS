@@ -10,6 +10,12 @@ import {
   type ArticleMarketNewsHistoryTask,
 } from '@/lib/article-market-news-history';
 import { Button, FormField, Panel, SectionHeader, StatusBadge, TextArea, TextInput, Toolbar } from '@/components/ui/dashboard';
+import {
+  ARTICLE_MARKET_NEWS_EXAMPLE_ANGLE,
+  ARTICLE_MARKET_NEWS_EXAMPLE_KEYWORD,
+  exampleCompetitorHeadings,
+  examplePaaText,
+} from '@/lib/article-market-news-example';
 
 interface SourceForm {
   outlet: string;
@@ -34,6 +40,33 @@ interface ArticleResult {
 
 const emptySource = (): SourceForm => ({ outlet: '', title: '', url: '', publishedAt: '', verifiedFacts: '' });
 
+function ExampleSample({
+  title,
+  description,
+  value,
+  copyLabel,
+  copied,
+  onCopy,
+}: {
+  title: string;
+  description: string;
+  value: string;
+  copyLabel: string;
+  copied: boolean;
+  onCopy: () => void;
+}) {
+  return (
+    <div>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h4 className="font-semibold text-cyan-100">{title}</h4>
+        <Button size="sm" onClick={onCopy}>{copied ? 'Tersalin' : copyLabel}</Button>
+      </div>
+      <p className="mt-1 text-xs leading-5 text-[var(--mos-text-muted)]">{description}</p>
+      <pre className="mt-2 overflow-x-auto whitespace-pre-wrap rounded-lg border border-cyan-500/20 bg-black/30 p-3 font-mono text-xs leading-5 text-cyan-50">{value}</pre>
+    </div>
+  );
+}
+
 export default function ArticleMarketNewsGenerator() {
   const [keyword, setKeyword] = useState('');
   const [researchDate, setResearchDate] = useState(jakartaDate);
@@ -50,6 +83,7 @@ export default function ArticleMarketNewsGenerator() {
   const [factReviewConfirmed, setFactReviewConfirmed] = useState(false);
   const [recent, setRecent] = useState<ArticleMarketNewsHistoryTask[]>([]);
   const [recentError, setRecentError] = useState('');
+  const [copiedSample, setCopiedSample] = useState<'competitors' | 'paa' | ''>('');
 
   const fetchRecent = useCallback(async () => {
     try {
@@ -113,18 +147,30 @@ export default function ArticleMarketNewsGenerator() {
   };
 
   const fillExample = () => {
-    setKeyword('harga emas');
-    setAngle('Membahas pergerakan harga emas hari ini, faktor pendorongnya, dan hal yang perlu diperhatikan trader pemula.');
-    setCompetitorHeadings(Array.from({ length: 5 }, (_, index) => `Competitor ${index + 1}:\nH1: Harga Emas Hari Ini\nH2: Faktor Penggerak Harga Emas\nH3: Risiko yang Perlu Diperhatikan`).join('\n\n'));
-    setPaaText([
-      'Apa yang memengaruhi harga emas hari ini?',
-      'Mengapa harga emas dapat naik atau turun?',
-      'Bagaimana hubungan dolar AS dengan harga emas?',
-      'Apa perbedaan emas fisik dan XAUUSD?',
-      'Apa risiko trading emas untuk pemula?',
-    ].join('\n'));
+    setKeyword(ARTICLE_MARKET_NEWS_EXAMPLE_KEYWORD);
+    setAngle(ARTICLE_MARKET_NEWS_EXAMPLE_ANGLE);
+    setCompetitorHeadings(exampleCompetitorHeadings);
+    setPaaText(examplePaaText);
     setSources([]);
     setNoCompetitorBroker(false);
+  };
+
+  const copySample = async (kind: 'competitors' | 'paa', text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      const area = document.createElement('textarea');
+      area.value = text;
+      area.setAttribute('readonly', '');
+      area.style.position = 'fixed';
+      area.style.left = '-9999px';
+      document.body.appendChild(area);
+      area.select();
+      document.execCommand('copy');
+      document.body.removeChild(area);
+    }
+    setCopiedSample(kind);
+    window.setTimeout(() => setCopiedSample(current => current === kind ? '' : current), 2000);
   };
 
   const generateArticle = async () => {
@@ -207,16 +253,35 @@ export default function ArticleMarketNewsGenerator() {
         </div>
       } />
 
-      <details className="mt-5 rounded-[var(--mos-radius-panel)] border border-cyan-500/20 bg-cyan-950/20 p-4 text-sm text-[var(--mos-text-secondary)]">
-        <summary className="cursor-pointer font-semibold text-cyan-200">Lihat contoh input</summary>
+      <section aria-labelledby="article-input-examples" className="mt-5 rounded-[var(--mos-radius-panel)] border border-cyan-500/20 bg-cyan-950/20 p-4 text-sm text-[var(--mos-text-secondary)]">
+        <h3 id="article-input-examples" className="font-semibold text-cyan-200">Lihat contoh input</h3>
+        <p className="mt-2 leading-6">
+          Klik <strong>Isi contoh</strong> untuk mengisi keyword, angle, lima struktur kompetitor, dan lima pertanyaan PAA sekaligus. Setelah itu Generate bisa dijalankan. Reference artikel tetap opsional dan akan dikosongkan.
+          Atau salin format di bawah ke kolom yang sesuai.
+        </p>
         <div className="mt-3 space-y-2 leading-6">
-          <p><strong>Keyword:</strong> harga emas</p>
-          <p><strong>Angle:</strong> pergerakan harga emas hari ini, faktor pendorong, dan risiko untuk trader pemula.</p>
-          <p><strong>Competitor structure:</strong> lima blok berurutan dari Competitor 1–5; setiap blok wajib memiliki H1, H2, dan H3.</p>
-          <p><strong>PAA:</strong> tepat lima pertanyaan unik dan masing-masing berakhir dengan tanda tanya.</p>
-          <p><strong>Reference:</strong> boleh dikosongkan. Jika diisi, reference akan menjadi tambahan; automated research tetap dijalankan.</p>
+          <p><strong className="text-cyan-100">Keyword:</strong> {ARTICLE_MARKET_NEWS_EXAMPLE_KEYWORD}</p>
+          <p><strong className="text-cyan-100">Angle:</strong> {ARTICLE_MARKET_NEWS_EXAMPLE_ANGLE}</p>
         </div>
-      </details>
+        <div className="mt-4 space-y-4">
+          <ExampleSample
+            title="5 struktur kompetitor"
+            description="Wajib lima blok berurutan, dari Competitor 1 sampai Competitor 5. Setiap blok punya tiga baris: H1:, H2:, dan H3:. Pisahkan blok dengan satu baris kosong."
+            value={exampleCompetitorHeadings}
+            copyLabel="Salin struktur"
+            copied={copiedSample === 'competitors'}
+            onCopy={() => { void copySample('competitors', exampleCompetitorHeadings); }}
+          />
+          <ExampleSample
+            title="5 pertanyaan PAA"
+            description="Tepat lima pertanyaan unik, satu per baris, tanpa nomor. Setiap baris harus diakhiri tanda tanya (?)."
+            value={examplePaaText}
+            copyLabel="Salin PAA"
+            copied={copiedSample === 'paa'}
+            onCopy={() => { void copySample('paa', examplePaaText); }}
+          />
+        </div>
+      </section>
 
       <div className="mt-6 grid gap-5 lg:grid-cols-2">
         <div className="space-y-4">
@@ -224,12 +289,14 @@ export default function ArticleMarketNewsGenerator() {
           <FormField label="Research date"><TextInput type="date" value={researchDate} min={jakartaDate()} max={jakartaDate()} onChange={event => setResearchDate(event.target.value)} /></FormField>
           <FormField label="Article angle"><TextArea value={angle} onChange={event => setAngle(event.target.value)} rows={3} placeholder="Sudut utama yang dipilih berdasarkan riset" /></FormField>
           <FormField label="Competitor H1/H2/H3 structure" hint="Exactly 5 articles">
-            <TextArea value={competitorHeadings} onChange={event => setCompetitorHeadings(event.target.value)} rows={12} placeholder={'Competitor 1:\nH1: ...\nH2: ...\nH3: ...\n\nUlangi sampai Competitor 5.'} className="font-mono" />
+            <TextArea value={competitorHeadings} onChange={event => setCompetitorHeadings(event.target.value)} rows={12} placeholder={'Competitor 1:\nH1: Harga Emas Hari Ini\nH2: Faktor Penggerak Harga Emas\nH3: Risiko yang Perlu Diperhatikan\n\nCompetitor 2:\nH1: ...\nH2: ...\nH3: ...'} className="font-mono" />
             <span className={`mt-1 block text-xs ${competitorResearchCount === 5 ? 'text-emerald-400' : 'text-[var(--mos-text-faint)]'}`}>{competitorResearchCount}/5 competitor structures</span>
+            <span className="mt-1 block text-xs leading-5 text-[var(--mos-text-muted)]">Tulis Competitor 1: sampai Competitor 5:. Setiap blok wajib memuat H1:, H2:, dan H3:.</span>
           </FormField>
           <FormField label="People Also Ask" hint="Exactly 5 questions">
-            <TextArea value={paaText} onChange={event => setPaaText(event.target.value)} rows={6} placeholder={'Satu pertanyaan per baris\n1. ...\n2. ...'} />
-            <span className={`mt-1 block text-xs ${paaQuestions.length === 5 ? 'text-emerald-400' : 'text-[var(--mos-text-faint)]'}`}>{paaQuestions.length}/5 questions</span>
+            <TextArea value={paaText} onChange={event => setPaaText(event.target.value)} rows={6} placeholder={'Apa yang memengaruhi harga emas hari ini?\nMengapa harga emas dapat naik atau turun?'} />
+            <span className={`mt-1 block text-xs ${paaQuestions.length === 5 && new Set(paaQuestions).size === 5 ? 'text-emerald-400' : 'text-[var(--mos-text-faint)]'}`}>{paaQuestions.length}/5 questions</span>
+            <span className="mt-1 block text-xs leading-5 text-[var(--mos-text-muted)]">Satu pertanyaan per baris, tepat lima, tidak boleh sama, dan diakhiri tanda tanya (?).</span>
           </FormField>
         </div>
 
@@ -268,7 +335,7 @@ export default function ArticleMarketNewsGenerator() {
         <Button variant="primary" onClick={generateArticle} disabled={!ready || loading}>
           {loading ? 'Generating Article…' : 'Generate Article'}
         </Button>
-        {!ready && <p className="text-xs text-[var(--mos-text-muted)]">Lengkapi keyword, angle, lima struktur kompetitor, tepat lima PAA, serta optional reference jika kamu menambahkannya.</p>}
+        {!ready && <p className="text-xs text-[var(--mos-text-muted)]">Lengkapi keyword, angle, lima struktur kompetitor, dan tepat lima PAA. Pakai Isi contoh jika formatnya belum jelas. Reference hanya perlu dilengkapi kalau kamu menambahkannya.</p>}
         {progress && <p className="text-sm text-cyan-200">{progress}</p>}
       </div>
       {error && <div className="mt-4 rounded-lg border border-red-500/25 bg-red-500/10 px-4 py-3 text-sm text-red-300" role="alert">{error}</div>}
