@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
-import { buildArticleMarketNewsPrompts, normalizeArticleMarketNewsInput, normalizeResearchUrl, parseGeneratedArticle, validateGeneratedArticle } from '../src/lib/article-market-news';
+import { buildArticleMarketNewsPrompts, normalizeArticleMarketNewsInput, normalizeResearchUrl, parseGeneratedArticle, repairLooseJson, validateGeneratedArticle } from '../src/lib/article-market-news';
 import { articleDocxFilename, buildArticleDocxBlob } from '../src/lib/article-market-news-docx';
 
 const read = (relative: string) => {
@@ -85,11 +85,66 @@ test('parses article JSON wrapped in reasoning prose or markdown fences', () => 
   assert.throws(() => parseGeneratedArticle('metadata only: {"status":"ready"}'), /invalid article format/i);
 });
 
+test('parses Claude-style almost-JSON with raw newlines, interior quotes, and trailing commas', () => {
+  const article = {
+    title: 'Harga Emas Hari Ini',
+    metaDescription: 'Ringkasan harga emas untuk trader pemula.',
+    articleMarkdown: '# Harga Emas Hari Ini\n\nDia berkata "aman" di pasar.\n\n## Sources\nKontan',
+  };
+
+  // Claude often pretty-prints articleMarkdown with literal newlines + unescaped quotes.
+  const claudeShaped = `{
+  "title": "${article.title}",
+  "metaDescription": "${article.metaDescription}",
+  "articleMarkdown": "# Harga Emas Hari Ini
+
+Dia berkata "aman" di pasar.
+
+## Sources
+Kontan",
+  "excerpt": "Ringkasan singkat",
+}`;
+
+  assert.throws(() => JSON.parse(claudeShaped), SyntaxError);
+  assert.deepEqual(parseGeneratedArticle(claudeShaped), {
+    title: article.title,
+    metaDescription: article.metaDescription,
+    articleMarkdown: article.articleMarkdown,
+    excerpt: 'Ringkasan singkat',
+  });
+
+  const fencedClaude = `<think>drafting</think>\n\`\`\`json\n${claudeShaped}\n\`\`\``;
+  assert.equal(parseGeneratedArticle(fencedClaude).articleMarkdown, article.articleMarkdown);
+
+  const repaired = repairLooseJson(claudeShaped);
+  assert.doesNotThrow(() => JSON.parse(repaired));
+  assert.match(repaired, /\\"aman\\"/);
+  assert.doesNotMatch(repaired, /,\s*}/);
+});
+
+test('recovers required fields from truncated Claude article JSON', () => {
+  const truncated = `{
+  "title": "Harga Emas Hari Ini",
+  "metaDescription": "Ringkasan harga emas hari ini untuk pemula.",
+  "articleMarkdown": "# Harga Emas Hari Ini
+
+Paragraf pembuka yang cukup panjang untuk lolos ambang recovery.
+## Analisis
+Masih terpotong tanpa penutup`;
+  assert.throws(() => JSON.parse(truncated), SyntaxError);
+  const parsed = parseGeneratedArticle(truncated);
+  assert.equal(parsed.title, 'Harga Emas Hari Ini');
+  assert.equal(parsed.metaDescription, 'Ringkasan harga emas hari ini untuk pemula.');
+  assert.match(String(parsed.articleMarkdown), /Paragraf pembuka/);
+});
+
 test('system prompt requires a bare JSON object response', () => {
   const input = normalizeArticleMarketNewsInput(rawInput, '2026-07-27');
   const { systemPrompt } = buildArticleMarketNewsPrompts(input);
   assert.match(systemPrompt, /no markdown fences/i);
   assert.match(systemPrompt, /first character of the response must be "\{"/i);
+  assert.match(systemPrompt, /Encode every newline inside string values as \\n/i);
+  assert.match(systemPrompt, /Escape every double quote inside string values as \\"/i);
 });
 
 test('page exposes the admin Article Market News generation workflow', () => {
@@ -111,11 +166,13 @@ test('route is feature-gated, gateway-routed, evidence-gated, and never fetches 
   assert.match(route, /buildRepairPrompt\(/);
   assert.match(route, /getUserPreferredModel\(auth\.id, 'article-market-news'\)/);
   assert.doesNotMatch(route, /getModelProvider|codexTextOnly|gpt-5\.6-sol/);
+  assert.match(route, /temperature: 0\.3/);
   assert.match(route, /jsonRepairAttempts: 0/);
   assert.match(route, /attempt <= 3/);
   assert.match(openai, /jsonRepairAttempts \?\? 1\) === 0/);
   assert.match(route, /RETRY FEEDBACK FROM THE DETERMINISTIC PUBLICATION GATE/);
   assert.match(route, /Do not revise broken text/);
+  assert.match(route, /Encode newlines as/);
   assert.match(route, /metaDescription\.length > 155/);
   assert.match(route, /validateGeneratedArticle/);
   assert.doesNotMatch(route, /fetchResearchSource|fetch\(source\.url/);

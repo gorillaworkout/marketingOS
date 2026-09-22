@@ -23,7 +23,8 @@ ${feedback}
 
 The prior model response was not usable as article JSON. Do not revise broken text.
 Return ONLY one valid JSON object with string fields title, metaDescription, and articleMarkdown.
-No markdown fences, no prose before or after the JSON, and no reasoning tags.`;
+Encode newlines as \\n and quotes as \\" inside those strings.
+No markdown fences, no prose before or after the JSON, no trailing commas, and no reasoning tags.`;
   }
 
   let priorDraft = priorContent?.trim() || '{}';
@@ -85,9 +86,12 @@ export async function POST(request: NextRequest) {
             generated = await generateContent(systemPrompt, attemptPrompt, auth.id, undefined, {
               model,
               responseFormat: { type: 'json_object' },
-              temperature: 0.45,
+              // Lower temperature for Claude JSON reliability; publication gate still retries QC failures.
+              temperature: 0.3,
               maxTokens: 7_000,
               taskType: 'article-market-news',
+              // Keep gateway JSON-repair off: fenced-but-recoverable Claude payloads would otherwise
+              // burn an extra completion before local parseGeneratedArticle / repairLooseJson runs.
               jsonRepairAttempts: 0,
             });
             article = parseGeneratedArticle(generated.content);
