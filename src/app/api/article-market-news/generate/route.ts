@@ -4,7 +4,7 @@ import { requireFeature } from '@/lib/auth';
 import { execute } from '@/lib/database';
 import { rateLimit } from '@/lib/rate-limit';
 import { generateContent, getUserPreferredModel } from '@/lib/openai';
-import { buildArticleMarketNewsPrompts, normalizeArticleMarketNewsInput, validateGeneratedArticle } from '@/lib/article-market-news';
+import { buildArticleMarketNewsPrompts, normalizeArticleMarketNewsInput, parseGeneratedArticle, validateGeneratedArticle } from '@/lib/article-market-news';
 import { researchArticleMarketNews } from '@/lib/article-market-news-research';
 
 export const maxDuration = 300;
@@ -13,14 +13,33 @@ function sseEvent(data: Record<string, unknown>): string {
   return `data: ${JSON.stringify(data)}\n\n`;
 }
 
-function parseGeneratedArticle(content: string): Record<string, unknown> {
-  try {
-    const parsed = JSON.parse(content);
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('Generated article has an invalid shape.');
-    return parsed as Record<string, unknown>;
-  } catch {
-    throw new Error('AI returned an invalid article format. Please generate again.');
+function buildRepairPrompt(userPrompt: string, feedback: string, priorContent: string | undefined): string {
+  const formatFailure = /invalid article format|ambiguous article format|incomplete article|Meta description must be/i.test(feedback);
+  if (formatFailure) {
+    return `${userPrompt}
+
+RETRY FEEDBACK FROM THE DETERMINISTIC PUBLICATION GATE:
+${feedback}
+
+The prior model response was not usable as article JSON. Do not revise broken text.
+Return ONLY one valid JSON object with string fields title, metaDescription, and articleMarkdown.
+No markdown fences, no prose before or after the JSON, and no reasoning tags.`;
   }
+
+  let priorDraft = priorContent?.trim() || '{}';
+  if (priorDraft.length > 12_000) {
+    priorDraft = `${priorDraft.slice(0, 12_000)}\n…[truncated prior draft for retry context]`;
+  }
+
+  return `${userPrompt}
+
+RETRY FEEDBACK FROM THE DETERMINISTIC PUBLICATION GATE:
+${feedback}
+
+PRIOR DRAFT JSON TO REVISE:
+${priorDraft}
+
+Revise the prior draft instead of starting over. Keep compliant material, correct every listed issue, expand only from the verified source material, target 950–975 words, and return only the required JSON.`;
 }
 
 export async function POST(request: NextRequest) {
@@ -86,7 +105,7 @@ export async function POST(request: NextRequest) {
             }
             const feedback = attemptError instanceof Error ? attemptError.message : 'The prior draft was invalid.';
             controller.enqueue(encoder.encode(sseEvent({ step: 'draft', progress: 35 + attempt * 15, message: `Repairing draft after publication-gate feedback (attempt ${attempt + 1}/3)…` })));
-            attemptPrompt = `${userPrompt}\n\nRETRY FEEDBACK FROM THE DETERMINISTIC PUBLICATION GATE:\n${feedback}\n\nPRIOR DRAFT JSON TO REVISE:\n${generated?.content || '{}'}\n\nRevise the prior draft instead of starting over. Keep compliant material, correct every listed issue, expand only from the verified source material, target 950–975 words, and return only the required JSON.`;
+            attemptPrompt = buildRepairPrompt(userPrompt, feedback, generated?.content);
           }
         }
 

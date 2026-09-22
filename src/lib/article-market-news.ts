@@ -1,3 +1,97 @@
+/**
+ * Models often wrap the required article JSON in markdown fences, prose, or a
+ * leading reasoning block. Extract the first unambiguous object that carries the
+ * three required string fields so the publication gate can run QC instead of
+ * failing on `JSON.parse` of the raw completion.
+ */
+export function parseGeneratedArticle(content: string): Record<string, unknown> {
+  const asArticle = (parsed: unknown): Record<string, unknown> | null => {
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+    const record = parsed as Record<string, unknown>;
+    const title = pickStringField(record, ['title', 'Title', 'h1', 'H1']);
+    const metaDescription = pickStringField(record, ['metaDescription', 'meta_description', 'metaDesc', 'MetaDescription']);
+    const articleMarkdown = pickStringField(record, ['articleMarkdown', 'article_markdown', 'markdown', 'Markdown', 'article', 'content']);
+    if (title === null || metaDescription === null || articleMarkdown === null) return null;
+    return {
+      ...record,
+      title,
+      metaDescription,
+      articleMarkdown,
+    };
+  };
+
+  const parseObject = (candidate: string): Record<string, unknown> | null => {
+    try {
+      return asArticle(JSON.parse(candidate));
+    } catch {
+      return null;
+    }
+  };
+
+  const direct = parseObject(content.replace(/^\uFEFF/, '').trim());
+  if (direct) return direct;
+
+  let cleaned = content
+    .replace(/^\uFEFF/, '')
+    .replace(/<think>[\s\S]*?<\/think>/gi, '')
+    .trim();
+  const outerFence = /^```(?:json)?\s*\r?\n?([\s\S]*?)\r?\n?```$/i.exec(cleaned);
+  if (outerFence) cleaned = outerFence[1].trim();
+  const unwrapped = parseObject(cleaned);
+  if (unwrapped) return unwrapped;
+
+  // Prefer fenced JSON blocks when the model wraps the payload in prose + ```json.
+  for (const fence of cleaned.matchAll(/```(?:json)?\s*\r?\n([\s\S]*?)\r?\n```/gi)) {
+    const fenced = parseObject(fence[1].trim());
+    if (fenced) return fenced;
+  }
+
+  const candidates: Record<string, unknown>[] = [];
+  for (let start = cleaned.indexOf('{'); start >= 0; start = cleaned.indexOf('{', start + 1)) {
+    let depth = 0;
+    let quoted = false;
+    let escaped = false;
+    for (let index = start; index < cleaned.length; index += 1) {
+      const character = cleaned[index];
+      if (quoted) {
+        if (escaped) escaped = false;
+        else if (character === '\\') escaped = true;
+        else if (character === '"') quoted = false;
+        continue;
+      }
+      if (character === '"') quoted = true;
+      else if (character === '{') depth += 1;
+      else if (character === '}' && --depth === 0) {
+        const parsed = parseObject(cleaned.slice(start, index + 1));
+        if (parsed) candidates.push(parsed);
+        start = index;
+        break;
+      }
+    }
+  }
+
+  if (candidates.length === 1) return candidates[0];
+  if (candidates.length > 1) {
+    // Identical payloads (e.g. echoed draft) are fine; conflicting articles are not.
+    const signatures = new Set(candidates.map(candidate => JSON.stringify({
+      title: candidate.title,
+      metaDescription: candidate.metaDescription,
+      articleMarkdown: candidate.articleMarkdown,
+    })));
+    if (signatures.size === 1) return candidates[0];
+    throw new Error('AI returned an ambiguous article format. Please generate again.');
+  }
+  throw new Error('AI returned an invalid article format. Please generate again.');
+}
+
+function pickStringField(record: Record<string, unknown>, keys: string[]): string | null {
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === 'string' && value.trim()) return value;
+  }
+  return null;
+}
+
 export const ELIGIBLE_KEYWORDS = [
   'emas', 'harga emas', 'xauusd', 'xau/usd', 'rupiah', 'dollar', 'dolar',
   'wall street', 'minyak', 'harga minyak',
@@ -254,14 +348,15 @@ NON-NEGOTIABLE EDITORIAL RULES:
 - End with one natural, imperative, one-sentence CTA that asks the reader to open an account with Dupoin.
 - Do not claim the article passed plagiarism or nonnumeric fact checking; those remain manual gates.
 
-Return ONLY valid JSON:
+Return ONLY one valid JSON object (no markdown fences, no prose, no reasoning tags) with exactly these string keys:
 {
   "title": "H1 title, maximum 60 characters",
   "metaDescription": "SEO description, maximum 155 characters",
   "articleMarkdown": "complete article in Markdown with H1/H2/H3, FAQ, CTA, and Sources",
   "excerpt": "one short summary",
   "sourcesCited": ["source outlet — publication date — URL"]
-}`;
+}
+The first character of the response must be "{" and the last character must be "}".`;
 
   const userPrompt = `<USER_DATA>
 MAIN KEYWORD: ${input.keyword}
