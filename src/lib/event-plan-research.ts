@@ -1,7 +1,16 @@
+export type EventPlanResearchSource = {
+  url: string;
+  title?: string;
+  snippet?: string;
+  query?: string;
+  claim: string;
+};
+
 export type EventPlanResearch = {
-  status: 'unverified' | 'source-provided';
-  sources: Array<{ url: string; claim: 'Needs manual quotation verification' }>;
+  status: 'unverified' | 'source-provided' | 'researched';
+  sources: EventPlanResearchSource[];
   contacts: Array<{ vendor: string; phone: string; email: string; sourceUrl: string; verified: false }>;
+  queries?: string[];
 };
 
 const MAX_RESEARCH_URLS = 5;
