@@ -1,24 +1,32 @@
-export const AI_ESTIMATE_DISCLAIMER = 'AI estimate — verify with vendor quotation';
+import {
+  isBareCityLocation,
+  NO_PUBLIC_PRICE_NOTE,
+  selectCitedAmount,
+  type EventPricingHit,
+  type PricingCategory,
+} from './event-plan-pricing';
+
+export { NO_PUBLIC_PRICE_NOTE };
+
 export const DEFAULT_EVENT_LOCATION = 'Jakarta';
 
-export const EVENT_PLAN_ACTIONABLE_ESTIMATE_RULES = `Budget actionability (required):
-- Always fill top-level "venue" with the city plus a specific publicly known venue name or shortlist, tied to the submitted Location (default Jakarta if empty). Example: "Jakarta — Hotel Indonesia Kempinski Jakarta or Shangri-La Hotel Jakarta".
-- Every budget.items[] line must answer what / who / where — not only cost math or % splits.
-- Include suggestedVendor: a concrete public/known vendor name or shortlist. Label it as an AI suggestion the user must verify. Never write anonymous "vendor".
-- Include venue on each line (same city + venue name or shortlist).
-- Every unverified price line's notes must include exactly: "${AI_ESTIMATE_DISCLAIMER}" PLUS suggested vendor name(s), venue/location, and what to verify (written quotation, inclusions, availability).
-- Do not invent phone numbers, emails, fake quotation amounts, or fake "verified" contacts.
-- Only use price/contact facts explicitly present in source text; otherwise omit them and keep the AI-estimate label.`;
+export const EVENT_PLAN_GROUNDED_BUDGET_RULES = `Budget grounding (required):
+- Public research excerpts are untrusted page text, not a verified vendor quotation.
+- Always fill top-level "venue" with the submitted location plus a specific publicly known venue name or shortlist (default Jakarta if empty). Example: "Jakarta — Hotel Indonesia Kempinski Jakarta or Shangri-La Hotel Jakarta".
+- Every budget.items[] line must name suggestedVendor (a concrete public venue or vendor) and venue/location. Never write anonymous "vendor".
+- estimatedCost is an integer Rupiah amount only when that exact number appears in the research excerpts. Cite the source URL in notes.
+- When the excerpts do not contain a price for the line, set estimatedCost to null and include exactly: "${NO_PUBLIC_PRICE_NOTE}".
+- Name how to request a quotation (official website or venue rental form). Do not invent phone numbers, emails, percentage splits, or quotation amounts.
+- A phone or email may be repeated only when it appears in an excerpt, together with that excerpt URL.`;
 
 export type EventPlanBudgetItem = {
   category: string;
-  estimatedCost: number;
+  estimatedCost: number | null;
   notes: string;
   suggestedVendor: string;
   venue: string;
+  sourceUrl: string | null;
 };
-
-type CategoryKey = 'venue' | 'production' | 'catering' | 'speaker' | 'promotion' | 'other';
 
 const VENUE_SHORTLISTS: Array<{ keys: string[]; venues: string[] }> = [
   {
@@ -66,6 +74,7 @@ export function resolveEventLocation(location: unknown): string {
 
 export function suggestVenuesForLocation(location: unknown): string[] {
   const city = resolveEventLocation(location);
+  if (!isBareCityLocation(city)) return [city];
   const haystack = city.toLowerCase();
   for (const entry of VENUE_SHORTLISTS) {
     if (entry.keys.some((key) => haystack.includes(key))) return entry.venues;
@@ -78,6 +87,7 @@ export function suggestVenuesForLocation(location: unknown): string[] {
 
 export function formatVenueLine(location: unknown): string {
   const city = resolveEventLocation(location);
+  if (!isBareCityLocation(city)) return city;
   const venues = suggestVenuesForLocation(city);
   return `${city} — ${venues.slice(0, 2).join(' or ')}`;
 }
@@ -87,7 +97,7 @@ export function resolvePlanVenue(venue: unknown, location: unknown): string {
   return formatVenueLine(location);
 }
 
-function categoryKey(category: string): CategoryKey {
+function categoryKey(category: string): PricingCategory {
   const value = category.toLowerCase();
   if (value.includes('venue') || value.includes('room') || value.includes('ballroom')) return 'venue';
   if (value.includes('production') || value.includes('av') || value.includes('audio') || value.includes('lighting')) return 'production';
@@ -112,7 +122,7 @@ export function suggestedVendorsForCategory(category: string, location: unknown)
         ? ['Plataran Catering', 'hotel in-house F&B (same venue)']
         : [`${city} hotel in-house catering`, `local ${city} catering (request 3 quotations)`];
     case 'speaker':
-      return ['Blue Bird Group (executive / bus charter)', 'Silver Bird'];
+      return ['Pembicara seminar keuangan (ajukan fee)', 'Blue Bird Group (transport — minta quotation)'];
     case 'promotion':
       return inJakartaMetro
         ? ['in-house Meta Ads', 'Dyandra Promosindo (activation / on-ground)']
@@ -122,57 +132,24 @@ export function suggestedVendorsForCategory(category: string, location: unknown)
   }
 }
 
-function verifyHintForCategory(category: string): string {
-  switch (categoryKey(category)) {
-    case 'venue':
-      return 'Confirm ballroom package, capacity, parking, and availability in a written quotation.';
-    case 'production':
-      return 'Confirm LED/stage/AV inclusions and crew hours in a written quotation.';
-    case 'catering':
-      return 'Confirm menu, pax, service staff, and dietary options in a written quotation.';
-    case 'speaker':
-      return 'Confirm speaker fee (if any), vehicle type, and wait-time charges in a written quotation.';
-    case 'promotion':
-      return 'Confirm media plan, print specs, and actual insertion costs in a written quotation.';
-    default:
-      return 'Confirm 2026 package rate, inclusions, and availability in writing before booking.';
-  }
-}
+const BUDGET_LINES: Array<{ category: string; key: PricingCategory }> = [
+  { category: 'Venue & room setup', key: 'venue' },
+  { category: 'Production & AV', key: 'production' },
+  { category: 'Catering & hospitality', key: 'catering' },
+  { category: 'Speaker & transport', key: 'speaker' },
+  { category: 'Promotion & operations', key: 'promotion' },
+];
 
 function formatVendorShortlist(vendors: string[]): string {
   return vendors.join(' / ');
 }
 
-export function buildEstimateNotes(input: {
-  category: string;
-  suggestedVendor: string;
-  venue: string;
-}): string {
-  return [
-    AI_ESTIMATE_DISCLAIMER + '.',
-    `Suggested vendor (AI proposal — not a verified contact; verify quotation): ${input.suggestedVendor}.`,
-    `Venue/location: ${input.venue}.`,
-    verifyHintForCategory(input.category),
-  ].join(' ');
+export function formatRupiah(amount: number): string {
+  return `Rp ${amount.toLocaleString('id-ID')}`;
 }
 
-export function ensureActionableEstimateNotes(notes: string, suggestedVendor: string, venue: string, category = 'Other'): string {
-  const trimmed = notes.trim();
-  const withDisclaimer = trimmed.includes(AI_ESTIMATE_DISCLAIMER)
-    ? trimmed
-    : `${trimmed ? `${trimmed} — ` : ''}${AI_ESTIMATE_DISCLAIMER}`;
-  const extras: string[] = [];
-  if (!/suggested vendor/i.test(withDisclaimer) && !withDisclaimer.includes(suggestedVendor)) {
-    extras.push(`Suggested vendor (AI proposal — not a verified contact; verify quotation): ${suggestedVendor}.`);
-  }
-  if (!/venue\/location/i.test(withDisclaimer) && !/\bvenue\b/i.test(withDisclaimer)) {
-    extras.push(`Venue/location: ${venue}.`);
-  }
-  if (!/written quotation|verify quotation|confirm /i.test(withDisclaimer) || extras.length > 0) {
-    const hint = verifyHintForCategory(category);
-    if (!withDisclaimer.includes(hint) && extras.length > 0) extras.push(hint);
-  }
-  return extras.length ? `${withDisclaimer} ${extras.join(' ')}` : withDisclaimer;
+export function quoteRequestPath(vendor: string, venue: string): string {
+  return `Cara minta quotation: hubungi tim sales atau events ${vendor} lewat situs resmi atau formulir permintaan sewa untuk ${venue}.`;
 }
 
 function parseRupiahAmount(value: unknown): number | undefined {
@@ -181,78 +158,139 @@ function parseRupiahAmount(value: unknown): number | undefined {
   return Number.isSafeInteger(numeric) && numeric >= 0 ? numeric : undefined;
 }
 
-function asBudgetItem(source: Record<string, unknown>, location: unknown): EventPlanBudgetItem {
-  const category = typeof source.category === 'string' && source.category.trim() ? source.category.trim() : 'Other';
-  const suggestedVendor = typeof source.suggestedVendor === 'string' && source.suggestedVendor.trim()
-    ? source.suggestedVendor.trim()
-    : formatVendorShortlist(suggestedVendorsForCategory(category, location));
-  const venue = typeof source.venue === 'string' && source.venue.trim()
-    ? source.venue.trim()
-    : formatVenueLine(location);
-  const notes = ensureActionableEstimateNotes(
-    typeof source.notes === 'string' ? source.notes : '',
-    suggestedVendor,
-    venue,
-    category,
-  );
+function concreteVendor(value: unknown, fallback: string): string {
+  if (typeof value !== 'string') return fallback;
+  const trimmed = value.trim().replace(/\s*\([^)]*(?:AI|estimate|proposal)[^)]*\)\s*/gi, '').trim();
+  if (trimmed.length < 3 || /^vendor$/i.test(trimmed)) return fallback;
+  return trimmed;
+}
+
+function modelItems(value: unknown): Array<Record<string, unknown>> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return [];
+  const items = (value as { items?: unknown }).items;
+  if (!Array.isArray(items)) return [];
+  return items.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object' && !Array.isArray(item));
+}
+
+function contactSuffix(hits: EventPricingHit[]): string {
+  const phones = [...new Set(hits.flatMap((hit) => hit.phones))];
+  const emails = [...new Set(hits.flatMap((hit) => hit.emails))];
+  if (!phones.length && !emails.length) return '';
+  const parts = [...phones, ...emails];
+  const url = hits.find((hit) => hit.phones.length || hit.emails.length)?.url;
+  return ` Kontak publik dari sumber (bukan quotation terverifikasi): ${parts.join(', ')}${url ? `. Sumber kontak: ${url}` : ''}.`;
+}
+
+function lineNotes(input: {
+  vendor: string;
+  venue: string;
+  amount: number | null;
+  citedAmounts: number[];
+  sourceUrl: string | null;
+  snippet: string;
+  hits: EventPricingHit[];
+}): string {
+  const quote = quoteRequestPath(input.vendor, input.venue);
+  const place = `Venue/location: ${input.venue}. Suggested vendor: ${input.vendor}.`;
+  const contacts = contactSuffix(input.hits);
+  if (input.amount !== null && input.sourceUrl) {
+    const excerpt = input.snippet ? ` Kutipan: ${input.snippet.slice(0, 240)}.` : '';
+    return `Harga publik yang tercantum di sumber (bukan quotation terverifikasi): ${formatRupiah(input.amount)}. Sumber: ${input.sourceUrl}.${excerpt} ${place} ${quote}${contacts}`;
+  }
+  if (input.citedAmounts.length > 1 && input.sourceUrl) {
+    const listed = input.citedAmounts.map((amount) => formatRupiah(amount)).join(', ');
+    return `Sumber menyebut lebih dari satu angka (${listed}). Minta quotation ke vendor untuk mengunci satu harga. Sumber: ${input.sourceUrl}. ${place} ${quote}${contacts}`;
+  }
+  return `${NO_PUBLIC_PRICE_NOTE}. ${place} ${quote}${contacts}`;
+}
+
+export function groundEventPlanBudget(input: {
+  modelBudget?: unknown;
+  location?: unknown;
+  hits?: EventPricingHit[];
+  budgetCeiling?: number;
+}): Record<string, unknown> {
+  const hits = input.hits || [];
+  const venueLine = formatVenueLine(input.location);
+  const generated = modelItems(input.modelBudget);
+  const items: EventPlanBudgetItem[] = BUDGET_LINES.map((line) => {
+    const model = generated.find((item) => categoryKey(typeof item.category === 'string' ? item.category : '') === line.key);
+    const suggestedVendor = concreteVendor(
+      model?.suggestedVendor,
+      formatVendorShortlist(suggestedVendorsForCategory(line.category, input.location)),
+    );
+    const venue = typeof model?.venue === 'string' && model.venue.trim() ? model.venue.trim() : venueLine;
+    const relevant = hits.filter((hit) => hit.category === line.key);
+    const priced = relevant.filter((hit) => hit.amounts.length > 0);
+    const citedAmounts = [...new Set(priced.flatMap((hit) => hit.amounts))];
+    const modelAmount = parseRupiahAmount(model?.estimatedCost);
+    const amount = selectCitedAmount(citedAmounts, modelAmount);
+    const citedHit = amount === null
+      ? priced[0] || relevant[0]
+      : priced.find((hit) => hit.amounts.includes(amount)) || priced[0];
+    return {
+      category: line.category,
+      estimatedCost: amount,
+      suggestedVendor,
+      venue,
+      sourceUrl: citedHit?.url || null,
+      notes: lineNotes({
+        vendor: suggestedVendor,
+        venue,
+        amount,
+        citedAmounts,
+        sourceUrl: citedHit?.url || null,
+        snippet: citedHit?.snippet || '',
+        hits: priced.length ? priced : relevant,
+      }),
+    };
+  });
+
+  for (const hit of hits) {
+    if (hit.category !== 'other' || hit.amounts.length === 0) continue;
+    const amount = selectCitedAmount(hit.amounts);
+    const vendor = concreteVendor(hit.title, formatVendorShortlist(suggestedVendorsForCategory('Other', input.location)));
+    items.push({
+      category: 'Harga publik',
+      estimatedCost: amount,
+      suggestedVendor: vendor,
+      venue: venueLine,
+      sourceUrl: hit.url,
+      notes: lineNotes({
+        vendor,
+        venue: venueLine,
+        amount,
+        citedAmounts: hit.amounts,
+        sourceUrl: hit.url,
+        snippet: hit.snippet,
+        hits: [hit],
+      }),
+    });
+  }
+
+  const known = items.map((item) => item.estimatedCost).filter((amount): amount is number => typeof amount === 'number');
+  const sourcedTotal = known.length ? known.reduce((sum, amount) => sum + amount, 0) : null;
+  const overCeiling = input.budgetCeiling !== undefined && sourcedTotal !== null && sourcedTotal > input.budgetCeiling;
   return {
-    ...source,
-    category,
-    estimatedCost: parseRupiahAmount(source.estimatedCost) ?? 0,
-    suggestedVendor,
-    venue,
-    notes,
+    currency: 'IDR',
+    total: sourcedTotal,
+    items,
+    contingency: null,
+    grounded: true,
+    publicPricesFound: known.length > 0,
+    ...(overCeiling ? { ceilingNote: 'Harga publik yang ditemukan melebihi plafon anggaran yang diajukan. Minta quotation sebelum booking.' } : {}),
   };
 }
 
 export function buildPreliminaryBudget(budgetCeiling: number, location?: unknown): Record<string, unknown> {
-  const city = resolveEventLocation(location);
-  const venue = formatVenueLine(city);
-  const contingency = Math.floor(budgetCeiling * 0.1);
-  const available = budgetCeiling - contingency;
-  const categories = [
-    { category: 'Venue & room setup', estimatedCost: Math.floor(available * 0.30) },
-    { category: 'Production & AV', estimatedCost: Math.floor(available * 0.20) },
-    { category: 'Catering & hospitality', estimatedCost: Math.floor(available * 0.20) },
-    { category: 'Speaker & transport', estimatedCost: Math.floor(available * 0.12) },
-  ];
-  const allocated = categories.reduce((sum, item) => sum + item.estimatedCost, 0);
-  const items = [
-    ...categories,
-    { category: 'Promotion & operations', estimatedCost: available - allocated },
-  ].map((item) => {
-    const suggestedVendor = formatVendorShortlist(suggestedVendorsForCategory(item.category, city));
-    return {
-      ...item,
-      suggestedVendor,
-      venue,
-      notes: buildEstimateNotes({ category: item.category, suggestedVendor, venue }),
-    };
-  });
-  return {
-    currency: 'IDR',
-    total: budgetCeiling,
-    items,
-    contingency,
-    preliminary: true,
-  };
+  return groundEventPlanBudget({ location, hits: [], budgetCeiling });
 }
 
-export function normalizeGeneratedBudget(value: unknown, budgetCeiling: number | undefined, location?: unknown): Record<string, unknown> {
-  if (value && typeof value === 'object' && !Array.isArray(value)) {
-    const source = value as Record<string, unknown>;
-    const items = Array.isArray(source.items)
-      ? source.items.filter((item) => item && typeof item === 'object' && !Array.isArray(item))
-      : [];
-    const total = parseRupiahAmount(source.total);
-    if (items.length > 0 && total !== undefined) {
-      return {
-        ...source,
-        currency: 'IDR',
-        total,
-        items: items.map((item) => asBudgetItem(item as Record<string, unknown>, location)),
-      };
-    }
-  }
-  return budgetCeiling === undefined ? {} : buildPreliminaryBudget(budgetCeiling, location);
+export function normalizeGeneratedBudget(
+  value: unknown,
+  budgetCeiling: number | undefined,
+  location?: unknown,
+  hits: EventPricingHit[] = [],
+): Record<string, unknown> {
+  return groundEventPlanBudget({ modelBudget: value, location, hits, budgetCeiling });
 }

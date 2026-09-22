@@ -2,12 +2,13 @@
 
 import { useEffect, useState } from 'react';
 import { buildEventPlanDownload, eventPlanDownloadFilename } from '@/lib/event-plan-download';
+import { NO_PUBLIC_PRICE_NOTE } from '@/lib/event-plan-pricing';
 import type { EventPlanResearch } from '@/lib/event-plan-research';
 import { Button, DataTableFrame, FormField, Panel, PageHeader, PageStack, SectionHeader, StatusBadge, TextArea, TextInput, Toolbar } from '@/components/ui/dashboard';
 import InlineModelSelector from '@/components/InlineModelSelector';
 
-type BudgetItem = { category: string; estimatedCost: number; notes: string; suggestedVendor?: string; venue?: string };
-type Budget = { currency: 'IDR'; total?: number; items: BudgetItem[]; contingency?: number; preliminary?: boolean };
+type BudgetItem = { category: string; estimatedCost: number | null; notes: string; suggestedVendor?: string; venue?: string; sourceUrl?: string | null };
+type Budget = { currency: 'IDR'; total?: number | null; items: BudgetItem[]; contingency?: number | null; preliminary?: boolean; publicPricesFound?: boolean; ceilingNote?: string };
 type EventPlanOption = {
   style: string;
   styleLabel: string;
@@ -33,19 +34,25 @@ export function formatIDR(value: number | string) {
   return `Rp ${Number.isFinite(amount) ? Math.max(0, Math.floor(amount)).toLocaleString('id-ID') : '0'}`;
 }
 
+function formatBudgetAmount(value: number | null | undefined) {
+  if (value === null || value === undefined) return 'Belum diketahui';
+  return formatIDR(value);
+}
+
 function formatTargetDate(value: string) {
   if (!value) return '';
   const date = new Date(`${value}T00:00:00`);
   return Number.isNaN(date.getTime()) ? value : new Intl.DateTimeFormat('id-ID', { dateStyle: 'long' }).format(date);
 }
 
-function asRupiah(value: unknown) {
+function asRupiah(value: unknown): number | null {
+  if (value === null || value === undefined || value === '') return null;
   if (typeof value === 'number' && Number.isFinite(value)) return Math.max(0, Math.floor(value));
   if (typeof value === 'string') {
     const digits = value.replace(/\D/g, '');
-    return digits ? Number(digits) : undefined;
+    return digits ? Number(digits) : null;
   }
-  return undefined;
+  return null;
 }
 
 function normalizeBudget(value: unknown): Budget | null {
@@ -60,10 +67,11 @@ function normalizeBudget(value: unknown): Budget | null {
     const entry = item as Record<string, unknown>;
     return [{
       category: typeof entry.category === 'string' ? entry.category : 'Other',
-      estimatedCost: asRupiah(entry.estimatedCost) ?? 0,
+      estimatedCost: asRupiah(entry.estimatedCost),
       notes: typeof entry.notes === 'string' ? entry.notes : '—',
       suggestedVendor: typeof entry.suggestedVendor === 'string' ? entry.suggestedVendor : undefined,
       venue: typeof entry.venue === 'string' ? entry.venue : undefined,
+      sourceUrl: typeof entry.sourceUrl === 'string' ? entry.sourceUrl : null,
     }];
   }) : [];
   return {
@@ -71,6 +79,8 @@ function normalizeBudget(value: unknown): Budget | null {
     total: asRupiah(source.total),
     contingency: asRupiah(source.contingency),
     preliminary: source.preliminary === true,
+    publicPricesFound: source.publicPricesFound === true,
+    ceilingNote: typeof source.ceilingNote === 'string' ? source.ceilingNote : undefined,
     items,
   };
 }
@@ -90,8 +100,9 @@ export default function EventPlanPage() {
   const [tokenUsage, setTokenUsage] = useState<TokenUsage | null>(null);
 
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const template = params.get('template');
+    const template = new URLSearchParams(window.location.search).get('template');
+    // Apply the template query after mount so the server render stays stable.
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- URL is an external input read once on mount
     if (template) setTheme(template);
   }, []);
 
@@ -185,7 +196,7 @@ export default function EventPlanPage() {
           <FormField label="Budget ceiling" hint="IDR"><TextInput inputMode="numeric" value={budget ? formatIDR(budget) : ''} onChange={e => setBudget(e.target.value.replace(/\D/g, ''))} placeholder="Rp 50.000.000" /></FormField>
           <FormField label="Event target date"><TextInput type="date" value={targetDate} onChange={e => setTargetDate(e.target.value)} /></FormField>
         </div>
-        <FormField label="Research / quotation links" hint="Optional · maximum 5"><TextArea value={researchLinks} onChange={e => setResearchLinks(e.target.value)} rows={4} placeholder={'https://official-vendor.example/proposal\nhttps://hotel.example/price-list'} /><span className="mt-1.5 block text-xs leading-5 text-[var(--mos-text-faint)]">Paste official hotel/vendor pages, proposals, or price lists—one public URL per line. Links require manual verification; do not enter free-form contact claims.</span></FormField>
+        <FormField label="Research / quotation links" hint="Optional · maximum 5"><TextArea value={researchLinks} onChange={e => setResearchLinks(e.target.value)} rows={4} placeholder={'https://official-vendor.example/proposal\nhttps://hotel.example/price-list'} /><span className="mt-1.5 block text-xs leading-5 text-[var(--mos-text-faint)]">Satu URL publik per baris. Server membaca halaman itu dan mencari harga sewa venue serta fee narasumber. Hasilnya bukan quotation terverifikasi.</span></FormField>
         <Button type="submit" variant="primary" disabled={loading || !eventName}>{loading ? 'Generating…' : 'Generate plan'}</Button>
       </form>
       </Panel>
@@ -224,8 +235,8 @@ function BudgetBreakdown({ budget }: { budget: Budget | null }) {
   return (
     <div className="mb-4">
       <label className="text-xs text-[var(--mos-text-faint)] uppercase tracking-wide">Budget breakdown</label>
-      {budget.preliminary && <p className="mt-1 text-xs text-amber-300">Preliminary IDR allocation based on the budget ceiling. Confirm all figures with vendor quotations.</p>}
-      <p className="mt-1 text-xs text-[var(--mos-text-faint)]">Each line names a suggested vendor and venue (AI proposal). Verify with a written quotation — we do not invent phone numbers, emails, or verified rates.</p>
+      <p className="mt-1 text-xs text-[var(--mos-text-faint)]">{NO_PUBLIC_PRICE_NOTE}. Angka di tabel hanya muncul jika angka itu ada di sumber publik. Ini bukan quotation terverifikasi.</p>
+      {budget.ceilingNote && <p className="mt-1 text-xs text-amber-300">{budget.ceilingNote}</p>}
       <DataTableFrame className="mt-2">
         <table className="w-full text-sm text-left">
           <thead className="bg-[var(--mos-raised)] text-[var(--mos-text-secondary)]">
@@ -233,7 +244,7 @@ function BudgetBreakdown({ budget }: { budget: Budget | null }) {
               <th className="p-3">Category</th>
               <th className="p-3">Suggested vendor</th>
               <th className="p-3">Notes</th>
-              <th className="p-3 text-right">Estimated cost</th>
+              <th className="p-3 text-right">Public price</th>
             </tr>
           </thead>
           <tbody>
@@ -245,7 +256,10 @@ function BudgetBreakdown({ budget }: { budget: Budget | null }) {
                   {item.venue && <p className="mt-1 text-xs text-[var(--mos-text-faint)]">{item.venue}</p>}
                 </td>
                 <td className="p-3 max-w-xl whitespace-pre-wrap leading-6">{item.notes}</td>
-                <td className="p-3 text-right whitespace-nowrap">{formatIDR(item.estimatedCost)}</td>
+                <td className="p-3 text-right whitespace-nowrap">
+                  <p>{formatBudgetAmount(item.estimatedCost)}</p>
+                  {item.sourceUrl && <a className="mt-1 inline-block text-xs underline" href={item.sourceUrl} target="_blank" rel="noreferrer">Sumber</a>}
+                </td>
               </tr>
             )) : (
               <tr className="border-t border-[var(--mos-border)] text-[var(--mos-text-muted)]">
@@ -256,11 +270,11 @@ function BudgetBreakdown({ budget }: { budget: Budget | null }) {
           <tfoot className="bg-[var(--mos-raised)] text-white">
             <tr>
               <td className="p-3 font-medium" colSpan={3}>Contingency</td>
-              <td className="p-3 text-right whitespace-nowrap">{formatIDR(budget.contingency ?? 0)}</td>
+              <td className="p-3 text-right whitespace-nowrap">{formatBudgetAmount(budget.contingency)}</td>
             </tr>
             <tr>
-              <td className="p-3 font-semibold" colSpan={3}>Total</td>
-              <td className="p-3 text-right font-semibold whitespace-nowrap">{formatIDR(budget.total ?? 0)}</td>
+              <td className="p-3 font-semibold" colSpan={3}>Total harga publik</td>
+              <td className="p-3 text-right font-semibold whitespace-nowrap">{formatBudgetAmount(budget.total)}</td>
             </tr>
           </tfoot>
         </table>
@@ -270,7 +284,46 @@ function BudgetBreakdown({ budget }: { budget: Budget | null }) {
 }
 
 function ResearchPanel({ research }: { research: EventPlanResearch }) {
-  if (research.status === 'unverified') return <section className="mt-4 rounded-lg border-2 border-amber-400 bg-amber-500/15 p-4 text-amber-100" role="alert"><p className="font-semibold">Harga di bawah adalah estimasi AI, bukan quotation vendor. Minta minimal 3 quotation tertulis sebelum booking.</p><p className="mt-1 text-sm">Tidak ada sumber quotation yang dapat diverifikasi secara otomatis.</p></section>;
-  const contacts = research.contacts.filter((contact) => Boolean(contact.sourceUrl));
-  return <section className="mt-4 rounded-lg border border-blue-500/40 bg-blue-500/10 p-4 text-blue-100"><h4 className="font-semibold">Research status: source provided</h4><p className="mt-1 text-sm">Sumber di bawah harus diverifikasi manual; URL saja bukan quotation atau riset terverifikasi.</p><div className="mt-3"><p className="text-xs uppercase tracking-wide text-blue-200">Sources</p><ul className="mt-1 list-disc pl-5 text-sm">{research.sources.map((source) => <li key={source.url}><a className="underline hover:text-white" href={source.url} target="_blank" rel="noreferrer">{source.url}</a> — {source.claim}</li>)}</ul></div>{contacts.length > 0 && <div className="mt-3"><p className="text-xs uppercase tracking-wide text-blue-200">Contacts</p><ul className="mt-1 space-y-1 text-sm">{contacts.map((contact, index) => <li key={`${contact.sourceUrl}-${index}`}><span className="font-medium">{contact.vendor}</span>{contact.phone ? ` · ${contact.phone}` : ''}{contact.email ? ` · ${contact.email}` : ''} · <a className="underline hover:text-white" href={contact.sourceUrl} target="_blank" rel="noreferrer">Source</a></li>)}</ul></div>}</section>;
+  const contacts = research.contacts.filter((contact) => Boolean(contact.sourceUrl) && (contact.phone || contact.email));
+  const hasSources = research.sources.length > 0;
+  return (
+    <section className={`mt-4 rounded-lg border p-4 ${hasSources ? 'border-blue-500/40 bg-blue-500/10 text-blue-100' : 'border-2 border-amber-400 bg-amber-500/15 text-amber-100'}`} role={hasSources ? undefined : 'alert'}>
+      <h4 className="font-semibold">Sumber riset anggaran</h4>
+      <p className="mt-1 text-sm">{NO_PUBLIC_PRICE_NOTE}. Halaman publik di bawah bukan quotation terverifikasi.</p>
+      {research.queries && research.queries.length > 0 && <p className="mt-2 text-xs">Pencarian: {research.queries.join(' · ')}</p>}
+      {hasSources ? (
+        <div className="mt-3">
+          <p className="text-xs uppercase tracking-wide">Sources</p>
+          <ul className="mt-1 space-y-3 text-sm">
+            {research.sources.map((source, index) => (
+              <li key={`${source.url}-${source.query || source.claim}-${index}`}>
+                {source.title && <p className="font-medium">{source.title}</p>}
+                <a className="underline hover:text-white" href={source.url} target="_blank" rel="noreferrer">{source.url}</a>
+                <p>{source.claim}</p>
+                {source.snippet && <p className="mt-1 whitespace-pre-wrap text-xs leading-5 opacity-90">{source.snippet}</p>}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : (
+        <p className="mt-2 text-sm">Pencarian publik tidak menemukan halaman harga untuk anggaran ini.</p>
+      )}
+      {contacts.length > 0 && (
+        <div className="mt-3">
+          <p className="text-xs uppercase tracking-wide">Contacts</p>
+          <ul className="mt-1 space-y-1 text-sm">
+            {contacts.map((contact, index) => (
+              <li key={`${contact.sourceUrl}-${index}`}>
+                <span className="font-medium">{contact.vendor}</span>
+                {contact.phone ? ` · ${contact.phone}` : ''}
+                {contact.email ? ` · ${contact.email}` : ''}
+                {' · '}
+                <a className="underline hover:text-white" href={contact.sourceUrl} target="_blank" rel="noreferrer">Source</a>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </section>
+  );
 }
