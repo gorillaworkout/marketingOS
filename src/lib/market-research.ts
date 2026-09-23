@@ -92,6 +92,116 @@ function isCalendarYear(value: string): boolean {
   return year >= 1900 && year <= 2100;
 }
 
+const MONTH_NAME = '(?:jan(?:uary|uari)?|feb(?:ruary|ruari)?|mar(?:ch|et)?|apr(?:il)?|may|mei|jun(?:e|i)?|jul(?:y|i)?|aug(?:ust|ustus)?|sep(?:t(?:ember)?)?|o[ck]t(?:ober)?|nov(?:ember)?|de[sc](?:ember)?)';
+
+function inRange(raw: string, min: number, max: number): number | null {
+  if (!/^\d{1,2}$/.test(raw)) return null;
+  const value = Number(raw);
+  return value >= min && value <= max ? value : null;
+}
+
+interface CalendarPart {
+  token: string;
+  value: number;
+  role: 'day' | 'month';
+}
+
+/** Numeric day/month tokens that are written as dates, not bare magnitudes. */
+function calendarTokens(text: string): CalendarPart[] {
+  const source = normalize(text);
+  const found: CalendarPart[] = [];
+  const add = (token: string, role: 'day' | 'month') => {
+    const value = inRange(token, 1, role === 'day' ? 31 : 12);
+    if (value === null) return;
+    found.push({ token, value, role });
+  };
+  const dayMonth = new RegExp(`\\b(\\d{1,2})(?:st|nd|rd|th)?(?:\\s+of)?[\\s-]+${MONTH_NAME}\\b`, 'g');
+  const monthDay = new RegExp(`\\b${MONTH_NAME}[\\s-]+(\\d{1,2})(?:st|nd|rd|th)?\\b`, 'g');
+
+  for (const match of source.matchAll(/\b\d{4}-(\d{1,2})-(\d{1,2})\b/g)) {
+    add(match[1], 'month');
+    add(match[2], 'day');
+  }
+  for (const match of source.matchAll(dayMonth)) add(match[1], 'day');
+  for (const match of source.matchAll(monthDay)) add(match[1], 'day');
+  for (const match of source.matchAll(/\b(?:tanggal|tgl)\.?\s+(\d{1,2})\b/g)) add(match[1], 'day');
+  for (const match of source.matchAll(/\bbulan\s+(\d{1,2})\b/g)) add(match[1], 'month');
+  for (const match of source.matchAll(/\b(\d{1,2})[/\-.](\d{1,2})(?:[/\-.](\d{2,4}))?\b/g)) {
+    const left = inRange(match[1], 1, 31);
+    const right = inRange(match[2], 1, 31);
+    if (left === null || right === null) continue;
+    const dated = Boolean(match[3]) || left > 12 || right > 12;
+    if (!dated) continue;
+    if (left > 12) add(match[1], 'day');
+    else if (right > 12) add(match[2], 'day');
+    else {
+      add(match[1], 'day');
+      add(match[2], 'day');
+    }
+    if (left <= 12) add(match[1], 'month');
+    if (right <= 12) add(match[2], 'month');
+  }
+  return found;
+}
+
+interface ClockMention {
+  normalized: string;
+  tokens: string[];
+}
+
+function clockTokens(text: string): ClockMention[] {
+  const source = normalize(text);
+  const found: ClockMention[] = [];
+  const push = (hourRaw: string, minuteRaw: string, tokens: string[]) => {
+    const hour = inRange(hourRaw, 0, 23);
+    const minute = inRange(minuteRaw, 0, 59);
+    if (hour === null || minute === null) return;
+    found.push({ normalized: `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`, tokens });
+  };
+  for (const match of source.matchAll(/\b(\d{1,2}):(\d{2})\b/g)) push(match[1], match[2], [match[1], match[2]]);
+  for (const match of source.matchAll(/\b(?:pukul|jam)\s+(\d{1,2})([.,])(\d{2})\b/g)) {
+    push(match[1], match[3], [`${match[1]}${match[2]}${match[3]}`]);
+  }
+  for (const match of source.matchAll(/\b(\d{1,2})([.,])(\d{2})\s*(?:wib|wita|wit)\b/g)) {
+    push(match[1], match[3], [`${match[1]}${match[2]}${match[3]}`]);
+  }
+  return found;
+}
+
+function stampDate(value: string | null): string {
+  return value && value.length >= 10 ? value.slice(0, 10) : '';
+}
+
+function stampTime(value: string | null): string {
+  return value && value.length >= 16 ? value.slice(11, 16) : '';
+}
+
+/**
+ * Evidence is the RSS headline + summary only, so a WIB publication day is often
+ * absent from that string. Day/month/clock tokens from the title or timestamps
+ * count only when the narrative uses them as a date or time. Bare rates, prices,
+ * and lot sizes stay unsupported.
+ */
+function isPublisherCalendarFact(number: string, narrative: string, candidate: MarketNewsCandidate): boolean {
+  const packet = [candidate.evidence, candidate.title, stampDate(candidate.publishedAt), stampDate(candidate.updatedAt)].join('\n');
+  const days = new Set<number>();
+  const months = new Set<number>();
+  for (const part of calendarTokens(packet)) {
+    if (part.role === 'day') days.add(part.value);
+    if (part.role === 'month') months.add(part.value);
+  }
+  if (/^\d{1,2}$/.test(number)) {
+    const value = Number(number);
+    for (const part of calendarTokens(narrative)) {
+      if (part.token !== number) continue;
+      if (part.role === 'day' && days.has(value)) return true;
+      if (part.role === 'month' && months.has(value)) return true;
+    }
+  }
+  const clocks = new Set([stampTime(candidate.publishedAt), stampTime(candidate.updatedAt)].filter(Boolean));
+  return clockTokens(narrative).some(mention => clocks.has(mention.normalized) && mention.tokens.includes(number));
+}
+
 function extractQuotes(value: string): string[] {
   const quotes: string[] = [];
   for (const pattern of [/“([^”]+)”/g, /‘([^’]+)’/g, /«([^»]+)»/g, /"([^"]+)"/g, /'([^'\n]{2,200})'/g]) {
@@ -167,8 +277,8 @@ export function validateAndHydrateMarketResearchSelection(value: unknown, candid
     selectedEvents.push(eventSignature);
     const narratives = `${eventKey}\n${mainEvent}\n${latestFactualDevelopment}\n${marketRelevance}`;
     if (hasCompetitor(narratives)) throw new Error(`Selection ${index + 1} mentions a competitor broker.`);
-    const allowedNumbers = new Set(extractNumbers(candidate.evidence));
-    const unsupportedNumbers = extractNumbers(narratives).filter(number => !allowedNumbers.has(number) && !isCalendarYear(number));
+    const allowedNumbers = new Set(extractNumbers(`${candidate.evidence}\n${candidate.title}`));
+    const unsupportedNumbers = extractNumbers(narratives).filter(number => !allowedNumbers.has(number) && !isCalendarYear(number) && !isPublisherCalendarFact(number, narratives, candidate));
     if (unsupportedNumbers.length > 0) throw new Error(`Selection ${index + 1} contains unsupported numeric facts: ${[...new Set(unsupportedNumbers)].join(', ')}.`);
     const unsupportedQuotes = extractQuotes(narratives).filter(quote => !candidate.evidence.includes(quote));
     if (unsupportedQuotes.length > 0) throw new Error(`Selection ${index + 1} contains unsupported quotes.`);
@@ -207,7 +317,7 @@ COVERAGE RULES:
 - At most one Indonesian-media article may be selected; prefer international publishers for the rest.
 - Retail gold shop pricing is never a market event.
 
-You may select only exact candidateId values supplied in CANDIDATES. Never invent or alter titles, sources, publication/update times, URLs, numbers, quotes, or events. For every selection, provide an eventKey in canonical lowercase English form "subject-confirmed_action-object". Semantically identical events MUST use the exact same eventKey even when publishers use synonyms. Main event, latest factual development, and market relevance must be concise Bahasa Indonesia paraphrases traceable only to that candidate's evidence. Do not mention competitor brokers. Do not claim that publisher metadata means the complete article was independently verified.
+You may select only exact candidateId values supplied in CANDIDATES. Never invent or alter titles, sources, publication/update times, URLs, numbers, quotes, or events. For every selection, provide an eventKey in canonical lowercase English form "subject-confirmed_action-object". Semantically identical events MUST use the exact same eventKey even when publishers use synonyms. Main event, latest factual development, and market relevance must be concise Bahasa Indonesia paraphrases. Do not invent prices, percentages, basis points, lot sizes, counts, or any other numeric fact. Reuse a number only when it appears in that candidate's evidence or title, or when it is that candidate's publication/update calendar date or clock time (publishedAtWIB / updatedAtWIB) written as a date or time. Do not mention competitor brokers. Do not claim that publisher metadata means the complete article was independently verified.
 
 Return ONLY valid JSON:
 {"items":[{"candidateId":"exact ID","eventKey":"subject-confirmed_action-object","productCategory":"Forex|Commodity|US Indices|US Stocks","symbol":"exact symbol from that candidate","mainEvent":"...","latestFactualDevelopment":"...","marketRelevance":"..."}]}`;

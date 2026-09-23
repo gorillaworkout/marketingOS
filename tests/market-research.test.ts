@@ -232,6 +232,86 @@ test('calendar years in narratives are not treated as unsupported numeric facts'
   assert.throws(() => validateAndHydrateMarketResearchSelection({ items: [{ ...selection.items[0], latestFactualDevelopment: 'Target harga 1899 tercatat.' }] }, candidates), /unsupported numeric facts: 1899/);
 });
 
+test('calendar days from the candidate packet are not unsupported numeric facts', () => {
+  const packet: MarketNewsCandidate = {
+    ...candidates[0],
+    title: 'Gold Naik Setelah Data Inflation Resmi Dirilis',
+    evidence: 'Publisher headline menyebut harga emas naik. Data resmi menunjukkan nilai 2.622.000.',
+    publishedAt: '2026-09-23T10:05',
+    updatedAt: '2026-09-23T10:30',
+  };
+  assert.equal(packet.evidence.includes('23'), false);
+  assert.equal(packet.title.includes('23'), false);
+  const item = {
+    candidateId: 'candidate-a',
+    eventKey: 'official-gold-data-release',
+    productCategory: 'Commodity' as const,
+    symbol: 'XAUUSD',
+    mainEvent: 'Pada 23 September 2026 data resmi memengaruhi harga emas.',
+    latestFactualDevelopment: 'Nilai terbaru tercatat 2.622.000.',
+    marketRelevance: 'Perkembangan tanggal 23 relevan untuk sentimen Gold.',
+  };
+  const hydrated = validateAndHydrateMarketResearchSelection({ items: [item] }, [packet]);
+  assert.match(hydrated.items[0].mainEvent, /23 September 2026/);
+  assert.equal(hydrated.items[0].publicationDate, '2026-09-23');
+  assert.equal(hydrated.items[0].publicationTime, '10:05');
+  assert.equal(hydrated.items[0].latestUpdateTime, '10:30');
+
+  validateAndHydrateMarketResearchSelection({ items: [{
+    ...item,
+    mainEvent: 'Pada 2026-09-23 data resmi memengaruhi harga emas.',
+    marketRelevance: 'Perkembangan bulan 9 relevan untuk sentimen Gold.',
+  }] }, [packet]);
+  validateAndHydrateMarketResearchSelection({ items: [{
+    ...item,
+    mainEvent: 'Data resmi memengaruhi harga emas hari ini.',
+    latestFactualDevelopment: 'Pembaruan pukul 10:30 WIB mencatat nilai 2.622.000.',
+    marketRelevance: 'Perkembangan ini relevan untuk sentimen Gold.',
+  }] }, [packet]);
+
+  const titled: MarketNewsCandidate = {
+    ...packet,
+    title: 'Gold moves 23 Sep after inflation data',
+    publishedAt: '2026-08-01T10:05',
+    updatedAt: null,
+  };
+  assert.equal(titled.evidence.includes('23'), false);
+  validateAndHydrateMarketResearchSelection({ items: [{
+    ...item,
+    mainEvent: 'Pergerakan 23 September memengaruhi harga emas.',
+    marketRelevance: 'Angka 23 pada judul tetap menjadi acuan peristiwa.',
+  }] }, [titled]);
+
+  const isoEvidence: MarketNewsCandidate = {
+    ...packet,
+    title: 'Gold Naik Setelah Data Inflation',
+    evidence: 'Rilis 2026-09-23 menyebut nilai 2.622.000.',
+    publishedAt: '2026-08-02T08:00',
+    updatedAt: null,
+  };
+  validateAndHydrateMarketResearchSelection({ items: [{
+    ...item,
+    mainEvent: 'Pada tanggal 23 data resmi memengaruhi harga emas.',
+    marketRelevance: 'Perkembangan ini relevan untuk sentimen Gold.',
+  }] }, [isoEvidence]);
+
+  const plain = {
+    ...item,
+    mainEvent: 'Data resmi memengaruhi harga emas hari ini.',
+    latestFactualDevelopment: 'Nilai terbaru tercatat 2.622.000.',
+    marketRelevance: 'Perkembangan ini relevan untuk sentimen Gold.',
+  };
+  assert.throws(() => validateAndHydrateMarketResearchSelection({ items: [{ ...plain, latestFactualDevelopment: 'Harga bergerak 17845.' }] }, [packet]), /unsupported numeric facts: 17845/);
+  assert.throws(() => validateAndHydrateMarketResearchSelection({ items: [{ ...plain, latestFactualDevelopment: 'Suku bunga naik 0.25%.' }] }, [packet]), /unsupported numeric facts: 0\.25/);
+  assert.throws(() => validateAndHydrateMarketResearchSelection({ items: [{ ...plain, latestFactualDevelopment: 'Ukuran lot 0.01 dicatat.' }] }, [packet]), /unsupported numeric facts: 0\.01/);
+  assert.throws(() => validateAndHydrateMarketResearchSelection({ items: [{ ...plain, latestFactualDevelopment: 'Ukuran lot 100 dicatat.' }] }, [packet]), /unsupported numeric facts: 100/);
+  assert.throws(() => validateAndHydrateMarketResearchSelection({ items: [{ ...plain, latestFactualDevelopment: 'Harga bergerak 23.' }] }, [packet]), /unsupported numeric facts: 23/);
+  assert.throws(() => validateAndHydrateMarketResearchSelection({ items: [{ ...plain, latestFactualDevelopment: 'Suku bunga naik 10%.' }] }, [packet]), /unsupported numeric facts: 10/);
+  assert.throws(() => validateAndHydrateMarketResearchSelection({ items: [{ ...plain, latestFactualDevelopment: 'Pembaruan pukul 11:45 WIB dicatat.' }] }, [packet]), /unsupported numeric facts: 11, 45/);
+  assert.throws(() => validateAndHydrateMarketResearchSelection({ items: [{ ...plain, mainEvent: 'Pada 15 September 2026 data resmi memengaruhi harga emas.' }] }, [packet]), /unsupported numeric facts: 15/);
+  assert.throws(() => validateAndHydrateMarketResearchSelection({ items: [{ ...plain, marketRelevance: 'Harga acuan 9 disebut tanpa tanggal.' }] }, [packet]), /unsupported numeric facts: 9/);
+});
+
 test('an honest zero-selection result is accepted, not treated as a format error', () => {
   // The evidence gate correctly rejecting every candidate (all speculative /
   // low-importance) must hydrate to an empty, valid report — not throw.
@@ -248,7 +328,11 @@ test('prompt treats brief and publisher text as untrusted data and requires exac
   assert.match(prompts.systemPrompt, /candidateId/);
   assert.match(prompts.systemPrompt, /up to 10/i);
   assert.match(prompts.systemPrompt, /eventKey/);
+  assert.match(prompts.systemPrompt, /do not invent prices/i);
+  assert.match(prompts.systemPrompt, /evidence or title/i);
+  assert.match(prompts.systemPrompt, /publishedAtWIB \/ updatedAtWIB/);
   assert.match(prompts.userPrompt, /candidate-a/);
+  assert.match(route, /publication\/update timestamps/);
 });
 
 test('Market Research is admin-only, gateway-routed, persisted, downloadable, and additively migrated', async () => {

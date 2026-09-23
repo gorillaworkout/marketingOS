@@ -67,7 +67,7 @@ export async function POST(request: NextRequest) {
             if (attempt === 3) throw new Error(`Market research failed the evidence gate after 3 attempts: ${attemptError instanceof Error ? attemptError.message : 'invalid output'}`);
             const feedback = attemptError instanceof Error ? attemptError.message : 'The prior selection was invalid.';
             controller.enqueue(encoder.encode(sseEvent({ step: 'selection', progress: 38 + attempt * 18, message: `Repairing evidence-bound selection (attempt ${attempt + 1}/3)…` })));
-            attemptPrompt = `${userPrompt}\n\nDETERMINISTIC EVIDENCE-GATE FEEDBACK:\n${feedback}\n\nPRIOR JSON TO REVISE:\n${generated?.content || '{}'}\n\nCorrect every issue using only exact candidate IDs and evidence. Return only the required JSON.`;
+            attemptPrompt = `${userPrompt}\n\nDETERMINISTIC EVIDENCE-GATE FEEDBACK:\n${feedback}\n\nPRIOR JSON TO REVISE:\n${generated?.content || '{}'}\n\nCorrect every issue using only exact candidate IDs and numbers present in that candidate's evidence, title, or publication/update timestamps. Return only the required JSON.`;
           }
         }
         if (!generated || !report) throw new Error('Market research ended without a valid report.');
