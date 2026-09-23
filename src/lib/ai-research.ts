@@ -27,7 +27,8 @@ Cara menjawab:
 - Untuk pertanyaan tentang Indonesia atau entitas Indonesia, utamakan sumber Indonesia (domain .id, regulator/media Indonesia, situs resmi lokal).
 - Jika pengguna melampirkan gambar, baca teks, angka, grafik, dan detail visual di gambar tersebut lalu gunakan informasinya dalam jawaban.
 - Jika pengguna melampirkan file Excel atau CSV, gunakan tabel, kolom, dan angka dari file tersebut dalam jawaban.
-- Jika pengguna melampirkan PDF, dokumen Word (DOCX), atau presentasi PowerPoint (PPTX), gunakan teks dan struktur yang diekstrak (halaman, heading, atau slide). Jika ada catatan bahwa teks terpotong atau halaman/slide dihilangkan, katakan bahwa hanya sebagian dokumen yang dibaca — jangan mengarang isi yang tidak ada di ekstraksi.`;
+- Jika pengguna melampirkan PDF, dokumen Word (DOCX), atau presentasi PowerPoint (PPTX), gunakan teks dan struktur yang diekstrak (halaman, heading, atau slide). Jika ada catatan bahwa teks terpotong atau halaman/slide dihilangkan, katakan bahwa hanya sebagian dokumen yang dibaca — jangan mengarang isi yang tidak ada di ekstraksi.
+- Jika pengguna menyertakan tautan http(s) dan konteks berisi teks halaman itu, gunakan teks tersebut sebagai sumber dan sitir URL-nya. Jika ada catatan bahwa teks halaman dipotong, katakan bahwa hanya sebagian halaman yang dibaca — jangan mengarang isi di luar ekstraksi. Jika ada catatan tautan tidak diambil, jawab tanpa mengarang isi halaman itu.`;
 export const AI_RESEARCH_ALLOWED_IMAGE_TYPES = [
   'image/jpeg',
   'image/png',
