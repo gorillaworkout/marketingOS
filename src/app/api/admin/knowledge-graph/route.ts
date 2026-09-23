@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { queryAll, queryOne } from '@/lib/database';
 import { requireAdmin } from '@/lib/auth';
+import { parseStoredSourceUrls } from '@/lib/knowledge-pin';
 
 type CountRow = { count: number | string };
 type LearningWindow = {
@@ -27,7 +28,8 @@ export async function GET(request: NextRequest) {
       SELECT ke.id, ke.user_id, u.username, u.name AS user_name,
              COALESCE(d.name, 'Admin / Unassigned') AS department,
              ke.task_type, ke.brief, ke.style_cluster, ke.platform,
-             ke.audience, ke.quality_score, ke.created_at
+             ke.audience, ke.quality_score, ke.created_at, ke.source_urls,
+             CASE WHEN ke.task_type = 'ai-research' THEN LEFT(ke.selected_output, 2000) ELSE NULL END AS fact_text
       FROM knowledge_entries ke
       JOIN users u ON u.id = ke.user_id
       LEFT JOIN departments d ON d.id = u.department_id
@@ -91,6 +93,8 @@ export async function GET(request: NextRequest) {
     platform: entry.platform ? String(entry.platform) : null,
     audience: entry.audience ? String(entry.audience) : null,
     qualityScore: asNumber(entry.quality_score as number | string | null),
+    sourceUrls: parseStoredSourceUrls(entry.source_urls),
+    fact: entry.fact_text ? String(entry.fact_text) : null,
     department: String(entry.department || 'Admin / Unassigned'),
     username: String(entry.username || entry.user_name || 'Unknown'),
     createdAt: String(entry.created_at),

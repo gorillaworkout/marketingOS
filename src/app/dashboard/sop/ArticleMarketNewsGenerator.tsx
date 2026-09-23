@@ -16,6 +16,7 @@ import {
   exampleCompetitorHeadings,
   examplePaaText,
 } from '@/lib/article-market-news-example';
+import { AI_RESEARCH_HANDOFF_QUERY, AI_RESEARCH_HANDOFF_VALUE, readAiResearchHandoff } from '@/lib/ai-research-handoff';
 
 interface SourceForm {
   outlet: string;
@@ -84,6 +85,7 @@ export default function ArticleMarketNewsGenerator() {
   const [recent, setRecent] = useState<ArticleMarketNewsHistoryTask[]>([]);
   const [recentError, setRecentError] = useState('');
   const [copiedSample, setCopiedSample] = useState<'competitors' | 'paa' | ''>('');
+  const [researchHandoff, setResearchHandoff] = useState(false);
 
   const fetchRecent = useCallback(async () => {
     try {
@@ -101,6 +103,18 @@ export default function ArticleMarketNewsGenerator() {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- standard data-fetch-on-mount pattern used across all dashboard pages
     void fetchRecent();
   }, [fetchRecent]);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get(AI_RESEARCH_HANDOFF_QUERY) !== AI_RESEARCH_HANDOFF_VALUE) return;
+    const handoff = readAiResearchHandoff('article-market-news');
+    if (!handoff?.keyword || !handoff.angle) return;
+    // Prefill only. Do not call generateArticle.
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- read a same-tab handoff once on mount
+    setKeyword(handoff.keyword);
+    setAngle(handoff.angle);
+    setResearchHandoff(true);
+  }, []);
 
   const restoreHistory = (task: ArticleMarketNewsHistoryTask) => {
     try {
@@ -252,6 +266,11 @@ export default function ArticleMarketNewsGenerator() {
           <Button size="sm" onClick={fillExample}>Isi contoh</Button>
         </div>
       } />
+      {researchHandoff && (
+        <p role="status" data-testid="article-research-handoff" className="mt-4 rounded-xl border border-indigo-400/30 bg-indigo-500/10 px-3 py-2 text-xs leading-5 text-indigo-100">
+          Diisi dari Dupoin AI Research. Keyword dan angle terisi dari ringkasan. Belum dipublikasikan — lengkapi struktur kompetitor dan PAA sebelum generate.
+        </p>
+      )}
 
       <section aria-labelledby="article-input-examples" className="mt-5 rounded-[var(--mos-radius-panel)] border border-cyan-500/20 bg-cyan-950/20 p-4 text-sm text-[var(--mos-text-secondary)]">
         <h3 id="article-input-examples" className="font-semibold text-cyan-200">Lihat contoh input</h3>

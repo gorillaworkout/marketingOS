@@ -275,7 +275,7 @@ export default function AdminAiResearchPage() {
                       {message.files && message.files.length > 0 && (
                         <div className={`mb-2 flex flex-wrap gap-2 ${message.role === 'user' ? 'justify-end' : ''}`}>
                           {message.files.map((file, fileIndex) => (
-                            <AiResearchFileChip key={`${file.name || 'file'}-${fileIndex}`} name={file.name || `Spreadsheet ${fileIndex + 1}`} />
+                            <AiResearchFileChip key={`${file.name || 'file'}-${fileIndex}`} name={file.name || `File ${fileIndex + 1}`} />
                           ))}
                         </div>
                       )}

@@ -105,7 +105,7 @@ test('assistant markdown contract renders bold, lists, links, and code without r
   assert.match(read('src/components/AiResearchMarkdown.tsx'), /data-markdown="assistant"/);
 });
 
-test('accepts CSV and XLSX attachments, extracts tables, and includes them in the chat request', () => {
+test('accepts CSV and XLSX attachments, extracts tables, and includes them in the chat request', async () => {
   const csv = csvDataUrl('pair,bid,ask\nXAUUSD,2650.1,2650.4\n');
   assert.deepEqual(parseCsvRows('pair;bid\nXAUUSD;2650'), [['pair', 'bid'], ['XAUUSD', '2650']]);
   assert.match(rowsToMarkdownTable([['pair', 'bid'], ['XAUUSD', '2650']]), /XAUUSD/);
@@ -115,7 +115,7 @@ test('accepts CSV and XLSX attachments, extracts tables, and includes them in th
     messages: [{ role: 'user', content: 'Ringkas file ini', files: [csv] }],
   });
   assert.equal(parsedCsv.messages[0].files?.[0].name, 'rates.csv');
-  const hydratedCsv = hydrateMessageFiles(parsedCsv.messages);
+  const hydratedCsv = await hydrateMessageFiles(parsedCsv.messages);
   assert.match(hydratedCsv[0].files?.[0].extractedText || '', /XAUUSD/);
   assert.equal(hydratedCsv[0].files?.[0].dataUrl, undefined);
 
@@ -124,7 +124,7 @@ test('accepts CSV and XLSX attachments, extracts tables, and includes them in th
     messages: [{ role: 'user', content: '', files: [xlsx] }],
   });
   assert.equal(parsedXlsx.messages[0].content, AI_RESEARCH_FILE_ONLY_PROMPT);
-  const hydratedXlsx = hydrateMessageFiles(parsedXlsx.messages);
+  const hydratedXlsx = await hydrateMessageFiles(parsedXlsx.messages);
   assert.match(hydratedXlsx[0].files?.[0].extractedText || '', /USOIL/);
 
   const xlsWorkbook = XLSX.utils.book_new();
@@ -141,7 +141,7 @@ test('accepts CSV and XLSX attachments, extracts tables, and includes them in th
       }],
     }],
   });
-  assert.match(hydrateMessageFiles(parsedXls.messages)[0].files?.[0].extractedText || '', /GBPUSD/);
+  assert.match((await hydrateMessageFiles(parsedXls.messages))[0].files?.[0].extractedText || '', /GBPUSD/);
   assert.match(extractSpreadsheetText(
     Buffer.from(xlsx.dataUrl.slice(xlsx.dataUrl.indexOf(',') + 1), 'base64'),
     xlsx.mimeType,
@@ -162,7 +162,7 @@ test('accepts CSV and XLSX attachments, extracts tables, and includes them in th
   assert.match(stored[0].files?.[0].extractedText || '', /XAUUSD/);
 
   assert.throws(
-    () => validateFileAttachments([{ mimeType: 'application/pdf', dataUrl: 'data:application/pdf;base64,AAAA', name: 'note.pdf' }]),
+    () => validateFileAttachments([{ mimeType: 'application/msword', dataUrl: 'data:application/msword;base64,AAAA', name: 'note.doc' }]),
     /Unsupported file type/i,
   );
   assert.throws(
