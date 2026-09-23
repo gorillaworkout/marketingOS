@@ -334,7 +334,7 @@ test('AI Research chat route grounds answers, raises the token budget, and updat
   assert.match(route, /buildAiResearchChatMessages/);
   assert.match(route, /AI_RESEARCH_SYSTEM_PROMPT/);
   assert.match(route, /AI_RESEARCH_MAX_OUTPUT_TOKENS/);
-  assert.match(route, /export const maxDuration = 60/);
+  assert.match(route, /export const maxDuration = 120/);
   assert.match(route, /type: 'research'/);
   assert.match(route, /sourceCount/);
   assert.match(route, /buildResearchSsePayload/);

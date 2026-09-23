@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "db:migrate": "tsx scripts/migrate.ts",
+    "research:watches": "tsx scripts/run-ai-research-watches.ts",
     "db:import-sqlite": "tsx scripts/migrate-sqlite-to-postgres.ts"
   },
   "dependencies": {
@@ -16,6 +17,8 @@
     "docx": "^9.7.1",
     "dotenv": "^17.4.2",
     "jsonwebtoken": "^9.0.3",
+    "jszip": "^3.10.2",
+    "mammoth": "^1.12.3",
     "next": "16.2.12",
     "openai": "^6.46.0",
     "pg": "^8.16.3",
@@ -23,6 +26,7 @@
     "react": "19.2.4",
     "react-dom": "19.2.4",
     "sharp": "^0.34.5",
+    "unpdf": "^1.8.1",
     "uuid": "^14.0.1",
     "xlsx": "^0.18.5"
   },

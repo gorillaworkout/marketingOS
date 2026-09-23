@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Button, EmptyState, LoadingState, MetricCard, PageHeader, PageStack, Panel, Select, StatusBadge, Toolbar } from '@/components/ui/dashboard';
 import KnowledgeGraphCanvas from './KnowledgeGraphCanvas';
 
-type GraphNode = { id: string; brief: string; taskType: string; styleCluster: string; platform: string | null; audience: string | null; qualityScore: number; department: string; username: string; createdAt: string };
+type GraphNode = { id: string; brief: string; taskType: string; styleCluster: string; platform: string | null; audience: string | null; qualityScore: number; department: string; username: string; createdAt: string; sourceUrls?: string[]; fact?: string | null };
 type GraphEdge = { source: string; target: string; type: string; weight: number; sourceType: 'stored' | 'derived' };
 type WindowMetrics = { generated: number; approved: number; rated: number; approvalRate: number; feedbackCoverage: number; averageRating: number };
 type GraphData = {
@@ -33,6 +33,7 @@ export default function AdminKnowledgeGraphPage() {
   const [department, setDepartment] = useState('all');
   const [taskType, setTaskType] = useState('all');
   const [selected, setSelected] = useState<GraphNode | null>(null);
+  const [focusId, setFocusId] = useState('');
 
   const load = async () => {
     setLoading(true);
@@ -52,6 +53,22 @@ export default function AdminKnowledgeGraphPage() {
     const timer = window.setTimeout(() => { void load(); }, 0);
     return () => window.clearTimeout(timer);
   }, []);
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setFocusId(new URLSearchParams(window.location.search).get('focus') || '');
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, []);
+  useEffect(() => {
+    if (!data || !focusId) return;
+    const node = data.nodes.find(item => item.id === focusId);
+    if (!node) return;
+    const timer = window.setTimeout(() => {
+      setSelected(node);
+      setTaskType(node.taskType);
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [data, focusId]);
 
   const filteredNodes = useMemo(() => (data?.nodes || []).filter(node => (department === 'all' || node.department === department) && (taskType === 'all' || node.taskType === taskType)), [data, department, taskType]);
   const ids = useMemo(() => new Set(filteredNodes.map(node => node.id)), [filteredNodes]);
@@ -121,7 +138,15 @@ export default function AdminKnowledgeGraphPage() {
             <div className="border-b border-[var(--mos-border-subtle)] p-5">
               <p className="text-[10px] font-medium uppercase tracking-[.12em] text-[var(--mos-text-faint)]">Selected record</p>
               {selected ? <div className="mt-5 space-y-4">
-                <div><h3 className="line-clamp-3 text-sm font-medium leading-6 text-[var(--mos-text)]">{selected.brief}</h3><p className="mt-2 text-xs text-[var(--mos-text-faint)]">Recorded {new Date(selected.createdAt).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })}</p></div>
+                <div>
+                  <h3 className="line-clamp-3 text-sm font-medium leading-6 text-[var(--mos-text)]">{selected.brief}</h3>
+                  <p className="mt-2 text-xs text-[var(--mos-text-faint)]">Recorded {new Date(selected.createdAt).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })}</p>
+                  {selected.fact && selected.fact !== selected.brief && <p className="mt-3 whitespace-pre-wrap text-xs leading-5 text-[var(--mos-text-secondary)]">{selected.fact}</p>}
+                  {!!selected.sourceUrls?.length && <div className="mt-3 space-y-1">
+                    <p className="text-[10px] text-[var(--mos-text-faint)]">Sources</p>
+                    {selected.sourceUrls.map(url => <a key={url} href={url} target="_blank" rel="noreferrer" className="block truncate text-[11px] text-indigo-300 underline-offset-2 hover:underline">{url}</a>)}
+                  </div>}
+                </div>
                 <dl className="grid grid-cols-2 gap-4 border-t border-[var(--mos-border-subtle)] pt-4">
                   <Meta label="Department" value={selected.department} /><Meta label="Contributor" value={selected.username} /><Meta label="Type" value={selected.taskType} /><Meta label="Style" value={selected.styleCluster} /><Meta label="Platform" value={selected.platform || 'Not set'} /><Meta label="Quality" value={selected.qualityScore.toFixed(2)} />
                 </dl>
