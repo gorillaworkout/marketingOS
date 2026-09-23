@@ -6,13 +6,13 @@ import {
   AI_RESEARCH_MAX_OUTPUT_TOKENS,
   AI_RESEARCH_SYSTEM_PROMPT,
   buildStoredAssistantMessage,
-  parseChatRequest,
   parseStoredMessages,
   type AiResearchChatMessage,
   type AiResearchMode,
   type GatewayMessage,
 } from '@/lib/ai-research';
 import { hydrateMessageFiles } from '@/lib/ai-research-files';
+import { parseAiResearchChatBody as parseChatRequest } from '@/lib/ai-research-request';
 import {
   AI_RESEARCH_DEEP_PLAN_MAX_TOKENS,
   AI_RESEARCH_DEEP_PLAN_PROMPT,
@@ -37,6 +37,17 @@ import {
 import { parseGatewayCompletion } from '@/lib/gateway-response';
 import { fetchAiResearchContextUrls } from '@/lib/ai-research-url-fetch';
 import {
+  buildCompareSearchQuery,
+  buildCompareSystemAddendum,
+  mergeCompareResearch,
+} from '@/lib/ai-research-compare';
+import {
+  AI_RESEARCH_INBOX_PROJECT,
+  appendProjectSummary,
+  buildProjectMemoryBlock,
+  selectProjectMemoryTurns,
+} from '@/lib/ai-research-projects';
+import {
   applyContextUrlsToIncoming,
   isUrlOnlyQuery,
   mergeContextUrlSources,
@@ -58,7 +69,7 @@ import {
   type GatewayTokenUsage,
 } from '@/lib/token-usage';
 import { v4 as uuidv4 } from 'uuid';
-import { execute, queryOne } from '@/lib/database';
+import { execute, queryAll, queryOne } from '@/lib/database';
 
 const MAX_HISTORY = 20;
 
@@ -185,6 +196,7 @@ async function persistConversation(
   messages: AiResearchChatMessage[],
   model: string,
   exists: boolean,
+  projectId: string | null,
 ) {
   const payload = JSON.stringify(messages);
   if (exists) {
@@ -195,9 +207,58 @@ async function persistConversation(
     if (updated > 0) return;
   }
   await execute(
-    'INSERT INTO ai_research_conversations (id, user_id, messages, model, created_at, updated_at) VALUES (?, ?, ?, ?, NOW(), NOW())',
-    [id, userId, payload, model],
+    'INSERT INTO ai_research_conversations (id, user_id, messages, model, project_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, NOW(), NOW())',
+    [id, userId, payload, model, projectId],
   );
+}
+
+async function loadProjectMemory(userId: string, projectId: string, excludeConversationId: string): Promise<string> {
+  const project = await queryOne<{ name: string; notes: string | null; summary: string | null }>(
+    'SELECT name, notes, summary FROM ai_research_projects WHERE id = ? AND user_id = ?',
+    [projectId, userId],
+  );
+  if (!project) return '';
+  const others = await queryAll<{ messages: unknown }>(
+    `SELECT messages FROM ai_research_conversations
+      WHERE user_id = ? AND project_id = ? AND id <> ?
+      ORDER BY updated_at DESC
+      LIMIT 4`,
+    [userId, projectId, excludeConversationId],
+  );
+  return buildProjectMemoryBlock({
+    name: project.name,
+    notes: project.notes || '',
+    summary: project.summary || '',
+    recentTurns: selectProjectMemoryTurns(others.map(row => parseStoredMessages(row.messages))),
+  });
+}
+
+async function rememberProjectTurn(
+  userId: string,
+  projectId: string | null,
+  userText: string,
+  assistantText: string,
+) {
+  if (!projectId) return;
+  const row = await queryOne<{ summary: string | null }>(
+    'SELECT summary FROM ai_research_projects WHERE id = ? AND user_id = ?',
+    [projectId, userId],
+  );
+  if (!row) return;
+  const summary = appendProjectSummary(row.summary || '', userText, assistantText);
+  await execute(
+    'UPDATE ai_research_projects SET summary = ?, updated_at = NOW() WHERE id = ? AND user_id = ?',
+    [summary, projectId, userId],
+  );
+}
+
+async function gatherResearchSide(query: string): Promise<{ research: ResearchContext | null; failed: boolean }> {
+  try {
+    return { research: await gatherAiResearchContext(query), failed: false };
+  } catch (error) {
+    console.error('[ai-research] gatherAiResearchContext failed:', error);
+    return { research: null, failed: true };
+  }
 }
 
 function usageCost(model: string, inputTokens: number, outputTokens: number): number {
@@ -240,7 +301,14 @@ export async function POST(request: NextRequest) {
     return jsonError(auth.error, auth.status);
   }
 
-  let parsed: { messages: AiResearchChatMessage[]; conversationId?: string; pinnedSourceUrls: string[]; mode: AiResearchMode };
+  let parsed: {
+    messages: AiResearchChatMessage[];
+    conversationId?: string;
+    projectId?: string;
+    pinnedSourceUrls: string[];
+    mode: AiResearchMode;
+    compare?: { a: string; b: string };
+  };
   try {
     parsed = parseChatRequest(await request.json());
     parsed.messages = await hydrateMessageFiles(parsed.messages);
@@ -251,7 +319,7 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const { messages, conversationId, mode } = parsed;
+  const { messages, conversationId, mode, compare } = parsed;
   const pinnedSourceUrls = parsePinnedSourceUrls(parsed.pinnedSourceUrls);
   let model: string;
   try {
@@ -261,21 +329,40 @@ export async function POST(request: NextRequest) {
   }
 
   let dbMessages: AiResearchChatMessage[] = [];
-  let history: { messages: unknown } | undefined;
+  let history: { messages: unknown; project_id: string | null } | undefined;
   if (conversationId) {
-    history = await queryOne<{ messages: unknown }>(
-      'SELECT messages FROM ai_research_conversations WHERE id = ? AND user_id = ?',
+    history = await queryOne<{ messages: unknown; project_id: string | null }>(
+      'SELECT messages, project_id FROM ai_research_conversations WHERE id = ? AND user_id = ?',
       [conversationId, auth.id],
     );
     if (history) dbMessages = await hydrateMessageFiles(parseStoredMessages(history.messages));
   }
 
   const convId = conversationId || uuidv4();
+  let activeProjectId: string | null = history?.project_id ?? null;
+  if (!history && parsed.projectId) {
+    const owned = await queryOne<{ id: string }>(
+      'SELECT id FROM ai_research_projects WHERE id = ? AND user_id = ?',
+      [parsed.projectId, auth.id],
+    );
+    if (!owned) return jsonError('Proyek tidak ditemukan', 404);
+    activeProjectId = owned.id;
+  }
+
+  let projectMemoryBlock = '';
+  if (activeProjectId) {
+    try {
+      projectMemoryBlock = await loadProjectMemory(auth.id, activeProjectId, convId);
+    } catch (error) {
+      return jsonError(error instanceof Error ? error.message : 'Failed to load project memory', 500);
+    }
+  }
+
   const pendingMessages = [...dbMessages, ...messages];
   const latestUser = messages[messages.length - 1];
 
   try {
-    await persistConversation(convId, auth.id, pendingMessages, model, Boolean(history));
+    await persistConversation(convId, auth.id, pendingMessages, model, Boolean(history), activeProjectId);
   } catch (error) {
     return jsonError(error instanceof Error ? error.message : 'Failed to save conversation', 500);
   }
@@ -294,11 +381,12 @@ export async function POST(request: NextRequest) {
         controller.close();
       };
       try {
-        emit({ type: 'start', conversationId: convId, model, mode });
+        const effectiveMode = compare ? 'fast' : mode;
+        emit({ type: 'start', conversationId: convId, model, mode: effectiveMode });
         const query = latestUser?.content || '';
         const urlOnly = isUrlOnlyQuery(query);
 
-        if (mode === 'deep') {
+        if (mode === 'deep' && !compare) {
           emit({ type: 'status', phase: 'plan', message: AI_RESEARCH_DEEP_STATUS.plan });
           const skipped = urlOnly ? 'url-only' : !shouldResearchQuery(query) ? 'not-needed' : null;
           let plan = fallbackDeepResearchPlan(query);
@@ -389,7 +477,12 @@ export async function POST(request: NextRequest) {
           emit({ type: 'status', phase: 'synthesize', message: AI_RESEARCH_DEEP_STATUS.synthesize });
 
           const apiMessages = buildAiResearchChatMessages({
-            systemPrompt: `${AI_RESEARCH_SYSTEM_PROMPT}\n\n${AI_RESEARCH_DEEP_SYSTEM_ADDENDUM}\n\n${formatDeepResearchPlanNote(plan, gatherResult)}`,
+            systemPrompt: [
+              AI_RESEARCH_SYSTEM_PROMPT,
+              AI_RESEARCH_DEEP_SYSTEM_ADDENDUM,
+              formatDeepResearchPlanNote(plan, gatherResult),
+              projectMemoryBlock,
+            ].filter(Boolean).join('\n\n'),
             history: dbMessages,
             incoming: applyContextUrlsToIncoming(messages, urlContext.failures),
             maxHistory: MAX_HISTORY,
@@ -424,7 +517,12 @@ export async function POST(request: NextRequest) {
             mode: 'deep',
             sources: researchEvent.sources,
           })];
-          await persistConversation(convId, auth.id, allMessages, model, true);
+          await persistConversation(convId, auth.id, allMessages, model, true, activeProjectId);
+          try {
+            await rememberProjectTurn(auth.id, activeProjectId, query, fullContent);
+          } catch (error) {
+            console.error('[ai-research] project summary update failed:', error);
+          }
           await logAiResearchUsage({
             userId: auth.id,
             model,
@@ -438,13 +536,22 @@ export async function POST(request: NextRequest) {
         }
 
         const gatherTask = (async (): Promise<{ research: ResearchContext | null; failed: boolean }> => {
-          if (urlOnly) return { research: null, failed: false };
-          try {
-            return { research: await gatherAiResearchContext(query), failed: false };
-          } catch (error) {
-            console.error('[ai-research] gatherAiResearchContext failed:', error);
-            return { research: null, failed: true };
+          if (compare) {
+            const [sideA, sideB] = await Promise.all([
+              gatherResearchSide(buildCompareSearchQuery(compare.a)),
+              gatherResearchSide(buildCompareSearchQuery(compare.b)),
+            ]);
+            const research = mergeCompareResearch({
+              aLabel: compare.a,
+              bLabel: compare.b,
+              aResearch: sideA.research,
+              bResearch: sideB.research,
+            });
+            const failed = sideA.failed && sideB.failed && research.sources.length === 0;
+            return { research, failed };
           }
+          if (urlOnly) return { research: null, failed: false };
+          return gatherResearchSide(query);
         })();
         const [gatherOutcome, urlContext] = await Promise.all([
           gatherTask,
@@ -477,7 +584,11 @@ export async function POST(request: NextRequest) {
         const modelResearch = mergeContextUrlSources(pinnedResearch, urlContext.sources, query);
 
         const apiMessages = buildAiResearchChatMessages({
-          systemPrompt: AI_RESEARCH_SYSTEM_PROMPT,
+          systemPrompt: [
+            AI_RESEARCH_SYSTEM_PROMPT,
+            projectMemoryBlock,
+            compare ? buildCompareSystemAddendum(compare) : '',
+          ].filter(Boolean).join('\n\n'),
           history: dbMessages,
           incoming: applyContextUrlsToIncoming(messages, urlContext.failures),
           maxHistory: MAX_HISTORY,
@@ -500,7 +611,12 @@ export async function POST(request: NextRequest) {
           mode: 'fast',
           sources: researchEvent.sources,
         })];
-        await persistConversation(convId, auth.id, allMessages, model, true);
+        await persistConversation(convId, auth.id, allMessages, model, true, activeProjectId);
+        try {
+          await rememberProjectTurn(auth.id, activeProjectId, query, streamed.content);
+        } catch (error) {
+          console.error('[ai-research] project summary update failed:', error);
+        }
         await logAiResearchUsage({
           userId: auth.id,
           model,
@@ -536,36 +652,55 @@ export async function GET(request: NextRequest) {
   const conversationId = searchParams.get('id');
 
   if (!conversationId) {
-    const conversations = await import('@/lib/database').then(m =>
-      m.queryAll<{ id: string; model: string; updated_at: string; title: string | null; message_count: number }>(
-        `SELECT id, model, updated_at,
-            COALESCE((
-              SELECT elem->>'content'
-              FROM jsonb_array_elements(messages) AS elem
-              WHERE elem->>'role' = 'user'
-              LIMIT 1
-            ), 'New conversation') AS title,
-            COALESCE(jsonb_array_length(messages), 0) AS message_count
-          FROM ai_research_conversations
-          WHERE user_id = ?
-          ORDER BY updated_at DESC
-          LIMIT 50`,
-        [auth.id],
-      ),
+    const projectParam = (searchParams.get('project') || AI_RESEARCH_INBOX_PROJECT).trim();
+    const params: unknown[] = [auth.id];
+    let projectClause = 'AND project_id IS NULL';
+    if (projectParam !== AI_RESEARCH_INBOX_PROJECT) {
+      const owned = await queryOne<{ id: string }>(
+        'SELECT id FROM ai_research_projects WHERE id = ? AND user_id = ?',
+        [projectParam, auth.id],
+      );
+      if (!owned) return jsonError('Proyek tidak ditemukan', 404);
+      projectClause = 'AND project_id = ?';
+      params.push(owned.id);
+    }
+    const conversations = await queryAll<{
+      id: string;
+      model: string;
+      updated_at: string;
+      project_id: string | null;
+      title: string | null;
+      message_count: number;
+    }>(
+      `SELECT id, model, updated_at, project_id,
+          COALESCE((
+            SELECT elem->>'content'
+            FROM jsonb_array_elements(messages) AS elem
+            WHERE elem->>'role' = 'user'
+            LIMIT 1
+          ), 'New conversation') AS title,
+          COALESCE(jsonb_array_length(messages), 0) AS message_count
+        FROM ai_research_conversations
+        WHERE user_id = ?
+        ${projectClause}
+        ORDER BY updated_at DESC
+        LIMIT 50`,
+      params,
     );
     return new Response(JSON.stringify({
       conversations: conversations.map(c => ({
         id: c.id,
         title: (c.title || 'New conversation').slice(0, 80),
         model: c.model,
+        projectId: c.project_id,
         updatedAt: c.updated_at,
         messageCount: Number(c.message_count) || 0,
       })),
     }));
   }
 
-  const row = await queryOne<{ id: string; messages: unknown; model: string }>(
-    'SELECT id, messages, model FROM ai_research_conversations WHERE id = ? AND user_id = ?',
+  const row = await queryOne<{ id: string; messages: unknown; model: string; project_id: string | null }>(
+    'SELECT id, messages, model, project_id FROM ai_research_conversations WHERE id = ? AND user_id = ?',
     [conversationId, auth.id],
   );
 
@@ -577,6 +712,7 @@ export async function GET(request: NextRequest) {
     id: row.id,
     messages: parseStoredMessages(row.messages),
     model: row.model,
+    projectId: row.project_id,
   }));
 }
 

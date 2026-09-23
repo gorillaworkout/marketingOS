@@ -33,7 +33,9 @@ import {
   type InspectorResearchSource,
   type ResearchGatherStatus,
 } from '@/lib/ai-research-inspector';
+import { buildCompareUserPrompt } from '@/lib/ai-research-compare';
 import { suggestAiResearchFollowUps } from '@/lib/ai-research-followups';
+import { conversationBelongsToProject } from '@/lib/ai-research-projects';
 import {
   AI_RESEARCH_MAX_CONTEXT_URLS,
   contextUrlBlockReason,
@@ -66,8 +68,16 @@ interface Conversation {
   id: string;
   title: string;
   model: string;
+  projectId?: string | null;
   updatedAt: string;
   messageCount: number;
+}
+
+interface ResearchProject {
+  id: string;
+  name: string;
+  notes: string;
+  updatedAt: string;
 }
 
 interface ModelOption { id: string; name: string; tier: string; provider: string }
@@ -220,6 +230,18 @@ async function fileToChatImage(file: File): Promise<ChatImage> {
 
 export default function AIResearchPage() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [projects, setProjects] = useState<ResearchProject[]>([]);
+  const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
+  const [projectDraftOpen, setProjectDraftOpen] = useState(false);
+  const [projectDraft, setProjectDraft] = useState('');
+  const [renameOpen, setRenameOpen] = useState(false);
+  const [renameDraft, setRenameDraft] = useState('');
+  const [notesDraft, setNotesDraft] = useState('');
+  const [deleteProjectArmed, setDeleteProjectArmed] = useState(false);
+  const [projectError, setProjectError] = useState('');
+  const [compareMode, setCompareMode] = useState(false);
+  const [compareA, setCompareA] = useState('');
+  const [compareB, setCompareB] = useState('');
   const [activeConvoId, setActiveConvoId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
@@ -321,13 +343,24 @@ export default function AIResearchPage() {
     } finally { setSavingModel(false); }
   };
 
-  const loadConversations = useCallback(async () => {
+  const loadProjects = useCallback(async () => {
     try {
-      const res = await fetch('/api/ai-research/chat');
-      if (res.ok) { const data = await res.json(); setConversations(data.conversations || []); }
+      const res = await fetch('/api/ai-research/projects');
+      if (!res.ok) return;
+      const data = await res.json();
+      setProjects(Array.isArray(data.projects) ? data.projects : []);
     } catch {}
   }, []);
 
+  const loadConversations = useCallback(async () => {
+    try {
+      const scope = activeProjectId ? encodeURIComponent(activeProjectId) : 'inbox';
+      const res = await fetch(`/api/ai-research/chat?project=${scope}`);
+      if (res.ok) { const data = await res.json(); setConversations(data.conversations || []); }
+    } catch {}
+  }, [activeProjectId]);
+
+  useEffect(() => { loadProjects(); }, [loadProjects]);
   useEffect(() => { loadConversations(); }, [loadConversations]);
 
   useEffect(() => {
@@ -556,7 +589,11 @@ export default function AIResearchPage() {
     const fromChip = typeof rawText === 'string';
     const trimmed = (fromChip ? rawText : input).trim();
     const attachments = fromChip ? [] : pendingAttachments;
-    if ((!trimmed && attachments.length === 0) || loading || sendingRef.current) return;
+    const compareRequest = !fromChip && compareMode
+      ? { a: compareA.trim(), b: compareB.trim() }
+      : null;
+    if (compareRequest && (!compareRequest.a || !compareRequest.b)) return;
+    if ((!trimmed && attachments.length === 0 && !compareRequest) || loading || sendingRef.current) return;
     sendingRef.current = true;
     setError('');
     setUrlNotices([]);
@@ -580,7 +617,9 @@ export default function AIResearchPage() {
 
     const userMsg: Message = {
       role: 'user',
-      content: trimmed || defaultPromptForAttachments(images.length, files.length),
+      content: compareRequest
+        ? buildCompareUserPrompt(compareRequest.a, compareRequest.b, trimmed)
+        : (trimmed || defaultPromptForAttachments(images.length, files.length)),
       images: images.length ? images : undefined,
       files: files.length ? files : undefined,
     };
@@ -591,7 +630,7 @@ export default function AIResearchPage() {
       setLinkDraft('');
       setLinkDraftOpen(false);
     }
-    const sentMode = researchMode;
+    const sentMode = compareRequest ? 'fast' : researchMode;
     sourcesRef.current = [];
     setRunMode(sentMode);
     setDeepStatus(sentMode === 'deep' ? AI_RESEARCH_DEEP_STATUS.plan : '');
@@ -611,6 +650,8 @@ export default function AIResearchPage() {
           conversationId: activeConvoId,
           pinnedSourceUrls,
           mode: sentMode,
+          projectId: activeProjectId,
+          ...(compareRequest ? { compare: compareRequest } : {}),
         }),
       });
       if (!res.ok) {
@@ -756,6 +797,115 @@ export default function AIResearchPage() {
     catch { setError('Failed to delete conversation'); }
   };
 
+  const resetThreadView = () => {
+    setActiveConvoId(null);
+    setMessages([]);
+    setStreaming('');
+    setResearchSourceCount(null);
+    setInspectorSources([]);
+    setGroundingStatus(null);
+    setPinnedSourceUrls([]);
+    setResearchNotice(null);
+    setUrlNotices([]);
+    setDeepStatus('');
+    setError('');
+    setModel('');
+  };
+
+  const selectProject = (id: string | null) => {
+    if (id === activeProjectId) return;
+    const project = projects.find(item => item.id === id);
+    setActiveProjectId(id);
+    setNotesDraft(project?.notes || '');
+    setRenameDraft(project?.name || '');
+    setProjectError('');
+    setRenameOpen(false);
+    setDeleteProjectArmed(false);
+    setConversations([]);
+    resetThreadView();
+    if (window.innerWidth < 768) setSidebarOpen(false);
+  };
+
+  const createProject = async () => {
+    const name = projectDraft.trim();
+    if (!name) {
+      setProjectError('Nama proyek wajib diisi.');
+      return;
+    }
+    setProjectError('');
+    try {
+      const res = await fetch('/api/ai-research/projects', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(typeof data.error === 'string' ? data.error : 'Gagal membuat proyek');
+      setProjectDraft('');
+      setProjectDraftOpen(false);
+      await loadProjects();
+      if (data.project?.id) selectProject(data.project.id);
+    } catch (e) {
+      setProjectError(e instanceof Error ? e.message : 'Gagal membuat proyek');
+    }
+  };
+
+  const renameProject = async () => {
+    if (!activeProjectId) return;
+    const name = renameDraft.trim();
+    if (!name) {
+      setProjectError('Nama proyek wajib diisi.');
+      return;
+    }
+    setProjectError('');
+    try {
+      const res = await fetch('/api/ai-research/projects', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: activeProjectId, name }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(typeof data.error === 'string' ? data.error : 'Gagal mengubah nama');
+      setRenameOpen(false);
+      await loadProjects();
+    } catch (e) {
+      setProjectError(e instanceof Error ? e.message : 'Gagal mengubah nama');
+    }
+  };
+
+  const saveProjectNotes = async () => {
+    if (!activeProjectId) return;
+    const project = projects.find(item => item.id === activeProjectId);
+    if (!project || project.notes === notesDraft) return;
+    try {
+      const res = await fetch('/api/ai-research/projects', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: activeProjectId, notes: notesDraft }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(typeof data.error === 'string' ? data.error : 'Gagal menyimpan catatan');
+      await loadProjects();
+    } catch (e) {
+      setProjectError(e instanceof Error ? e.message : 'Gagal menyimpan catatan');
+    }
+  };
+
+  const deleteProject = async () => {
+    if (!activeProjectId) return;
+    setProjectError('');
+    try {
+      const res = await fetch(`/api/ai-research/projects?id=${encodeURIComponent(activeProjectId)}`, { method: 'DELETE' });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(typeof data.error === 'string' ? data.error : 'Gagal menghapus proyek');
+      setDeleteProjectArmed(false);
+      await loadProjects();
+      selectProject(null);
+    } catch (e) {
+      setProjectError(e instanceof Error ? e.message : 'Gagal menghapus proyek');
+    }
+  };
+
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
   };
@@ -817,7 +967,15 @@ export default function AIResearchPage() {
     inputRef.current?.focus();
   };
 
-  const canSend = !loading && Boolean(input.trim() || pendingAttachments.length);
+  const canSend = !loading && (
+    compareMode
+      ? Boolean(compareA.trim() && compareB.trim())
+      : Boolean(input.trim() || pendingAttachments.length)
+  );
+  const activeProject = projects.find(item => item.id === activeProjectId) || null;
+  const visibleConversations = conversations.filter(conv =>
+    conversationBelongsToProject(conv.projectId ?? null, activeProjectId),
+  );
   const selectedModelId = currentModel || defaultModel;
   const selectedHealth = healthResults?.find(result => result.model === selectedModelId);
   const failCount = healthResults?.filter(result => result.status === 'fail').length || 0;
@@ -865,6 +1023,9 @@ export default function AIResearchPage() {
         </button>
 
         <span className="text-sm font-semibold text-[var(--mos-text)] truncate">AI Research</span>
+        <span className="hidden sm:inline max-w-[160px] truncate text-[11px] text-[var(--mos-text-muted)]">
+          {activeProject ? activeProject.name : 'Percakapan biasa'}
+        </span>
 
         <div className="ml-auto relative flex items-center gap-1.5 min-w-0">
           <select
@@ -965,17 +1126,153 @@ export default function AIResearchPage() {
       {/* Main area: sidebar + chat */}
       <div className="flex-1 flex min-h-0">
         {/* Sidebar */}
-        <div className={`${sidebarOpen ? 'w-60' : 'w-0'} transition-all duration-200 overflow-hidden border-r border-[var(--mos-border)] flex-shrink-0 bg-[var(--mos-bg)] flex flex-col`}>
-          <div className="p-3">
+        <div className={`${sidebarOpen ? 'w-72' : 'w-0'} transition-all duration-200 overflow-hidden border-r border-[var(--mos-border)] flex-shrink-0 bg-[var(--mos-bg)] flex flex-col`}>
+          <div className="p-3 space-y-2 border-b border-[var(--mos-border)]" data-testid="ai-research-project-switcher">
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-[var(--mos-text-muted)]">Proyek riset</p>
+            <button
+              type="button"
+              data-testid="ai-research-project-inbox"
+              aria-pressed={!activeProjectId}
+              onClick={() => selectProject(null)}
+              className={`w-full rounded-lg px-2.5 py-1.5 text-left text-xs transition-colors ${
+                !activeProjectId
+                  ? 'bg-indigo-600/15 text-[var(--mos-text)]'
+                  : 'text-[var(--mos-text-muted)] hover:bg-[var(--mos-hover)] hover:text-[var(--mos-text)]'
+              }`}
+            >
+              Percakapan biasa
+            </button>
+            <div className="max-h-36 space-y-1 overflow-y-auto">
+              {projects.map(project => (
+                <button
+                  key={project.id}
+                  type="button"
+                  data-testid="ai-research-project"
+                  aria-pressed={activeProjectId === project.id}
+                  onClick={() => selectProject(project.id)}
+                  className={`w-full rounded-lg px-2.5 py-1.5 text-left text-xs truncate transition-colors ${
+                    activeProjectId === project.id
+                      ? 'bg-indigo-600/15 text-[var(--mos-text)]'
+                      : 'text-[var(--mos-text-muted)] hover:bg-[var(--mos-hover)] hover:text-[var(--mos-text)]'
+                  }`}
+                >
+                  {project.name}
+                </button>
+              ))}
+            </div>
+            {projectDraftOpen ? (
+              <form
+                className="space-y-1.5"
+                onSubmit={event => {
+                  event.preventDefault();
+                  void createProject();
+                }}
+              >
+                <input
+                  value={projectDraft}
+                  onChange={event => setProjectDraft(event.target.value)}
+                  placeholder="Nama proyek, misalnya emas"
+                  aria-label="Nama proyek baru"
+                  className="w-full rounded-lg border border-[var(--mos-border)] bg-[var(--mos-raised)] px-2 py-1.5 text-xs text-[var(--mos-text)] outline-none focus:border-indigo-400/60"
+                />
+                <div className="flex gap-1.5">
+                  <button type="submit" className="flex-1 rounded-lg bg-indigo-600 px-2 py-1 text-[11px] font-medium text-white hover:bg-indigo-500">
+                    Simpan
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setProjectDraftOpen(false); setProjectDraft(''); setProjectError(''); }}
+                    className="rounded-lg border border-[var(--mos-border)] px-2 py-1 text-[11px] text-[var(--mos-text-muted)] hover:text-[var(--mos-text)]"
+                  >
+                    Batal
+                  </button>
+                </div>
+              </form>
+            ) : (
+              <button
+                type="button"
+                data-testid="ai-research-project-create"
+                onClick={() => { setProjectDraftOpen(true); setProjectError(''); }}
+                className="w-full rounded-lg border border-dashed border-[var(--mos-border)] px-2 py-1.5 text-[11px] text-[var(--mos-text-muted)] hover:text-[var(--mos-text)] hover:bg-[var(--mos-hover)]"
+              >
+                + Proyek baru
+              </button>
+            )}
+            {activeProject && (
+              <div className="space-y-1.5 rounded-lg border border-[var(--mos-border)] bg-[var(--mos-raised)] p-2">
+                {renameOpen ? (
+                  <form
+                    className="space-y-1.5"
+                    onSubmit={event => {
+                      event.preventDefault();
+                      void renameProject();
+                    }}
+                  >
+                    <input
+                      value={renameDraft}
+                      onChange={event => setRenameDraft(event.target.value)}
+                      aria-label="Ubah nama proyek"
+                      className="w-full rounded-lg border border-[var(--mos-border)] bg-[var(--mos-bg)] px-2 py-1 text-xs text-[var(--mos-text)] outline-none focus:border-indigo-400/60"
+                    />
+                    <div className="flex gap-1.5">
+                      <button type="submit" className="flex-1 rounded-lg bg-indigo-600 px-2 py-1 text-[11px] font-medium text-white">Simpan</button>
+                      <button type="button" onClick={() => setRenameOpen(false)} className="rounded-lg px-2 py-1 text-[11px] text-[var(--mos-text-muted)]">Batal</button>
+                    </div>
+                  </form>
+                ) : (
+                  <div className="flex items-center justify-between gap-1">
+                    <p className="min-w-0 truncate text-[11px] font-medium text-[var(--mos-text)]">{activeProject.name}</p>
+                    <button
+                      type="button"
+                      onClick={() => { setRenameDraft(activeProject.name); setRenameOpen(true); }}
+                      className="flex-shrink-0 text-[10px] text-[var(--mos-text-muted)] hover:text-[var(--mos-text)]"
+                    >
+                      Ubah nama
+                    </button>
+                  </div>
+                )}
+                <label className="block text-[10px] text-[var(--mos-text-muted)]">
+                  Catatan sematan
+                  <textarea
+                    value={notesDraft}
+                    onChange={event => setNotesDraft(event.target.value)}
+                    onBlur={() => { void saveProjectNotes(); }}
+                    rows={3}
+                    placeholder="Fakta atau batas yang harus diingat di proyek ini"
+                    aria-label="Catatan sematan"
+                    className="mt-1 w-full resize-none rounded-lg border border-[var(--mos-border)] bg-[var(--mos-bg)] px-2 py-1 text-[11px] text-[var(--mos-text)] outline-none focus:border-indigo-400/60"
+                  />
+                </label>
+                {deleteProjectArmed ? (
+                  <div className="space-y-1.5" data-testid="ai-research-project-delete-confirm">
+                    <p className="text-[10px] leading-4 text-amber-200">Hapus proyek ini? Percakapan kembali ke Percakapan biasa.</p>
+                    <div className="flex gap-1.5">
+                      <button type="button" onClick={() => { void deleteProject(); }} className="flex-1 rounded-lg bg-red-600 px-2 py-1 text-[11px] font-medium text-white">Hapus</button>
+                      <button type="button" onClick={() => setDeleteProjectArmed(false)} className="rounded-lg px-2 py-1 text-[11px] text-[var(--mos-text-muted)]">Batal</button>
+                    </div>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    data-testid="ai-research-project-delete"
+                    onClick={() => setDeleteProjectArmed(true)}
+                    className="text-[10px] text-[var(--mos-text-muted)] hover:text-red-300"
+                  >
+                    Hapus proyek
+                  </button>
+                )}
+              </div>
+            )}
+            {projectError && <p className="text-[10px] text-red-300">{projectError}</p>}
             <button
               onClick={newConversation}
               className="w-full bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-medium py-2 rounded-lg transition-colors"
             >
-              + New Conversation
+              Percakapan baru
             </button>
           </div>
           <div className="overflow-y-auto flex-1">
-            {conversations.map(conv => (
+            {visibleConversations.map(conv => (
               <div
                 key={conv.id}
                 className={`group px-3 py-2.5 cursor-pointer border-b border-[var(--mos-border-subtle)] transition-colors ${
@@ -995,7 +1292,7 @@ export default function AIResearchPage() {
                   <button
                     onClick={(e) => { e.stopPropagation(); deleteConversation(conv.id); }}
                     className="opacity-0 group-hover:opacity-100 text-[var(--mos-text-muted)] hover:text-red-400 p-0.5 transition-all flex-shrink-0"
-                    title="Delete"
+                    title="Hapus"
                   >
                     <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
                       <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
@@ -1004,8 +1301,8 @@ export default function AIResearchPage() {
                 </div>
               </div>
             ))}
-            {conversations.length === 0 && (
-              <p className="text-[10px] text-[var(--mos-text-muted)] text-center py-8 px-3">No conversations yet</p>
+            {visibleConversations.length === 0 && (
+              <p className="text-[10px] text-[var(--mos-text-muted)] text-center py-8 px-3">Belum ada percakapan</p>
             )}
           </div>
         </div>
@@ -1045,7 +1342,9 @@ export default function AIResearchPage() {
                   </div>
                   <h2 className="text-xl font-semibold text-[var(--mos-text)] mb-2">{AI_RESEARCH_ASSISTANT_NAME}</h2>
                   <p className="text-sm text-[var(--mos-text-muted)] max-w-md">
-                    Ask anything — riset topik trading, analisis berita, strategi marketing, atau lampirkan gambar, Excel, CSV, PDF, Word, atau PowerPoint untuk dibaca AI.
+                    {activeProject
+                      ? `Riset di proyek ${activeProject.name}. Pertanyaan di sini mengingat catatan dan percakapan proyek ini.`
+                      : 'Ask anything — riset topik trading, analisis berita, strategi marketing, atau lampirkan gambar, Excel, CSV, PDF, Word, atau PowerPoint untuk dibaca AI.'}
                   </p>
                   <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 gap-2 w-full max-w-lg">
                     {[
@@ -1308,38 +1607,88 @@ export default function AIResearchPage() {
                 </div>
               )}
               <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-                <div
-                  role="group"
-                  aria-label="Mode riset"
-                  data-testid="ai-research-mode-toggle"
-                  className="inline-flex rounded-xl border border-[var(--mos-border)] bg-[var(--mos-raised)] p-0.5"
-                >
-                  {([
-                    ['fast', 'Cepat'],
-                    ['deep', 'Mendalam'],
-                  ] as const).map(([mode, label]) => (
-                    <button
-                      key={mode}
-                      type="button"
-                      aria-pressed={researchMode === mode}
-                      disabled={loading}
-                      onClick={() => selectResearchMode(mode)}
-                      className={`rounded-lg px-3 py-1 text-[11px] font-medium transition-colors disabled:opacity-50 ${
-                        researchMode === mode
-                          ? 'bg-indigo-600 text-white'
-                          : 'text-[var(--mos-text-muted)] hover:text-[var(--mos-text)]'
-                      }`}
-                    >
-                      {label}
-                    </button>
-                  ))}
+                <div className="flex flex-wrap items-center gap-2">
+                  <div
+                    role="group"
+                    aria-label="Mode riset"
+                    data-testid="ai-research-mode-toggle"
+                    className="inline-flex rounded-xl border border-[var(--mos-border)] bg-[var(--mos-raised)] p-0.5"
+                  >
+                    {([
+                      ['fast', 'Cepat'],
+                      ['deep', 'Mendalam'],
+                    ] as const).map(([mode, label]) => (
+                      <button
+                        key={mode}
+                        type="button"
+                        aria-pressed={researchMode === mode}
+                        disabled={loading}
+                        onClick={() => selectResearchMode(mode)}
+                        className={`rounded-lg px-3 py-1 text-[11px] font-medium transition-colors disabled:opacity-50 ${
+                          researchMode === mode
+                            ? 'bg-indigo-600 text-white'
+                            : 'text-[var(--mos-text-muted)] hover:text-[var(--mos-text)]'
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                  <button
+                    type="button"
+                    data-testid="ai-research-compare-toggle"
+                    aria-pressed={compareMode}
+                    disabled={loading}
+                    onClick={() => setCompareMode(open => !open)}
+                    className={`rounded-xl border px-3 py-1 text-[11px] font-medium transition-colors disabled:opacity-50 ${
+                      compareMode
+                        ? 'border-indigo-400/40 bg-indigo-600 text-white'
+                        : 'border-[var(--mos-border)] bg-[var(--mos-raised)] text-[var(--mos-text-muted)] hover:text-[var(--mos-text)]'
+                    }`}
+                  >
+                    Bandingkan
+                  </button>
                 </div>
                 <p className="text-[10px] text-[var(--mos-text-muted)]">
-                  {researchMode === 'deep'
-                    ? 'Mendalam: beberapa putaran pencarian, lalu sintesis. Lebih lama.'
-                    : 'Cepat: satu putaran riset.'}
+                  {compareMode
+                    ? 'Bandingkan memakai riset cepat untuk kedua sisi. Harga dan fakta hanya dari sumber.'
+                    : researchMode === 'deep'
+                      ? 'Mendalam: beberapa putaran pencarian, lalu sintesis. Lebih lama.'
+                      : 'Cepat: satu putaran riset.'}
                 </p>
               </div>
+              {compareMode && (
+                <div className="mb-2 grid gap-2 sm:grid-cols-2" data-testid="ai-research-compare-fields">
+                  <input
+                    value={compareA}
+                    onChange={event => setCompareA(event.target.value)}
+                    onKeyDown={event => {
+                      if (event.key === 'Enter') {
+                        event.preventDefault();
+                        void sendMessage();
+                      }
+                    }}
+                    disabled={loading}
+                    placeholder="Entitas / klaim A"
+                    aria-label="Entitas atau klaim A"
+                    className="min-h-9 rounded-xl border border-[var(--mos-border)] bg-[var(--mos-raised)] px-3 text-sm text-[var(--mos-text)] outline-none focus:border-indigo-400/60"
+                  />
+                  <input
+                    value={compareB}
+                    onChange={event => setCompareB(event.target.value)}
+                    onKeyDown={event => {
+                      if (event.key === 'Enter') {
+                        event.preventDefault();
+                        void sendMessage();
+                      }
+                    }}
+                    disabled={loading}
+                    placeholder="Entitas / klaim B"
+                    aria-label="Entitas atau klaim B"
+                    className="min-h-9 rounded-xl border border-[var(--mos-border)] bg-[var(--mos-raised)] px-3 text-sm text-[var(--mos-text)] outline-none focus:border-indigo-400/60"
+                  />
+                </div>
+              )}
               {pendingAttachments.length > 0 && (
                 <div className="mb-2 flex flex-wrap gap-2">
                   {pendingAttachments.map(item => (
@@ -1416,7 +1765,9 @@ export default function AIResearchPage() {
                   onChange={autoResize}
                   onKeyDown={handleKeyDown}
                   onPaste={handleComposerPaste}
-                  placeholder="Tanyakan apapun — seret, tempel, atau klik untuk lampirkan gambar, Excel, CSV, PDF, Word, atau PowerPoint... Tempel tautan http(s) untuk dijadikan konteks."
+                  placeholder={compareMode
+                    ? 'Fokus perbandingan (opsional) — misalnya harga, regulasi, atau risiko'
+                    : 'Tanyakan apapun — seret, tempel, atau klik untuk lampirkan gambar, Excel, CSV, PDF, Word, atau PowerPoint... Tempel tautan http(s) untuk dijadikan konteks.'}
                   disabled={loading}
                   rows={1}
                   className="flex-1 min-h-[24px] max-h-[160px] resize-none bg-transparent border-none text-sm text-[var(--mos-text)] placeholder-[var(--mos-text-muted)] focus:outline-none"
