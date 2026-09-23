@@ -4,7 +4,7 @@ import { requireFeature } from '@/lib/auth';
 import { execute } from '@/lib/database';
 import { rateLimit } from '@/lib/rate-limit';
 import { generateContent, getUserPreferredModel } from '@/lib/openai';
-import { buildArticleMarketNewsPrompts, normalizeArticleMarketNewsInput, parseGeneratedArticle, validateGeneratedArticle } from '@/lib/article-market-news';
+import { buildArticleMarketNewsPrompts, ensureEndingDupoinAccountCta, normalizeArticleMarketNewsInput, parseGeneratedArticle, validateGeneratedArticle } from '@/lib/article-market-news';
 import { researchArticleMarketNews } from '@/lib/article-market-news-research';
 
 export const maxDuration = 300;
@@ -40,7 +40,8 @@ ${feedback}
 PRIOR DRAFT JSON TO REVISE:
 ${priorDraft}
 
-Revise the prior draft instead of starting over. Keep compliant material, correct every listed issue, expand only from the verified source material, target 950–975 words, and return only the required JSON.`;
+Revise the prior draft instead of starting over. Keep compliant material, correct every listed issue, expand only from the verified source material, target 950–975 words, and return only the required JSON.
+The last prose paragraph before the Sources or Sumber heading must be one imperative Dupoin account-opening sentence starting with Buka, Mulai, Daftar, or Buat. Do not invent prices, percentages, dates, or other numbers.`;
 }
 
 export async function POST(request: NextRequest) {
@@ -100,6 +101,7 @@ export async function POST(request: NextRequest) {
             articleMarkdown = typeof article.articleMarkdown === 'string' ? article.articleMarkdown.trim() : '';
             if (!title || !articleMarkdown) throw new Error('AI returned an incomplete article.');
             if (!metaDescription || metaDescription.length > 155) throw new Error(`Meta description must be 1–155 characters; received ${metaDescription.length}.`);
+            articleMarkdown = ensureEndingDupoinAccountCta(articleMarkdown);
             validation = validateGeneratedArticle(title, articleMarkdown, effectiveInput, metaDescription);
             if (validation.violations.length === 0) break;
             throw new Error(validation.violations.join(' '));
