@@ -5,6 +5,11 @@ export const AI_RESEARCH_MAX_TOTAL_IMAGE_BYTES = 6 * 1024 * 1024;
 export const AI_RESEARCH_MAX_FILES = 4;
 export const AI_RESEARCH_MAX_FILE_BYTES = 2 * 1024 * 1024;
 export const AI_RESEARCH_MAX_TOTAL_FILE_BYTES = 4 * 1024 * 1024;
+export const AI_RESEARCH_MAX_DOCUMENTS = 4;
+export const AI_RESEARCH_MAX_DOCUMENT_BYTES = 8 * 1024 * 1024;
+export const AI_RESEARCH_MAX_TOTAL_DOCUMENT_BYTES = 16 * 1024 * 1024;
+export const AI_RESEARCH_MAX_DOCUMENT_PAGES = 40;
+export const AI_RESEARCH_MAX_PRESENTATION_SLIDES = 40;
 export const AI_RESEARCH_MAX_EXTRACTED_CHARS = 80_000;
 export const AI_RESEARCH_MAX_SPREADSHEET_ROWS = 250;
 export const AI_RESEARCH_MAX_OUTPUT_TOKENS = 4000;
@@ -21,7 +26,8 @@ Cara menjawab:
 - Jangan mengarang fakta perusahaan. Setiap klaim konkret harus tertelusur ke cuplikan sumber. Jika sumber tidak menyebutkan suatu fakta, katakan bahwa sumber terkonfirmasi tidak mencakupnya — jangan mengisi kekosongan dengan tebakan. Jika nama orang muncul di cuplikan (misalnya daftar wakil pialang Bappebti), rangkum peran/lembaga yang tertulis dan sitir sumbernya — jangan menolak dengan “belum ada sumber publik terverifikasi”. Jika beberapa cuplikan menyebut nama yang sama di konteks berbeda (roster Bappebti, daftar CPNS, profil freelancer), tampilkan SEMUA jejak dengan sitasi — peran resmi dulu, lalu jejak publik lain. Jangan menahan, menyeleksi, atau “simpan untuk nanti”. Pengguna yang memutuskan mana yang dipercaya. Jangan menggabungkan identitas tanpa bukti bahwa itu orang yang sama. Hanya katakan belum terverifikasi jika riset benar-benar tidak mengembalikan sumber yang berguna.
 - Untuk pertanyaan tentang Indonesia atau entitas Indonesia, utamakan sumber Indonesia (domain .id, regulator/media Indonesia, situs resmi lokal).
 - Jika pengguna melampirkan gambar, baca teks, angka, grafik, dan detail visual di gambar tersebut lalu gunakan informasinya dalam jawaban.
-- Jika pengguna melampirkan file Excel atau CSV, gunakan tabel, kolom, dan angka dari file tersebut dalam jawaban.`;
+- Jika pengguna melampirkan file Excel atau CSV, gunakan tabel, kolom, dan angka dari file tersebut dalam jawaban.
+- Jika pengguna melampirkan PDF, dokumen Word (DOCX), atau presentasi PowerPoint (PPTX), gunakan teks dan struktur yang diekstrak (halaman, heading, atau slide). Jika ada catatan bahwa teks terpotong atau halaman/slide dihilangkan, katakan bahwa hanya sebagian dokumen yang dibaca — jangan mengarang isi yang tidak ada di ekstraksi.`;
 export const AI_RESEARCH_ALLOWED_IMAGE_TYPES = [
   'image/jpeg',
   'image/png',
@@ -34,15 +40,27 @@ export const AI_RESEARCH_ALLOWED_FILE_TYPES = [
   'text/csv',
   'application/csv',
 ] as const;
+export const AI_RESEARCH_ALLOWED_DOCUMENT_TYPES = [
+  'application/pdf',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+] as const;
 export const AI_RESEARCH_FILE_EXTENSIONS = ['.xlsx', '.xls', '.csv'] as const;
+export const AI_RESEARCH_DOCUMENT_EXTENSIONS = ['.pdf', '.docx', '.pptx'] as const;
 export const AI_RESEARCH_FILE_PICKER_ACCEPT = [
   ...AI_RESEARCH_ALLOWED_IMAGE_TYPES,
   ...AI_RESEARCH_ALLOWED_FILE_TYPES,
+  ...AI_RESEARCH_ALLOWED_DOCUMENT_TYPES,
   ...AI_RESEARCH_FILE_EXTENSIONS,
+  ...AI_RESEARCH_DOCUMENT_EXTENSIONS,
 ].join(',');
+export const AI_RESEARCH_UNSUPPORTED_FILE_ERROR = 'Unsupported file type. Use XLSX, XLS, CSV, PDF, DOCX, or PPTX.';
 
 export type AiResearchImageType = (typeof AI_RESEARCH_ALLOWED_IMAGE_TYPES)[number];
 export type AiResearchFileType = (typeof AI_RESEARCH_ALLOWED_FILE_TYPES)[number];
+export type AiResearchDocumentType = (typeof AI_RESEARCH_ALLOWED_DOCUMENT_TYPES)[number];
+export type AiResearchAttachmentMime = AiResearchFileType | AiResearchDocumentType;
+export type ResearchAttachmentKind = 'image' | 'spreadsheet' | 'document';
 
 export interface AiResearchImage {
   mimeType: AiResearchImageType;
@@ -82,6 +100,17 @@ const FILE_EXT_MIME: Record<string, AiResearchFileType> = {
   '.csv': 'text/csv',
 };
 
+const DOCUMENT_EXT_MIME: Record<string, AiResearchDocumentType> = {
+  '.pdf': 'application/pdf',
+  '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+};
+
+const DOCUMENT_MIME_ALIASES: Record<string, AiResearchDocumentType> = {
+  'application/x-pdf': 'application/pdf',
+  'application/acrobat': 'application/pdf',
+};
+
 const GENERIC_FILE_MIMES = new Set([
   'application/octet-stream',
   'application/zip',
@@ -98,6 +127,11 @@ export function isAllowedFileType(value: unknown): value is AiResearchFileType {
     && (AI_RESEARCH_ALLOWED_FILE_TYPES as readonly string[]).includes(value);
 }
 
+export function isAllowedDocumentType(value: unknown): value is AiResearchDocumentType {
+  return typeof value === 'string'
+    && (AI_RESEARCH_ALLOWED_DOCUMENT_TYPES as readonly string[]).includes(value);
+}
+
 export function fileExtension(name?: string): string {
   const trimmed = (name || '').trim().toLowerCase();
   const dot = trimmed.lastIndexOf('.');
@@ -110,6 +144,32 @@ export function inferSpreadsheetType(mimeType: unknown, name?: string): AiResear
   if (ext && FILE_EXT_MIME[ext]) return FILE_EXT_MIME[ext];
   if (isAllowedFileType(mimeType)) return mimeType;
   return null;
+}
+
+export function inferDocumentType(mimeType: unknown, name?: string): AiResearchDocumentType | null {
+  const ext = fileExtension(name);
+  if (ext && DOCUMENT_EXT_MIME[ext]) return DOCUMENT_EXT_MIME[ext];
+  if (typeof mimeType === 'string' && DOCUMENT_MIME_ALIASES[mimeType]) return DOCUMENT_MIME_ALIASES[mimeType];
+  if (isAllowedDocumentType(mimeType)) return mimeType;
+  return null;
+}
+
+export function inferResearchFileType(mimeType: unknown, name?: string): AiResearchAttachmentMime | null {
+  return inferSpreadsheetType(mimeType, name) || inferDocumentType(mimeType, name);
+}
+
+export function classifyResearchAttachment(mimeType: string, name?: string): ResearchAttachmentKind | null {
+  const ext = fileExtension(name);
+  if (ext && (AI_RESEARCH_DOCUMENT_EXTENSIONS as readonly string[]).includes(ext)) return 'document';
+  if (ext && (AI_RESEARCH_FILE_EXTENSIONS as readonly string[]).includes(ext)) return 'spreadsheet';
+  if (isAllowedImageType(mimeType)) return 'image';
+  if (inferDocumentType(mimeType, name)) return 'document';
+  if (inferSpreadsheetType(mimeType, name)) return 'spreadsheet';
+  return null;
+}
+
+export function isResearchDocument(file: { mimeType?: string | null; name?: string | null }): boolean {
+  return classifyResearchAttachment(file.mimeType || '', file.name || undefined) === 'document';
 }
 
 export function imageAttachmentError(message: string): Error {
@@ -145,13 +205,18 @@ export function splitImageDataUrl(dataUrl: string): { mimeType: AiResearchImageT
   return { mimeType: parsed.mimeType, base64: parsed.base64 };
 }
 
-export function splitFileDataUrl(dataUrl: string, name?: string): { mimeType: AiResearchFileType; base64: string } | null {
-  const parsed = splitAttachmentDataUrl(dataUrl);
-  if (!parsed) return null;
-  const inferred = inferSpreadsheetType(parsed.mimeType, name)
-    || (GENERIC_FILE_MIMES.has(parsed.mimeType) ? inferSpreadsheetType('', name) : null);
+export function splitFileDataUrl(dataUrl: string, name?: string): { mimeType: AiResearchAttachmentMime; base64: string } | null {
+  const trimmed = dataUrl.trim();
+  const markerAt = trimmed.indexOf(BASE64_MARKER);
+  if (!trimmed.startsWith(DATA_URL_PREFIX) || markerAt < 0) return null;
+  const headerMime = trimmed.slice(DATA_URL_PREFIX.length, markerAt).split(';')[0]?.trim().toLowerCase() || '';
+  const base64 = trimmed.slice(markerAt + BASE64_MARKER.length).replace(/\s/g, '');
+  if (!base64) return null;
+  const generic = !headerMime || GENERIC_FILE_MIMES.has(headerMime);
+  const inferred = inferResearchFileType(headerMime, name)
+    || (generic ? inferResearchFileType('', name) : null);
   if (!inferred) return null;
-  return { mimeType: inferred, base64: parsed.base64 };
+  return { mimeType: inferred, base64 };
 }
 
 /** pg returns JSONB as objects; some callers still pass serialized strings. */
@@ -235,20 +300,26 @@ export function validateFileAttachment(
   if (typeof file.dataUrl === 'string' && file.dataUrl.trim()) {
     const parsed = splitFileDataUrl(file.dataUrl, name);
     if (!parsed) {
-      throw attachmentError('Unsupported file type. Use XLSX, XLS, or CSV.');
+      throw attachmentError(AI_RESEARCH_UNSUPPORTED_FILE_ERROR);
     }
     if (
       typeof file.mimeType === 'string'
+      && file.mimeType.length > 0
       && file.mimeType !== parsed.mimeType
       && !GENERIC_FILE_MIMES.has(file.mimeType)
       && !isAllowedFileType(file.mimeType)
+      && !isAllowedDocumentType(file.mimeType)
     ) {
       throw attachmentError(`File ${index + 1} type does not match the file data.`);
     }
     const bytes = decodeBase64Length(parsed.base64);
     if (bytes <= 0) throw attachmentError(`File ${index + 1} is empty.`);
-    if (bytes > AI_RESEARCH_MAX_FILE_BYTES) {
-      throw attachmentError('Each spreadsheet must be 2 MB or smaller.');
+    const document = isResearchDocument({ mimeType: parsed.mimeType, name });
+    const maxBytes = document ? AI_RESEARCH_MAX_DOCUMENT_BYTES : AI_RESEARCH_MAX_FILE_BYTES;
+    if (bytes > maxBytes) {
+      throw attachmentError(document
+        ? 'Each document must be 8 MB or smaller.'
+        : 'Each spreadsheet must be 2 MB or smaller.');
     }
     return {
       mimeType: parsed.mimeType,
@@ -258,7 +329,10 @@ export function validateFileAttachment(
   }
 
   if (options.allowStoredFiles && typeof file.extractedText === 'string') {
-    const mimeType = inferSpreadsheetType(file.mimeType, name) || (isAllowedFileType(file.mimeType) ? file.mimeType : 'text/csv');
+    const mimeType = inferResearchFileType(file.mimeType, name)
+      || (isAllowedFileType(file.mimeType) ? file.mimeType : null)
+      || (isAllowedDocumentType(file.mimeType) ? file.mimeType : null)
+      || 'text/csv';
     return {
       mimeType,
       name: name || undefined,
@@ -277,18 +351,26 @@ export function validateFileAttachments(
   if (!Array.isArray(value)) {
     throw attachmentError('Files must be sent as a list.');
   }
-  if (value.length > AI_RESEARCH_MAX_FILES) {
+  const files = value.map((item, index) => validateFileAttachment(item, index, options));
+  const documents = files.filter(file => isResearchDocument(file));
+  const spreadsheets = files.filter(file => !isResearchDocument(file));
+  if (spreadsheets.length > AI_RESEARCH_MAX_FILES) {
     throw attachmentError(`You can attach up to ${AI_RESEARCH_MAX_FILES} spreadsheets per message.`);
   }
+  if (documents.length > AI_RESEARCH_MAX_DOCUMENTS) {
+    throw attachmentError(`You can attach up to ${AI_RESEARCH_MAX_DOCUMENTS} documents per message.`);
+  }
 
-  const files = value.map((item, index) => validateFileAttachment(item, index, options));
-  const totalBytes = files.reduce((sum, file) => {
+  const totalBytes = (group: AiResearchFile[]) => group.reduce((sum, file) => {
     if (!file.dataUrl) return sum;
     const parsed = splitFileDataUrl(file.dataUrl, file.name);
     return sum + (parsed ? decodeBase64Length(parsed.base64) : 0);
   }, 0);
-  if (totalBytes > AI_RESEARCH_MAX_TOTAL_FILE_BYTES) {
+  if (totalBytes(spreadsheets) > AI_RESEARCH_MAX_TOTAL_FILE_BYTES) {
     throw attachmentError('Attached spreadsheets exceed the 4 MB total limit.');
+  }
+  if (totalBytes(documents) > AI_RESEARCH_MAX_TOTAL_DOCUMENT_BYTES) {
+    throw attachmentError('Attached documents exceed the 16 MB total limit.');
   }
   return files;
 }
@@ -399,9 +481,11 @@ export function buildMultimodalContent(text: string, images: AiResearchImage[] =
 }
 
 function fileContextBlock(file: AiResearchFile): string {
-  const label = file.name || 'spreadsheet';
+  const document = isResearchDocument(file);
+  const noun = document ? 'document' : 'spreadsheet';
+  const label = file.name || noun;
   const body = file.extractedText?.trim() || `[${label} was attached]`;
-  return `Attached spreadsheet (${label}):\n${body}`;
+  return `Attached ${noun} (${label}):\n${body}`;
 }
 
 export function storedMessageText(message: AiResearchChatMessage, includeImages: boolean): string {
