@@ -9,14 +9,17 @@ import {
   AI_RESEARCH_FILE_ONLY_PROMPT,
   AI_RESEARCH_FILE_PICKER_ACCEPT,
   AI_RESEARCH_IMAGE_ONLY_PROMPT,
+  AI_RESEARCH_MAX_DOCUMENT_BYTES,
+  AI_RESEARCH_MAX_DOCUMENTS,
   AI_RESEARCH_MAX_FILE_BYTES,
   AI_RESEARCH_MAX_FILES,
   AI_RESEARCH_MAX_IMAGE_BYTES,
   AI_RESEARCH_MAX_IMAGES,
+  AI_RESEARCH_MAX_TOTAL_DOCUMENT_BYTES,
   AI_RESEARCH_MAX_TOTAL_FILE_BYTES,
   AI_RESEARCH_MAX_TOTAL_IMAGE_BYTES,
-  inferSpreadsheetType,
-  isAllowedImageType,
+  classifyResearchAttachment,
+  inferResearchFileType,
 } from '@/lib/ai-research';
 import {
   RESEARCH_DISCONNECT_BANNER,
@@ -70,14 +73,12 @@ interface ModelHealthResult {
 interface PendingAttachment {
   id: string;
   file: File;
-  kind: 'image' | 'file';
+  kind: 'image' | 'spreadsheet' | 'document';
   previewUrl?: string;
 }
 
-function attachmentKind(file: File): 'image' | 'file' | null {
-  if (isAllowedImageType(file.type)) return 'image';
-  if (inferSpreadsheetType(file.type, file.name)) return 'file';
-  return null;
+function attachmentKind(file: File): PendingAttachment['kind'] | null {
+  return classifyResearchAttachment(file.type, file.name);
 }
 
 function dragHasFiles(dataTransfer: DataTransfer | null): boolean {
@@ -315,11 +316,12 @@ export default function AIResearchPage() {
       for (const file of incoming) {
         const kind = attachmentKind(file);
         if (!kind) {
-          setError('Unsupported attachment. Use JPEG, PNG, WebP, GIF, XLSX, XLS, or CSV.');
+          setError('Unsupported attachment. Use JPEG, PNG, WebP, GIF, XLSX, XLS, CSV, PDF, DOCX, or PPTX.');
           continue;
         }
         const images = next.filter(item => item.kind === 'image');
-        const spreadsheets = next.filter(item => item.kind === 'file');
+        const spreadsheets = next.filter(item => item.kind === 'spreadsheet');
+        const documents = next.filter(item => item.kind === 'document');
         if (kind === 'image') {
           if (file.size > AI_RESEARCH_MAX_IMAGE_BYTES) {
             setError(`${file.name} is larger than 4 MB.`);
@@ -339,6 +341,27 @@ export default function AIResearchPage() {
             file,
             kind,
             previewUrl: URL.createObjectURL(file),
+          });
+          continue;
+        }
+        if (kind === 'document') {
+          if (file.size > AI_RESEARCH_MAX_DOCUMENT_BYTES) {
+            setError(`${file.name} is larger than ${AI_RESEARCH_MAX_DOCUMENT_BYTES / (1024 * 1024)} MB.`);
+            continue;
+          }
+          if (documents.length >= AI_RESEARCH_MAX_DOCUMENTS) {
+            setError(`You can attach up to ${AI_RESEARCH_MAX_DOCUMENTS} documents per message.`);
+            break;
+          }
+          const total = documents.reduce((sum, item) => sum + item.file.size, 0) + file.size;
+          if (total > AI_RESEARCH_MAX_TOTAL_DOCUMENT_BYTES) {
+            setError(`Attached documents exceed the ${AI_RESEARCH_MAX_TOTAL_DOCUMENT_BYTES / (1024 * 1024)} MB total limit.`);
+            break;
+          }
+          next.push({
+            id: `${file.name}-${file.size}-${file.lastModified}-${next.length}`,
+            file,
+            kind,
           });
           continue;
         }
@@ -437,13 +460,13 @@ export default function AIResearchPage() {
     setError('');
 
     const pendingImages = pendingAttachments.filter(item => item.kind === 'image');
-    const pendingFiles = pendingAttachments.filter(item => item.kind === 'file');
+    const pendingFiles = pendingAttachments.filter(item => item.kind === 'spreadsheet' || item.kind === 'document');
     let images: ChatImage[] = [];
     let files: ChatFile[] = [];
     try {
       images = await Promise.all(pendingImages.map(item => fileToChatImage(item.file)));
       files = await Promise.all(pendingFiles.map(async item => ({
-        mimeType: inferSpreadsheetType(item.file.type, item.file.name) || item.file.type || 'text/csv',
+        mimeType: inferResearchFileType(item.file.type, item.file.name) || item.file.type || 'application/octet-stream',
         dataUrl: await readFileAsDataUrl(item.file),
         name: item.file.name,
       })));
@@ -809,7 +832,7 @@ export default function AIResearchPage() {
             >
               <div className="rounded-2xl border-2 border-dashed border-indigo-300 bg-[var(--mos-raised)]/95 px-5 py-4 text-center shadow-lg">
                 <p className="text-sm font-semibold text-[var(--mos-text)]">Lepas untuk lampirkan</p>
-                <p className="mt-1 text-[11px] text-[var(--mos-text-muted)]">Gambar, Excel, atau CSV</p>
+                <p className="mt-1 text-[11px] text-[var(--mos-text-muted)]">Gambar, Excel, CSV, PDF, Word, atau PowerPoint</p>
               </div>
             </div>
           )}
@@ -826,7 +849,7 @@ export default function AIResearchPage() {
                   </div>
                   <h2 className="text-xl font-semibold text-[var(--mos-text)] mb-2">{AI_RESEARCH_ASSISTANT_NAME}</h2>
                   <p className="text-sm text-[var(--mos-text-muted)] max-w-md">
-                    Ask anything — riset topik trading, analisis berita, strategi marketing, atau lampirkan gambar, Excel, atau CSV untuk dibaca AI.
+                    Ask anything — riset topik trading, analisis berita, strategi marketing, atau lampirkan gambar, Excel, CSV, PDF, Word, atau PowerPoint untuk dibaca AI.
                   </p>
                   <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 gap-2 w-full max-w-lg">
                     {[
@@ -876,7 +899,7 @@ export default function AIResearchPage() {
                       {msg.files && msg.files.length > 0 && (
                         <div className={`mb-2 flex flex-wrap gap-2 ${msg.role === 'user' ? 'justify-end' : ''}`}>
                           {msg.files.map((file, fileIndex) => (
-                            <AiResearchFileChip key={`${file.name || 'file'}-${fileIndex}`} name={file.name || `Spreadsheet ${fileIndex + 1}`} />
+                            <AiResearchFileChip key={`${file.name || 'file'}-${fileIndex}`} name={file.name || `File ${fileIndex + 1}`} />
                           ))}
                         </div>
                       )}
@@ -1031,8 +1054,8 @@ export default function AIResearchPage() {
                   onClick={() => fileInputRef.current?.click()}
                   disabled={loading}
                   className="text-[var(--mos-text-muted)] hover:text-[var(--mos-text)] disabled:opacity-30 p-2 rounded-xl transition-colors flex-shrink-0"
-                  title="Attach images or spreadsheets"
-                  aria-label="Attach images or spreadsheets"
+                  title="Attach images, spreadsheets, PDF, Word, or PowerPoint"
+                  aria-label="Attach images, spreadsheets, PDF, Word, or PowerPoint"
                 >
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.8">
                     <path strokeLinecap="round" strokeLinejoin="round" d="M18.375 12.739l-7.693 7.693a4.5 4.5 0 01-6.364-6.364l10.94-10.94A3 3 0 1119.5 8.25l-10.94 10.939a1.5 1.5 0 01-2.121-2.121l8.485-8.486" />
@@ -1044,7 +1067,7 @@ export default function AIResearchPage() {
                   onChange={autoResize}
                   onKeyDown={handleKeyDown}
                   onPaste={handleComposerPaste}
-                  placeholder="Tanyakan apapun — seret, tempel, atau klik untuk lampirkan gambar, Excel, atau CSV..."
+                  placeholder="Tanyakan apapun — seret, tempel, atau klik untuk lampirkan gambar, Excel, CSV, PDF, Word, atau PowerPoint..."
                   disabled={loading}
                   rows={1}
                   className="flex-1 min-h-[24px] max-h-[160px] resize-none bg-transparent border-none text-sm text-[var(--mos-text)] placeholder-[var(--mos-text-muted)] focus:outline-none"
@@ -1068,7 +1091,7 @@ export default function AIResearchPage() {
                 </button>
               </div>
               <p className="text-[9px] text-[var(--mos-text-faint)] text-center mt-2">
-                {AI_RESEARCH_ASSISTANT_NAME} may produce inaccurate information. Enter to send · Shift+Enter for newline · Seret, tempel, atau klik ikon untuk gambar dan Excel/CSV (maks. 4).
+                {AI_RESEARCH_ASSISTANT_NAME} may produce inaccurate information. Enter to send · Shift+Enter for newline · Seret, tempel, atau klik ikon untuk gambar, Excel/CSV, PDF, Word, dan PowerPoint (maks. 4 per jenis).
               </p>
             </div>
           </div>

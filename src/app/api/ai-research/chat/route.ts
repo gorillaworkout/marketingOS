@@ -105,7 +105,7 @@ export async function POST(request: NextRequest) {
   let parsed: { messages: AiResearchChatMessage[]; conversationId?: string; pinnedSourceUrls: string[] };
   try {
     parsed = parseChatRequest(await request.json());
-    parsed.messages = hydrateMessageFiles(parsed.messages);
+    parsed.messages = await hydrateMessageFiles(parsed.messages);
   } catch (error) {
     return jsonError(
       error instanceof SyntaxError ? 'Invalid JSON body' : error instanceof Error ? error.message : 'Invalid request',
@@ -129,7 +129,7 @@ export async function POST(request: NextRequest) {
       'SELECT messages FROM ai_research_conversations WHERE id = ? AND user_id = ?',
       [conversationId, auth.id],
     );
-    if (history) dbMessages = hydrateMessageFiles(parseStoredMessages(history.messages));
+    if (history) dbMessages = await hydrateMessageFiles(parseStoredMessages(history.messages));
   }
 
   const convId = conversationId || uuidv4();
