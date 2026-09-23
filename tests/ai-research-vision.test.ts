@@ -105,6 +105,13 @@ test('AI Research UI adds a file picker, previews, and sends images with the pro
   assert.match(page, /canSend/);
   assert.match(page, /loading && !streaming/);
   assert.match(page, /ai-research-thinking/);
+  assert.match(page, /data-testid="ai-research-drop-zone"/);
+  assert.match(page, /Lepas untuk lampirkan/);
+  assert.match(page, /onDrop=\{handleAttachmentDrop\}/);
+  assert.match(page, /addAttachments\(files\)/);
+  assert.match(page, /onPaste=\{handleComposerPaste\}/);
+  assert.match(page, /onClick=\{\(\) => fileInputRef\.current\?\.click\(\)\}/);
+  assert.match(page, /Unsupported attachment\. Use JPEG, PNG, WebP, GIF, XLSX, XLS, or CSV\./);
 });
 
 test('AI Research chat route forwards multimodal content to the existing gateway', () => {

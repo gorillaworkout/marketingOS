@@ -80,6 +80,42 @@ function attachmentKind(file: File): 'image' | 'file' | null {
   return null;
 }
 
+function dragHasFiles(dataTransfer: DataTransfer | null): boolean {
+  if (!dataTransfer) return false;
+  if (Array.from(dataTransfer.types).includes('Files')) return true;
+  return Array.from(dataTransfer.items).some(item => item.kind === 'file');
+}
+
+function filesFromClipboard(data: DataTransfer | null): File[] {
+  if (!data) return [];
+  const listed = Array.from(data.files);
+  if (listed.length > 0) return listed;
+  const extracted: File[] = [];
+  for (const item of Array.from(data.items)) {
+    if (item.kind !== 'file') continue;
+    const file = item.getAsFile();
+    if (file) extracted.push(file);
+  }
+  return extracted;
+}
+
+function clipboardHasPlainText(data: DataTransfer): boolean {
+  try {
+    return data.getData('text/plain').length > 0;
+  } catch {
+    return false;
+  }
+}
+
+function dragPointerLeftZone(event: React.DragEvent<HTMLElement>): boolean {
+  if (event.clientX === 0 && event.clientY === 0) return true;
+  const rect = event.currentTarget.getBoundingClientRect();
+  return event.clientX < rect.left
+    || event.clientX > rect.right
+    || event.clientY < rect.top
+    || event.clientY > rect.bottom;
+}
+
 function defaultPromptForAttachments(images: number, files: number): string {
   if (images && files) return AI_RESEARCH_ATTACHMENT_ONLY_PROMPT;
   if (files) return AI_RESEARCH_FILE_ONLY_PROMPT;
@@ -128,6 +164,7 @@ export default function AIResearchPage() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([]);
+  const [fileDragActive, setFileDragActive] = useState(false);
   const [loading, setLoading] = useState(false);
   const [streaming, setStreaming] = useState('');
   const [researchSourceCount, setResearchSourceCount] = useState<number | null>(null);
@@ -320,6 +357,47 @@ export default function AIResearchPage() {
       }
       return next;
     });
+  };
+
+  const handleAttachmentDragEnter = (event: React.DragEvent<HTMLDivElement>) => {
+    if (!dragHasFiles(event.dataTransfer)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (!loading) setFileDragActive(true);
+  };
+
+  const handleAttachmentDragOver = (event: React.DragEvent<HTMLDivElement>) => {
+    if (!dragHasFiles(event.dataTransfer)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    event.dataTransfer.dropEffect = loading ? 'none' : 'copy';
+    if (!loading) setFileDragActive(true);
+  };
+
+  const handleAttachmentDragLeave = (event: React.DragEvent<HTMLDivElement>) => {
+    if (!fileDragActive && !dragHasFiles(event.dataTransfer)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (dragPointerLeftZone(event)) setFileDragActive(false);
+  };
+
+  const handleAttachmentDrop = (event: React.DragEvent<HTMLDivElement>) => {
+    const files = event.dataTransfer?.files;
+    const isFileDrop = dragHasFiles(event.dataTransfer) || Boolean(files && files.length > 0);
+    if (!isFileDrop) return;
+    event.preventDefault();
+    event.stopPropagation();
+    setFileDragActive(false);
+    if (loading || !files?.length) return;
+    addAttachments(files);
+  };
+
+  const handleComposerPaste = (event: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const files = filesFromClipboard(event.clipboardData);
+    if (!files.length) return;
+    if (!clipboardHasPlainText(event.clipboardData)) event.preventDefault();
+    if (loading) return;
+    addAttachments(files);
   };
 
   const removePendingAttachment = (id: string) => {
@@ -691,8 +769,28 @@ export default function AIResearchPage() {
           </div>
         </div>
 
-        {/* Chat column */}
-        <div className="flex-1 flex flex-col min-w-0">
+        {/* Chat column is the file drop zone (messages + composer). */}
+        <div
+          data-testid="ai-research-drop-zone"
+          data-drag-active={fileDragActive ? 'true' : 'false'}
+          className={`relative flex-1 flex flex-col min-w-0 ${fileDragActive ? 'ring-2 ring-inset ring-indigo-400' : ''}`}
+          onDragEnter={handleAttachmentDragEnter}
+          onDragOver={handleAttachmentDragOver}
+          onDragLeave={handleAttachmentDragLeave}
+          onDrop={handleAttachmentDrop}
+        >
+          {fileDragActive && (
+            <div
+              role="status"
+              aria-live="polite"
+              className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center bg-indigo-500/10"
+            >
+              <div className="rounded-2xl border-2 border-dashed border-indigo-300 bg-[var(--mos-raised)]/95 px-5 py-4 text-center shadow-lg">
+                <p className="text-sm font-semibold text-[var(--mos-text)]">Lepas untuk lampirkan</p>
+                <p className="mt-1 text-[11px] text-[var(--mos-text-muted)]">Gambar, Excel, atau CSV</p>
+              </div>
+            </div>
+          )}
           {/* Messages — only this scrolls */}
           <div className="flex-1 overflow-y-auto">
             <div className="max-w-3xl mx-auto px-4 sm:px-6 py-6 space-y-6">
@@ -891,7 +989,11 @@ export default function AIResearchPage() {
                   ))}
                 </div>
               )}
-              <div className="flex gap-2 items-end bg-[var(--mos-raised)] border border-[var(--mos-border)] rounded-2xl px-3 py-3 focus-within:border-indigo-400/60 focus-within:ring-1 focus-within:ring-indigo-400/30 transition-all">
+              <div className={`flex gap-2 items-end bg-[var(--mos-raised)] border rounded-2xl px-3 py-3 transition-all ${
+                fileDragActive
+                  ? 'border-indigo-400 ring-2 ring-indigo-400/40'
+                  : 'border-[var(--mos-border)] focus-within:border-indigo-400/60 focus-within:ring-1 focus-within:ring-indigo-400/30'
+              }`}>
                 <input
                   ref={fileInputRef}
                   type="file"
@@ -919,6 +1021,7 @@ export default function AIResearchPage() {
                   value={input}
                   onChange={autoResize}
                   onKeyDown={handleKeyDown}
+                  onPaste={handleComposerPaste}
                   placeholder="Tanyakan apapun atau lampirkan gambar, Excel, atau CSV..."
                   disabled={loading}
                   rows={1}
