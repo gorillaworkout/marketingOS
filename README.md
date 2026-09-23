@@ -142,10 +142,23 @@ PostgreSQL contains these core tables:
 | user_preferences | Global settings |
 | task_model_preferences | Per-task model |
 
+## Production CI/CD
+
+Pushes to `main` deploy to the AWS VPS (`/home/ubuntu/apps/marketingos`, PM2 process `marketingos`, port 3021) via `.github/workflows/deploy-production.yml`. The VPS deploy key must keep its forced command on `scripts/deploy.sh`.
+
+Add these repository secrets before the workflow can succeed (**Settings → Secrets and variables → Actions**):
+
+- `MARKETINGOS_DEPLOY_SSH_KEY` (private key PEM)
+- `MARKETINGOS_DEPLOY_HOST` (`16.78.68.56`)
+- `MARKETINGOS_DEPLOY_USER` (`ubuntu`)
+
+Optional: `MARKETINGOS_DEPLOY_KNOWN_HOSTS`. The first merge needs a one-time manual deploy so the committed `scripts/deploy.sh` lands on the VPS. Details: [docs/deploy-cicd.md](docs/deploy-cicd.md).
+
 ## Documentation
 
 - [API Documentation](docs/API.md) — Semua 19 API endpoints
 - [User Guide](docs/USER-GUIDE.md) — Panduan lengkap untuk marketing team
+- [Production CI/CD](docs/deploy-cicd.md) — Actions secrets and VPS deploy
 
 ## Development
 
