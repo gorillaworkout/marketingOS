@@ -2,6 +2,8 @@
 
 import { useEffect, useRef, useState, useCallback, useMemo, useSyncExternalStore } from 'react';
 import { AiResearchExportActions } from '@/components/AiResearchExportActions';
+import { AiResearchPinFact } from '@/components/AiResearchPinFact';
+import { AiResearchWatchPanel } from '@/components/AiResearchWatchPanel';
 import { AiResearchFileChip, AiResearchMarkdown } from '@/components/AiResearchMarkdown';
 import { AiResearchSourcesPanel } from '@/components/AiResearchSourcesPanel';
 import {
@@ -186,6 +188,10 @@ function writeResearchMode(mode: 'fast' | 'deep') {
   researchModeListeners.forEach(listener => listener());
 }
 
+function watchTopicSeed(text: string): string {
+  return text.replace(/\s+/g, ' ').trim().slice(0, 120);
+}
+
 function defaultPromptForAttachments(images: number, files: number): string {
   if (images && files) return AI_RESEARCH_ATTACHMENT_ONLY_PROMPT;
   if (files) return AI_RESEARCH_FILE_ONLY_PROMPT;
@@ -254,6 +260,8 @@ export default function AIResearchPage() {
   const [groundingStatus, setGroundingStatus] = useState<ResearchGatherStatus | null>(null);
   const [pinnedSourceUrls, setPinnedSourceUrls] = useState<string[]>([]);
   const [sourcesPanelOpen, setSourcesPanelOpen] = useState(false);
+  const [watchOpen, setWatchOpen] = useState(false);
+  const [watchSeed, setWatchSeed] = useState('');
   const [researchNotice, setResearchNotice] = useState<{ tone: 'warning' | 'danger'; text: string } | null>(null);
   const [urlNotices, setUrlNotices] = useState<string[]>([]);
   const [linkDraftOpen, setLinkDraftOpen] = useState(false);
@@ -1108,6 +1116,14 @@ export default function AIResearchPage() {
 
         <button
           type="button"
+          data-testid="ai-research-watch-open"
+          onClick={() => setWatchOpen(true)}
+          className="min-h-7 flex-shrink-0 rounded-lg border border-[var(--mos-border)] bg-[var(--mos-raised)] px-2 py-1 text-[11px] font-medium text-[var(--mos-text)] hover:bg-[var(--mos-hover)] transition-colors"
+        >
+          Pantauan
+        </button>
+        <button
+          type="button"
           onClick={() => setSourcesPanelOpen(open => !open)}
           aria-expanded={sourcesPanelOpen}
           className="min-h-7 flex-shrink-0 rounded-lg border border-[var(--mos-border)] bg-[var(--mos-raised)] px-2 py-1 text-[11px] font-medium text-[var(--mos-text)] hover:bg-[var(--mos-hover)] transition-colors"
@@ -1413,12 +1429,22 @@ export default function AIResearchPage() {
                           : msg.content}
                       </div>
                       {msg.role === 'assistant' && msg.content.trim() && (
-                        <AiResearchExportActions
-                          title={[...messages].slice(0, i).reverse().find(item => item.role === 'user')?.content || 'Riset Dupoin AI'}
-                          answer={msg.content}
-                          sources={msg.sources?.length ? msg.sources : (i === messages.length - 1 ? inspectorSources : [])}
-                          mode={msg.researchMode}
-                        />
+                        <>
+                          <AiResearchExportActions
+                            title={[...messages].slice(0, i).reverse().find(item => item.role === 'user')?.content || 'Riset Dupoin AI'}
+                            answer={msg.content}
+                            sources={msg.sources?.length ? msg.sources : (i === messages.length - 1 ? inspectorSources : [])}
+                            mode={msg.researchMode}
+                          />
+                          <AiResearchPinFact
+                            answer={msg.content}
+                            sources={msg.sources?.length ? msg.sources : (i === messages.length - 1 ? inspectorSources : [])}
+                            conversationId={activeConvoId}
+                            projectId={activeProjectId}
+                            topicSuggestion={watchTopicSeed([...messages].slice(0, i).reverse().find(item => item.role === 'user')?.content || '')}
+                            onWatchTopic={topic => { setWatchSeed(topic); setWatchOpen(true); }}
+                          />
+                        </>
                       )}
                       {i === followUpIndex && (
                         <div className="mt-2" data-testid="ai-research-followups">
@@ -1797,6 +1823,7 @@ export default function AIResearchPage() {
             </div>
           </div>
         </div>
+        <AiResearchWatchPanel open={watchOpen} seed={watchSeed} onClose={() => setWatchOpen(false)} />
         <AiResearchSourcesPanel
           open={sourcesPanelOpen}
           onClose={() => setSourcesPanelOpen(false)}

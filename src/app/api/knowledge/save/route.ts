@@ -4,6 +4,8 @@ import { getSession } from '@/lib/auth';
 import { getEmbedding, cosineSimilarity } from '@/lib/embeddings';
 import { getUserPreferredModel } from '@/lib/openai';
 import { isGenerationFeature } from '@/lib/model-routing';
+import { savePinnedResearchFact } from '@/lib/knowledge-pin-save';
+import { AI_RESEARCH_KNOWLEDGE_TASK } from '@/lib/knowledge-pin';
 import { v4 as uuidv4 } from 'uuid';
 
 export async function POST(request: NextRequest) {
@@ -11,7 +13,12 @@ export async function POST(request: NextRequest) {
   if (auth.error) return NextResponse.json({ error: auth.error }, { status: auth.status });
   const userId = auth.userId as string;
 
-  const { brief, taskType, selectedOutput, rejectedOutputs, platform, audience } = await request.json();
+  const body = await request.json();
+  if (body?.taskType === AI_RESEARCH_KNOWLEDGE_TASK) {
+    const pinned = await savePinnedResearchFact(userId, body);
+    return NextResponse.json(pinned.body, { status: pinned.status });
+  }
+  const { brief, taskType, selectedOutput, rejectedOutputs, platform, audience } = body;
   if (!brief || !taskType || !selectedOutput) {
     return NextResponse.json({ error: 'brief, taskType, and selectedOutput required' }, { status: 400 });
   }
