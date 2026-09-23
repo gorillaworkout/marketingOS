@@ -484,11 +484,53 @@ function hasExactFivePaaHeadings(markdown: string, questions: string[]): boolean
   return questionHeadings.length === 5 && questions.every(question => questionHeadings.filter(heading => heading === question).length === 1);
 }
 
-function hasEndingDupoinAccountCta(markdown: string): boolean {
-  const lastParagraph = markdown.split(/\n\s*\n/).map(block => block.trim()).filter(Boolean).at(-1) || '';
-  if (lastParagraph.startsWith('#') || !/^[^.!?]+[.!?]$/.test(lastParagraph)) return false;
-  const text = normalized(lastParagraph);
+/** Number-free imperative close. Used only when a draft has no compliant ending CTA. */
+export const DUPOIN_ACCOUNT_CTA_SENTENCE = 'Buka akun Dupoin untuk memantau pergerakan pasar dengan pengelolaan risiko.';
+
+function findSourcesHeading(markdown: string): RegExpExecArray | null {
+  return /^#{1,3}\s+(?:sources|sumber)\s*$/im.exec(markdown);
+}
+
+function lastProseParagraph(markdown: string): string {
+  return markdown.split(/\n\s*\n/).map(block => block.trim()).filter(block => block && !block.startsWith('#')).at(-1) || '';
+}
+
+function isImperativeDupoinAccountCta(paragraph: string): boolean {
+  if (!paragraph || paragraph.startsWith('#') || !/^[^.!?]+[.!?]$/.test(paragraph)) return false;
+  const text = normalized(paragraph);
   return /^(buka|mulai|daftar|buat)\b/.test(text) && /\b(akun|account)\b/.test(text) && /\bdupoin\b/.test(text);
+}
+
+/**
+ * The article body ends at the Sources/Sumber heading. The CTA is the last prose
+ * paragraph before that heading, which is where FAQ + CTA + Sources drafts place it.
+ * A one-sentence CTA after the source list still counts for older drafts.
+ */
+function hasEndingDupoinAccountCta(markdown: string): boolean {
+  const sourcesHeading = findSourcesHeading(markdown);
+  const body = sourcesHeading ? markdown.slice(0, sourcesHeading.index) : markdown;
+  if (isImperativeDupoinAccountCta(lastProseParagraph(body))) return true;
+  if (!sourcesHeading) return false;
+  return isImperativeDupoinAccountCta(lastProseParagraph(markdown.slice(sourcesHeading.index)));
+}
+
+function isSafeDupoinAccountCta(sentence: string): boolean {
+  if (!isImperativeDupoinAccountCta(sentence) || extractNumbers(sentence).length > 0 || extractQuotes(sentence).length > 0) return false;
+  const text = normalized(sentence);
+  return !COMPETITOR_BROKERS.some(broker => text.includes(normalized(broker)));
+}
+
+/** Append the fixed Dupoin CTA before Sources when the ending CTA is missing. */
+export function ensureEndingDupoinAccountCta(markdown: string): string {
+  if (hasEndingDupoinAccountCta(markdown) || !isSafeDupoinAccountCta(DUPOIN_ACCOUNT_CTA_SENTENCE)) return markdown;
+  const sourcesHeading = findSourcesHeading(markdown);
+  if (!sourcesHeading) {
+    const trimmed = markdown.trimEnd();
+    return trimmed ? `${trimmed}\n\n${DUPOIN_ACCOUNT_CTA_SENTENCE}` : DUPOIN_ACCOUNT_CTA_SENTENCE;
+  }
+  const before = markdown.slice(0, sourcesHeading.index).trimEnd();
+  const after = markdown.slice(sourcesHeading.index).replace(/^\n+/, '');
+  return before ? `${before}\n\n${DUPOIN_ACCOUNT_CTA_SENTENCE}\n\n${after}` : `${DUPOIN_ACCOUNT_CTA_SENTENCE}\n\n${after}`;
 }
 
 export function buildArticleMarketNewsPrompts(input: ArticleMarketNewsInput): { systemPrompt: string; userPrompt: string } {
@@ -517,14 +559,14 @@ NON-NEGOTIABLE EDITORIAL RULES:
 - A quote may appear only if it exists verbatim in a Source evidence field.
 - Do not mention competitor brokers.
 - The URLs are citations only. Do not browse, open, fetch, or follow them.
-- End with one natural, imperative, one-sentence CTA that asks the reader to open an account with Dupoin.
+- Immediately before the Sources or Sumber heading, write exactly one imperative one-sentence CTA on its own paragraph. Start that sentence with Buka, Mulai, Daftar, or Buat, include akun or account and Dupoin, and end it with . ! or ?. Use this number-free sentence when you do not already have a compliant close: ${DUPOIN_ACCOUNT_CTA_SENTENCE} Do not put the CTA after Sources. Do not add prices, percentages, dates, or other numbers to the CTA.
 - Do not claim the article passed plagiarism or nonnumeric fact checking; those remain manual gates.
 
 Return ONLY one valid JSON object (no markdown fences, no prose, no reasoning tags) with exactly these string keys:
 {
   "title": "H1 title, maximum 60 characters",
   "metaDescription": "SEO description, maximum 155 characters",
-  "articleMarkdown": "complete article in Markdown with H1/H2/H3, FAQ, CTA, and Sources",
+  "articleMarkdown": "complete article in Markdown with H1/H2/H3, FAQ, one-sentence Dupoin CTA, then Sources",
   "excerpt": "one short summary",
   "sourcesCited": ["source outlet — publication date — URL"]
 }
@@ -549,7 +591,7 @@ SOURCE EVIDENCE WITH EXPLICIT PROVENANCE:
 ${sourceMaterial}
 </USER_DATA>
 
-Write the article using only factual claims traceable to SOURCE EVIDENCE. Treat automated RSS evidence as publisher-supplied headline/summary metadata, not as a claim that the full article body was independently verified.`;
+Write the article using only factual claims traceable to SOURCE EVIDENCE. Treat automated RSS evidence as publisher-supplied headline/summary metadata, not as a claim that the full article body was independently verified. Put the one-sentence Dupoin account CTA in the last prose paragraph immediately before the Sources or Sumber heading.`;
   return { systemPrompt, userPrompt };
 }
 
@@ -589,7 +631,7 @@ export function validateGeneratedArticle(title: string, articleMarkdown: string,
     return spacedMatch || outputTokens.has(brokerName.replace(/\s+/g, ''));
   });
   const h1Headings = [...articleMarkdown.matchAll(/^#\s+(.+)$/gm)].map(match => match[1].trim());
-  const sourcesHeading = /^#{1,3}\s+(?:sources|sumber)\s*$/im.exec(articleMarkdown);
+  const sourcesHeading = findSourcesHeading(articleMarkdown);
   const prose = sourcesHeading ? articleMarkdown.slice(0, sourcesHeading.index) : articleMarkdown;
   const sourcesSection = sourcesHeading ? articleMarkdown.slice(sourcesHeading.index) : '';
   const sourcesCitedInProse = input.sources.every(source => prose.includes(source.outlet) && containsSourceDate(prose, source.publishedAt));
@@ -622,7 +664,7 @@ export function validateGeneratedArticle(title: string, articleMarkdown: string,
   if (!qc.sourcesSectionIncluded) violations.push('Article must contain a Sources or Sumber section heading.');
   if (!qc.sourcesCitedInProse) violations.push('Every reference outlet and publication date must be cited in the prose before the Sources section.');
   if (!qc.allSourcesCited) violations.push('Every reference outlet, publication date, and URL must be listed in the Sources section.');
-  if (!qc.dupoinCtaIncluded) violations.push('Final paragraph must be an imperative Dupoin account-opening CTA.');
+  if (!qc.dupoinCtaIncluded) violations.push('Final paragraph before Sources must be an imperative Dupoin account-opening CTA.');
   if (!qc.noCompetitorBroker) violations.push(`Competitor broker mention detected: ${brokerMatches.join(', ')}.`);
   if (!qc.allNumbersSourceBacked) violations.push(`Unsupported numeric claims detected: ${unsupportedNumbers.join(', ')}.`);
   if (!qc.allQuotesSourceBacked) violations.push(`Quotes not found verbatim in verified facts: ${unsupportedQuotes.join(' | ')}.`);

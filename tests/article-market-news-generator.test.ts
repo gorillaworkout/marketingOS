@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
-import { buildArticleMarketNewsPrompts, normalizeArticleMarketNewsInput, normalizeResearchUrl, parseGeneratedArticle, repairLooseJson, validateGeneratedArticle } from '../src/lib/article-market-news';
+import { buildArticleMarketNewsPrompts, DUPOIN_ACCOUNT_CTA_SENTENCE, ensureEndingDupoinAccountCta, normalizeArticleMarketNewsInput, normalizeResearchUrl, parseGeneratedArticle, repairLooseJson, validateGeneratedArticle } from '../src/lib/article-market-news';
 import { articleDocxFilename, buildArticleDocxBlob } from '../src/lib/article-market-news-docx';
 
 const read = (relative: string) => {
@@ -45,7 +45,7 @@ function compliantArticle(): string {
   const lead = 'Harga Emas menjadi perhatian pelaku pasar berdasarkan fakta yang telah diverifikasi operator dari laporan Kontan pada 2026-07-27.';
   const body = Array.from({ length: 770 }, () => 'pasar').join(' ');
   const faqs = rawInput.paaQuestions.map(question => `## ${question}\nJawaban merujuk pada fakta sumber dan menekankan disiplin risiko.`).join('\n\n');
-  return `# Harga Emas dan Permintaan Pasar\n\n${lead}\n\n## Analisis Pasar\n${body}\n\n${faqs}\n\n## Sources\nKontan — 2026-07-27 — https://investasi.kontan.co.id/news/harga-emas\n\nBuka akun Dupoin untuk memantau peluang pasar dengan pengelolaan risiko.`;
+  return `# Harga Emas dan Permintaan Pasar\n\n${lead}\n\n## Analisis Pasar\n${body}\n\n${faqs}\n\nBuka akun Dupoin untuk memantau peluang pasar dengan pengelolaan risiko.\n\n## Sources\nKontan — 2026-07-27 — https://investasi.kontan.co.id/news/harga-emas`;
 }
 
 test('parses article JSON wrapped in reasoning prose or markdown fences', () => {
@@ -140,11 +140,16 @@ Masih terpotong tanpa penutup`;
 
 test('system prompt requires a bare JSON object response', () => {
   const input = normalizeArticleMarketNewsInput(rawInput, '2026-07-27');
-  const { systemPrompt } = buildArticleMarketNewsPrompts(input);
+  const { systemPrompt, userPrompt } = buildArticleMarketNewsPrompts(input);
   assert.match(systemPrompt, /no markdown fences/i);
   assert.match(systemPrompt, /first character of the response must be "\{"/i);
   assert.match(systemPrompt, /Encode every newline inside string values as \\n/i);
   assert.match(systemPrompt, /Escape every double quote inside string values as \\"/i);
+  assert.match(systemPrompt, /immediately before the Sources or Sumber heading/i);
+  assert.match(systemPrompt, /Buka, Mulai, Daftar, or Buat/);
+  assert.match(systemPrompt, /Do not add prices, percentages, dates, or other numbers to the CTA/);
+  assert.match(systemPrompt, new RegExp(DUPOIN_ACCOUNT_CTA_SENTENCE.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  assert.match(userPrompt, /last prose paragraph immediately before the Sources or Sumber heading/i);
 });
 
 test('page exposes the admin Article Market News generation workflow', () => {
@@ -170,7 +175,9 @@ test('route is feature-gated, gateway-routed, evidence-gated, and never fetches 
   assert.match(route, /jsonRepairAttempts: 0/);
   assert.match(route, /attempt <= 3/);
   assert.match(openai, /jsonRepairAttempts \?\? 1\) === 0/);
+  assert.match(route, /ensureEndingDupoinAccountCta\(/);
   assert.match(route, /RETRY FEEDBACK FROM THE DETERMINISTIC PUBLICATION GATE/);
+  assert.match(route, /Do not invent prices, percentages, dates, or other numbers/);
   assert.match(route, /Do not revise broken text/);
   assert.match(route, /Encode newlines as/);
   assert.match(route, /metaDescription\.length > 155/);
@@ -249,6 +256,45 @@ test('publication gate passes a compliant article', () => {
   assert.equal(result.qc.allQuotesSourceBacked, true);
   const naturalDateArticle = compliantArticle().replaceAll('2026-07-27', '27 Juli 2026');
   assert.deepEqual(validateGeneratedArticle('Harga Emas dan Permintaan Pasar', naturalDateArticle, input).violations, []);
+});
+
+test('publication gate accepts a Dupoin CTA before Sources and rejects a missing or soft ending', () => {
+  const input = normalizeArticleMarketNewsInput(rawInput, '2026-07-27');
+  const cta = 'Buka akun Dupoin untuk memantau peluang pasar dengan pengelolaan risiko.';
+  const sourcesLast = [
+    '# Harga Emas dan Permintaan Pasar',
+    'Harga Emas dibahas menurut Kontan pada 27 Juli 2026.',
+    cta,
+    '## Sources',
+    'Kontan — 2026-07-27 — https://investasi.kontan.co.id/news/harga-emas',
+  ].join('\n\n');
+  const lastBlock = sourcesLast.split(/\n\s*\n/).map(block => block.trim()).filter(Boolean).at(-1) || '';
+  assert.equal(lastBlock.startsWith('#'), false);
+  assert.doesNotMatch(lastBlock, /Buka akun Dupoin/);
+  assert.equal(validateGeneratedArticle('Harga Emas dan Permintaan Pasar', sourcesLast, input).qc.dupoinCtaIncluded, true);
+
+  const sumberHeading = sourcesLast.replace('## Sources', '## Sumber');
+  assert.equal(validateGeneratedArticle('Harga Emas dan Permintaan Pasar', sumberHeading, input).qc.dupoinCtaIncluded, true);
+
+  const missingCta = sourcesLast.replace(`${cta}\n\n`, '');
+  assert.equal(validateGeneratedArticle('Harga Emas dan Permintaan Pasar', missingCta, input).qc.dupoinCtaIncluded, false);
+
+  const softEnding = sourcesLast.replace(cta, 'Pembaca dapat mempertimbangkan akun Dupoin sesuai kebutuhan masing-masing.');
+  assert.equal(validateGeneratedArticle('Harga Emas dan Permintaan Pasar', softEnding, input).qc.dupoinCtaIncluded, false);
+
+  const legacyAfterSources = sourcesLast.replace(`${cta}\n\n`, '') + `\n\n${cta}`;
+  assert.equal(validateGeneratedArticle('Harga Emas dan Permintaan Pasar', legacyAfterSources, input).qc.dupoinCtaIncluded, true);
+
+  const repaired = ensureEndingDupoinAccountCta(missingCta);
+  assert.equal(validateGeneratedArticle('Harga Emas dan Permintaan Pasar', repaired, input).qc.dupoinCtaIncluded, true);
+  assert.match(repaired, new RegExp(`${DUPOIN_ACCOUNT_CTA_SENTENCE.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\n\\n## Sources`));
+  assert.doesNotMatch(DUPOIN_ACCOUNT_CTA_SENTENCE, /\d/);
+  assert.equal(repaired.slice(repaired.indexOf('## Sources')), missingCta.slice(missingCta.indexOf('## Sources')));
+  assert.equal(ensureEndingDupoinAccountCta(repaired), repaired);
+  assert.equal(ensureEndingDupoinAccountCta(sourcesLast), sourcesLast);
+  const repairedSoft = ensureEndingDupoinAccountCta(softEnding);
+  assert.match(repairedSoft, /Pembaca dapat mempertimbangkan akun Dupoin sesuai kebutuhan masing-masing\.\n\nBuka akun Dupoin/);
+  assert.equal(validateGeneratedArticle('Harga Emas dan Permintaan Pasar', repairedSoft, input).qc.dupoinCtaIncluded, true);
 });
 
 test('publication gate rejects duplicate PAA headings and a fake Dupoin mention', () => {
