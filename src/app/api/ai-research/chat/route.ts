@@ -16,6 +16,12 @@ import {
   resolveAiResearchTemperature,
   type ResearchContext,
 } from '@/lib/ai-research-grounding';
+import { fetchAiResearchContextUrls } from '@/lib/ai-research-url-fetch';
+import {
+  applyContextUrlsToIncoming,
+  isUrlOnlyQuery,
+  mergeContextUrlSources,
+} from '@/lib/ai-research-urls';
 import {
   applyPinnedResearchSources,
   buildResearchSsePayload,
@@ -105,7 +111,7 @@ export async function POST(request: NextRequest) {
   let parsed: { messages: AiResearchChatMessage[]; conversationId?: string; pinnedSourceUrls: string[] };
   try {
     parsed = parseChatRequest(await request.json());
-    parsed.messages = hydrateMessageFiles(parsed.messages);
+    parsed.messages = await hydrateMessageFiles(parsed.messages);
   } catch (error) {
     return jsonError(
       error instanceof SyntaxError ? 'Invalid JSON body' : error instanceof Error ? error.message : 'Invalid request',
@@ -129,7 +135,7 @@ export async function POST(request: NextRequest) {
       'SELECT messages FROM ai_research_conversations WHERE id = ? AND user_id = ?',
       [conversationId, auth.id],
     );
-    if (history) dbMessages = hydrateMessageFiles(parseStoredMessages(history.messages));
+    if (history) dbMessages = await hydrateMessageFiles(parseStoredMessages(history.messages));
   }
 
   const convId = conversationId || uuidv4();
@@ -148,17 +154,35 @@ export async function POST(request: NextRequest) {
       try {
         controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'start', conversationId: convId, model })}\n\n`));
 
-        let research: ResearchContext | null = null;
-        let gatherFailed = false;
         const query = latestUser?.content || '';
-        try {
-          research = await gatherAiResearchContext(query);
-        } catch (error) {
-          console.error('[ai-research] gatherAiResearchContext failed:', error);
-          gatherFailed = true;
-          research = null;
+        const urlOnly = isUrlOnlyQuery(query);
+        const gatherTask = (async (): Promise<{ research: ResearchContext | null; failed: boolean }> => {
+          if (urlOnly) return { research: null, failed: false };
+          try {
+            return { research: await gatherAiResearchContext(query), failed: false };
+          } catch (error) {
+            console.error('[ai-research] gatherAiResearchContext failed:', error);
+            return { research: null, failed: true };
+          }
+        })();
+        const [gatherOutcome, urlContext] = await Promise.all([
+          gatherTask,
+          fetchAiResearchContextUrls(query),
+        ]);
+        if (urlContext.sources.length || urlContext.failures.length) {
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+            type: 'context-urls',
+            attached: urlContext.sources.map(source => ({ url: source.url, title: source.title })),
+            failures: urlContext.failures,
+          })}\n\n`));
         }
-        const researchEvent = buildResearchSsePayload({ query, research, failed: gatherFailed });
+
+        const displayResearch = mergeContextUrlSources(gatherOutcome.research, urlContext.sources, query);
+        const researchEvent = buildResearchSsePayload({
+          query,
+          research: displayResearch,
+          failed: gatherOutcome.failed && urlContext.sources.length === 0,
+        });
         controller.enqueue(encoder.encode(`data: ${JSON.stringify({
           type: 'research',
           sourceCount: researchEvent.sourceCount,
@@ -166,14 +190,15 @@ export async function POST(request: NextRequest) {
           sources: researchEvent.sources,
         })}\n\n`));
 
-        const modelResearch = research && pinnedSourceUrls.length
-          ? applyPinnedResearchSources(research, pinnedSourceUrls)
-          : research;
+        const pinnedResearch = gatherOutcome.research && pinnedSourceUrls.length
+          ? applyPinnedResearchSources(gatherOutcome.research, pinnedSourceUrls)
+          : gatherOutcome.research;
+        const modelResearch = mergeContextUrlSources(pinnedResearch, urlContext.sources, query);
 
         const apiMessages = buildAiResearchChatMessages({
           systemPrompt: AI_RESEARCH_SYSTEM_PROMPT,
           history: dbMessages,
-          incoming: messages,
+          incoming: applyContextUrlsToIncoming(messages, urlContext.failures),
           maxHistory: MAX_HISTORY,
           research: modelResearch,
         });
@@ -191,7 +216,7 @@ export async function POST(request: NextRequest) {
             messages: apiMessages,
             stream: true,
             stream_options: { include_usage: true },
-            temperature: resolveAiResearchTemperature(research),
+            temperature: resolveAiResearchTemperature(modelResearch),
             max_tokens: AI_RESEARCH_MAX_OUTPUT_TOKENS,
           }),
         });

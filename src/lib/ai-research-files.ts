@@ -1,13 +1,28 @@
+import JSZip from 'jszip';
+import mammoth from 'mammoth';
+import { extractText, getDocumentProxy } from 'unpdf';
 import * as XLSX from 'xlsx';
 import {
+  AI_RESEARCH_MAX_DOCUMENT_PAGES,
   AI_RESEARCH_MAX_EXTRACTED_CHARS,
+  AI_RESEARCH_MAX_PRESENTATION_SLIDES,
   AI_RESEARCH_MAX_SPREADSHEET_ROWS,
+  AI_RESEARCH_UNSUPPORTED_FILE_ERROR,
   attachmentError,
+  fileExtension,
+  inferResearchFileType,
   inferSpreadsheetType,
+  isResearchDocument,
   splitFileDataUrl,
   type AiResearchChatMessage,
   type AiResearchFile,
 } from './ai-research';
+
+type MammothResult = { value: string; messages: Array<{ type: string; message: string }> };
+
+const readDocx = mammoth as typeof mammoth & {
+  convertToMarkdown: (input: { buffer: Buffer }) => Promise<MammothResult>;
+};
 
 function decodeText(bytes: Uint8Array): string {
   return new TextDecoder('utf-8', { fatal: false }).decode(bytes).replace(/^\uFEFF/, '');
@@ -90,9 +105,78 @@ export function rowsToMarkdownTable(rows: unknown[][]): string {
   ].join('\n');
 }
 
-function truncateExtracted(text: string): string {
+const EXTRACTION_TRUNCATION_NOTE = '\n… extracted text truncated — only part of the file was sent to the model';
+
+export function truncateExtractedText(text: string): string {
   if (text.length <= AI_RESEARCH_MAX_EXTRACTED_CHARS) return text;
-  return `${text.slice(0, AI_RESEARCH_MAX_EXTRACTED_CHARS)}\n… extracted text truncated`;
+  const keep = Math.max(0, AI_RESEARCH_MAX_EXTRACTED_CHARS - EXTRACTION_TRUNCATION_NOTE.length);
+  return `${text.slice(0, keep)}${EXTRACTION_TRUNCATION_NOTE}`;
+}
+
+export function limitLabeledSections(sections: string[], maxSections: number, omittedNoun: 'pages' | 'slides'): string {
+  const kept = sections.slice(0, Math.max(0, maxSections));
+  const omitted = Math.max(0, sections.length - kept.length);
+  const body = kept.map(section => section.trim()).filter(Boolean).join('\n\n');
+  if (!omitted) return body;
+  const note = `… ${omitted} more ${omittedNoun} omitted`;
+  return body ? `${body}\n\n${note}` : note;
+}
+
+function normalizeWhitespace(text: string): string {
+  return text
+    .replace(/\u0000/g, '')
+    .replace(/\r\n/g, '\n')
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+function unescapeMammothMarkdown(text: string): string {
+  return normalizeWhitespace(text.replace(/\\([\\`*_{}[\]()#+.!|-])/g, '$1').replace(/!\[[^\]]*]\([^)]*\)/g, ''));
+}
+
+function decodeXml(value: string): string {
+  return value
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, hex: string) => codePoint(parseInt(hex, 16)))
+    .replace(/&#(\d+);/g, (_, dec: string) => codePoint(parseInt(dec, 10)))
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&amp;/g, '&');
+}
+
+function codePoint(code: number): string {
+  if (!Number.isFinite(code) || code < 0 || code > 0x10FFFF) return '';
+  try {
+    return String.fromCodePoint(code);
+  } catch {
+    return '';
+  }
+}
+
+function drawingText(xml: string): string {
+  const paragraphs = xml.split(/<a:p\b/).slice(1);
+  const lines = paragraphs.map((chunk) => {
+    const end = chunk.indexOf('</a:p>');
+    const paragraph = end >= 0 ? chunk.slice(0, end) : chunk;
+    return [...paragraph.matchAll(/<a:t\b[^>]*>([\s\S]*?)<\/a:t>/g)]
+      .map(match => decodeXml(match[1]))
+      .join('')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }).filter(Boolean);
+  if (lines.length) return lines.join('\n');
+  return [...xml.matchAll(/<a:t\b[^>]*>([\s\S]*?)<\/a:t>/g)]
+    .map(match => decodeXml(match[1]))
+    .join(' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function attachmentFailureDetail(error: unknown, fallback: string): string {
+  const message = error instanceof Error ? error.message : fallback;
+  return (message.replace(/\s+/g, ' ').trim() || fallback).slice(0, 180);
 }
 
 function formatSheetRows(rows: unknown[][], sheetName?: string, sheetCount = 1): string {
@@ -108,7 +192,7 @@ function formatSheetRows(rows: unknown[][], sheetName?: string, sheetCount = 1):
 
 export function extractCsvText(bytes: Uint8Array): string {
   const rows = parseCsvRows(decodeText(bytes));
-  return truncateExtracted(formatSheetRows(rows) || '(empty spreadsheet)');
+  return truncateExtractedText(formatSheetRows(rows) || '(empty spreadsheet)');
 }
 
 export function extractSpreadsheetText(bytes: Uint8Array, mimeType: string, name?: string): string {
@@ -128,22 +212,110 @@ export function extractSpreadsheetText(bytes: Uint8Array, mimeType: string, name
     return formatSheetRows(rows, sheetName, workbook.SheetNames.length);
   }).filter(Boolean);
 
-  return truncateExtracted(parts.join('\n\n') || '(empty spreadsheet)');
+  return truncateExtractedText(parts.join('\n\n') || '(empty spreadsheet)');
+}
+
+async function extractPdfText(bytes: Uint8Array): Promise<string> {
+  const pdf = await getDocumentProxy(new Uint8Array(bytes));
+  const { text } = await extractText(pdf, { mergePages: false });
+  const pages = Array.isArray(text) ? text : [text];
+  const sections = pages.map((page, index) => {
+    const body = normalizeWhitespace(String(page ?? ''));
+    return body ? `Page ${index + 1}\n${body}` : '';
+  });
+  const joined = limitLabeledSections(sections, AI_RESEARCH_MAX_DOCUMENT_PAGES, 'pages');
+  if (!joined) return '(no extractable text — the file may be scanned or image-only)';
+  return truncateExtractedText(joined);
+}
+
+async function extractDocxText(bytes: Uint8Array): Promise<string> {
+  const buffer = Buffer.from(bytes);
+  let markdown = '';
+  try {
+    const result = await readDocx.convertToMarkdown({ buffer });
+    markdown = unescapeMammothMarkdown(result.value || '');
+  } catch {
+    markdown = '';
+  }
+  if (!markdown) {
+    const raw = await mammoth.extractRawText({ buffer });
+    markdown = normalizeWhitespace(raw.value || '');
+    if (!markdown) {
+      const errors = raw.messages.filter(message => message.type === 'error').map(message => message.message);
+      if (errors.length) throw new Error(errors.join('; '));
+      return '(empty document)';
+    }
+  }
+  return truncateExtractedText(markdown);
+}
+
+function slideIndex(path: string): number {
+  const match = path.replace(/\\/g, '/').match(/slide(\d+)\.xml$/i);
+  return match ? Number(match[1]) : 0;
+}
+
+async function extractPptxText(bytes: Uint8Array): Promise<string> {
+  let zip: JSZip;
+  try {
+    zip = await JSZip.loadAsync(bytes);
+  } catch {
+    throw new Error('unreadable presentation');
+  }
+  const slideFiles = Object.keys(zip.files)
+    .filter(name => /^ppt\/slides\/slide\d+\.xml$/i.test(name.replace(/\\/g, '/')) && !zip.files[name]?.dir)
+    .sort((left, right) => slideIndex(left) - slideIndex(right));
+  if (!slideFiles.length) throw new Error('presentation has no slides');
+  if (slideFiles.length > 500) throw new Error('presentation has too many slides');
+
+  const sections: string[] = [];
+  for (const path of slideFiles) {
+    const xml = await zip.file(path)?.async('string');
+    if (!xml) continue;
+    if (xml.length > 1_500_000) throw new Error('slide is too large');
+    const number = slideIndex(path);
+    const notesXml = await zip.file(`ppt/notesSlides/notesSlide${number}.xml`)?.async('string');
+    const body = drawingText(xml);
+    const notes = notesXml && notesXml.length <= 1_500_000 ? drawingText(notesXml) : '';
+    if (!body && !notes) {
+      sections.push('');
+      continue;
+    }
+    const lines = [`Slide ${number}`];
+    if (body) lines.push(body);
+    if (notes) lines.push(`Notes: ${notes}`);
+    sections.push(lines.join('\n'));
+  }
+
+  const joined = limitLabeledSections(sections, AI_RESEARCH_MAX_PRESENTATION_SLIDES, 'slides');
+  if (!joined) return '(empty presentation)';
+  return truncateExtractedText(joined);
+}
+
+export async function extractResearchFileText(bytes: Uint8Array, mimeType: string, name?: string): Promise<string> {
+  const inferred = inferResearchFileType(mimeType, name) || mimeType;
+  if (!isResearchDocument({ mimeType: inferred, name })) {
+    return extractSpreadsheetText(bytes, inferred, name);
+  }
+  const ext = fileExtension(name);
+  if (inferred === 'application/pdf' || ext === '.pdf') return extractPdfText(bytes);
+  if (ext === '.docx' || inferred.endsWith('wordprocessingml.document')) return extractDocxText(bytes);
+  if (ext === '.pptx' || inferred.endsWith('presentationml.presentation')) return extractPptxText(bytes);
+  throw new Error('unsupported document');
 }
 
 function fileLooksLikeCsv(name?: string, mimeType?: string): boolean {
   return (name || '').toLowerCase().endsWith('.csv') || mimeType === 'text/csv' || mimeType === 'application/csv';
 }
 
-export function hydrateMessageFiles(messages: AiResearchChatMessage[]): AiResearchChatMessage[] {
-  return messages.map((message) => {
+export async function hydrateMessageFiles(messages: AiResearchChatMessage[]): Promise<AiResearchChatMessage[]> {
+  return Promise.all(messages.map(async (message) => {
     if (!message.files?.length) return message;
-    const files = message.files.map((file, index) => hydrateOneFile(file, index));
+    const files = await Promise.all(message.files.map((file, index) => hydrateOneFile(file, index)));
     return { ...message, files };
-  });
+  }));
 }
 
-function hydrateOneFile(file: AiResearchFile, index: number): AiResearchFile {
+async function hydrateOneFile(file: AiResearchFile, index: number): Promise<AiResearchFile> {
   if (file.extractedText?.trim() && !file.dataUrl) {
     return {
       mimeType: file.mimeType,
@@ -156,18 +328,21 @@ function hydrateOneFile(file: AiResearchFile, index: number): AiResearchFile {
   }
   const parsed = splitFileDataUrl(file.dataUrl, file.name);
   if (!parsed) {
-    throw attachmentError('Unsupported file type. Use XLSX, XLS, or CSV.');
+    throw attachmentError(AI_RESEARCH_UNSUPPORTED_FILE_ERROR);
   }
+  const document = isResearchDocument({ mimeType: parsed.mimeType, name: file.name });
   let extractedText: string;
   try {
-    extractedText = extractSpreadsheetText(
+    extractedText = await extractResearchFileText(
       Buffer.from(parsed.base64, 'base64'),
       parsed.mimeType,
       file.name,
     );
   } catch (error) {
-    const detail = error instanceof Error ? error.message : 'unreadable spreadsheet';
-    throw attachmentError(`Could not read ${file.name || 'spreadsheet'}. Use a valid XLSX, XLS, or CSV file. (${detail})`);
+    const detail = attachmentFailureDetail(error, document ? 'unreadable document' : 'unreadable spreadsheet');
+    const label = file.name || (document ? 'document' : 'spreadsheet');
+    const expected = document ? 'PDF, DOCX, or PPTX' : 'XLSX, XLS, or CSV';
+    throw attachmentError(`Could not read ${label}. Use a valid ${expected} file. (${detail})`);
   }
   return {
     mimeType: parsed.mimeType,

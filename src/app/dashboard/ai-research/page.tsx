@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { AiResearchFileChip, AiResearchMarkdown } from '@/components/AiResearchMarkdown';
 import { AiResearchSourcesPanel } from '@/components/AiResearchSourcesPanel';
 import {
@@ -9,14 +9,17 @@ import {
   AI_RESEARCH_FILE_ONLY_PROMPT,
   AI_RESEARCH_FILE_PICKER_ACCEPT,
   AI_RESEARCH_IMAGE_ONLY_PROMPT,
+  AI_RESEARCH_MAX_DOCUMENT_BYTES,
+  AI_RESEARCH_MAX_DOCUMENTS,
   AI_RESEARCH_MAX_FILE_BYTES,
   AI_RESEARCH_MAX_FILES,
   AI_RESEARCH_MAX_IMAGE_BYTES,
   AI_RESEARCH_MAX_IMAGES,
+  AI_RESEARCH_MAX_TOTAL_DOCUMENT_BYTES,
   AI_RESEARCH_MAX_TOTAL_FILE_BYTES,
   AI_RESEARCH_MAX_TOTAL_IMAGE_BYTES,
-  inferSpreadsheetType,
-  isAllowedImageType,
+  classifyResearchAttachment,
+  inferResearchFileType,
 } from '@/lib/ai-research';
 import {
   RESEARCH_DISCONNECT_BANNER,
@@ -25,6 +28,12 @@ import {
   type InspectorResearchSource,
   type ResearchGatherStatus,
 } from '@/lib/ai-research-inspector';
+import { suggestAiResearchFollowUps } from '@/lib/ai-research-followups';
+import {
+  AI_RESEARCH_MAX_CONTEXT_URLS,
+  contextUrlBlockReason,
+  scanContextUrls,
+} from '@/lib/ai-research-urls';
 
 interface ChatImage {
   mimeType: string;
@@ -70,14 +79,54 @@ interface ModelHealthResult {
 interface PendingAttachment {
   id: string;
   file: File;
-  kind: 'image' | 'file';
+  kind: 'image' | 'spreadsheet' | 'document';
   previewUrl?: string;
 }
 
-function attachmentKind(file: File): 'image' | 'file' | null {
-  if (isAllowedImageType(file.type)) return 'image';
-  if (inferSpreadsheetType(file.type, file.name)) return 'file';
-  return null;
+function attachmentKind(file: File): PendingAttachment['kind'] | null {
+  return classifyResearchAttachment(file.type, file.name);
+}
+
+function dragHasFiles(dataTransfer: DataTransfer | null): boolean {
+  if (!dataTransfer) return false;
+  if (Array.from(dataTransfer.types).includes('Files')) return true;
+  return Array.from(dataTransfer.items).some(item => item.kind === 'file');
+}
+
+function filesFromClipboard(data: DataTransfer | null): File[] {
+  if (!data) return [];
+  const listed = Array.from(data.files);
+  if (listed.length > 0) return listed;
+  const extracted: File[] = [];
+  for (const item of Array.from(data.items)) {
+    if (item.kind !== 'file') continue;
+    const file = item.getAsFile();
+    if (file) extracted.push(file);
+  }
+  return extracted;
+}
+
+function clipboardPlainText(data: DataTransfer): string {
+  try {
+    return data.getData('text/plain');
+  } catch {
+    return '';
+  }
+}
+
+function plainTextIsOnlyFileNames(text: string, files: File[]): boolean {
+  const names = new Set(files.map(file => file.name.trim()).filter(Boolean));
+  const lines = text.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+  return lines.length > 0 && lines.every(line => names.has(line));
+}
+
+function dragPointerLeftZone(event: React.DragEvent<HTMLElement>): boolean {
+  if (event.clientX === 0 && event.clientY === 0) return true;
+  const rect = event.currentTarget.getBoundingClientRect();
+  return event.clientX < rect.left
+    || event.clientX > rect.right
+    || event.clientY < rect.top
+    || event.clientY > rect.bottom;
 }
 
 function defaultPromptForAttachments(images: number, files: number): string {
@@ -128,6 +177,7 @@ export default function AIResearchPage() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([]);
+  const [fileDragActive, setFileDragActive] = useState(false);
   const [loading, setLoading] = useState(false);
   const [streaming, setStreaming] = useState('');
   const [researchSourceCount, setResearchSourceCount] = useState<number | null>(null);
@@ -136,6 +186,9 @@ export default function AIResearchPage() {
   const [pinnedSourceUrls, setPinnedSourceUrls] = useState<string[]>([]);
   const [sourcesPanelOpen, setSourcesPanelOpen] = useState(false);
   const [researchNotice, setResearchNotice] = useState<{ tone: 'warning' | 'danger'; text: string } | null>(null);
+  const [urlNotices, setUrlNotices] = useState<string[]>([]);
+  const [linkDraftOpen, setLinkDraftOpen] = useState(false);
+  const [linkDraft, setLinkDraft] = useState('');
   const [error, setError] = useState('');
   const [model, setModel] = useState('');
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -151,6 +204,7 @@ export default function AIResearchPage() {
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const skipNextLoadRef = useRef(false);
+  const sendingRef = useRef(false);
 
   useEffect(() => {
     fetch('/api/settings/model')
@@ -240,6 +294,7 @@ export default function AIResearchPage() {
         setGroundingStatus(null);
         setResearchSourceCount(null);
         setResearchNotice(null);
+        setUrlNotices([]);
         setPinnedSourceUrls([]);
       })
       .catch(() => {
@@ -272,11 +327,12 @@ export default function AIResearchPage() {
       for (const file of incoming) {
         const kind = attachmentKind(file);
         if (!kind) {
-          setError('Unsupported attachment. Use JPEG, PNG, WebP, GIF, XLSX, XLS, or CSV.');
+          setError('Unsupported attachment. Use JPEG, PNG, WebP, GIF, XLSX, XLS, CSV, PDF, DOCX, or PPTX.');
           continue;
         }
         const images = next.filter(item => item.kind === 'image');
-        const spreadsheets = next.filter(item => item.kind === 'file');
+        const spreadsheets = next.filter(item => item.kind === 'spreadsheet');
+        const documents = next.filter(item => item.kind === 'document');
         if (kind === 'image') {
           if (file.size > AI_RESEARCH_MAX_IMAGE_BYTES) {
             setError(`${file.name} is larger than 4 MB.`);
@@ -296,6 +352,27 @@ export default function AIResearchPage() {
             file,
             kind,
             previewUrl: URL.createObjectURL(file),
+          });
+          continue;
+        }
+        if (kind === 'document') {
+          if (file.size > AI_RESEARCH_MAX_DOCUMENT_BYTES) {
+            setError(`${file.name} is larger than ${AI_RESEARCH_MAX_DOCUMENT_BYTES / (1024 * 1024)} MB.`);
+            continue;
+          }
+          if (documents.length >= AI_RESEARCH_MAX_DOCUMENTS) {
+            setError(`You can attach up to ${AI_RESEARCH_MAX_DOCUMENTS} documents per message.`);
+            break;
+          }
+          const total = documents.reduce((sum, item) => sum + item.file.size, 0) + file.size;
+          if (total > AI_RESEARCH_MAX_TOTAL_DOCUMENT_BYTES) {
+            setError(`Attached documents exceed the ${AI_RESEARCH_MAX_TOTAL_DOCUMENT_BYTES / (1024 * 1024)} MB total limit.`);
+            break;
+          }
+          next.push({
+            id: `${file.name}-${file.size}-${file.lastModified}-${next.length}`,
+            file,
+            kind,
           });
           continue;
         }
@@ -322,6 +399,91 @@ export default function AIResearchPage() {
     });
   };
 
+  const handleAttachmentDragEnter = (event: React.DragEvent<HTMLDivElement>) => {
+    if (!dragHasFiles(event.dataTransfer)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (!loading) setFileDragActive(true);
+  };
+
+  const handleAttachmentDragOver = (event: React.DragEvent<HTMLDivElement>) => {
+    if (!dragHasFiles(event.dataTransfer)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    event.dataTransfer.dropEffect = loading ? 'none' : 'copy';
+    if (!loading) setFileDragActive(true);
+  };
+
+  const handleAttachmentDragLeave = (event: React.DragEvent<HTMLDivElement>) => {
+    if (!fileDragActive && !dragHasFiles(event.dataTransfer)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (dragPointerLeftZone(event)) setFileDragActive(false);
+  };
+
+  const appendContextUrls = (urls: string[]) => {
+    if (!urls.length) return;
+    const existing = new Set(scanContextUrls(input).accepted.map(item => item.url));
+    const room = AI_RESEARCH_MAX_CONTEXT_URLS - existing.size;
+    const nextUrls = urls.filter(url => !existing.has(url)).slice(0, Math.max(0, room));
+    if (!nextUrls.length) {
+      if (urls.some(url => !existing.has(url))) {
+        setError(`Maksimal ${AI_RESEARCH_MAX_CONTEXT_URLS} tautan per pesan.`);
+      }
+      return;
+    }
+    setError('');
+    setInput(prev => {
+      const trimmed = prev.trim();
+      return trimmed ? `${trimmed} ${nextUrls.join(' ')}` : nextUrls.join(' ');
+    });
+  };
+
+  const handleAttachmentDrop = (event: React.DragEvent<HTMLDivElement>) => {
+    const files = event.dataTransfer?.files;
+    const isFileDrop = dragHasFiles(event.dataTransfer) || Boolean(files && files.length > 0);
+    if (isFileDrop) {
+      event.preventDefault();
+      event.stopPropagation();
+      setFileDragActive(false);
+      if (loading || !files?.length) return;
+      addAttachments(files);
+      return;
+    }
+    const droppedText = `${event.dataTransfer?.getData('text/uri-list') || ''}\n${event.dataTransfer?.getData('text/plain') || ''}`;
+    const dropped = scanContextUrls(droppedText).accepted;
+    if (!dropped.length) return;
+    event.preventDefault();
+    event.stopPropagation();
+    setFileDragActive(false);
+    if (loading) return;
+    appendContextUrls(dropped.map(item => item.url));
+  };
+
+  const handleComposerPaste = (event: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const files = filesFromClipboard(event.clipboardData);
+    if (!files.length) return;
+    event.preventDefault();
+    if (loading) return;
+    const text = clipboardPlainText(event.clipboardData);
+    if (text && !plainTextIsOnlyFileNames(text, files)) {
+      const el = event.currentTarget;
+      const start = el.selectionStart ?? input.length;
+      const end = el.selectionEnd ?? input.length;
+      const next = `${input.slice(0, start)}${text}${input.slice(end)}`;
+      setInput(next);
+      const cursor = start + text.length;
+      requestAnimationFrame(() => {
+        const node = inputRef.current;
+        if (!node) return;
+        node.style.height = 'auto';
+        node.style.height = `${Math.min(node.scrollHeight, 160)}px`;
+        node.setSelectionRange(cursor, cursor);
+      });
+    }
+    addAttachments(files);
+  };
+
   const removePendingAttachment = (id: string) => {
     setPendingAttachments(prev => {
       const target = prev.find(item => item.id === id);
@@ -331,24 +493,29 @@ export default function AIResearchPage() {
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
-  const sendMessage = async () => {
-    const trimmed = input.trim();
-    if ((!trimmed && pendingAttachments.length === 0) || loading) return;
+  const sendMessage = async (rawText?: string) => {
+    const fromChip = typeof rawText === 'string';
+    const trimmed = (fromChip ? rawText : input).trim();
+    const attachments = fromChip ? [] : pendingAttachments;
+    if ((!trimmed && attachments.length === 0) || loading || sendingRef.current) return;
+    sendingRef.current = true;
     setError('');
+    setUrlNotices([]);
 
-    const pendingImages = pendingAttachments.filter(item => item.kind === 'image');
-    const pendingFiles = pendingAttachments.filter(item => item.kind === 'file');
+    const pendingImages = attachments.filter(item => item.kind === 'image');
+    const pendingFiles = attachments.filter(item => item.kind === 'spreadsheet' || item.kind === 'document');
     let images: ChatImage[] = [];
     let files: ChatFile[] = [];
     try {
       images = await Promise.all(pendingImages.map(item => fileToChatImage(item.file)));
       files = await Promise.all(pendingFiles.map(async item => ({
-        mimeType: inferSpreadsheetType(item.file.type, item.file.name) || item.file.type || 'text/csv',
+        mimeType: inferResearchFileType(item.file.type, item.file.name) || item.file.type || 'application/octet-stream',
         dataUrl: await readFileAsDataUrl(item.file),
         name: item.file.name,
       })));
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not read the attached file');
+      sendingRef.current = false;
       return;
     }
 
@@ -359,15 +526,19 @@ export default function AIResearchPage() {
       files: files.length ? files : undefined,
     };
     setMessages(prev => [...prev, userMsg]);
-    setInput('');
-    clearPendingAttachments();
+    if (!fromChip) {
+      setInput('');
+      clearPendingAttachments();
+      setLinkDraft('');
+      setLinkDraftOpen(false);
+    }
     setStreaming('');
     setResearchSourceCount(null);
     setInspectorSources([]);
     setGroundingStatus(null);
     setResearchNotice(null);
     setLoading(true);
-    if (inputRef.current) inputRef.current.style.height = 'auto';
+    if (!fromChip && inputRef.current) inputRef.current.style.height = 'auto';
 
     try {
       const res = await fetch('/api/ai-research/chat', {
@@ -404,6 +575,7 @@ export default function AIResearchPage() {
             sourceCount?: number;
             grounding?: ResearchGatherStatus;
             sources?: InspectorResearchSource[];
+            failures?: Array<{ url?: string; error?: string }>;
           };
           try { d = JSON.parse(t.slice(6)); } catch { continue; }
           if (d.type === 'start') {
@@ -413,6 +585,16 @@ export default function AIResearchPage() {
             }
             if (d.model) setModel(d.model);
             loadConversations();
+          } else if (d.type === 'context-urls') {
+            const notes = Array.isArray(d.failures)
+              ? d.failures.flatMap(item => {
+                  const url = typeof item?.url === 'string' ? item.url : '';
+                  const reason = typeof item?.error === 'string' ? item.error : 'tidak bisa diambil';
+                  if (!url) return [];
+                  return [`Tautan tidak bisa diambil (${reason}): ${url}. Pertanyaan tetap dikirim tanpa halaman itu.`];
+                })
+              : [];
+            if (notes.length) setUrlNotices(notes);
           } else if (d.type === 'research') {
             const sources = Array.isArray(d.sources)
               ? d.sources.flatMap(item => {
@@ -459,7 +641,10 @@ export default function AIResearchPage() {
     } catch (e) {
       setError(e instanceof Error ? e.message : 'An error occurred');
       setStreaming('');
-    } finally { setLoading(false); }
+    } finally {
+      sendingRef.current = false;
+      setLoading(false);
+    }
   };
 
   const newConversation = () => {
@@ -471,6 +656,9 @@ export default function AIResearchPage() {
     setGroundingStatus(null);
     setPinnedSourceUrls([]);
     setResearchNotice(null);
+    setUrlNotices([]);
+    setLinkDraft('');
+    setLinkDraftOpen(false);
     setError('');
     setModel('');
     clearPendingAttachments();
@@ -496,6 +684,56 @@ export default function AIResearchPage() {
     const el = e.target;
     el.style.height = 'auto';
     el.style.height = Math.min(el.scrollHeight, 160) + 'px';
+  };
+
+  const linkScan = scanContextUrls(input);
+  const followUps = useMemo(() => {
+    if (loading || streaming) return [];
+    const lastIndex = messages.length - 1;
+    const last = messages[lastIndex];
+    if (!last || last.role !== 'assistant') return [];
+    const previousUser = [...messages].slice(0, lastIndex).reverse().find(message => message.role === 'user');
+    if (!previousUser?.content.trim()) return [];
+    return suggestAiResearchFollowUps({
+      query: previousUser.content,
+      answer: last.content,
+      sources: inspectorSources,
+    });
+  }, [messages, loading, streaming, inspectorSources]);
+  const followUpIndex = followUps.length ? messages.length - 1 : -1;
+
+  const removeContextUrl = (raw: string) => {
+    setInput(prev => prev
+      .replace(raw, ' ')
+      .replace(/[ \t]{2,}/g, ' ')
+      .replace(/[ \t]+\n/g, '\n')
+      .trim());
+  };
+
+  const commitLinkDraft = () => {
+    const raw = linkDraft.trim();
+    if (!raw) return;
+    const withScheme = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
+    const reason = contextUrlBlockReason(withScheme);
+    if (reason) {
+      setError(`Tautan diblokir (${reason}). Gunakan http(s) publik.`);
+      return;
+    }
+    const canonical = scanContextUrls(withScheme).accepted[0]?.url;
+    if (!canonical) {
+      setError('Masukkan tautan http atau https.');
+      return;
+    }
+    const existing = scanContextUrls(input).accepted;
+    if (existing.length >= AI_RESEARCH_MAX_CONTEXT_URLS && !existing.some(item => item.url === canonical)) {
+      setError(`Maksimal ${AI_RESEARCH_MAX_CONTEXT_URLS} tautan per pesan.`);
+      return;
+    }
+    appendContextUrls([canonical]);
+    setLinkDraft('');
+    setLinkDraftOpen(false);
+    setError('');
+    inputRef.current?.focus();
   };
 
   const canSend = !loading && Boolean(input.trim() || pendingAttachments.length);
@@ -691,8 +929,28 @@ export default function AIResearchPage() {
           </div>
         </div>
 
-        {/* Chat column */}
-        <div className="flex-1 flex flex-col min-w-0">
+        {/* Chat column is the file drop zone (messages + composer). */}
+        <div
+          data-testid="ai-research-drop-zone"
+          data-drag-active={fileDragActive ? 'true' : 'false'}
+          className={`relative flex-1 flex flex-col min-w-0 ${fileDragActive ? 'ring-2 ring-inset ring-indigo-400' : ''}`}
+          onDragEnter={handleAttachmentDragEnter}
+          onDragOver={handleAttachmentDragOver}
+          onDragLeave={handleAttachmentDragLeave}
+          onDrop={handleAttachmentDrop}
+        >
+          {fileDragActive && (
+            <div
+              role="status"
+              aria-live="polite"
+              className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center bg-indigo-500/10"
+            >
+              <div className="rounded-2xl border-2 border-dashed border-indigo-300 bg-[var(--mos-raised)]/95 px-5 py-4 text-center shadow-lg">
+                <p className="text-sm font-semibold text-[var(--mos-text)]">Lepas untuk lampirkan</p>
+                <p className="mt-1 text-[11px] text-[var(--mos-text-muted)]">Gambar, Excel, CSV, PDF, Word, atau PowerPoint</p>
+              </div>
+            </div>
+          )}
           {/* Messages — only this scrolls */}
           <div className="flex-1 overflow-y-auto">
             <div className="max-w-3xl mx-auto px-4 sm:px-6 py-6 space-y-6">
@@ -706,7 +964,7 @@ export default function AIResearchPage() {
                   </div>
                   <h2 className="text-xl font-semibold text-[var(--mos-text)] mb-2">{AI_RESEARCH_ASSISTANT_NAME}</h2>
                   <p className="text-sm text-[var(--mos-text-muted)] max-w-md">
-                    Ask anything — riset topik trading, analisis berita, strategi marketing, atau lampirkan gambar, Excel, atau CSV untuk dibaca AI.
+                    Ask anything — riset topik trading, analisis berita, strategi marketing, atau lampirkan gambar, Excel, CSV, PDF, Word, atau PowerPoint untuk dibaca AI.
                   </p>
                   <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 gap-2 w-full max-w-lg">
                     {[
@@ -756,7 +1014,7 @@ export default function AIResearchPage() {
                       {msg.files && msg.files.length > 0 && (
                         <div className={`mb-2 flex flex-wrap gap-2 ${msg.role === 'user' ? 'justify-end' : ''}`}>
                           {msg.files.map((file, fileIndex) => (
-                            <AiResearchFileChip key={`${file.name || 'file'}-${fileIndex}`} name={file.name || `Spreadsheet ${fileIndex + 1}`} />
+                            <AiResearchFileChip key={`${file.name || 'file'}-${fileIndex}`} name={file.name || `File ${fileIndex + 1}`} />
                           ))}
                         </div>
                       )}
@@ -769,6 +1027,23 @@ export default function AIResearchPage() {
                           ? <AiResearchMarkdown text={msg.content} />
                           : msg.content}
                       </div>
+                      {i === followUpIndex && (
+                        <div className="mt-2" data-testid="ai-research-followups">
+                          <p className="mb-1.5 px-1 text-[10px] font-semibold text-[var(--mos-text-muted)]">Pertanyaan lanjutan</p>
+                          <div className="flex flex-wrap gap-1.5">
+                            {followUps.map(suggestion => (
+                              <button
+                                key={suggestion}
+                                type="button"
+                                onClick={() => sendMessage(suggestion)}
+                                className="rounded-full border border-[var(--mos-border)] bg-[var(--mos-bg)] px-3 py-1.5 text-left text-[11px] text-[var(--mos-text)] transition-colors hover:bg-[var(--mos-hover)]"
+                              >
+                                {suggestion}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -846,6 +1121,17 @@ export default function AIResearchPage() {
               )}
 
               {/* Error */}
+              {urlNotices.length > 0 && (
+                <div className="flex justify-center" data-testid="ai-research-url-error">
+                  <div className="max-w-md rounded-xl border border-amber-400/20 bg-amber-400/10 px-4 py-2.5 text-center text-sm text-amber-100" role="status">
+                    {urlNotices.map(notice => (
+                      <p key={notice} className="leading-5">{notice}</p>
+                    ))}
+                    <button type="button" onClick={() => setUrlNotices([])} className="mt-1 underline hover:opacity-80">Tutup</button>
+                  </div>
+                </div>
+              )}
+
               {error && (
                 <div className="flex justify-center">
                   <div className="bg-red-500/10 border border-red-400/20 text-red-300 text-sm px-4 py-2.5 rounded-xl text-center max-w-md">
@@ -862,6 +1148,58 @@ export default function AIResearchPage() {
           {/* Input — sticky at bottom */}
           <div className="flex-shrink-0 border-t border-[var(--mos-border)] bg-[var(--mos-bg)] px-4 py-3">
             <div className="max-w-3xl mx-auto">
+              {(linkScan.accepted.length > 0 || linkScan.blocked.length > 0 || linkScan.overflow.length > 0 || linkDraftOpen) && (
+                <div className="mb-2 space-y-1.5" data-testid="ai-research-context-links">
+                  {linkScan.accepted.length > 0 && (
+                    <div className="flex flex-wrap gap-2">
+                      {linkScan.accepted.map(item => (
+                        <span key={item.url} className="inline-flex max-w-full items-center gap-1.5 rounded-lg border border-indigo-400/30 bg-indigo-500/10 px-2.5 py-1.5 text-[11px] text-[var(--mos-text)]">
+                          <span className="truncate">{item.url.replace(/^https?:\/\//, '')}</span>
+                          <button
+                            type="button"
+                            onClick={() => removeContextUrl(item.raw)}
+                            className="text-[var(--mos-text-muted)] hover:text-red-300"
+                            title="Hapus tautan"
+                            aria-label={`Hapus tautan ${item.url}`}
+                          >
+                            ×
+                          </button>
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                  {linkScan.blocked.map(item => (
+                    <p key={item.url} className="text-[11px] text-amber-200" role="status">
+                      Tautan diblokir ({contextUrlBlockReason(item.url) || 'alamat tidak publik'}): {item.url}. Pertanyaan tetap bisa dikirim tanpa halaman itu.
+                    </p>
+                  ))}
+                  {linkScan.overflow.length > 0 && (
+                    <p className="text-[11px] text-amber-200" role="status">
+                      Hanya {AI_RESEARCH_MAX_CONTEXT_URLS} tautan pertama yang diambil. Lewati: {linkScan.overflow.map(item => item.url).join(', ')}
+                    </p>
+                  )}
+                  {linkDraftOpen && (
+                    <form
+                      className="flex gap-2"
+                      onSubmit={event => {
+                        event.preventDefault();
+                        commitLinkDraft();
+                      }}
+                    >
+                      <input
+                        value={linkDraft}
+                        onChange={event => setLinkDraft(event.target.value)}
+                        placeholder="https://..."
+                        aria-label="Tautan untuk konteks"
+                        className="min-h-8 flex-1 rounded-lg border border-[var(--mos-border)] bg-[var(--mos-raised)] px-2.5 text-[12px] text-[var(--mos-text)] outline-none focus:border-indigo-400/60"
+                      />
+                      <button type="submit" className="rounded-lg bg-indigo-600 px-2.5 text-[11px] font-medium text-white hover:bg-indigo-500">
+                        Tambah
+                      </button>
+                    </form>
+                  )}
+                </div>
+              )}
               {pendingAttachments.length > 0 && (
                 <div className="mb-2 flex flex-wrap gap-2">
                   {pendingAttachments.map(item => (
@@ -891,7 +1229,11 @@ export default function AIResearchPage() {
                   ))}
                 </div>
               )}
-              <div className="flex gap-2 items-end bg-[var(--mos-raised)] border border-[var(--mos-border)] rounded-2xl px-3 py-3 focus-within:border-indigo-400/60 focus-within:ring-1 focus-within:ring-indigo-400/30 transition-all">
+              <div className={`flex gap-2 items-end bg-[var(--mos-raised)] border rounded-2xl px-3 py-3 transition-all ${
+                fileDragActive
+                  ? 'border-indigo-400 ring-2 ring-indigo-400/40'
+                  : 'border-[var(--mos-border)] focus-within:border-indigo-400/60 focus-within:ring-1 focus-within:ring-indigo-400/30'
+              }`}>
                 <input
                   ref={fileInputRef}
                   type="file"
@@ -907,11 +1249,25 @@ export default function AIResearchPage() {
                   onClick={() => fileInputRef.current?.click()}
                   disabled={loading}
                   className="text-[var(--mos-text-muted)] hover:text-[var(--mos-text)] disabled:opacity-30 p-2 rounded-xl transition-colors flex-shrink-0"
-                  title="Attach images or spreadsheets"
-                  aria-label="Attach images or spreadsheets"
+                  title="Attach images, spreadsheets, PDF, Word, or PowerPoint"
+                  aria-label="Attach images, spreadsheets, PDF, Word, or PowerPoint"
                 >
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.8">
                     <path strokeLinecap="round" strokeLinejoin="round" d="M18.375 12.739l-7.693 7.693a4.5 4.5 0 01-6.364-6.364l10.94-10.94A3 3 0 1119.5 8.25l-10.94 10.939a1.5 1.5 0 01-2.121-2.121l8.485-8.486" />
+                  </svg>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setLinkDraftOpen(open => !open)}
+                  disabled={loading}
+                  className="text-[var(--mos-text-muted)] hover:text-[var(--mos-text)] disabled:opacity-30 p-2 rounded-xl transition-colors flex-shrink-0"
+                  title="Tambah tautan sebagai konteks"
+                  aria-label="Tambah tautan sebagai konteks"
+                  aria-expanded={linkDraftOpen}
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.8">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M13.19 8.688a4.5 4.5 0 011.242 7.244l-4.5 4.5a4.5 4.5 0 01-6.364-6.364l1.757-1.757" />
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M10.81 15.312a4.5 4.5 0 01-1.242-7.244l4.5-4.5a4.5 4.5 0 016.364 6.364l-1.757 1.757" />
                   </svg>
                 </button>
                 <textarea
@@ -919,13 +1275,15 @@ export default function AIResearchPage() {
                   value={input}
                   onChange={autoResize}
                   onKeyDown={handleKeyDown}
-                  placeholder="Tanyakan apapun atau lampirkan gambar, Excel, atau CSV..."
+                  onPaste={handleComposerPaste}
+                  placeholder="Tanyakan apapun — seret, tempel, atau klik untuk lampirkan gambar, Excel, CSV, PDF, Word, atau PowerPoint... Tempel tautan http(s) untuk dijadikan konteks."
                   disabled={loading}
                   rows={1}
                   className="flex-1 min-h-[24px] max-h-[160px] resize-none bg-transparent border-none text-sm text-[var(--mos-text)] placeholder-[var(--mos-text-muted)] focus:outline-none"
                 />
                 <button
-                  onClick={sendMessage}
+                  type="button"
+                  onClick={() => { void sendMessage(); }}
                   disabled={!canSend}
                   className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-30 disabled:cursor-not-allowed text-white p-2 rounded-xl transition-colors flex-shrink-0"
                   title="Send message"
@@ -943,7 +1301,7 @@ export default function AIResearchPage() {
                 </button>
               </div>
               <p className="text-[9px] text-[var(--mos-text-faint)] text-center mt-2">
-                {AI_RESEARCH_ASSISTANT_NAME} may produce inaccurate information. Enter to send · Shift+Enter for newline · Images and Excel/CSV up to 4 each.
+                {AI_RESEARCH_ASSISTANT_NAME} may produce inaccurate information. Enter to send · Shift+Enter for newline · Seret, tempel, atau klik ikon untuk gambar, Excel/CSV, PDF, Word, dan PowerPoint (maks. 4 per jenis). Tempel tautan http(s), maks. {AI_RESEARCH_MAX_CONTEXT_URLS} per pesan.
               </p>
             </div>
           </div>
