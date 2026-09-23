@@ -1,0 +1,134 @@
+# Push to main deploys MarketingOS on the AWS VPS.
+#
+# The deploy key is forced to run /home/ubuntu/apps/marketingos/scripts/deploy.sh
+# with no-pty and no forwarding. This job only opens an SSH session; remote
+# argv is ignored. OpenSSH uses StrictHostKeyChecking against known_hosts.
+
+name: Deploy production
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: marketingos-production-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: Deploy to AWS VPS
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Require deploy secrets
+        env:
+          MARKETINGOS_DEPLOY_HOST: ${{ secrets.MARKETINGOS_DEPLOY_HOST }}
+          MARKETINGOS_DEPLOY_USER: ${{ secrets.MARKETINGOS_DEPLOY_USER }}
+          MARKETINGOS_DEPLOY_SSH_KEY: ${{ secrets.MARKETINGOS_DEPLOY_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          missing=0
+          if [[ -z "${MARKETINGOS_DEPLOY_HOST}" ]]; then
+            echo "Missing GitHub Actions secret: MARKETINGOS_DEPLOY_HOST"
+            missing=1
+          fi
+          if [[ -z "${MARKETINGOS_DEPLOY_USER}" ]]; then
+            echo "Missing GitHub Actions secret: MARKETINGOS_DEPLOY_USER"
+            missing=1
+          fi
+          if [[ -z "${MARKETINGOS_DEPLOY_SSH_KEY}" ]]; then
+            echo "Missing GitHub Actions secret: MARKETINGOS_DEPLOY_SSH_KEY"
+            missing=1
+          fi
+          if [[ "$missing" -ne 0 ]]; then
+            echo "Add the secrets under Settings → Secrets and variables → Actions."
+            exit 1
+          fi
+          echo "Required deploy secrets are present."
+
+      - name: Configure known_hosts
+        env:
+          MARKETINGOS_DEPLOY_HOST: ${{ secrets.MARKETINGOS_DEPLOY_HOST }}
+          MARKETINGOS_DEPLOY_KNOWN_HOSTS: ${{ secrets.MARKETINGOS_DEPLOY_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          mkdir -p "${HOME}/.ssh"
+          chmod 700 "${HOME}/.ssh"
+          if [[ -n "${MARKETINGOS_DEPLOY_KNOWN_HOSTS}" ]]; then
+            printf '%s\n' "${MARKETINGOS_DEPLOY_KNOWN_HOSTS}" > "${HOME}/.ssh/known_hosts"
+            echo "Using MARKETINGOS_DEPLOY_KNOWN_HOSTS."
+          else
+            ssh-keyscan -H -t ed25519,ecdsa,rsa -T 15 "${MARKETINGOS_DEPLOY_HOST}" > "${HOME}/.ssh/known_hosts"
+            echo "Using ssh-keyscan for the deploy host."
+          fi
+          chmod 644 "${HOME}/.ssh/known_hosts"
+          if [[ ! -s "${HOME}/.ssh/known_hosts" ]]; then
+            echo "FAIL: known_hosts is empty. Set MARKETINGOS_DEPLOY_KNOWN_HOSTS or allow ssh-keyscan to reach the VPS."
+            exit 1
+          fi
+
+      - name: Run VPS deploy script
+        env:
+          MARKETINGOS_DEPLOY_HOST: ${{ secrets.MARKETINGOS_DEPLOY_HOST }}
+          MARKETINGOS_DEPLOY_USER: ${{ secrets.MARKETINGOS_DEPLOY_USER }}
+          MARKETINGOS_DEPLOY_SSH_KEY: ${{ secrets.MARKETINGOS_DEPLOY_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          keyfile="${RUNNER_TEMP}/marketingos_deploy_key"
+          umask 077
+          : > "${keyfile}"
+          chmod 600 "${keyfile}"
+          cleanup() {
+            rm -f "${keyfile}"
+          }
+          trap cleanup EXIT
+          printf '%s\n' "${MARKETINGOS_DEPLOY_SSH_KEY}" | tr -d '\r' > "${keyfile}"
+          chmod 600 "${keyfile}"
+          if ! grep -q 'BEGIN .*PRIVATE KEY' "${keyfile}"; then
+            echo "FAIL: MARKETINGOS_DEPLOY_SSH_KEY is not a PEM private key."
+            exit 1
+          fi
+          # Forced command ignores argv. `true` is a no-op placeholder.
+          timeout 35m ssh -n \
+            -i "${keyfile}" \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="${HOME}/.ssh/known_hosts" \
+            -o IdentitiesOnly=yes \
+            -o BatchMode=yes \
+            -o ConnectTimeout=20 \
+            -o ServerAliveInterval=30 \
+            -o ServerAliveCountMax=80 \
+            -o PreferredAuthentications=publickey \
+            "${MARKETINGOS_DEPLOY_USER}@${MARKETINGOS_DEPLOY_HOST}" \
+            true
+          echo "Production deploy script finished on the VPS. Local health passed inside scripts/deploy.sh."
+
+      - name: Check public health
+        run: |
+          set -euo pipefail
+          url="https://marketing-aws.gorillaworkout.id/api/health"
+          sleep 3
+          attempt=1
+          http_code="000"
+          while [[ "$attempt" -le 6 ]]; do
+            http_code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 15 "${url}" || true)"
+            if [[ -z "${http_code}" ]]; then
+              http_code="000"
+            fi
+            echo "public health attempt ${attempt}/6: HTTP ${http_code}"
+            if [[ "${http_code}" == "200" ]]; then
+              echo "SUCCESS: ${url} returned 200"
+              exit 0
+            fi
+            attempt=$((attempt + 1))
+            if [[ "$attempt" -le 6 ]]; then
+              sleep 5
+            fi
+          done
+          echo "FAIL: ${url} did not return 200 (last HTTP ${http_code}). The VPS deploy script already finished."
+          exit 1
