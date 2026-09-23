@@ -99,12 +99,18 @@ function filesFromClipboard(data: DataTransfer | null): File[] {
   return extracted;
 }
 
-function clipboardHasPlainText(data: DataTransfer): boolean {
+function clipboardPlainText(data: DataTransfer): string {
   try {
-    return data.getData('text/plain').length > 0;
+    return data.getData('text/plain');
   } catch {
-    return false;
+    return '';
   }
+}
+
+function plainTextIsOnlyFileNames(text: string, files: File[]): boolean {
+  const names = new Set(files.map(file => file.name.trim()).filter(Boolean));
+  const lines = text.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+  return lines.length > 0 && lines.every(line => names.has(line));
 }
 
 function dragPointerLeftZone(event: React.DragEvent<HTMLElement>): boolean {
@@ -395,8 +401,24 @@ export default function AIResearchPage() {
   const handleComposerPaste = (event: React.ClipboardEvent<HTMLTextAreaElement>) => {
     const files = filesFromClipboard(event.clipboardData);
     if (!files.length) return;
-    if (!clipboardHasPlainText(event.clipboardData)) event.preventDefault();
+    event.preventDefault();
     if (loading) return;
+    const text = clipboardPlainText(event.clipboardData);
+    if (text && !plainTextIsOnlyFileNames(text, files)) {
+      const el = event.currentTarget;
+      const start = el.selectionStart ?? input.length;
+      const end = el.selectionEnd ?? input.length;
+      const next = `${input.slice(0, start)}${text}${input.slice(end)}`;
+      setInput(next);
+      const cursor = start + text.length;
+      requestAnimationFrame(() => {
+        const node = inputRef.current;
+        if (!node) return;
+        node.style.height = 'auto';
+        node.style.height = `${Math.min(node.scrollHeight, 160)}px`;
+        node.setSelectionRange(cursor, cursor);
+      });
+    }
     addAttachments(files);
   };
 
@@ -1022,7 +1044,7 @@ export default function AIResearchPage() {
                   onChange={autoResize}
                   onKeyDown={handleKeyDown}
                   onPaste={handleComposerPaste}
-                  placeholder="Tanyakan apapun atau lampirkan gambar, Excel, atau CSV..."
+                  placeholder="Tanyakan apapun — seret, tempel, atau klik untuk lampirkan gambar, Excel, atau CSV..."
                   disabled={loading}
                   rows={1}
                   className="flex-1 min-h-[24px] max-h-[160px] resize-none bg-transparent border-none text-sm text-[var(--mos-text)] placeholder-[var(--mos-text-muted)] focus:outline-none"
@@ -1046,7 +1068,7 @@ export default function AIResearchPage() {
                 </button>
               </div>
               <p className="text-[9px] text-[var(--mos-text-faint)] text-center mt-2">
-                {AI_RESEARCH_ASSISTANT_NAME} may produce inaccurate information. Enter to send · Shift+Enter for newline · Images and Excel/CSV up to 4 each.
+                {AI_RESEARCH_ASSISTANT_NAME} may produce inaccurate information. Enter to send · Shift+Enter for newline · Seret, tempel, atau klik ikon untuk gambar dan Excel/CSV (maks. 4).
               </p>
             </div>
           </div>

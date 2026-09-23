@@ -110,6 +110,9 @@ test('AI Research UI adds a file picker, previews, and sends images with the pro
   assert.match(page, /onDrop=\{handleAttachmentDrop\}/);
   assert.match(page, /addAttachments\(files\)/);
   assert.match(page, /onPaste=\{handleComposerPaste\}/);
+  assert.match(page, /if \(!files\.length\) return;/);
+  assert.match(page, /seret, tempel, atau klik untuk lampirkan/);
+  assert.match(page, /Seret, tempel, atau klik ikon untuk gambar dan Excel\/CSV/);
   assert.match(page, /onClick=\{\(\) => fileInputRef\.current\?\.click\(\)\}/);
   assert.match(page, /Unsupported attachment\. Use JPEG, PNG, WebP, GIF, XLSX, XLS, or CSV\./);
 });
