@@ -1,8 +1,13 @@
 'use client';
 
-import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
+import { useEffect, useRef, useState, useCallback, useMemo, useSyncExternalStore } from 'react';
+import { AiResearchExportActions } from '@/components/AiResearchExportActions';
 import { AiResearchFileChip, AiResearchMarkdown } from '@/components/AiResearchMarkdown';
 import { AiResearchSourcesPanel } from '@/components/AiResearchSourcesPanel';
+import {
+  AI_RESEARCH_DEEP_STATUS,
+  AI_RESEARCH_MODE_STORAGE_KEY,
+} from '@/lib/ai-research-deep';
 import {
   AI_RESEARCH_ASSISTANT_NAME,
   AI_RESEARCH_ATTACHMENT_ONLY_PROMPT,
@@ -53,6 +58,8 @@ interface Message {
   content: string;
   images?: ChatImage[];
   files?: ChatFile[];
+  researchMode?: 'deep';
+  sources?: Array<{ title: string; url: string }>;
 }
 
 interface Conversation {
@@ -129,6 +136,46 @@ function dragPointerLeftZone(event: React.DragEvent<HTMLElement>): boolean {
     || event.clientY > rect.bottom;
 }
 
+const researchModeListeners = new Set<() => void>();
+
+function readStoredResearchMode(): 'fast' | 'deep' {
+  try {
+    return window.localStorage.getItem(AI_RESEARCH_MODE_STORAGE_KEY) === 'deep' ? 'deep' : 'fast';
+  } catch {
+    return 'fast';
+  }
+}
+
+let memoryResearchMode: 'fast' | 'deep' | null = null;
+
+function subscribeResearchMode(listener: () => void) {
+  researchModeListeners.add(listener);
+  const onStorage = (event: StorageEvent) => {
+    if (event.key !== AI_RESEARCH_MODE_STORAGE_KEY) return;
+    memoryResearchMode = null;
+    listener();
+  };
+  window.addEventListener('storage', onStorage);
+  return () => {
+    researchModeListeners.delete(listener);
+    window.removeEventListener('storage', onStorage);
+  };
+}
+
+function getResearchModeSnapshot(): 'fast' | 'deep' {
+  return memoryResearchMode || readStoredResearchMode();
+}
+
+function writeResearchMode(mode: 'fast' | 'deep') {
+  memoryResearchMode = mode;
+  try {
+    window.localStorage.setItem(AI_RESEARCH_MODE_STORAGE_KEY, mode);
+  } catch {
+    // The in-memory toggle still applies to the next send.
+  }
+  researchModeListeners.forEach(listener => listener());
+}
+
 function defaultPromptForAttachments(images: number, files: number): string {
   if (images && files) return AI_RESEARCH_ATTACHMENT_ONLY_PROMPT;
   if (files) return AI_RESEARCH_FILE_ONLY_PROMPT;
@@ -190,6 +237,13 @@ export default function AIResearchPage() {
   const [linkDraftOpen, setLinkDraftOpen] = useState(false);
   const [linkDraft, setLinkDraft] = useState('');
   const [error, setError] = useState('');
+  const researchMode = useSyncExternalStore<'fast' | 'deep'>(
+    subscribeResearchMode,
+    getResearchModeSnapshot,
+    () => 'fast',
+  );
+  const [runMode, setRunMode] = useState<'fast' | 'deep'>('fast');
+  const [deepStatus, setDeepStatus] = useState('');
   const [model, setModel] = useState('');
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [allowedModels, setAllowedModels] = useState<ModelOption[]>([]);
@@ -205,6 +259,11 @@ export default function AIResearchPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const skipNextLoadRef = useRef(false);
   const sendingRef = useRef(false);
+  const sourcesRef = useRef<Array<{ title: string; url: string }>>([]);
+
+  const selectResearchMode = (mode: 'fast' | 'deep') => {
+    writeResearchMode(mode);
+  };
 
   useEffect(() => {
     fetch('/api/settings/model')
@@ -532,6 +591,10 @@ export default function AIResearchPage() {
       setLinkDraft('');
       setLinkDraftOpen(false);
     }
+    const sentMode = researchMode;
+    sourcesRef.current = [];
+    setRunMode(sentMode);
+    setDeepStatus(sentMode === 'deep' ? AI_RESEARCH_DEEP_STATUS.plan : '');
     setStreaming('');
     setResearchSourceCount(null);
     setInspectorSources([]);
@@ -547,6 +610,7 @@ export default function AIResearchPage() {
           messages: [userMsg],
           conversationId: activeConvoId,
           pinnedSourceUrls,
+          mode: sentMode,
         }),
       });
       if (!res.ok) {
@@ -576,6 +640,7 @@ export default function AIResearchPage() {
             grounding?: ResearchGatherStatus;
             sources?: InspectorResearchSource[];
             failures?: Array<{ url?: string; error?: string }>;
+            message?: string;
           };
           try { d = JSON.parse(t.slice(6)); } catch { continue; }
           if (d.type === 'start') {
@@ -608,17 +673,26 @@ export default function AIResearchPage() {
             if (d.grounding === 'ok' || d.grounding === 'failed' || d.grounding === 'skipped' || d.grounding === 'empty') {
               setGroundingStatus(d.grounding);
             }
+            sourcesRef.current = sources.map(source => ({ title: source.title, url: source.url }));
             if (d.grounding === 'failed') {
               setResearchNotice({ tone: 'danger', text: RESEARCH_FAILED_BANNER });
               setSourcesPanelOpen(true);
             } else if (sources.length > 0) {
               setSourcesPanelOpen(true);
             }
+          } else if (d.type === 'status') {
+            if (typeof d.message === 'string' && d.message.trim()) setDeepStatus(d.message);
           } else if (d.type === 'token') { content += d.content || ''; setStreaming(content); }
           else if (d.type === 'done') {
             streamCompleted = true;
             setStreaming('');
-            setMessages(prev => [...prev, { role: 'assistant', content }]);
+            setDeepStatus('');
+            setMessages(prev => [...prev, {
+              role: 'assistant',
+              content,
+              researchMode: sentMode === 'deep' ? 'deep' : undefined,
+              sources: sourcesRef.current.length ? [...sourcesRef.current] : undefined,
+            }]);
             if (d.conversationId && !activeConvoId) {
               skipNextLoadRef.current = true;
               setActiveConvoId(d.conversationId);
@@ -633,9 +707,15 @@ export default function AIResearchPage() {
       }
       if (!streamCompleted) {
         if (content) {
-          setMessages(prev => [...prev, { role: 'assistant', content }]);
+          setMessages(prev => [...prev, {
+            role: 'assistant',
+            content,
+            researchMode: sentMode === 'deep' ? 'deep' : undefined,
+            sources: sourcesRef.current.length ? [...sourcesRef.current] : undefined,
+          }]);
         }
         setStreaming('');
+        setDeepStatus('');
         setResearchNotice({ tone: 'warning', text: RESEARCH_DISCONNECT_BANNER });
       }
     } catch (e) {
@@ -657,6 +737,7 @@ export default function AIResearchPage() {
     setPinnedSourceUrls([]);
     setResearchNotice(null);
     setUrlNotices([]);
+    setDeepStatus('');
     setLinkDraft('');
     setLinkDraftOpen(false);
     setError('');
@@ -996,8 +1077,13 @@ export default function AIResearchPage() {
                       }
                     </div>
                     <div className="min-w-0">
-                      <p className="text-[10px] font-semibold text-[var(--mos-text-muted)] mb-1 px-1">
+                      <p className="text-[10px] font-semibold text-[var(--mos-text-muted)] mb-1 px-1 flex items-center gap-1.5">
                         {msg.role === 'user' ? 'You' : AI_RESEARCH_ASSISTANT_NAME}
+                        {msg.researchMode === 'deep' && (
+                          <span data-testid="ai-research-deep-badge" className="rounded-full bg-emerald-500/15 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-emerald-200">
+                            Mendalam
+                          </span>
+                        )}
                       </p>
                       {msg.images && msg.images.length > 0 && (
                         <div className={`mb-2 flex flex-wrap gap-2 ${msg.role === 'user' ? 'justify-end' : ''}`}>
@@ -1027,6 +1113,14 @@ export default function AIResearchPage() {
                           ? <AiResearchMarkdown text={msg.content} />
                           : msg.content}
                       </div>
+                      {msg.role === 'assistant' && msg.content.trim() && (
+                        <AiResearchExportActions
+                          title={[...messages].slice(0, i).reverse().find(item => item.role === 'user')?.content || 'Riset Dupoin AI'}
+                          answer={msg.content}
+                          sources={msg.sources?.length ? msg.sources : (i === messages.length - 1 ? inspectorSources : [])}
+                          mode={msg.researchMode}
+                        />
+                      )}
                       {i === followUpIndex && (
                         <div className="mt-2" data-testid="ai-research-followups">
                           <p className="mb-1.5 px-1 text-[10px] font-semibold text-[var(--mos-text-muted)]">Pertanyaan lanjutan</p>
@@ -1059,18 +1153,26 @@ export default function AIResearchPage() {
                     <div className="min-w-0">
                       <p className="text-[10px] font-semibold text-[var(--mos-text-muted)] mb-1 px-1 flex items-center gap-2">
                         {AI_RESEARCH_ASSISTANT_NAME}
+                        {runMode === 'deep' && (
+                          <span className="rounded-full bg-emerald-500/15 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-emerald-200">Mendalam</span>
+                        )}
                         <span className="text-[9px] font-medium text-emerald-300/80">
-                          {groundingStatus === 'failed'
-                            ? 'Pencarian sumber gagal'
-                            : researchSourceCount
-                              ? `Sedang meneliti ${researchSourceCount} sumber`
-                              : 'Sedang meneliti'}
+                          {runMode === 'deep' && deepStatus
+                            ? deepStatus
+                            : groundingStatus === 'failed'
+                              ? 'Pencarian sumber gagal'
+                              : researchSourceCount
+                                ? `Sedang meneliti ${researchSourceCount} sumber`
+                                : 'Sedang meneliti'}
                         </span>
                       </p>
                       <div
                         data-testid="ai-research-thinking"
                         className="px-4 py-3 bg-[var(--mos-raised)] border border-[var(--mos-border)] text-[var(--mos-text)] rounded-2xl rounded-tl-md"
                       >
+                        {runMode === 'deep' && (
+                          <p className="mb-2 text-[11px] text-[var(--mos-text-muted)]">{deepStatus || 'Menyusun riset mendalam…'}</p>
+                        )}
                         <span className="sr-only">Thinking</span>
                         <span className="ai-research-typing-dots" aria-hidden="true">
                           <span />
@@ -1093,6 +1195,11 @@ export default function AIResearchPage() {
                     <div className="min-w-0">
                       <p className="text-[10px] font-semibold text-[var(--mos-text-muted)] mb-1 px-1 flex items-center gap-2">
                         {AI_RESEARCH_ASSISTANT_NAME}
+                        {runMode === 'deep' && (
+                          <span className="rounded-full bg-emerald-500/15 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-emerald-200">
+                            {deepStatus || 'Mendalam'}
+                          </span>
+                        )}
                         <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
                       </p>
                       <div className="px-4 py-2.5 bg-[var(--mos-raised)] border border-[var(--mos-border)] text-[var(--mos-text)] rounded-2xl rounded-tl-md text-sm leading-relaxed">
@@ -1200,6 +1307,39 @@ export default function AIResearchPage() {
                   )}
                 </div>
               )}
+              <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                <div
+                  role="group"
+                  aria-label="Mode riset"
+                  data-testid="ai-research-mode-toggle"
+                  className="inline-flex rounded-xl border border-[var(--mos-border)] bg-[var(--mos-raised)] p-0.5"
+                >
+                  {([
+                    ['fast', 'Cepat'],
+                    ['deep', 'Mendalam'],
+                  ] as const).map(([mode, label]) => (
+                    <button
+                      key={mode}
+                      type="button"
+                      aria-pressed={researchMode === mode}
+                      disabled={loading}
+                      onClick={() => selectResearchMode(mode)}
+                      className={`rounded-lg px-3 py-1 text-[11px] font-medium transition-colors disabled:opacity-50 ${
+                        researchMode === mode
+                          ? 'bg-indigo-600 text-white'
+                          : 'text-[var(--mos-text-muted)] hover:text-[var(--mos-text)]'
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                <p className="text-[10px] text-[var(--mos-text-muted)]">
+                  {researchMode === 'deep'
+                    ? 'Mendalam: beberapa putaran pencarian, lalu sintesis. Lebih lama.'
+                    : 'Cepat: satu putaran riset.'}
+                </p>
+              </div>
               {pendingAttachments.length > 0 && (
                 <div className="mb-2 flex flex-wrap gap-2">
                   {pendingAttachments.map(item => (

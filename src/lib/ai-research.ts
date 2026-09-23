@@ -76,11 +76,20 @@ export interface AiResearchFile {
   extractedText?: string;
 }
 
+export type AiResearchMode = 'fast' | 'deep';
+
+export interface AiResearchSourceRef {
+  title: string;
+  url: string;
+}
+
 export interface AiResearchChatMessage {
   role: 'user' | 'assistant';
   content: string;
   images?: AiResearchImage[];
   files?: AiResearchFile[];
+  researchMode?: 'deep';
+  sources?: AiResearchSourceRef[];
 }
 
 export type GatewayContentPart =
@@ -392,14 +401,67 @@ function isAttachmentOnlyPrompt(text: string): boolean {
     || text === AI_RESEARCH_ATTACHMENT_ONLY_PROMPT;
 }
 
+const STORED_SOURCE_LIMIT = 16;
+
+export function parseAiResearchMode(value: unknown): AiResearchMode {
+  return value === 'deep' ? 'deep' : 'fast';
+}
+
+export function validateStoredSources(value: unknown): AiResearchSourceRef[] {
+  if (!Array.isArray(value)) return [];
+  const sources: AiResearchSourceRef[] = [];
+  const seen = new Set<string>();
+  for (const item of value) {
+    if (!item || typeof item !== 'object') continue;
+    const record = item as { title?: unknown; url?: unknown };
+    const url = typeof record.url === 'string' ? record.url.trim() : '';
+    if (!url || url.length > 2_048) continue;
+    try {
+      const parsed = new URL(url);
+      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') continue;
+    } catch {
+      continue;
+    }
+    const key = url.replace(/\/$/, '');
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const title = typeof record.title === 'string' ? record.title.replace(/\s+/g, ' ').trim().slice(0, 200) : '';
+    sources.push({ title: title || url, url });
+    if (sources.length >= STORED_SOURCE_LIMIT) break;
+  }
+  return sources;
+}
+
+export function buildStoredAssistantMessage(options: {
+  content: string;
+  mode?: AiResearchMode;
+  sources?: unknown;
+}): AiResearchChatMessage {
+  const message: AiResearchChatMessage = {
+    role: 'assistant',
+    content: options.content,
+  };
+  if (options.mode === 'deep') message.researchMode = 'deep';
+  const sources = validateStoredSources(options.sources);
+  if (sources.length) message.sources = sources;
+  return message;
+}
+
 export function normalizeChatMessage(
   value: unknown,
-  options: { allowStoredFiles?: boolean } = {},
+  options: { allowStoredFiles?: boolean; allowStoredMeta?: boolean } = {},
 ): AiResearchChatMessage {
   if (!value || typeof value !== 'object') {
     throw imageAttachmentError('Each message must be an object.');
   }
-  const raw = value as { role?: unknown; content?: unknown; images?: unknown; files?: unknown };
+  const raw = value as {
+    role?: unknown;
+    content?: unknown;
+    images?: unknown;
+    files?: unknown;
+    researchMode?: unknown;
+    sources?: unknown;
+  };
   if (raw.role !== 'user' && raw.role !== 'assistant') {
     throw imageAttachmentError('Each message must have a user or assistant role.');
   }
@@ -415,6 +477,11 @@ export function normalizeChatMessage(
   const message: AiResearchChatMessage = { role: raw.role, content };
   if (images.length) message.images = images;
   if (files.length) message.files = files;
+  if (options.allowStoredMeta && raw.role === 'assistant') {
+    if (raw.researchMode === 'deep') message.researchMode = 'deep';
+    const sources = validateStoredSources(raw.sources);
+    if (sources.length) message.sources = sources;
+  }
   return message;
 }
 
@@ -422,11 +489,12 @@ export function parseChatRequest(body: unknown): {
   messages: AiResearchChatMessage[];
   conversationId?: string;
   pinnedSourceUrls: string[];
+  mode: AiResearchMode;
 } {
   if (!body || typeof body !== 'object') {
     throw imageAttachmentError('Invalid JSON body');
   }
-  const raw = body as { messages?: unknown; conversationId?: unknown; pinnedSourceUrls?: unknown };
+  const raw = body as { messages?: unknown; conversationId?: unknown; pinnedSourceUrls?: unknown; mode?: unknown };
   if (!Array.isArray(raw.messages) || raw.messages.length === 0) {
     throw imageAttachmentError('Messages are required');
   }
@@ -455,7 +523,7 @@ export function parseChatRequest(body: unknown): {
   const pinnedSourceUrls = Array.isArray(raw.pinnedSourceUrls)
     ? raw.pinnedSourceUrls.filter((item): item is string => typeof item === 'string').map(item => item.trim()).filter(Boolean).slice(0, 32)
     : [];
-  return { messages, conversationId, pinnedSourceUrls };
+  return { messages, conversationId, pinnedSourceUrls, mode: parseAiResearchMode(raw.mode) };
 }
 
 export function conversationTitleFromMessages(messages: AiResearchChatMessage[]): string {
@@ -532,7 +600,7 @@ export function parseStoredMessages(raw: unknown): AiResearchChatMessage[] {
   if (!parsed) return [];
   return parsed.map(item => {
     try {
-      return normalizeChatMessage(item, { allowStoredFiles: true });
+      return normalizeChatMessage(item, { allowStoredFiles: true, allowStoredMeta: true });
     } catch {
       if (!item || typeof item !== 'object') return null;
       const role = (item as { role?: unknown }).role === 'assistant'
