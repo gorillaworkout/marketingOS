@@ -17,6 +17,7 @@ import InlineModelSelector from '@/components/InlineModelSelector';
 import { DEFAULT_IMAGE_ASPECT_RATIO, IMAGE_ASPECT_RATIOS, type ImageAspectRatio } from '@/lib/image-aspect-ratio';
 import { applyDupoinImagePromptLocks } from '@/lib/dupoin-image-prompt';
 import { AVAILABLE_IMAGE_MODELS, DEFAULT_IMAGE_MODEL } from '@/lib/image-models';
+import { AI_RESEARCH_HANDOFF_QUERY, AI_RESEARCH_HANDOFF_VALUE, readAiResearchHandoff } from '@/lib/ai-research-handoff';
 
 interface QCCheck {
   name: string;
@@ -117,6 +118,7 @@ const STEP_ICONS: Record<string, string> = {
 
 export default function SocialPostPage() {
   const [brief, setBrief] = useState('');
+  const [researchHandoff, setResearchHandoff] = useState(false);
   const [platform, setPlatform] = useState('Instagram');
   const [targetAudience, setTargetAudience] = useState('');
   const [goal, setGoal] = useState('Awareness');
@@ -167,6 +169,13 @@ export default function SocialPostPage() {
     const params = new URLSearchParams(window.location.search);
     const template = params.get('template');
     if (template) setBrief(template);
+    if (params.get(AI_RESEARCH_HANDOFF_QUERY) === AI_RESEARCH_HANDOFF_VALUE) {
+      const handoff = readAiResearchHandoff('social-post');
+      if (handoff?.brief) {
+        setBrief(handoff.brief);
+        setResearchHandoff(true);
+      }
+    }
     
     // Fetch available image models
     fetch('/api/image-models')
@@ -645,6 +654,11 @@ export default function SocialPostPage() {
           <Panel>
           <form onSubmit={handleGenerate} className="space-y-5">
             <SectionHeader title="Generation brief" description="Define the channel, audience, objective, and content direction." />
+            {researchHandoff && (
+              <p role="status" data-testid="social-post-research-handoff" className="rounded-xl border border-indigo-400/30 bg-indigo-500/10 px-3 py-2 text-xs leading-5 text-indigo-100">
+                Diisi dari Dupoin AI Research. Belum dipublikasikan — edit brief ini sebelum generate.
+              </p>
+            )}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <FormField label="Platform">
                 <Select value={platform} onChange={e => setPlatform(e.target.value)}>

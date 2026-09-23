@@ -1,8 +1,10 @@
 'use client';
 
 import { useEffect, useRef, useState, useCallback, useMemo, useSyncExternalStore } from 'react';
+import { AiResearchAnswerTools } from '@/components/AiResearchAnswerTools';
 import { AiResearchExportActions } from '@/components/AiResearchExportActions';
 import { AiResearchPinFact } from '@/components/AiResearchPinFact';
+import { AiResearchVoiceButton } from '@/components/AiResearchVoiceButton';
 import { AiResearchWatchPanel } from '@/components/AiResearchWatchPanel';
 import { AiResearchFileChip, AiResearchMarkdown } from '@/components/AiResearchMarkdown';
 import { AiResearchSourcesPanel } from '@/components/AiResearchSourcesPanel';
@@ -43,6 +45,7 @@ import {
   contextUrlBlockReason,
   scanContextUrls,
 } from '@/lib/ai-research-urls';
+import { appendVoiceTranscript } from '@/lib/ai-research-voice';
 
 interface ChatImage {
   mimeType: string;
@@ -266,6 +269,7 @@ export default function AIResearchPage() {
   const [urlNotices, setUrlNotices] = useState<string[]>([]);
   const [linkDraftOpen, setLinkDraftOpen] = useState(false);
   const [linkDraft, setLinkDraft] = useState('');
+  const [voiceStatus, setVoiceStatus] = useState('');
   const [error, setError] = useState('');
   const researchMode = useSyncExternalStore<'fast' | 'deep'>(
     subscribeResearchMode,
@@ -918,11 +922,23 @@ export default function AIResearchPage() {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
   };
 
+  const resizeComposer = () => {
+    const el = inputRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
+  };
+
   const autoResize = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     setInput(e.target.value);
     const el = e.target;
     el.style.height = 'auto';
     el.style.height = Math.min(el.scrollHeight, 160) + 'px';
+  };
+
+  const applyVoiceTranscript = (spoken: string) => {
+    setInput(prev => appendVoiceTranscript(prev, spoken));
+    requestAnimationFrame(resizeComposer);
   };
 
   const linkScan = scanContextUrls(input);
@@ -1436,6 +1452,12 @@ export default function AIResearchPage() {
                             sources={msg.sources?.length ? msg.sources : (i === messages.length - 1 ? inspectorSources : [])}
                             mode={msg.researchMode}
                           />
+                          <AiResearchAnswerTools
+                            query={[...messages].slice(0, i).reverse().find(item => item.role === 'user')?.content || ''}
+                            answer={msg.content}
+                            sources={msg.sources?.length ? msg.sources : (i === messages.length - 1 ? inspectorSources : [])}
+                            conversationId={activeConvoId}
+                          />
                           <AiResearchPinFact
                             answer={msg.content}
                             sources={msg.sources?.length ? msg.sources : (i === messages.length - 1 ? inspectorSources : [])}
@@ -1744,6 +1766,15 @@ export default function AIResearchPage() {
                   ))}
                 </div>
               )}
+              {voiceStatus && (
+                <p
+                  role="status"
+                  data-testid="ai-research-voice-status"
+                  className="mb-2 rounded-xl border border-amber-400/30 bg-amber-500/10 px-3 py-2 text-[11px] leading-5 text-amber-100"
+                >
+                  {voiceStatus}
+                </p>
+              )}
               <div className={`flex gap-2 items-end bg-[var(--mos-raised)] border rounded-2xl px-3 py-3 transition-all ${
                 fileDragActive
                   ? 'border-indigo-400 ring-2 ring-indigo-400/40'
@@ -1785,6 +1816,7 @@ export default function AIResearchPage() {
                     <path strokeLinecap="round" strokeLinejoin="round" d="M10.81 15.312a4.5 4.5 0 01-1.242-7.244l4.5-4.5a4.5 4.5 0 016.364 6.364l-1.757 1.757" />
                   </svg>
                 </button>
+                <AiResearchVoiceButton disabled={loading} onTranscript={applyVoiceTranscript} onStatus={setVoiceStatus} />
                 <textarea
                   ref={inputRef}
                   value={input}
@@ -1818,7 +1850,7 @@ export default function AIResearchPage() {
                 </button>
               </div>
               <p className="text-[9px] text-[var(--mos-text-faint)] text-center mt-2">
-                {AI_RESEARCH_ASSISTANT_NAME} may produce inaccurate information. Enter to send · Shift+Enter for newline · Seret, tempel, atau klik ikon untuk gambar, Excel/CSV, PDF, Word, dan PowerPoint (maks. 4 per jenis). Tempel tautan http(s), maks. {AI_RESEARCH_MAX_CONTEXT_URLS} per pesan.
+                {AI_RESEARCH_ASSISTANT_NAME} may produce inaccurate information. Enter to send · Shift+Enter for newline · Mic memakai Web Speech API di browser (id-ID, atau English jika id-ID tidak didukung; Chrome, Edge, Safari). Seret, tempel, atau klik ikon untuk gambar, Excel/CSV, PDF, Word, dan PowerPoint (maks. 4 per jenis). Tempel tautan http(s), maks. {AI_RESEARCH_MAX_CONTEXT_URLS} per pesan.
               </p>
             </div>
           </div>
