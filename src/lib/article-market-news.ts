@@ -1,3 +1,269 @@
+/**
+ * Models (especially Claude via the gateway) often wrap article JSON in markdown
+ * fences/prose, emit raw newlines or unescaped quotes inside string values, or
+ * rename required keys. Extract the first unambiguous article object so the
+ * publication gate can run QC instead of failing on raw `JSON.parse`.
+ *
+ * Prod signal (ag/claude-sonnet-4-6): gateway completions succeed with ~2.4–2.9k
+ * output tokens, then local parse failed for all 3 publication-gate attempts.
+ */
+export function parseGeneratedArticle(content: string): Record<string, unknown> {
+  const asArticle = (parsed: unknown): Record<string, unknown> | null => {
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+    const record = parsed as Record<string, unknown>;
+    const title = pickStringField(record, ARTICLE_TITLE_KEYS);
+    const metaDescription = pickStringField(record, ARTICLE_META_KEYS);
+    const articleMarkdown = pickStringField(record, ARTICLE_MARKDOWN_KEYS);
+    if (title === null || metaDescription === null || articleMarkdown === null) return null;
+    return {
+      ...record,
+      title,
+      metaDescription,
+      articleMarkdown,
+    };
+  };
+
+  const parseObject = (candidate: string): Record<string, unknown> | null => {
+    const attempts = [candidate, repairLooseJson(candidate)];
+    for (const attempt of attempts) {
+      try {
+        const parsed = asArticle(JSON.parse(attempt));
+        if (parsed) return parsed;
+      } catch {
+        // try next repair strategy
+      }
+    }
+    return null;
+  };
+
+  const direct = parseObject(content.replace(/^\uFEFF/, '').trim());
+  if (direct) return direct;
+
+  let cleaned = content
+    .replace(/^\uFEFF/, '')
+    .replace(/<think>[\s\S]*?<\/think>/gi, '')
+    .trim();
+  const outerFence = /^```(?:json)?\s*\r?\n?([\s\S]*?)\r?\n?```$/i.exec(cleaned);
+  if (outerFence) cleaned = outerFence[1].trim();
+  const unwrapped = parseObject(cleaned);
+  if (unwrapped) return unwrapped;
+
+  // Prefer fenced JSON blocks when the model wraps the payload in prose + ```json.
+  for (const fence of cleaned.matchAll(/```(?:json)?\s*\r?\n([\s\S]*?)\r?\n```/gi)) {
+    const fenced = parseObject(fence[1].trim());
+    if (fenced) return fenced;
+  }
+
+  const candidates: Record<string, unknown>[] = [];
+  for (const slice of iterateBalancedObjects(cleaned)) {
+    const parsed = parseObject(slice);
+    if (parsed) candidates.push(parsed);
+  }
+
+  if (candidates.length === 0) {
+    const recovered = extractArticleFieldsLoosely(cleaned);
+    if (recovered) return recovered;
+    throw new Error('AI returned an invalid article format. Please generate again.');
+  }
+  if (candidates.length === 1) return candidates[0];
+  // Identical payloads (e.g. echoed draft) are fine; conflicting articles are not.
+  const signatures = new Set(candidates.map(candidate => JSON.stringify({
+    title: candidate.title,
+    metaDescription: candidate.metaDescription,
+    articleMarkdown: candidate.articleMarkdown,
+  })));
+  if (signatures.size === 1) return candidates[0];
+  throw new Error('AI returned an ambiguous article format. Please generate again.');
+}
+
+const ARTICLE_TITLE_KEYS = ['title', 'Title', 'h1', 'H1'] as const;
+const ARTICLE_META_KEYS = ['metaDescription', 'meta_description', 'metaDesc', 'MetaDescription'] as const;
+const ARTICLE_MARKDOWN_KEYS = ['articleMarkdown', 'article_markdown', 'markdown', 'Markdown', 'article', 'content'] as const;
+
+function pickStringField(record: Record<string, unknown>, keys: readonly string[]): string | null {
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === 'string' && value.trim()) return value;
+  }
+  return null;
+}
+
+/** True when a `"` at `index` looks like the end of a JSON string value, not copy inside markdown. */
+function looksLikeJsonStringTerminator(source: string, index: number): boolean {
+  let cursor = index + 1;
+  while (cursor < source.length && /\s/.test(source[cursor])) cursor += 1;
+  if (cursor >= source.length) return true;
+  const next = source[cursor];
+  return next === ',' || next === '}' || next === ']' || next === ':';
+}
+
+/**
+ * Repair Claude-style almost-JSON: raw newlines/tabs inside strings, unescaped
+ * interior quotes, and trailing commas. Keeps already-valid JSON intact enough
+ * for `JSON.parse` after the pass.
+ */
+export function repairLooseJson(input: string): string {
+  let result = '';
+  let inString = false;
+  let escaped = false;
+
+  for (let index = 0; index < input.length; index += 1) {
+    const character = input[index];
+    if (!inString) {
+      if (character === '"') {
+        inString = true;
+        result += character;
+        continue;
+      }
+      if (character === ',') {
+        let cursor = index + 1;
+        while (cursor < input.length && /\s/.test(input[cursor])) cursor += 1;
+        if (cursor < input.length && (input[cursor] === '}' || input[cursor] === ']')) continue;
+      }
+      result += character;
+      continue;
+    }
+
+    if (escaped) {
+      result += character;
+      escaped = false;
+      continue;
+    }
+    if (character === '\\') {
+      result += character;
+      escaped = true;
+      continue;
+    }
+    if (character === '"') {
+      if (looksLikeJsonStringTerminator(input, index)) {
+        inString = false;
+        result += character;
+      } else {
+        result += '\\"';
+      }
+      continue;
+    }
+    if (character === '\n') {
+      result += '\\n';
+      continue;
+    }
+    if (character === '\r') {
+      result += '\\r';
+      continue;
+    }
+    if (character === '\t') {
+      result += '\\t';
+      continue;
+    }
+    if (character.charCodeAt(0) < 0x20) {
+      result += `\\u${character.charCodeAt(0).toString(16).padStart(4, '0')}`;
+      continue;
+    }
+    result += character;
+  }
+
+  return result;
+}
+
+function* iterateBalancedObjects(content: string): Generator<string> {
+  for (let start = content.indexOf('{'); start >= 0; start = content.indexOf('{', start + 1)) {
+    let depth = 0;
+    let quoted = false;
+    let escaped = false;
+    for (let index = start; index < content.length; index += 1) {
+      const character = content[index];
+      if (quoted) {
+        if (escaped) {
+          escaped = false;
+          continue;
+        }
+        if (character === '\\') {
+          escaped = true;
+          continue;
+        }
+        if (character === '"') {
+          // Claude may leave raw quotes inside markdown; only exit the string when
+          // the quote looks like a real JSON terminator.
+          if (looksLikeJsonStringTerminator(content, index)) quoted = false;
+          continue;
+        }
+        continue;
+      }
+      if (character === '"') quoted = true;
+      else if (character === '{') depth += 1;
+      else if (character === '}' && --depth === 0) {
+        yield content.slice(start, index + 1);
+        start = index;
+        break;
+      }
+    }
+  }
+}
+
+function decodeJsonStringFragment(raw: string): string {
+  return raw.replace(/\\(u[0-9a-fA-F]{4}|["\\/bfnrt])/g, (_, token: string) => {
+    switch (token) {
+      case '"':
+      case '\\':
+      case '/':
+        return token;
+      case 'b':
+        return '\b';
+      case 'f':
+        return '\f';
+      case 'n':
+        return '\n';
+      case 'r':
+        return '\r';
+      case 't':
+        return '\t';
+      default:
+        if (token.startsWith('u') && token.length === 5) {
+          return String.fromCharCode(Number.parseInt(token.slice(1), 16));
+        }
+        return token;
+    }
+  });
+}
+
+function extractJsonStringField(source: string, keys: readonly string[]): string | null {
+  for (const key of keys) {
+    const matcher = new RegExp(`"${key}"\\s*:\\s*"`, 'i');
+    const match = matcher.exec(source);
+    if (!match) continue;
+    let index = match.index + match[0].length;
+    let raw = '';
+    let escaped = false;
+    for (; index < source.length; index += 1) {
+      const character = source[index];
+      if (escaped) {
+        raw += `\\${character}`;
+        escaped = false;
+        continue;
+      }
+      if (character === '\\') {
+        escaped = true;
+        continue;
+      }
+      if (character === '"' && looksLikeJsonStringTerminator(source, index)) {
+        return decodeJsonStringFragment(raw);
+      }
+      raw += character;
+    }
+    // Truncated string value — keep a substantial fragment so the gate can retry with QC feedback.
+    if (raw.trim().length >= 40) return decodeJsonStringFragment(raw);
+  }
+  return null;
+}
+
+function extractArticleFieldsLoosely(source: string): Record<string, unknown> | null {
+  const title = extractJsonStringField(source, ARTICLE_TITLE_KEYS);
+  const metaDescription = extractJsonStringField(source, ARTICLE_META_KEYS);
+  const articleMarkdown = extractJsonStringField(source, ARTICLE_MARKDOWN_KEYS);
+  if (!title || !metaDescription || !articleMarkdown) return null;
+  return { title, metaDescription, articleMarkdown };
+}
+
 export const ELIGIBLE_KEYWORDS = [
   'emas', 'harga emas', 'xauusd', 'xau/usd', 'rupiah', 'dollar', 'dolar',
   'wall street', 'minyak', 'harga minyak',
@@ -254,14 +520,19 @@ NON-NEGOTIABLE EDITORIAL RULES:
 - End with one natural, imperative, one-sentence CTA that asks the reader to open an account with Dupoin.
 - Do not claim the article passed plagiarism or nonnumeric fact checking; those remain manual gates.
 
-Return ONLY valid JSON:
+Return ONLY one valid JSON object (no markdown fences, no prose, no reasoning tags) with exactly these string keys:
 {
   "title": "H1 title, maximum 60 characters",
   "metaDescription": "SEO description, maximum 155 characters",
   "articleMarkdown": "complete article in Markdown with H1/H2/H3, FAQ, CTA, and Sources",
   "excerpt": "one short summary",
   "sourcesCited": ["source outlet — publication date — URL"]
-}`;
+}
+JSON encoding rules (required for gateway models such as Claude):
+- The first character of the response must be "{" and the last character must be "}".
+- Encode every newline inside string values as \\n (never paste raw line breaks inside JSON strings).
+- Escape every double quote inside string values as \\".
+- Do not emit trailing commas.`;
 
   const userPrompt = `<USER_DATA>
 MAIN KEYWORD: ${input.keyword}
