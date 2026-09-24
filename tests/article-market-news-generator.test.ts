@@ -213,6 +213,8 @@ test('user references are optional because the server always performs automated 
   }, '2026-07-27');
   assert.deepEqual(withoutReferences.sources, []);
   assert.match(route, /researchArticleMarketNews/);
+  assert.match(route, /angle: input\.angle/);
+  assert.match(route, /Searching publisher feeds and the open web for sources/);
   assert.match(route, /automatedSources/);
   assert.match(route, /sources: \[\.\.\.automatedSources, \.\.\.input\.sources\]/);
   assert.match(generator, /Reference Articles \(Optional\)/i);

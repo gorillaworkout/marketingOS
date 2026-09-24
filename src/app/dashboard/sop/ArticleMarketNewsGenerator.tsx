@@ -260,7 +260,7 @@ export default function ArticleMarketNewsGenerator() {
   return (
     <>
     <Panel aria-labelledby="article-generator-title">
-      <SectionHeader title="Generate article market news" description="Enter a keyword, angle, competitor structure, and five PAA questions. The system always researches publisher feeds automatically; extra references from you are optional." action={
+      <SectionHeader title="Generate article market news" description="Enter a keyword, angle, competitor structure, and five PAA questions. The generator searches publisher feeds and the open web. Extra references from you are optional." action={
         <div className="flex flex-wrap gap-2">
           <Link href={`/dashboard/history?type=${ARTICLE_MARKET_NEWS_HISTORY_TYPE}`} className="rounded-lg border border-[var(--mos-border)] px-3 py-2 text-xs text-[var(--mos-text-secondary)] hover:border-[var(--mos-accent-border)]">Open History</Link>
           <Button size="sm" onClick={fillExample}>Fill example</Button>
@@ -321,7 +321,7 @@ export default function ArticleMarketNewsGenerator() {
 
         <div className="space-y-4">
           <div className="flex items-center justify-between">
-            <div><h3 className="font-semibold text-white">Reference Articles (Optional)</h3><p className="text-xs text-[var(--mos-text-muted)]">Leave this empty if you want. If you add references, include at most five that you have already checked; automatic research still runs.</p></div>
+            <div><h3 className="font-semibold text-white">Reference Articles (Optional)</h3><p className="text-xs text-[var(--mos-text-muted)]">Leave this empty if you want. If you add references, include at most five that you have already checked. Publisher feeds and open-web research still run.</p></div>
             <Button size="sm" onClick={() => setSources(current => [...current, emptySource()])} disabled={sources.length >= 5}>Add source</Button>
           </div>
           {sources.map((source, index) => (
@@ -362,6 +362,19 @@ export default function ArticleMarketNewsGenerator() {
       {result && (
         <div className="mt-7 space-y-5 border-t border-[var(--mos-border)] pt-6">
           <Toolbar><div><StatusBadge tone="success" dot>Draft generated</StatusBadge><h3 className="mt-2 text-base font-semibold text-white">{result.title}</h3><p className="mt-1 text-xs text-[var(--mos-text-muted)]">Model: {result.model} · {currentWordCount} words</p></div><Button variant="primary" onClick={downloadDocx} disabled={!currentValidation || currentValidation.violations.length > 0 || !factReviewConfirmed}>Download DOCX</Button></Toolbar>
+          {generatedInput && generatedInput.sources.length > 0 && (
+            <div data-testid="article-research-sources" className="rounded-[var(--mos-radius-panel)] border border-[var(--mos-border)] bg-[var(--mos-raised)] p-4">
+              <h4 className="text-sm font-semibold text-white">Research sources</h4>
+              <ul className="mt-2 space-y-2">
+                {generatedInput.sources.map(source => (
+                  <li key={source.url} className="text-sm text-[var(--mos-text-secondary)]">
+                    <a href={source.url} target="_blank" rel="noreferrer" className="text-cyan-200 hover:underline">{source.title}</a>
+                    <span className="mt-0.5 block text-xs text-[var(--mos-text-faint)]">{source.outlet} · {source.publishedAt}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
           <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
             {[
               ['Title ≤60', currentValidation?.qc.titleWithin60Characters || false],
