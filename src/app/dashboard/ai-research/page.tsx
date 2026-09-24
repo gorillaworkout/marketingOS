@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, useCallback, useMemo, useSyncExternalStore
 import { AiResearchAnswerTools } from '@/components/AiResearchAnswerTools';
 import { AiResearchExportActions } from '@/components/AiResearchExportActions';
 import { AiResearchPinFact } from '@/components/AiResearchPinFact';
+import { AiResearchCameraButton } from '@/components/AiResearchCameraButton';
 import { AiResearchVoiceButton } from '@/components/AiResearchVoiceButton';
 import { AiResearchWatchPanel } from '@/components/AiResearchWatchPanel';
 import { AiResearchFileChip, AiResearchMarkdown } from '@/components/AiResearchMarkdown';
@@ -1802,6 +1803,11 @@ export default function AIResearchPage() {
                     <path strokeLinecap="round" strokeLinejoin="round" d="M18.375 12.739l-7.693 7.693a4.5 4.5 0 01-6.364-6.364l10.94-10.94A3 3 0 1119.5 8.25l-10.94 10.939a1.5 1.5 0 01-2.121-2.121l8.485-8.486" />
                   </svg>
                 </button>
+                <AiResearchCameraButton
+                  disabled={loading}
+                  onCapture={file => addAttachments([file])}
+                  onError={message => setError(message)}
+                />
                 <button
                   type="button"
                   onClick={() => setLinkDraftOpen(open => !open)}
@@ -1850,7 +1856,7 @@ export default function AIResearchPage() {
                 </button>
               </div>
               <p className="text-[9px] text-[var(--mos-text-faint)] text-center mt-2">
-                {AI_RESEARCH_ASSISTANT_NAME} may produce inaccurate information. Enter to send · Shift+Enter for newline · Mic memakai Web Speech API di browser (id-ID, atau English jika id-ID tidak didukung; Chrome, Edge, Safari). Seret, tempel, atau klik ikon untuk gambar, Excel/CSV, PDF, Word, dan PowerPoint (maks. 4 per jenis). Tempel tautan http(s), maks. {AI_RESEARCH_MAX_CONTEXT_URLS} per pesan.
+                {AI_RESEARCH_ASSISTANT_NAME} may produce inaccurate information. Enter to send · Shift+Enter for newline · Mic memakai Web Speech API di browser (id-ID, atau English jika id-ID tidak didukung; Chrome, Edge, Safari). Seret, tempel, atau klik ikon untuk gambar, Excel/CSV, PDF, Word, dan PowerPoint (maks. 4 per jenis). Tombol kamera mengambil foto lalu melampirkannya. Tempel tautan http(s), maks. {AI_RESEARCH_MAX_CONTEXT_URLS} per pesan.
               </p>
             </div>
           </div>
