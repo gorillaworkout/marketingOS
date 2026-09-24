@@ -10,6 +10,10 @@ import {
   DUPOIN_IG_FOOTER_LINE_1,
   DUPOIN_IG_FOOTER_LINE_2,
   DUPOIN_IG_HEADER_BAND_PX,
+  DUPOIN_IG_LOCKUP_HEIGHT,
+  DUPOIN_IG_LOCKUP_LEFT,
+  DUPOIN_IG_LOCKUP_TOP,
+  DUPOIN_IG_LOCKUP_WIDTH,
   DUPOIN_SOCIAL_FOOTER_PNG_PATH,
   DUPOIN_SOCIAL_HEADER_PNG_PATH,
   chromePlacement,
@@ -162,6 +166,37 @@ test('source plates are black-backed, and knockout clears the field without eras
   const leftMargin = footerMinX;
   const rightMargin = footerRaw.info.width - 1 - footerMaxX;
   assert.ok(Math.abs(leftMargin - rightMargin) <= 8, `footer type must be centered, margins ${leftMargin} vs ${rightMargin}`);
+});
+
+test('the header lockup stays inside the sizing-reference box', async () => {
+  const headerRaw = await raw(DUPOIN_SOCIAL_HEADER_PNG_PATH);
+  const keyed = knockOutBlackBackground(
+    { data: headerRaw.data, width: headerRaw.info.width, height: headerRaw.info.height },
+    false,
+  );
+  let minX = headerRaw.info.width;
+  let minY = headerRaw.info.height;
+  let maxX = 0;
+  let maxY = 0;
+  for (let y = 0; y < headerRaw.info.height; y++) {
+    for (let x = 0; x < headerRaw.info.width; x++) {
+      const i = (y * headerRaw.info.width + x) * 4;
+      if (keyed[i + 3] <= 20) continue;
+      if (Math.max(keyed[i], keyed[i + 1], keyed[i + 2]) <= 12) continue;
+      if (x < minX) minX = x;
+      if (y < minY) minY = y;
+      if (x > maxX) maxX = x;
+      if (y > maxY) maxY = y;
+    }
+  }
+  const width = maxX - minX + 1;
+  const height = maxY - minY + 1;
+  assert.equal(minX, DUPOIN_IG_LOCKUP_LEFT);
+  assert.equal(minY, DUPOIN_IG_LOCKUP_TOP);
+  assert.equal(width, DUPOIN_IG_LOCKUP_WIDTH);
+  assert.equal(height, DUPOIN_IG_LOCKUP_HEIGHT);
+  assert.ok(width < 520, 'lockup must stay smaller than the previous oversized stamp');
+  assert.ok(minX >= 72 && minY >= 56, 'lockup needs the reference top and left inset');
 });
 
 test('prompt bands match the artwork left after black knockout', async () => {

@@ -24,12 +24,22 @@ export const DUPOIN_IG_CHROME_WIDTH = 1080;
 export const DUPOIN_IG_CHROME_HEIGHT = 1350;
 
 /**
- * Content height of each plate after the black background is removed,
- * measured from the committed assets (inclusive of the plate's own padding).
- * Prompt clearance uses the same numbers so the model reserves the real bands.
+ * Lockup box on Bayu's 1080×1350 sizing reference.
+ * The composited mark must stay inside this box: more inset than a
+ * full-width stamp, and not taller than the reference.
  */
-export const DUPOIN_IG_HEADER_BAND_PX = 156;
-export const DUPOIN_IG_FOOTER_BAND_PX = 70;
+export const DUPOIN_IG_LOCKUP_LEFT = 80;
+export const DUPOIN_IG_LOCKUP_TOP = 64;
+export const DUPOIN_IG_LOCKUP_WIDTH = 435;
+export const DUPOIN_IG_LOCKUP_HEIGHT = 72;
+
+/**
+ * Content height of each plate after the black background is removed.
+ * Header band is the sizing-reference top inset plus the lockup height.
+ * Prompt clearance uses the same numbers.
+ */
+export const DUPOIN_IG_HEADER_BAND_PX = DUPOIN_IG_LOCKUP_TOP + DUPOIN_IG_LOCKUP_HEIGHT;
+export const DUPOIN_IG_FOOTER_BAND_PX = 64;
 
 /** Exact disclaimer on the official footer plate. Spelling "resiko" is intentional. */
 export const DUPOIN_IG_FOOTER_LINE_1 =
