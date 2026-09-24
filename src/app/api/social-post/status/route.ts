@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { queryOne, queryAll, execute } from '@/lib/database';
+import { queryOne, execute } from '@/lib/database';
 import { getSession } from '@/lib/auth';
 import { rateLimit } from '@/lib/rate-limit';
 
@@ -40,7 +40,7 @@ export async function PUT(request: NextRequest) {
     previousStatus: task.status,
     newStatus: status,
     message: status === 'published'
-      ? '📢 Status changed to Published! Kirim ke Admin Social Media untuk posting.'
+      ? 'Status changed to Published. Send this to the Social Media admin for posting.'
       : `Status updated to ${status}`,
   });
 }

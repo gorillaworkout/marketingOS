@@ -39,6 +39,20 @@ interface ResearchPost {
   caption: string;
 }
 
+interface SocialPostCitation {
+  url: string;
+  title: string;
+  snippet?: string;
+}
+
+interface SocialPostWebResearch {
+  status: 'grounded' | 'skipped' | 'empty';
+  queries: string[];
+  sources: Array<SocialPostCitation & { query?: string; read?: boolean }>;
+  warnings: string[];
+  skippedReason?: string;
+}
+
 interface ProgressState {
   step: string;
   progress: number;
@@ -59,6 +73,7 @@ interface ProgressEvent {
   message: string;
   result?: Record<string, unknown>;
   researchPosts?: ResearchPost[];
+  webResearch?: SocialPostWebResearch;
   qcResults?: QCResult[];
 }
 
@@ -96,10 +111,11 @@ interface PostOption {
   caption: string;
   hashtags: string[];
   imagePrompt: string;
+  citations?: SocialPostCitation[];
 }
 
 const STEP_LABELS: Record<string, string> = {
-  research: 'Research past posts',
+  research: 'Web research',
   draft: 'Generating options',
   qc: 'Quality check',
   'image-prompt': 'Image prompt',
@@ -115,6 +131,138 @@ const STEP_ICONS: Record<string, string> = {
   done: '05',
   error: '!',
 };
+
+function readWebResearch(value: unknown): SocialPostWebResearch | null {
+  if (!value || typeof value !== 'object') return null;
+  const row = value as Record<string, unknown>;
+  if (row.status !== 'grounded' && row.status !== 'skipped' && row.status !== 'empty') return null;
+  const sources = Array.isArray(row.sources)
+    ? row.sources.flatMap((item) => {
+        const citation = readCitation(item)[0];
+        if (!citation || !item || typeof item !== 'object') return [];
+        const source = item as Record<string, unknown>;
+        return [{
+          ...citation,
+          query: typeof source.query === 'string' ? source.query : undefined,
+          read: source.read === true,
+        }];
+      })
+    : [];
+  return {
+    status: row.status,
+    queries: Array.isArray(row.queries) ? row.queries.filter((query): query is string => typeof query === 'string') : [],
+    sources,
+    warnings: Array.isArray(row.warnings) ? row.warnings.filter((warning): warning is string => typeof warning === 'string') : [],
+    skippedReason: typeof row.skippedReason === 'string' ? row.skippedReason : undefined,
+  };
+}
+
+function readCitation(value: unknown): SocialPostCitation[] {
+  if (!value || typeof value !== 'object') return [];
+  const row = value as Record<string, unknown>;
+  const href = safeHttpUrl(typeof row.url === 'string' ? row.url : '');
+  if (!href) return [];
+  const title = typeof row.title === 'string' && row.title.trim() ? row.title.trim() : href;
+  const snippet = typeof row.snippet === 'string' && row.snippet.trim() ? row.snippet.trim() : undefined;
+  return [{ url: href, title, snippet }];
+}
+
+function safeHttpUrl(value: string): string | null {
+  try {
+    const parsed = new URL(value);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;
+    if (parsed.username || parsed.password) return null;
+    return parsed.toString();
+  } catch {
+    return null;
+  }
+}
+
+export function OptionCitations({ citations, expanded }: { citations?: SocialPostCitation[]; expanded: boolean }) {
+  const safe = (Array.isArray(citations) ? citations : []).flatMap((citation) => {
+    const href = safeHttpUrl(citation?.url || '');
+    if (!href) return [];
+    return [{ ...citation, url: href }];
+  });
+  if (!safe.length) return null;
+  const visible = expanded ? safe : safe.slice(0, 2);
+  return (
+    <div data-testid="social-post-option-citations" className="mb-3 space-y-2">
+      <p className="text-[10px] uppercase tracking-wide text-[var(--mos-text-faint)]">Sources</p>
+      {visible.map((citation) => (
+        <div key={citation.url}>
+          <a
+            href={citation.url}
+            target="_blank"
+            rel="noreferrer"
+            onClick={(event) => event.stopPropagation()}
+            className="block truncate text-[11px] text-blue-300 hover:underline"
+          >
+            {citation.title || citation.url}
+          </a>
+          {expanded && citation.snippet && (
+            <p className="mt-1 text-[11px] leading-5 text-[var(--mos-text-muted)]">{citation.snippet}</p>
+          )}
+        </div>
+      ))}
+      {!expanded && safe.length > 2 && (
+        <p className="text-[10px] text-[var(--mos-text-faint)]">+{safe.length - 2} more sources</p>
+      )}
+    </div>
+  );
+}
+
+export function SocialPostWebSources({ research }: { research: SocialPostWebResearch }) {
+  return (
+    <Panel>
+      <SectionHeader
+        className="mb-4"
+        title="Web sources"
+        description={
+          research.status === 'grounded'
+            ? 'Open-web pages used to ground this generation.'
+            : research.status === 'skipped'
+              ? 'Live web grounding did not run for this generation.'
+              : 'Open-web search ran and did not return a usable page.'
+        }
+      />
+      {research.status === 'skipped' && (
+        <div role="status" data-testid="social-post-web-skipped" className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs leading-5 text-amber-100">
+          {research.skippedReason || 'Web grounding was skipped. Captions use past posts only.'}
+        </div>
+      )}
+      {research.status === 'empty' && (
+        <div role="status" data-testid="social-post-web-empty" className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs leading-5 text-amber-100">
+          {research.warnings[0] || 'Open-web search returned no usable sources. Captions use past posts only.'}
+        </div>
+      )}
+      {research.status !== 'skipped' && research.queries.length > 0 && (
+        <p className="mt-3 text-xs text-[var(--mos-text-muted)]">Searches: {research.queries.join(' · ')}</p>
+      )}
+      {research.warnings.length > 0 && research.status === 'grounded' && (
+        <p className="mt-2 text-xs text-[var(--mos-text-muted)]">{research.warnings.join(' ')}</p>
+      )}
+      {research.sources.length > 0 && (
+        <div data-testid="social-post-web-sources" className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+          {research.sources.map((source) => (
+            <div key={source.url} className="rounded-lg border border-[var(--mos-border)] bg-[var(--mos-surface)] p-3">
+              <a href={source.url} target="_blank" rel="noreferrer" className="block text-sm font-medium text-blue-300 hover:underline">
+                {source.title}
+              </a>
+              <p className="mt-1 truncate text-[11px] text-[var(--mos-text-faint)]">{source.url}</p>
+              {source.snippet && (
+                <p className="mt-2 line-clamp-3 text-xs leading-relaxed text-[var(--mos-text-secondary)]">{source.snippet}</p>
+              )}
+              <p className="mt-2 text-[10px] uppercase tracking-wide text-[var(--mos-text-faint)]">
+                {source.read ? 'Page read' : 'Search snippet'}
+              </p>
+            </div>
+          ))}
+        </div>
+      )}
+    </Panel>
+  );
+}
 
 export default function SocialPostPage() {
   const [brief, setBrief] = useState('');
@@ -154,6 +302,7 @@ export default function SocialPostPage() {
 
   // SOP state
   const [researchPosts, setResearchPosts] = useState<ResearchPost[]>([]);
+  const [webResearch, setWebResearch] = useState<SocialPostWebResearch | null>(null);
   const [qcResults, setQcResults] = useState<QCResult[]>([]);
   const [dupoinFileName, setDupoinFileName] = useState('');
   const [postStatus, setPostStatus] = useState<string>('draft');
@@ -261,11 +410,12 @@ export default function SocialPostPage() {
     setKnowledgeError('');
     setTaskId(null);
     setResearchPosts([]);
+    setWebResearch(null);
     setQcResults([]);
     setDupoinFileName('');
     setPostStatus('draft');
     setStatusMessage('');
-    setProgress({ step: 'draft', progress: 0, message: 'Starting generation...', elapsed: 0 });
+    setProgress({ step: 'research', progress: 0, message: 'Starting web research...', elapsed: 0 });
 
     // Abort any previous request
     abortControllerRef.current?.abort();
@@ -327,6 +477,7 @@ export default function SocialPostPage() {
                 if (r.qcResults) setQcResults(r.qcResults);
                 if (r.dupoinFileName) setDupoinFileName(r.dupoinFileName);
                 if (r.researchPosts) setResearchPosts(r.researchPosts);
+                setWebResearch(readWebResearch(r.webResearch));
                 if (r.status) setPostStatus(r.status);
                 fetchPosts();
               }
@@ -339,6 +490,7 @@ export default function SocialPostPage() {
 
             // Capture research and QC data from intermediate events
             if (event.researchPosts) setResearchPosts(event.researchPosts);
+            if (event.webResearch) setWebResearch(readWebResearch(event.webResearch));
             if (event.qcResults) setQcResults(event.qcResults);
 
             setProgress({
@@ -572,6 +724,7 @@ export default function SocialPostPage() {
     setKnowledgeSaved(false);
     setError('');
     setResearchPosts([]);
+    setWebResearch(null);
     setQcResults([]);
     setDupoinFileName('');
     setPostStatus(post.status || 'draft');
@@ -600,6 +753,7 @@ export default function SocialPostPage() {
       if (data.qcResults) setQcResults(data.qcResults);
       if (data.dupoinFileName) setDupoinFileName(data.dupoinFileName);
       if (data.researchPosts) setResearchPosts(data.researchPosts);
+      setWebResearch(readWebResearch(data.webResearch));
       // Replay previously generated images for this post
       setImageHistory(history);
       const restoredUrl = latest?.imageUrl || data.imageUrl || null;
@@ -616,7 +770,7 @@ export default function SocialPostPage() {
 
   const copyToClipboard = (text: string) => navigator.clipboard.writeText(text);
   const downloadJSON = () => {
-    const dataToExport = options ? { platform, brief, options, usage: tokenUsage, generatedAt: new Date().toISOString(), qcResults, dupoinFileName, status: postStatus }
+    const dataToExport = options ? { platform, brief, options, usage: tokenUsage, generatedAt: new Date().toISOString(), qcResults, dupoinFileName, webResearch, status: postStatus }
       : result ? { platform, brief, caption: result.caption, imagePrompt: result.imagePrompt, usage: tokenUsage, generatedAt: new Date().toISOString(), qcResults, dupoinFileName, status: postStatus }
       : null;
     if (!dataToExport) return;
@@ -780,6 +934,8 @@ export default function SocialPostPage() {
             </div>
           )}
 
+          {webResearch && !loading && <SocialPostWebSources research={webResearch} />}
+
           {/* Research Reference Cards */}
           {researchPosts.length > 0 && !loading && (
             <Panel>
@@ -872,6 +1028,8 @@ export default function SocialPostPage() {
                             )}
                           </div>
                         )}
+
+                        <OptionCitations citations={opt.citations} expanded={isSelected} />
 
                         {/* Select button */}
                         {!isSelected && (
