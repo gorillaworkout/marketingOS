@@ -11,10 +11,17 @@ import {
   Select,
   StatusBadge,
   TextArea,
-  TextInput,
   Toolbar,
 } from '@/components/ui/dashboard';
 import InlineModelSelector from '@/components/InlineModelSelector';
+import { AI_RESEARCH_HANDOFF_QUERY, AI_RESEARCH_HANDOFF_VALUE, readAiResearchHandoff } from '@/lib/ai-research-handoff';
+import type { QCResult } from '@/lib/openai';
+import { readStoredVideoScriptQc } from '@/lib/video-script-qc';
+import {
+  readStoredVideoScriptResearch,
+  type VideoScriptCitation,
+  type VideoScriptWebResearch,
+} from '@/lib/video-script-research';
 
 interface ProgressState {
   step: string;
@@ -28,6 +35,8 @@ interface ProgressEvent {
   progress: number;
   message: string;
   result?: Record<string, unknown>;
+  webResearch?: VideoScriptWebResearch;
+  qcResults?: QCResult[];
 }
 
 interface PreviewOption {
@@ -39,6 +48,7 @@ interface PreviewOption {
   highlight: string;
   brandTieIn: string;
   cta: string;
+  citations?: VideoScriptCitation[];
 }
 
 interface ScriptOption extends PreviewOption {
@@ -46,16 +56,20 @@ interface ScriptOption extends PreviewOption {
 }
 
 const STEP_LABELS: Record<string, string> = {
+  research: 'Web research',
   preview: 'Generating 3 preview options',
   full: 'Generating full script',
+  qc: 'Script quality check',
   done: 'Complete',
   error: 'Error',
 };
 
 const STEP_ICONS: Record<string, string> = {
-  preview: '01',
+  research: '01',
+  preview: '02',
   full: '02',
-  done: '03',
+  qc: '03',
+  done: '04',
   error: '!',
 };
 
@@ -65,12 +79,135 @@ const STYLE_COLORS: Record<string, { border: string; accent: string }> = {
   cinematic: { border: 'border-purple-500/40', accent: 'text-purple-400' },
 };
 
+function safeHttpUrl(value: string): string | null {
+  try {
+    const parsed = new URL(value);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;
+    if (parsed.username || parsed.password) return null;
+    return parsed.toString();
+  } catch {
+    return null;
+  }
+}
+
+export function VideoScriptCitations({ citations, detailed = false }: { citations?: VideoScriptCitation[]; detailed?: boolean }) {
+  const safe = (Array.isArray(citations) ? citations : []).flatMap((citation) => {
+    const href = safeHttpUrl(citation?.url || '');
+    if (!href) return [];
+    return [{ ...citation, url: href }];
+  });
+  if (!safe.length) return null;
+  return (
+    <div data-testid="video-script-citations" className="space-y-2">
+      <p className="text-[10px] uppercase tracking-wide text-[var(--mos-text-faint)]">Sources</p>
+      {safe.map((citation) => (
+        <div key={citation.url}>
+          <a
+            href={citation.url}
+            target="_blank"
+            rel="noreferrer"
+            onClick={(click) => click.stopPropagation()}
+            className="block truncate text-[11px] text-blue-300 hover:underline"
+          >
+            {citation.title || citation.url}
+          </a>
+          {detailed && citation.snippet && (
+            <p className="mt-1 text-[11px] leading-5 text-[var(--mos-text-muted)]">{citation.snippet}</p>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+export function VideoScriptWebSources({ research }: { research: VideoScriptWebResearch }) {
+  return (
+    <Panel>
+      <SectionHeader
+        className="mb-4"
+        title="Web sources"
+        description={
+          research.status === 'grounded'
+            ? 'Open-web pages and reference links used to ground this script.'
+            : research.status === 'skipped'
+              ? 'Live web grounding did not run for this script.'
+              : 'Open-web search ran and did not return a usable page.'
+        }
+      />
+      {research.status === 'skipped' && (
+        <div role="status" data-testid="video-script-web-skipped" className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs leading-5 text-amber-100">
+          {research.skippedReason || 'Web grounding was skipped. The script uses brand knowledge only.'}
+        </div>
+      )}
+      {research.status === 'empty' && (
+        <div role="status" data-testid="video-script-web-empty" className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs leading-5 text-amber-100">
+          {research.warnings[0] || 'Open-web search returned no usable sources. The script uses brand knowledge only.'}
+        </div>
+      )}
+      {research.status !== 'skipped' && research.queries.length > 0 && (
+        <p className="mt-3 text-xs text-[var(--mos-text-muted)]">Searches: {research.queries.join(' · ')}</p>
+      )}
+      {research.warnings.length > 0 && (
+        <p className="mt-2 text-xs text-[var(--mos-text-muted)]">{research.warnings.join(' ')}</p>
+      )}
+      {research.sources.length > 0 && (
+        <div data-testid="video-script-web-sources" className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+          {research.sources.map((source) => (
+            <div key={source.url} className="rounded-lg border border-[var(--mos-border)] bg-[var(--mos-surface)] p-3">
+              <a href={source.url} target="_blank" rel="noreferrer" className="block text-sm font-medium text-blue-300 hover:underline">
+                {source.title}
+              </a>
+              <p className="mt-1 truncate text-[11px] text-[var(--mos-text-faint)]">{source.url}</p>
+              {source.snippet && (
+                <p className="mt-2 line-clamp-3 text-xs leading-relaxed text-[var(--mos-text-secondary)]">{source.snippet}</p>
+              )}
+              <p className="mt-2 text-[10px] uppercase tracking-wide text-[var(--mos-text-faint)]">
+                {source.kind === 'reference' ? 'Reference link' : 'Open web'} · {source.read ? 'Page read' : 'Search snippet'}
+              </p>
+            </div>
+          ))}
+        </div>
+      )}
+    </Panel>
+  );
+}
+
+export function VideoScriptQcPanel({ result }: { result?: QCResult | null }) {
+  if (!result) return null;
+  return (
+    <div data-testid="video-script-qc" className="bg-[var(--mos-surface)] rounded-lg p-4 border border-[var(--mos-border)]">
+      <div className="flex items-center justify-between mb-2 gap-3">
+        <h4 className="text-sm font-semibold text-white">Script quality check</h4>
+        <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+          result.allPassed ? 'bg-green-500/20 text-green-400' : 'bg-yellow-500/20 text-yellow-400'
+        }`}>
+          {result.score}% — {result.allPassed ? 'All passed' : 'Has warnings'}
+        </span>
+      </div>
+      <p className="mb-2 text-[11px] leading-5 text-[var(--mos-text-muted)]">
+        Warnings do not block the script. Creative voiceover is allowed when it does not state unsourced numbers, prices, or quotations.
+      </p>
+      <div className="space-y-1.5">
+        {result.checks.map((check) => (
+          <div key={check.name} className="flex items-start gap-2">
+            <span className={`text-xs font-medium w-32 shrink-0 ${check.passed ? 'text-[var(--mos-text-secondary)]' : 'text-yellow-300'}`}>{check.label}</span>
+            <span className={`text-xs ${check.passed ? 'text-[var(--mos-text-muted)]' : 'text-yellow-300/80'}`}>{check.detail}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export default function VideoScriptPage() {
   const [event, setEvent] = useState('');
   const [platform, setPlatform] = useState('Instagram Reels');
   const [duration, setDuration] = useState('30-45 seconds');
   const [targetAudience, setTargetAudience] = useState('');
   const [references, setReferences] = useState('');
+  const [researchHandoff, setResearchHandoff] = useState(false);
+  const [webResearch, setWebResearch] = useState<VideoScriptWebResearch | null>(null);
+  const [qcResults, setQcResults] = useState<QCResult[]>([]);
   const [loading, setLoading] = useState(false);
   const [previewOptions, setPreviewOptions] = useState<PreviewOption[] | null>(null);
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
@@ -97,6 +234,13 @@ export default function VideoScriptPage() {
     const params = new URLSearchParams(window.location.search);
     const template = params.get('template');
     if (template) setEvent(template);
+    if (params.get(AI_RESEARCH_HANDOFF_QUERY) !== AI_RESEARCH_HANDOFF_VALUE) return;
+    const handoff = readAiResearchHandoff('video-script');
+    if (!handoff?.brief) return;
+    // Prefill only. Do not call handleGeneratePreview.
+    setEvent(handoff.brief);
+    if (handoff.references) setReferences(handoff.references);
+    setResearchHandoff(true);
   }, []);
 
   const fetchScripts = async () => {
@@ -105,6 +249,14 @@ export default function VideoScriptPage() {
       const data = await res.json();
       if (data.tasks) setRecentScripts(data.tasks);
     } catch {}
+  };
+
+  const applyStreamMeta = (payload: { webResearch?: unknown; qcResults?: unknown }) => {
+    if (payload.webResearch) {
+      const research = readStoredVideoScriptResearch(payload.webResearch);
+      if (research) setWebResearch(research);
+    }
+    if (payload.qcResults) setQcResults(readStoredVideoScriptQc(payload.qcResults));
   };
 
   const startElapsedTimer = useCallback(() => {
@@ -149,7 +301,9 @@ export default function VideoScriptPage() {
     setStep('preview');
     setKnowledgeSaved(false);
     setTaskId(null);
-    setProgress({ step: 'preview', progress: 0, message: 'Starting preview generation...', elapsed: 0 });
+    setWebResearch(null);
+    setQcResults([]);
+    setProgress({ step: 'research', progress: 0, message: 'Starting web research...', elapsed: 0 });
 
     abortControllerRef.current?.abort();
     const controller = new AbortController();
@@ -188,6 +342,8 @@ export default function VideoScriptPage() {
             const event: ProgressEvent = JSON.parse(line.slice(6));
             const elapsed = Math.floor((Date.now() - startTime) / 1000);
 
+            applyStreamMeta(event);
+
             if (event.step === 'error') {
               setError(event.message);
               setProgress(null);
@@ -199,6 +355,7 @@ export default function VideoScriptPage() {
 
             if (event.step === 'done' && event.result) {
               const r = event.result as any;
+              applyStreamMeta(r);
               if (r.success) {
                 setPreviewOptions(r.options || []);
                 setTokenUsage(r.usage);
@@ -263,7 +420,9 @@ export default function VideoScriptPage() {
     setError('');
     setResult(null);
     setStep('full');
-    setProgress({ step: 'full', progress: 0, message: 'Starting full script generation...', elapsed: 0 });
+    setWebResearch(null);
+    setQcResults([]);
+    setProgress({ step: 'research', progress: 0, message: 'Starting web research...', elapsed: 0 });
 
     abortControllerRef.current?.abort();
     const controller = new AbortController();
@@ -314,6 +473,8 @@ export default function VideoScriptPage() {
             const event: ProgressEvent = JSON.parse(line.slice(6));
             const elapsed = Math.floor((Date.now() - startTime) / 1000);
 
+            applyStreamMeta(event);
+
             if (event.step === 'error') {
               setError(event.message);
               setProgress(null);
@@ -324,6 +485,7 @@ export default function VideoScriptPage() {
 
             if (event.step === 'done' && event.result) {
               const r = event.result as any;
+              applyStreamMeta(r);
               if (r.success) {
                 setResult(r);
                 setTaskId(r.taskId);
@@ -450,6 +612,9 @@ export default function VideoScriptPage() {
       if (typeof raw.platform === 'string' && raw.platform) setPlatform(raw.platform);
       if (typeof raw.duration === 'string' && raw.duration) setDuration(raw.duration);
       if (typeof raw.targetAudience === 'string' && raw.targetAudience) setTargetAudience(raw.targetAudience);
+      if (typeof raw.references === 'string') setReferences(raw.references);
+      setWebResearch(readStoredVideoScriptResearch(raw.webResearch));
+      setQcResults(readStoredVideoScriptQc(raw.qcResults));
     } catch {
       setStep('form');
     }
@@ -459,7 +624,7 @@ export default function VideoScriptPage() {
 
   const downloadJSON = () => {
     const dataToExport = result
-      ? { platform, event, options: result.options || [result.script], usage: tokenUsage, generatedAt: new Date().toISOString() }
+      ? { platform, event, duration, targetAudience, references, options: result.options || [result.script], usage: tokenUsage, generatedAt: new Date().toISOString(), webResearch, qcResults }
       : null;
     if (!dataToExport) return;
     const blob = new Blob([JSON.stringify(dataToExport, null, 2)], { type: 'application/json' });
@@ -471,9 +636,11 @@ export default function VideoScriptPage() {
     URL.revokeObjectURL(url);
   };
 
+  const progressSteps = step === 'full' ? ['research', 'full', 'qc'] : ['research', 'preview', 'qc'];
+
   const getStepStatus = (stepName: string): 'completed' | 'active' | 'pending' => {
     if (!progress) return 'pending';
-    const stepOrder = ['preview', 'full', 'done'];
+    const stepOrder = [...progressSteps, 'done'];
     const currentIdx = stepOrder.indexOf(progress.step);
     const targetIdx = stepOrder.indexOf(stepName);
     if (currentIdx > targetIdx) return 'completed';
@@ -502,6 +669,9 @@ export default function VideoScriptPage() {
     setKnowledgeSaved(false);
     setRatingMessage('');
     setEditedPrompt('');
+    setWebResearch(null);
+    setQcResults([]);
+    setResearchHandoff(false);
   };
 
   return (
@@ -542,6 +712,11 @@ export default function VideoScriptPage() {
             <Panel>
             <form onSubmit={handleGeneratePreview} className="space-y-5">
               <SectionHeader title="Video brief" description="Set the format and audience before comparing creative directions." />
+              {researchHandoff && (
+                <p role="status" data-testid="video-script-research-handoff" className="rounded-xl border border-indigo-400/30 bg-indigo-500/10 px-3 py-2 text-xs leading-5 text-indigo-100">
+                  Filled from Dupoin AI Research. Not published yet — edit this brief before you generate.
+                </p>
+              )}
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <FormField label="Platform">
                   <Select value={platform} onChange={e => setPlatform(e.target.value)}>
@@ -572,9 +747,9 @@ export default function VideoScriptPage() {
                 <TextArea value={event} onChange={e => setEvent(e.target.value)} rows={3}
                   placeholder="Describe the event or topic for the video..." required />
               </FormField>
-              <FormField label="Reference links" hint="Optional">
-                <TextInput type="text" value={references} onChange={e => setReferences(e.target.value)}
-                  placeholder="e.g., TikTok/IG links for inspiration" />
+              <FormField label="Reference links" hint="Optional. Public URLs are read with Jina. Generation also searches the open web for the topic, format, and competitors.">
+                <TextArea value={references} onChange={e => setReferences(e.target.value)} rows={2}
+                  placeholder="https://example.com/article" />
               </FormField>
               <div className="flex items-center gap-3">
                 <Button type="submit" variant="primary" disabled={loading || !event}>
@@ -603,7 +778,7 @@ export default function VideoScriptPage() {
               </div>
 
               <div className="space-y-2 pt-2">
-                {['preview', 'full'].map((stepName) => {
+                {progressSteps.map((stepName) => {
                   const status = getStepStatus(stepName);
                   return (
                     <div key={stepName} className={`flex items-center gap-3 px-3 py-1.5 rounded-lg transition-colors ${
@@ -637,6 +812,8 @@ export default function VideoScriptPage() {
           )}
 
           {error && <div className="bg-red-500/10 border border-red-500/20 text-red-400 px-4 py-3 rounded-lg">{error}</div>}
+
+          {webResearch && !loading && <VideoScriptWebSources research={webResearch} />}
 
           {/* Step 2 Preview: 3 Option Cards */}
           {previewOptions && previewOptions.length > 0 && step !== 'form' && !loading && step !== 'full' && (
@@ -695,7 +872,13 @@ export default function VideoScriptPage() {
                           {opt.highlight && <span className="text-[10px] px-1.5 py-0.5 bg-[var(--mos-raised)] text-purple-300 rounded">Highlight</span>}
                           {opt.brandTieIn && <span className="text-[10px] px-1.5 py-0.5 bg-[var(--mos-raised)] text-green-300 rounded">Brand</span>}
                           {opt.cta && <span className="text-[10px] px-1.5 py-0.5 bg-[var(--mos-raised)] text-yellow-300 rounded">CTA</span>}
+                          {qcResults[index] && (
+                            <span className={`text-[10px] px-1.5 py-0.5 rounded ${qcResults[index].allPassed ? 'bg-green-500/15 text-green-300' : 'bg-yellow-500/15 text-yellow-300'}`}>
+                              QC {qcResults[index].score}%
+                            </span>
+                          )}
                         </div>
+                        <VideoScriptCitations citations={opt.citations} />
 
                         {/* Select button */}
                         {!isSelected && !isDisabled && (
@@ -734,6 +917,7 @@ export default function VideoScriptPage() {
                                 <p className="text-blue-400 mt-1 bg-[var(--mos-raised)] p-2.5 rounded-lg text-sm">{opt.cta}</p>
                               </div>
                             )}
+                            <VideoScriptQcPanel result={qcResults[index]} />
                           </div>
                         )}
                       </div>
@@ -807,9 +991,14 @@ export default function VideoScriptPage() {
                       className="text-xs px-2.5 py-1 bg-[var(--mos-raised)] hover:bg-[var(--mos-raised)] text-[var(--mos-text-secondary)] rounded-lg transition-colors">
                       Copy
                     </button>
-                    <button onClick={() => copyToClipboard(
-                      `Hook: ${fullScriptOption.hook}\n\nContext: ${fullScriptOption.context}\n\nHighlight: ${fullScriptOption.highlight}\n\nBrand Tie-In: ${fullScriptOption.brandTieIn}\n\nCTA: ${fullScriptOption.cta}\n\n---\n\nFull Script:\n${fullScriptOption.fullScript}`
-                    )}
+                    <button onClick={() => {
+                      const sourceLines = (Array.isArray(fullScriptOption.citations) ? fullScriptOption.citations : [])
+                        .map((citation: VideoScriptCitation) => `- ${citation.title} (${citation.url})`)
+                        .join('\n');
+                      copyToClipboard(
+                        `Hook: ${fullScriptOption.hook}\n\nContext: ${fullScriptOption.context}\n\nHighlight: ${fullScriptOption.highlight}\n\nBrand Tie-In: ${fullScriptOption.brandTieIn}\n\nCTA: ${fullScriptOption.cta}\n\n---\n\nFull Script:\n${fullScriptOption.fullScript}${sourceLines ? `\n\nSources:\n${sourceLines}` : ''}`
+                      );
+                    }}
                       className="text-xs px-2.5 py-1 bg-[var(--mos-raised)] hover:bg-[var(--mos-raised)] text-[var(--mos-text-secondary)] rounded-lg transition-colors">
                       Copy all
                     </button>
@@ -864,6 +1053,9 @@ export default function VideoScriptPage() {
                       <p className="text-white mt-1 bg-[var(--mos-raised)] p-4 rounded-lg whitespace-pre-wrap font-mono text-sm leading-relaxed">{fullScriptOption.fullScript}</p>
                     </div>
                   )}
+
+                  <VideoScriptCitations citations={fullScriptOption.citations} detailed />
+                  <VideoScriptQcPanel result={qcResults[0]} />
                 </div>
               </Panel>
 

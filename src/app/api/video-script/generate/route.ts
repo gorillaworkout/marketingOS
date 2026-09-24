@@ -3,6 +3,14 @@ import { queryOne, queryAll, execute } from '@/lib/database';
 import { requireFeature } from '@/lib/auth';
 import { rateLimit } from '@/lib/rate-limit';
 import { generateContent, getSmartSystemPrompt, fetchContextMemory, fetchStyleContext, fetchKnowledgeContext, getUserPreferredModel, type BrandGuidelines } from '@/lib/openai';
+import { runVideoScriptQc } from '@/lib/video-script-qc';
+import {
+  VIDEO_SCRIPT_WEB_SKIPPED_MESSAGE,
+  formatVideoScriptEvidence,
+  researchVideoScriptWeb,
+  resolveVideoScriptCitations,
+  type VideoScriptWebResearch,
+} from '@/lib/video-script-research';
 import { v4 as uuidv4 } from 'uuid';
 import fs from 'fs';
 import path from 'path';
@@ -52,6 +60,14 @@ const STYLE_VARIANTS = [
   },
 ];
 
+type ScriptFields = {
+  event: string;
+  platform?: string;
+  duration?: string;
+  targetAudience?: string;
+  references?: string;
+};
+
 export async function POST(request: NextRequest) {
   const rl = rateLimit(request);
   if (rl) return rl;
@@ -86,12 +102,7 @@ async function handlePreview(
   body: Record<string, unknown>,
   userId: string,
 ) {
-  const { event, platform, duration, targetAudience, references, brandGuidelineId } = body as {
-    event: string;
-    platform?: string;
-    duration?: string;
-    targetAudience?: string;
-    references?: string;
+  const { event, platform, duration, targetAudience, references, brandGuidelineId } = body as ScriptFields & {
     brandGuidelineId?: string;
   };
   if (!event) {
@@ -101,35 +112,9 @@ async function handlePreview(
   }
 
   const preferredModel = await getUserPreferredModel(userId, 'video-script');
-
-  // Fetch brand guidelines if specified
-  let brandGuidelines: BrandGuidelines | undefined;
-  if (brandGuidelineId) {
-    try {
-      const row = await queryOne('SELECT id, brand_name, tone_of_voice, target_market, key_messages, do_list, dont_list, examples FROM brand_guidelines WHERE id = ? AND user_id = ?', [brandGuidelineId, userId]) as Record<string, unknown> | undefined;
-      if (row) {
-        brandGuidelines = {
-          id: row.id as string,
-          brand_name: row.brand_name as string,
-          tone_of_voice: (row.tone_of_voice as string) || undefined,
-          target_market: (row.target_market as string) || undefined,
-          key_messages: (row.key_messages as string) || undefined,
-          do_list: JSON.parse((row.do_list as string) || '[]'),
-          dont_list: JSON.parse((row.dont_list as string) || '[]'),
-          examples: (row.examples as string) || undefined,
-        };
-      }
-    } catch (e) {
-      console.warn('Failed to fetch brand guidelines:', e);
-    }
-  }
-
-  // Fetch context memory
+  const brandGuidelines = await loadBrandGuidelines(userId, brandGuidelineId);
   const contextMemory = await fetchContextMemory(userId, 'video-script', 5);
-
-  // Fetch style context
   const styleContext = await fetchStyleContext(userId, 'video-script');
-
   const knowledgeContext = await fetchKnowledgeContext(userId, event, 'video-script', 5);
 
   const encoder = new TextEncoder();
@@ -137,45 +122,25 @@ async function handlePreview(
 
   const stream = new ReadableStream({
     async start(controller) {
-      // Fetch reference links inside the stream so we can send progress
-      let referencesContent = '';
-      if (references && references.trim()) {
-        const links = references.split(/[\n,]+/).map(l => l.trim()).filter(l => l.startsWith('http'));
-        if (links.length > 0) {
-          controller.enqueue(encoder.encode(sseEvent({
-            step: 'references', progress: 2,
-            message: `🔍 Analyzing ${links.length} reference link(s)...`,
-          })));
-
-          const fetched = await Promise.allSettled(
-            links.slice(0, 2).map(link => fetchReferenceContent(link))
-          );
-          const summaries = fetched
-            .map(r => r.status === 'fulfilled' ? r.value : null)
-            .filter(Boolean);
-          if (summaries.length > 0) {
-            referencesContent = `\n\n📎 REFERENCE LINK ANALYSIS:\n${summaries.join('\n---\n')}`;
-            controller.enqueue(encoder.encode(sseEvent({
-              step: 'references', progress: 3,
-              message: `✅ ${summaries.length} reference(s) analyzed`,
-            })));
-          }
-        }
-      }
-
+      const emit = (data: Record<string, unknown>) => {
+        controller.enqueue(encoder.encode(sseEvent(data)));
+      };
       const timeoutPromise = new Promise<never>((_, reject) => {
         timeoutId = setTimeout(() => reject(new Error(`Generation timed out after ${TIMEOUT_MS / 1000}s`)), TIMEOUT_MS);
       });
 
       try {
         const generationPromise = (async () => {
+          const webResearch = await collectVideoScriptResearch({ event, platform, duration, targetAudience, references }, emit);
+          const evidence = formatVideoScriptEvidence(webResearch);
+          const referenceNote = references?.trim() ? `Operator reference links:\n${references.trim()}` : '';
           const smartSystem = getSmartSystemPrompt('video-script', platform, brandGuidelines, targetAudience, styleContext);
 
-          controller.enqueue(encoder.encode(sseEvent({
+          emit({
             step: 'preview',
-            progress: 5,
-            message: '🚀 Generating 3 preview style options...',
-          })));
+            progress: 12,
+            message: 'Generating 3 preview style options...',
+          });
 
           const optionPromises = STYLE_VARIANTS.map(async (variant, index) => {
             const stylePrompt = `Create a video script PREVIEW with these details:
@@ -183,25 +148,26 @@ Event/Topic: ${event}
 Platform: ${platform || 'Instagram Reels'}
 Duration: ${duration || '30-45 seconds'}
 Target Audience: ${targetAudience || 'General'}
-${references ? `References: ${references}` : ''}
-${referencesContent}
+${referenceNote}
 
 ${variant.instruction}
 
 ${contextMemory}
 ${knowledgeContext}
 
+${evidence}
+
 Generate ONLY the preview fields (hook, context, highlight, brandTieIn, cta). Do NOT generate the full script yet.
 
-Output JSON format with: { "hook": "the opening hook that stops the scroll", "hookOptions": ["option 1", "option 2", "option 3"], "context": "brief background context for the video", "highlight": "the peak moment or key highlight", "brandTieIn": "how Dupoin connects to this topic", "cta": "call to action" }`;
+Output JSON format with: { "hook": "the opening hook that stops the scroll", "hookOptions": ["option 1", "option 2", "option 3"], "context": "brief background context for the video", "highlight": "the peak moment or key highlight", "brandTieIn": "how Dupoin connects to this topic", "cta": "call to action", "citationIds": [1] }`;
 
-            const progressBase = 10 + index * 20;
+            const progressBase = 18 + index * 16;
 
-            controller.enqueue(encoder.encode(sseEvent({
+            emit({
               step: 'preview',
               progress: progressBase,
               message: `${variant.styleLabel} — generating preview...`,
-            })));
+            });
 
             const result = await generateContent(smartSystem, stylePrompt, userId, undefined, {
               brandGuidelines,
@@ -216,50 +182,73 @@ Output JSON format with: { "hook": "the opening hook that stops the scroll", "ho
 
           const optionResults = await Promise.all(optionPromises);
 
-          controller.enqueue(encoder.encode(sseEvent({
+          emit({
             step: 'preview',
-            progress: 70,
-            message: '✅ All 3 previews generated!',
-          })));
+            progress: 72,
+            message: 'All 3 previews generated.',
+          });
 
-          // Parse all options
           const options = optionResults.map(({ variant, result }) => {
-            let scriptData;
-            try { scriptData = JSON.parse(result); } catch {
-              scriptData = { hook: '', context: '', highlight: '', brandTieIn: '', cta: '' };
-            }
+            const scriptData = parseModelJson(result);
             return {
               style: variant.style,
               styleLabel: variant.styleLabel,
-              hook: scriptData.hook || '',
-              hookOptions: scriptData.hookOptions || [],
-              context: scriptData.context || '',
-              highlight: scriptData.highlight || '',
-              brandTieIn: scriptData.brandTieIn || '',
-              cta: scriptData.cta || '',
+              hook: asString(scriptData.hook),
+              hookOptions: asStringList(scriptData.hookOptions),
+              context: asString(scriptData.context),
+              highlight: asString(scriptData.highlight),
+              brandTieIn: asString(scriptData.brandTieIn),
+              cta: asString(scriptData.cta),
+              citations: resolveVideoScriptCitations(scriptData, webResearch.sources),
             };
           });
 
-          // Aggregate usage
+          emit({
+            step: 'qc',
+            progress: 84,
+            message: 'Running script quality checks...',
+          });
+
+          const qcResults = options.map((option) => runVideoScriptQc({
+            mode: 'preview',
+            platform,
+            duration,
+            hook: option.hook,
+            context: option.context,
+            highlight: option.highlight,
+            brandTieIn: option.brandTieIn,
+            cta: option.cta,
+            citations: option.citations,
+          }));
+          const passed = qcResults.filter((result) => result.allPassed).length;
+          emit({
+            step: 'qc',
+            progress: 92,
+            message: `Quality check complete — ${passed}/${qcResults.length} previews passed all checks. Warnings do not block the script.`,
+            qcResults,
+          });
+
           const totalUsage = {
             videoScript: {
-              inputTokens: optionResults.reduce((sum, r) => sum + (r.usage?.inputTokens || 0), 0),
-              outputTokens: optionResults.reduce((sum, r) => sum + (r.usage?.outputTokens || 0), 0),
+              inputTokens: optionResults.reduce((sum, item) => sum + (item.usage?.inputTokens || 0), 0),
+              outputTokens: optionResults.reduce((sum, item) => sum + (item.usage?.outputTokens || 0), 0),
               model: optionResults[0]?.usage?.model || preferredModel,
-              cost: optionResults.reduce((sum, r) => sum + (r.usage?.cost || 0), 0),
+              cost: optionResults.reduce((sum, item) => sum + (item.usage?.cost || 0), 0),
             },
           };
 
-          controller.enqueue(encoder.encode(sseEvent({
+          emit({
             step: 'done',
             progress: 100,
-            message: '✅ Preview complete! Pick your favorite style.',
+            message: 'Preview complete. Pick your favorite style.',
             result: {
               success: true,
               options,
               usage: totalUsage,
+              webResearch,
+              qcResults,
             },
-          })));
+          });
         })();
 
         await Promise.race([generationPromise, timeoutPromise]);
@@ -292,12 +281,7 @@ async function handleFull(
   body: Record<string, unknown>,
   userId: string,
 ) {
-  const { event, platform, duration, targetAudience, references, brandGuidelineId, selectedOption, editedPrompt, style } = body as {
-    event: string;
-    platform?: string;
-    duration?: string;
-    targetAudience?: string;
-    references?: string;
+  const { event, platform, duration, targetAudience, references, brandGuidelineId, selectedOption, editedPrompt, style } = body as ScriptFields & {
     brandGuidelineId?: string;
     selectedOption: Record<string, string>;
     editedPrompt: string;
@@ -311,33 +295,11 @@ async function handleFull(
   }
 
   const preferredModel = await getUserPreferredModel(userId, 'video-script');
-
-  let brandGuidelines: BrandGuidelines | undefined;
-  if (brandGuidelineId) {
-    try {
-      const row = await queryOne('SELECT id, brand_name, tone_of_voice, target_market, key_messages, do_list, dont_list, examples FROM brand_guidelines WHERE id = ? AND user_id = ?', [brandGuidelineId, userId]) as Record<string, unknown> | undefined;
-      if (row) {
-        brandGuidelines = {
-          id: row.id as string,
-          brand_name: row.brand_name as string,
-          tone_of_voice: (row.tone_of_voice as string) || undefined,
-          target_market: (row.target_market as string) || undefined,
-          key_messages: (row.key_messages as string) || undefined,
-          do_list: JSON.parse((row.do_list as string) || '[]'),
-          dont_list: JSON.parse((row.dont_list as string) || '[]'),
-          examples: (row.examples as string) || undefined,
-        };
-      }
-    } catch (e) {
-      console.warn('Failed to fetch brand guidelines:', e);
-    }
-  }
-
+  const brandGuidelines = await loadBrandGuidelines(userId, brandGuidelineId);
   const contextMemory = await fetchContextMemory(userId, 'video-script', 5);
   const styleContext = await fetchStyleContext(userId, 'video-script');
   const knowledgeContext = await fetchKnowledgeContext(userId, event, 'video-script', 5);
 
-  // Fetch best examples
   let bestExamples = '';
   try {
     const examplesResult = await queryAll(`
@@ -346,12 +308,12 @@ async function handleFull(
       ORDER BY rating DESC, created_at DESC LIMIT 3
     `, []) as { output_data: string; brief: string }[];
     if (examplesResult.length) {
-      bestExamples = '\n\n📚 Best examples from past (highly rated):';
-      for (const v of examplesResult) {
+      bestExamples = '\n\nBest examples from past (highly rated):';
+      for (const example of examplesResult) {
         try {
-          const data = JSON.parse(v.output_data);
+          const data = JSON.parse(example.output_data);
           const hook = data.options?.[0]?.hook || data.hook || '';
-          bestExamples += `\n- Topic: "${(v.brief || '').substring(0, 100)}"\n  Hook: "${hook.substring(0, 150)}"`;
+          bestExamples += `\n- Topic: "${(example.brief || '').substring(0, 100)}"\n  Hook: "${hook.substring(0, 150)}"`;
         } catch {}
       }
     }
@@ -362,6 +324,9 @@ async function handleFull(
 
   const stream = new ReadableStream({
     async start(controller) {
+      const emit = (data: Record<string, unknown>) => {
+        controller.enqueue(encoder.encode(sseEvent(data)));
+      };
       const timeoutPromise = new Promise<never>((_, reject) => {
         timeoutId = setTimeout(() => reject(new Error(`Generation timed out after ${TIMEOUT_MS / 1000}s`)), TIMEOUT_MS);
       });
@@ -369,15 +334,17 @@ async function handleFull(
       try {
         const generationPromise = (async () => {
           const taskId = uuidv4();
+          const webResearch = await collectVideoScriptResearch({ event, platform, duration, targetAudience, references }, emit);
+          const evidence = formatVideoScriptEvidence(webResearch);
+          const referenceNote = references?.trim() ? `Operator reference links:\n${references.trim()}` : '';
           const smartSystem = getSmartSystemPrompt('video-script', platform, brandGuidelines, targetAudience, styleContext);
+          const variant = STYLE_VARIANTS.find(item => item.style === style) || STYLE_VARIANTS[0];
 
-          const variant = STYLE_VARIANTS.find(v => v.style === style) || STYLE_VARIANTS[0];
-
-          controller.enqueue(encoder.encode(sseEvent({
+          emit({
             step: 'full',
-            progress: 10,
-            message: `🎬 Generating full ${variant.styleLabel} script...`,
-          })));
+            progress: 18,
+            message: `Generating full ${variant.styleLabel} script...`,
+          });
 
           const fullPrompt = `Based on the following brief and selected preview, generate the COMPLETE video script.
 
@@ -400,6 +367,10 @@ ${bestExamples}
 ${contextMemory}
 ${knowledgeContext}
 
+${referenceNote}
+
+${evidence}
+
 Platform: ${platform || 'Instagram Reels'}
 Duration: ${duration || '30-45 seconds'}
 Target Audience: ${targetAudience || 'General'}
@@ -408,7 +379,7 @@ Generate the complete script following the SOP. Include dialogue, scene descript
 
 CRITICAL: Each VO (Voice Over) section MUST have MULTIPLE SENTENCES (3-5 sentences per VO). Do NOT write 1-sentence VOs. Write full, detailed narration that flows naturally. For a 30-45 second script, aim for 4-6 sentences total split across 2-3 VO segments.
 
-Output JSON format with: { "hook": "...", "hookOptions": ["...", "...", "..."], "context": "...", "highlight": "...", "brandTieIn": "...", "cta": "...", "fullScript": "..." }
+Output JSON format with: { "hook": "...", "hookOptions": ["...", "...", "..."], "context": "...", "highlight": "...", "brandTieIn": "...", "cta": "...", "fullScript": "...", "citationIds": [1] }
 
 The fullScript must be the complete, detailed script with scene descriptions, dialogue, and timing. Each scene should have: [TIMESTAMP], [VISUAL], [SFX], [MUSIC], [VO: narration text (3-5 sentences)].`;
 
@@ -420,29 +391,53 @@ The fullScript must be the complete, detailed script with scene descriptions, di
             taskType: 'video-script',
           });
 
-          controller.enqueue(encoder.encode(sseEvent({
+          emit({
             step: 'full',
             progress: 70,
-            message: '✅ Full script generated!',
-          })));
+            message: 'Full script generated.',
+          });
 
-          // Parse the result
-          let scriptData;
-          try { scriptData = JSON.parse(result.content); } catch {
-            scriptData = { fullScript: result.content, hook: selectedOption.hook || '', context: selectedOption.context || '', highlight: selectedOption.highlight || '', brandTieIn: selectedOption.brandTieIn || '', cta: selectedOption.cta || '' };
-          }
-
+          const scriptData = parseModelJson(result.content);
+          const citations = resolveVideoScriptCitations(scriptData, webResearch.sources);
           const finalOption = {
             style: style,
             styleLabel: variant.styleLabel,
-            hook: scriptData.hook || selectedOption.hook || '',
-            hookOptions: scriptData.hookOptions || [],
-            context: scriptData.context || selectedOption.context || '',
-            highlight: scriptData.highlight || selectedOption.highlight || '',
-            brandTieIn: scriptData.brandTieIn || selectedOption.brandTieIn || '',
-            cta: scriptData.cta || selectedOption.cta || '',
-            fullScript: scriptData.fullScript || result.content,
+            hook: asString(scriptData.hook, selectedOption.hook || ''),
+            hookOptions: asStringList(scriptData.hookOptions),
+            context: asString(scriptData.context, selectedOption.context || ''),
+            highlight: asString(scriptData.highlight, selectedOption.highlight || ''),
+            brandTieIn: asString(scriptData.brandTieIn, selectedOption.brandTieIn || ''),
+            cta: asString(scriptData.cta, selectedOption.cta || ''),
+            fullScript: asString(scriptData.fullScript, result.content),
+            citations,
           };
+
+          emit({
+            step: 'qc',
+            progress: 82,
+            message: 'Running script quality checks...',
+          });
+          const fullQc = runVideoScriptQc({
+            mode: 'full',
+            platform,
+            duration,
+            hook: finalOption.hook,
+            context: finalOption.context,
+            highlight: finalOption.highlight,
+            brandTieIn: finalOption.brandTieIn,
+            cta: finalOption.cta,
+            fullScript: finalOption.fullScript,
+            citations,
+          });
+          const qcResults = [fullQc];
+          emit({
+            step: 'qc',
+            progress: 90,
+            message: fullQc.allPassed
+              ? 'Quality check complete — the full script passed all checks.'
+              : 'Quality check complete — the full script has warnings. Creative voiceover is kept; review the issues before you record.',
+            qcResults,
+          });
 
           const totalUsage = {
             videoScript: {
@@ -453,9 +448,15 @@ The fullScript must be the complete, detailed script with scene descriptions, di
             },
           };
 
-          // Save output data
           const outputData = {
             options: [finalOption],
+            webResearch,
+            qcResults,
+            event,
+            platform,
+            duration,
+            targetAudience,
+            references: references || '',
           };
 
           const dateStr = new Date().toISOString().split('T')[0];
@@ -464,13 +465,12 @@ The fullScript must be the complete, detailed script with scene descriptions, di
           if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true });
           fs.writeFileSync(path.join(outputDir, fileName), JSON.stringify(outputData, null, 2));
 
-          // Save to DB
           await execute('INSERT INTO tasks (id, user_id, type, title, brief, status, output_data) VALUES (?, ?, ?, ?, ?, ?, ?)', [taskId, userId, 'video-script', `Video Script: ${event.substring(0, 50)}`, event, 'completed', JSON.stringify(outputData)]);
 
-          controller.enqueue(encoder.encode(sseEvent({
+          emit({
             step: 'done',
             progress: 100,
-            message: '✅ Full script generation complete!',
+            message: 'Full script generation complete.',
             result: {
               success: true,
               taskId,
@@ -478,8 +478,10 @@ The fullScript must be the complete, detailed script with scene descriptions, di
               script: finalOption,
               outputFile: `/outputs/video-scripts/${fileName}`,
               usage: totalUsage,
+              webResearch,
+              qcResults,
             },
-          })));
+          });
         })();
 
         await Promise.race([generationPromise, timeoutPromise]);
@@ -504,41 +506,78 @@ The fullScript must be the complete, detailed script with scene descriptions, di
     },
   });
 }
-/**
- * Fetch content from a reference URL and return a summary/analysis.
- * Handles TikTok, Instagram, and general URLs.
- */
-async function fetchReferenceContent(url: string): Promise<string | null> {
-  try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 5000);
 
-    const response = await fetch(url, {
-      signal: controller.signal,
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (compatible; MarketingOS/1.0)',
-        'Accept': 'text/html,application/json,*/*',
+async function collectVideoScriptResearch(
+  input: ScriptFields,
+  emit: (data: Record<string, unknown>) => void,
+): Promise<VideoScriptWebResearch> {
+  let webResearch: VideoScriptWebResearch;
+  try {
+    webResearch = await researchVideoScriptWeb({
+      ...input,
+      onProgress: (message) => {
+        emit({ step: 'research', progress: 6, message });
       },
     });
-    clearTimeout(timeout);
-
-    const html = await response.text();
-    const text = html
-      .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
-      .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
-      .replace(/<[^>]+>/g, ' ')
-      .replace(/\s+/g, ' ')
-      .trim()
-      .substring(0, 1000);
-
-    if (text.length < 50) return null;
-
-    return `🔗 Source: ${url}
-📝 Content preview: "${text.substring(0, 500)}"
-💡 Hook style: ${text.includes('?') ? 'Question-based hook' : text.includes('!') ? 'Exclamation-based hook' : 'Statement-based hook'}
-📏 Length: ${text.length} chars`;
-  } catch {
-    // If we can't fetch the link, just skip it
-    return null;
+  } catch (error) {
+    console.warn('Video script web research failed:', error);
+    webResearch = {
+      status: 'empty',
+      queries: [],
+      sources: [],
+      warnings: ['Web research failed. Continuing with brand knowledge only.'],
+    };
   }
+
+  const readCount = webResearch.sources.filter((source) => source.read).length;
+  const webMessage = webResearch.status === 'skipped'
+    ? webResearch.skippedReason || VIDEO_SCRIPT_WEB_SKIPPED_MESSAGE
+    : webResearch.sources.length
+      ? `Read ${readCount} source page${readCount === 1 ? '' : 's'} from ${webResearch.sources.length} web hit${webResearch.sources.length === 1 ? '' : 's'}.`
+      : (webResearch.warnings[0] || 'Open-web search returned no usable sources. Continuing with brand knowledge only.');
+  emit({
+    step: 'research',
+    progress: 10,
+    message: webMessage,
+    webResearch,
+  });
+  return webResearch;
+}
+
+async function loadBrandGuidelines(userId: string, brandGuidelineId?: string): Promise<BrandGuidelines | undefined> {
+  if (!brandGuidelineId) return undefined;
+  try {
+    const row = await queryOne('SELECT id, brand_name, tone_of_voice, target_market, key_messages, do_list, dont_list, examples FROM brand_guidelines WHERE id = ? AND user_id = ?', [brandGuidelineId, userId]) as Record<string, unknown> | undefined;
+    if (!row) return undefined;
+    return {
+      id: row.id as string,
+      brand_name: row.brand_name as string,
+      tone_of_voice: (row.tone_of_voice as string) || undefined,
+      target_market: (row.target_market as string) || undefined,
+      key_messages: (row.key_messages as string) || undefined,
+      do_list: JSON.parse((row.do_list as string) || '[]'),
+      dont_list: JSON.parse((row.dont_list as string) || '[]'),
+      examples: (row.examples as string) || undefined,
+    };
+  } catch (error) {
+    console.warn('Failed to fetch brand guidelines:', error);
+    return undefined;
+  }
+}
+
+function parseModelJson(raw: string): Record<string, unknown> {
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    return parsed && typeof parsed === 'object' ? parsed as Record<string, unknown> : {};
+  } catch {
+    return {};
+  }
+}
+
+function asString(value: unknown, fallback = ''): string {
+  return typeof value === 'string' ? value : fallback;
+}
+
+function asStringList(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
 }
