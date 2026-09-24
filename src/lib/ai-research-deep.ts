@@ -21,12 +21,30 @@ export const AI_RESEARCH_DEEP_PLAN_TIMEOUT_MS = 12_000;
 export const AI_RESEARCH_DEEP_MAX_SOURCES = 16;
 export const AI_RESEARCH_MODE_STORAGE_KEY = 'dupoin-ai-research-mode';
 
+/** English status copy sent on Deep-mode SSE `status` events and shown in the progress panel. */
 export const AI_RESEARCH_DEEP_STATUS = {
-  plan: 'planning…',
-  search: 'searching…',
-  read: 'reading sources…',
-  synthesize: 'writing…',
+  plan: 'Planning…',
+  search: 'Searching…',
+  read: 'Reading sources…',
+  synthesize: 'Drafting answer…',
+  gaps: 'Checking gaps / limitations…',
 } as const;
+
+export const DEEP_PROGRESS_COMPLETE = 'Research complete';
+export const DEEP_PROGRESS_STOPPED = 'Research stopped';
+
+export type DeepStatusPhase = 'plan' | 'search' | 'read' | 'synthesize' | 'gaps';
+
+export interface DeepStatusSseEvent {
+  type: 'status';
+  phase: DeepStatusPhase;
+  message: string;
+  maxRounds: number;
+  round?: number;
+  sourceCount?: number;
+  query?: string;
+  skippedSearch?: boolean;
+}
 
 export type DeepResearchPhase = keyof typeof AI_RESEARCH_DEEP_STATUS;
 export type DeepPlanSource = 'model' | 'fallback';
@@ -42,6 +60,7 @@ export interface DeepResearchProgress {
   phase: 'search' | 'read';
   message: string;
   round: number;
+  maxRounds: number;
   query: string;
   sourceCount?: number;
   research?: ResearchContext;
@@ -198,6 +217,52 @@ export function formatDeepResearchPlanNote(
   ].join('\n');
 }
 
+export function answerHasDeepLimitations(answer: string): boolean {
+  return /^#{1,3}\s+(gaps and limitations|kesenjangan dan keterbatasan)\s*$/im.test(answer);
+}
+
+export function formatDeepSearchStatus(round: number, maxRounds = AI_RESEARCH_DEEP_MAX_ROUNDS): string {
+  const safeRound = Number.isFinite(round) && round > 0 ? Math.floor(round) : 1;
+  const safeMax = Number.isFinite(maxRounds) && maxRounds > 0
+    ? Math.floor(maxRounds)
+    : AI_RESEARCH_DEEP_MAX_ROUNDS;
+  return `Searching (round ${safeRound} of up to ${safeMax})…`;
+}
+
+export function buildDeepStatusEvent(input: {
+  phase: DeepStatusPhase;
+  message?: string;
+  round?: number;
+  maxRounds?: number;
+  sourceCount?: number;
+  query?: string;
+  skippedSearch?: boolean;
+}): DeepStatusSseEvent {
+  const maxRounds = input.maxRounds && input.maxRounds > 0
+    ? Math.floor(input.maxRounds)
+    : AI_RESEARCH_DEEP_MAX_ROUNDS;
+  let message = input.message?.trim() || '';
+  if (!message) {
+    if (input.phase === 'search') message = formatDeepSearchStatus(input.round ?? 1, maxRounds);
+    else if (input.phase === 'plan') message = AI_RESEARCH_DEEP_STATUS.plan;
+    else if (input.phase === 'read') message = AI_RESEARCH_DEEP_STATUS.read;
+    else if (input.phase === 'synthesize') message = AI_RESEARCH_DEEP_STATUS.synthesize;
+    else message = AI_RESEARCH_DEEP_STATUS.gaps;
+  }
+  const event: DeepStatusSseEvent = {
+    type: 'status',
+    phase: input.phase,
+    message,
+    maxRounds,
+  };
+  if (typeof input.round === 'number' && Number.isFinite(input.round)) event.round = input.round;
+  if (typeof input.sourceCount === 'number' && Number.isFinite(input.sourceCount)) event.sourceCount = input.sourceCount;
+  const query = input.query?.trim();
+  if (query) event.query = query;
+  if (input.skippedSearch) event.skippedSearch = true;
+  return event;
+}
+
 export function ensureDeepLimitationsSection(
   answer: string,
   meta: {
@@ -208,7 +273,7 @@ export function ensureDeepLimitationsSection(
     skipped?: 'url-only' | 'not-needed' | null;
   },
 ): string {
-  if (/^#{1,3}\s+(gaps and limitations|kesenjangan dan keterbatasan)\s*$/im.test(answer)) return answer;
+  if (answerHasDeepLimitations(answer)) return answer;
   let reason: string;
   if (meta.skipped === 'url-only') {
     reason = 'Extra web search was skipped because the message only contains links. Context comes from those pages when the fetch succeeds.';
@@ -258,8 +323,9 @@ export async function runDeepResearchGather(options: {
     if (remaining < 1_500) break;
     await options.onProgress?.({
       phase: 'search',
-      message: AI_RESEARCH_DEEP_STATUS.search,
+      message: formatDeepSearchStatus(roundsRun + 1, maxRounds),
       round: roundsRun + 1,
+      maxRounds,
       query: searchQuery,
     });
     const timeoutMs = Math.max(1_500, Math.min(roundTimeoutMs, remaining));
@@ -279,6 +345,7 @@ export async function runDeepResearchGather(options: {
       phase: 'read',
       message: AI_RESEARCH_DEEP_STATUS.read,
       round: roundsRun,
+      maxRounds,
       query: searchQuery,
       sourceCount: merged.sources.length,
       research: merged,

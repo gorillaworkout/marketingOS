@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
 import { parseChatRequest, parseStoredMessages } from '../src/lib/ai-research';
 import {
   AI_RESEARCH_DEEP_MAX_QUERIES,
@@ -11,12 +13,24 @@ import {
   AI_RESEARCH_DEEP_STATUS,
   AI_RESEARCH_DEEP_TIME_BUDGET_MS,
   AI_RESEARCH_MODE_STORAGE_KEY,
+  answerHasDeepLimitations,
+  buildDeepStatusEvent,
   ensureDeepLimitationsSection,
   fallbackDeepResearchPlan,
+  formatDeepSearchStatus,
   mergeDeepResearchContexts,
   parseDeepResearchPlan,
   runDeepResearchGather,
 } from '../src/lib/ai-research-deep';
+import {
+  applyDeepStatusEvent,
+  completeDeepProgress,
+  createDeepProgress,
+  failDeepProgress,
+  noteDeepLimitationsInProgress,
+  readDeepStatusEvent,
+} from '../src/lib/ai-research-deep-progress';
+import { AiResearchDeepProgress } from '../src/components/AiResearchDeepProgress';
 import type { ResearchContext, ResearchSource } from '../src/lib/ai-research-grounding';
 
 const read = (path: string) => readFileSync(path, 'utf8');
@@ -80,7 +94,8 @@ test('deep gather merges sources, caps rounds, and stops on the time budget', as
   assert.equal(result.roundsRun, 2);
   assert.equal(result.stoppedReason, 'cap');
   assert.equal(result.research.sources.length, 2);
-  assert.ok(progress.includes(AI_RESEARCH_DEEP_STATUS.search));
+  assert.ok(progress.includes(formatDeepSearchStatus(1, 2)));
+  assert.ok(progress.includes(formatDeepSearchStatus(2, 2)));
   assert.ok(progress.includes(AI_RESEARCH_DEEP_STATUS.read));
 
   let clock = 1_000;
@@ -189,16 +204,133 @@ test('chat request defaults to fast and stored answers keep deep mode plus sourc
   assert.equal(incoming.messages[0].sources, undefined);
 });
 
+test('deep status events use English step labels and round progress', () => {
+  assert.equal(AI_RESEARCH_DEEP_STATUS.plan, 'Planning…');
+  assert.equal(AI_RESEARCH_DEEP_STATUS.read, 'Reading sources…');
+  assert.equal(AI_RESEARCH_DEEP_STATUS.synthesize, 'Drafting answer…');
+  assert.equal(AI_RESEARCH_DEEP_STATUS.gaps, 'Checking gaps / limitations…');
+  assert.equal(formatDeepSearchStatus(2, 3), 'Searching (round 2 of up to 3)…');
+  assert.equal(answerHasDeepLimitations('Answer\n\n## Gaps and limitations\n\nNone.'), true);
+  assert.equal(answerHasDeepLimitations('No heading yet'), false);
+
+  const search = buildDeepStatusEvent({ phase: 'search', round: 2, maxRounds: 3 });
+  assert.equal(search.type, 'status');
+  assert.equal(search.phase, 'search');
+  assert.equal(search.message, 'Searching (round 2 of up to 3)…');
+  assert.equal(search.maxRounds, 3);
+  assert.equal(search.round, 2);
+  const gaps = buildDeepStatusEvent({ phase: 'gaps' });
+  assert.equal(gaps.message, 'Checking gaps / limitations…');
+  const skipped = buildDeepStatusEvent({ phase: 'synthesize', skippedSearch: true });
+  assert.equal(skipped.message, 'Drafting answer…');
+  assert.equal(skipped.skippedSearch, true);
+
+  let model = createDeepProgress();
+  assert.equal(model.outcome, 'running');
+  assert.equal(model.liveText, 'Planning…');
+  assert.equal(model.steps.find(step => step.state === 'active')?.id, 'plan');
+
+  const parsedSearch = readDeepStatusEvent(search);
+  assert.ok(parsedSearch);
+  model = applyDeepStatusEvent(model, parsedSearch);
+  assert.equal(model.liveText, 'Searching (round 2 of up to 3)…');
+  assert.equal(model.steps[0].state, 'done');
+  assert.equal(model.steps[1].state, 'active');
+
+  model = applyDeepStatusEvent(model, readDeepStatusEvent(buildDeepStatusEvent({
+    phase: 'read',
+    round: 2,
+    maxRounds: 3,
+    sourceCount: 4,
+  }))!);
+  assert.equal(model.steps.find(step => step.id === 'read')?.label, 'Reading sources…');
+  assert.equal(model.steps.find(step => step.id === 'read')?.detail, '4 sources');
+  assert.equal(model.steps.find(step => step.id === 'search')?.label, 'Searching (round 2 of up to 3)');
+
+  model = applyDeepStatusEvent(model, { phase: 'search', round: 3, maxRounds: 3 });
+  assert.equal(model.liveText, 'Searching (round 3 of up to 3)…');
+  assert.equal(model.steps.find(step => step.id === 'read')?.state, 'pending');
+
+  model = applyDeepStatusEvent(model, { phase: 'synthesize' });
+  assert.equal(model.steps.find(step => step.state === 'active')?.label, 'Drafting answer…');
+  model = applyDeepStatusEvent(model, { phase: 'gaps' });
+  assert.equal(model.liveText, 'Checking gaps / limitations…');
+  assert.equal(model.steps.filter(step => step.state === 'done').length, 4);
+  assert.equal(model.steps.find(step => step.state === 'active')?.id, 'gaps');
+
+  const finished = completeDeepProgress(model);
+  assert.equal(finished.outcome, 'complete');
+  assert.equal(finished.liveText, 'Research complete');
+  assert.equal(finished.steps.some(step => step.state === 'active'), false);
+
+  const stopped = failDeepProgress(model);
+  assert.equal(stopped.outcome, 'error');
+  assert.equal(stopped.liveText, 'Research stopped');
+  assert.equal(stopped.steps.some(step => step.state === 'active'), false);
+  assert.equal(stopped.steps.find(step => step.id === 'gaps')?.state, 'error');
+
+  const skippedRun = applyDeepStatusEvent(createDeepProgress(), {
+    phase: 'synthesize',
+    skippedSearch: true,
+  });
+  assert.equal(skippedRun.steps.find(step => step.id === 'search')?.detail, 'Not needed');
+  assert.equal(skippedRun.steps.find(step => step.id === 'read')?.detail, 'Not needed');
+  assert.equal(skippedRun.steps.find(step => step.state === 'active')?.id, 'draft');
+  assert.equal(readDeepStatusEvent({}), null);
+
+  const drafting = applyDeepStatusEvent(createDeepProgress(), { phase: 'synthesize' });
+  const noted = noteDeepLimitationsInProgress(drafting);
+  assert.equal(noted?.steps.find(step => step.state === 'active')?.id, 'gaps');
+  assert.equal(noteDeepLimitationsInProgress(noted), noted);
+  assert.equal(noteDeepLimitationsInProgress(null), null);
+});
+
+test('deep progress panel renders English steps and removes the spinner when stopped', () => {
+  const running = renderToStaticMarkup(createElement(AiResearchDeepProgress, { progress: createDeepProgress() }));
+  assert.match(running, /Planning…/);
+  assert.match(running, /Searching/);
+  assert.match(running, /Reading sources/);
+  assert.match(running, /Drafting answer/);
+  assert.match(running, /Checking gaps \/ limitations/);
+  assert.match(running, /aria-live="polite"/);
+  assert.match(running, /aria-label="Deep research progress"/);
+  assert.match(running, /data-testid="ai-research-deep-progress"/);
+  assert.match(running, /data-outcome="running"/);
+  assert.match(running, /ai-research-deep-step-spinner/);
+
+  const stopped = renderToStaticMarkup(createElement(AiResearchDeepProgress, {
+    progress: failDeepProgress(createDeepProgress()),
+  }));
+  assert.match(stopped, /Research stopped/);
+  assert.match(stopped, /data-outcome="error"/);
+  assert.doesNotMatch(stopped, /ai-research-deep-step-spinner/);
+
+  const finished = renderToStaticMarkup(createElement(AiResearchDeepProgress, {
+    progress: completeDeepProgress(applyDeepStatusEvent(createDeepProgress(), { phase: 'gaps' })),
+  }));
+  assert.match(finished, /data-outcome="complete"/);
+  assert.match(finished, /Research complete/);
+  assert.doesNotMatch(finished, /ai-research-deep-step-spinner/);
+  assert.doesNotMatch(finished, /animate-spin/);
+});
+
 test('deep route reuses the gather pipeline and the page exposes the mode toggle', () => {
   const route = read('src/app/api/ai-research/chat/route.ts');
   const page = read('src/app/dashboard/ai-research/page.tsx');
+  const progressUi = read('src/components/AiResearchDeepProgress.tsx');
   assert.match(route, /mode === 'deep'/);
   assert.match(route, /runDeepResearchGather/);
   assert.match(route, /gatherAiResearchContext/);
-  assert.match(route, /AI_RESEARCH_DEEP_STATUS/);
+  assert.match(route, /buildDeepStatusEvent/);
   assert.match(route, /ensureDeepLimitationsSection/);
   assert.match(route, /buildResearchSsePayload/);
-  assert.match(route, /type: 'status'/);
+  assert.match(route, /phase: 'plan'/);
+  assert.match(route, /phase: 'synthesize'/);
+  assert.match(route, /phase: 'gaps'/);
+  const deepBlock = route.slice(route.indexOf("if (mode === 'deep' && !compare)"), route.indexOf('const gatherTask'));
+  const fastBlock = route.slice(route.indexOf('const gatherTask'));
+  assert.match(deepBlock, /buildDeepStatusEvent/);
+  assert.doesNotMatch(fastBlock, /buildDeepStatusEvent/);
   assert.equal(AI_RESEARCH_DEEP_MAX_ROUNDS, 3);
   assert.equal(AI_RESEARCH_DEEP_TIME_BUDGET_MS, 40_000);
   assert.equal(AI_RESEARCH_DEEP_ROUND_TIMEOUT_MS, 12_000);
@@ -210,7 +342,22 @@ test('deep route reuses the gather pipeline and the page exposes the mode toggle
   assert.match(page, /AI_RESEARCH_MODE_STORAGE_KEY/);
   assert.match(page, /localStorage/);
   assert.match(page, /mode: sentMode/);
+  assert.match(page, /compareRequest \? 'fast' : researchMode/);
   assert.match(page, /d\.type === 'status'/);
-  assert.match(page, /AI_RESEARCH_DEEP_STATUS/);
+  assert.match(page, /applyDeepStatusEvent/);
+  assert.match(page, /failDeepProgress/);
+  assert.match(page, /answerHasDeepLimitations/);
+  assert.match(page, /noteDeepLimitationsInProgress/);
+  assert.match(page, /runMode !== 'deep'/);
+  assert.match(page, /data-testid="ai-research-transcript"/);
+  assert.match(page, /min-h-0 flex-1 overflow-x-hidden overflow-y-auto/);
+  assert.match(page, /AiResearchDeepProgress/);
   assert.match(page, /data-testid="ai-research-deep-badge"/);
+  assert.match(progressUi, /data-testid="ai-research-deep-progress"/);
+  assert.match(progressUi, /aria-live="polite"/);
+  assert.match(progressUi, /aria-label="Deep research progress"/);
+  assert.match(progressUi, /ai-research-deep-step-spinner/);
+  assert.match(progressUi, /progress\.outcome === 'running'/);
+  assert.match(progressUi, /data-testid="ai-research-deep-progress-error"/);
+  assert.match(progressUi, /DEEP_PROGRESS_STOPPED/);
 });

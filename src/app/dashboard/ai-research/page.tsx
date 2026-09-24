@@ -8,11 +8,20 @@ import { AiResearchCameraButton } from '@/components/AiResearchCameraButton';
 import { AiResearchVoiceButton } from '@/components/AiResearchVoiceButton';
 import { AiResearchWatchPanel } from '@/components/AiResearchWatchPanel';
 import { AiResearchFileChip, AiResearchMarkdown } from '@/components/AiResearchMarkdown';
+import { AiResearchDeepProgress } from '@/components/AiResearchDeepProgress';
 import { AiResearchSourcesPanel } from '@/components/AiResearchSourcesPanel';
 import {
-  AI_RESEARCH_DEEP_STATUS,
   AI_RESEARCH_MODE_STORAGE_KEY,
+  answerHasDeepLimitations,
 } from '@/lib/ai-research-deep';
+import {
+  applyDeepStatusEvent,
+  createDeepProgress,
+  failDeepProgress,
+  noteDeepLimitationsInProgress,
+  readDeepStatusEvent,
+  type DeepProgressModel,
+} from '@/lib/ai-research-deep-progress';
 import {
   AI_RESEARCH_ASSISTANT_NAME,
   AI_RESEARCH_ATTACHMENT_ONLY_PROMPT,
@@ -278,7 +287,7 @@ export default function AIResearchPage() {
     () => 'fast',
   );
   const [runMode, setRunMode] = useState<'fast' | 'deep'>('fast');
-  const [deepStatus, setDeepStatus] = useState('');
+  const [deepProgress, setDeepProgress] = useState<DeepProgressModel | null>(null);
   const [model, setModel] = useState('');
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [allowedModels, setAllowedModels] = useState<ModelOption[]>([]);
@@ -413,6 +422,7 @@ export default function AIResearchPage() {
         setResearchNotice(null);
         setUrlNotices([]);
         setPinnedSourceUrls([]);
+        setDeepProgress(null);
       })
       .catch(() => {
         if (!cancelled) setError('Failed to load conversation');
@@ -424,7 +434,7 @@ export default function AIResearchPage() {
     const transcript = transcriptRef.current;
     if (!transcript) return;
     transcript.scrollTo({ top: transcript.scrollHeight });
-  }, [messages, streaming, loading]);
+  }, [messages, streaming, loading, deepProgress?.liveText]);
 
   const clearPendingAttachments = () => {
     setPendingAttachments(prev => {
@@ -660,7 +670,7 @@ export default function AIResearchPage() {
     const sentMode = compareRequest ? 'fast' : researchMode;
     sourcesRef.current = [];
     setRunMode(sentMode);
-    setDeepStatus(sentMode === 'deep' ? AI_RESEARCH_DEEP_STATUS.plan : '');
+    setDeepProgress(sentMode === 'deep' ? createDeepProgress() : null);
     setStreaming('');
     setResearchSourceCount(null);
     setInspectorSources([]);
@@ -709,6 +719,10 @@ export default function AIResearchPage() {
             sources?: InspectorResearchSource[];
             failures?: Array<{ url?: string; error?: string }>;
             message?: string;
+            phase?: string;
+            round?: number;
+            maxRounds?: number;
+            skippedSearch?: boolean;
           };
           try { d = JSON.parse(t.slice(6)); } catch { continue; }
           if (d.type === 'start') {
@@ -748,13 +762,20 @@ export default function AIResearchPage() {
             } else if (sources.length > 0) {
               setSourcesPanelOpen(true);
             }
-          } else if (d.type === 'status') {
-            if (typeof d.message === 'string' && d.message.trim()) setDeepStatus(d.message);
-          } else if (d.type === 'token') { content += d.content || ''; setStreaming(content); }
+          } else if (d.type === 'status' && sentMode === 'deep') {
+            const status = readDeepStatusEvent(d);
+            if (status) setDeepProgress(prev => applyDeepStatusEvent(prev ?? createDeepProgress(), status));
+          } else if (d.type === 'token') {
+            content += d.content || '';
+            setStreaming(content);
+            if (sentMode === 'deep' && answerHasDeepLimitations(content)) {
+              setDeepProgress(noteDeepLimitationsInProgress);
+            }
+          }
           else if (d.type === 'done') {
             streamCompleted = true;
             setStreaming('');
-            setDeepStatus('');
+            setDeepProgress(null);
             setMessages(prev => [...prev, {
               role: 'assistant',
               content,
@@ -783,12 +804,13 @@ export default function AIResearchPage() {
           }]);
         }
         setStreaming('');
-        setDeepStatus('');
+        setDeepProgress(prev => (prev && prev.outcome === 'running' ? failDeepProgress(prev) : prev));
         setResearchNotice({ tone: 'warning', text: RESEARCH_DISCONNECT_BANNER });
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'An error occurred');
       setStreaming('');
+      setDeepProgress(prev => (prev && prev.outcome === 'running' ? failDeepProgress(prev) : prev));
     } finally {
       sendingRef.current = false;
       setLoading(false);
@@ -805,7 +827,7 @@ export default function AIResearchPage() {
     setPinnedSourceUrls([]);
     setResearchNotice(null);
     setUrlNotices([]);
-    setDeepStatus('');
+    setDeepProgress(null);
     setLinkDraft('');
     setLinkDraftOpen(false);
     setError('');
@@ -834,7 +856,7 @@ export default function AIResearchPage() {
     setPinnedSourceUrls([]);
     setResearchNotice(null);
     setUrlNotices([]);
-    setDeepStatus('');
+    setDeepProgress(null);
     setError('');
     setModel('');
   };
@@ -1330,7 +1352,7 @@ export default function AIResearchPage() {
                     ? 'bg-indigo-600/10 border-l-2 border-l-indigo-500'
                     : 'hover:bg-[var(--mos-hover)] border-l-2 border-l-transparent'
                 }`}
-                onClick={() => { setActiveConvoId(conv.id); if (window.innerWidth < 768) setSidebarOpen(false); }}
+                onClick={() => { setDeepProgress(null); setActiveConvoId(conv.id); if (window.innerWidth < 768) setSidebarOpen(false); }}
               >
                 <div className="flex items-start justify-between gap-1">
                   <div className="min-w-0 flex-1">
@@ -1512,8 +1534,13 @@ export default function AIResearchPage() {
                 </div>
               ))}
 
-              {/* Thinking / typing bubble before the first stream token */}
-              {loading && !streaming && (
+              {/* Deep progress stays in the transcript scroll region, before and during the answer. */}
+              {deepProgress && deepProgress.outcome !== 'complete' && (
+                <AiResearchDeepProgress progress={deepProgress} />
+              )}
+
+              {/* Fast / Compare: one lightweight status before the first token. Deep uses the step list above. */}
+              {loading && !streaming && runMode !== 'deep' && (
                 <div className="flex justify-start" role="status" aria-live="polite" aria-label={`${AI_RESEARCH_ASSISTANT_NAME} is researching`}>
                   <div className="flex gap-3 max-w-[85%] sm:max-w-[75%]">
                     <div className="w-7 h-7 rounded-full bg-emerald-600 flex items-center justify-center flex-shrink-0 mt-0.5">
@@ -1522,26 +1549,18 @@ export default function AIResearchPage() {
                     <div className="min-w-0">
                       <p className="text-[10px] font-semibold text-[var(--mos-text-muted)] mb-1 px-1 flex items-center gap-2">
                         {AI_RESEARCH_ASSISTANT_NAME}
-                        {runMode === 'deep' && (
-                          <span className="rounded-full bg-emerald-500/15 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-emerald-200">Deep</span>
-                        )}
                         <span className="text-[9px] font-medium text-emerald-300/80">
-                          {runMode === 'deep' && deepStatus
-                            ? deepStatus
-                            : groundingStatus === 'failed'
-                              ? 'Source search failed'
-                              : researchSourceCount
-                                ? `Researching ${researchSourceCount} sources`
-                                : 'Researching'}
+                          {groundingStatus === 'failed'
+                            ? 'Source search failed'
+                            : researchSourceCount
+                              ? `Researching ${researchSourceCount} sources`
+                              : 'Researching'}
                         </span>
                       </p>
                       <div
                         data-testid="ai-research-thinking"
                         className="px-4 py-3 bg-[var(--mos-raised)] border border-[var(--mos-border)] text-[var(--mos-text)] rounded-2xl rounded-tl-md"
                       >
-                        {runMode === 'deep' && (
-                          <p className="mb-2 text-[11px] text-[var(--mos-text-muted)]">{deepStatus || 'Writing the deep research answer…'}</p>
-                        )}
                         <span className="sr-only">Thinking</span>
                         <span className="ai-research-typing-dots" aria-hidden="true">
                           <span />
@@ -1566,7 +1585,7 @@ export default function AIResearchPage() {
                         {AI_RESEARCH_ASSISTANT_NAME}
                         {runMode === 'deep' && (
                           <span className="rounded-full bg-emerald-500/15 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-emerald-200">
-                            {deepStatus || 'Deep'}
+                            Deep
                           </span>
                         )}
                         <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
@@ -1591,7 +1610,7 @@ export default function AIResearchPage() {
                       : 'bg-amber-400/10 border-amber-400/20 text-amber-100'
                   }`}>
                     {researchNotice.text}
-                    <button onClick={() => setResearchNotice(null)} className="ml-2 underline hover:opacity-80">Close</button>
+                    <button onClick={() => { setResearchNotice(null); setDeepProgress(prev => (prev?.outcome === 'error' ? null : prev)); }} className="ml-2 underline hover:opacity-80">Close</button>
                   </div>
                 </div>
               )}
@@ -1612,7 +1631,7 @@ export default function AIResearchPage() {
                 <div className="flex justify-center">
                   <div className="bg-red-500/10 border border-red-400/20 text-red-300 text-sm px-4 py-2.5 rounded-xl text-center max-w-md">
                     {error}
-                    <button onClick={() => setError('')} className="ml-2 underline hover:text-red-200">Dismiss</button>
+                    <button onClick={() => { setError(''); setDeepProgress(prev => (prev?.outcome === 'error' ? null : prev)); }} className="ml-2 underline hover:text-red-200">Dismiss</button>
                   </div>
                 </div>
               )}
