@@ -17,8 +17,8 @@ import {
   AI_RESEARCH_DEEP_PLAN_MAX_TOKENS,
   AI_RESEARCH_DEEP_PLAN_PROMPT,
   AI_RESEARCH_DEEP_PLAN_TIMEOUT_MS,
-  AI_RESEARCH_DEEP_STATUS,
   AI_RESEARCH_DEEP_SYSTEM_ADDENDUM,
+  buildDeepStatusEvent,
   ensureDeepLimitationsSection,
   fallbackDeepResearchPlan,
   formatDeepResearchPlanNote,
@@ -387,7 +387,7 @@ export async function POST(request: NextRequest) {
         const urlOnly = isUrlOnlyQuery(query);
 
         if (mode === 'deep' && !compare) {
-          emit({ type: 'status', phase: 'plan', message: AI_RESEARCH_DEEP_STATUS.plan });
+          emit(buildDeepStatusEvent({ phase: 'plan' }));
           const skipped = urlOnly ? 'url-only' : !shouldResearchQuery(query) ? 'not-needed' : null;
           let plan = fallbackDeepResearchPlan(query);
           let planUsage: GatewayTokenUsage | null = null;
@@ -420,13 +420,14 @@ export async function POST(request: NextRequest) {
               plan,
               gather: (searchQuery, timeoutMs) => gatherAiResearchContext(searchQuery, { timeoutMs }),
               onProgress: event => {
-                emit({
-                  type: 'status',
+                emit(buildDeepStatusEvent({
                   phase: event.phase,
                   message: event.message,
                   round: event.round,
+                  maxRounds: event.maxRounds,
+                  sourceCount: event.sourceCount,
                   query: event.query,
-                });
+                }));
                 if (event.phase === 'read' && event.research) {
                   const progressEvent = buildResearchSsePayload({
                     query,
@@ -474,7 +475,10 @@ export async function POST(request: NextRequest) {
             ? applyPinnedResearchSources(gatherResult.research, pinnedSourceUrls)
             : gatherResult.research;
           const modelResearch = mergeContextUrlSources(pinnedResearch, urlContext.sources, query);
-          emit({ type: 'status', phase: 'synthesize', message: AI_RESEARCH_DEEP_STATUS.synthesize });
+          emit(buildDeepStatusEvent({
+            phase: 'synthesize',
+            skippedSearch: Boolean(skipped),
+          }));
 
           const apiMessages = buildAiResearchChatMessages({
             systemPrompt: [
@@ -499,6 +503,7 @@ export async function POST(request: NextRequest) {
             return;
           }
 
+          emit(buildDeepStatusEvent({ phase: 'gaps' }));
           let fullContent = streamed.content;
           const withLimits = ensureDeepLimitationsSection(fullContent, {
             roundsRun: gatherResult.roundsRun,
