@@ -64,8 +64,13 @@ export async function POST(request: NextRequest) {
   const stream = new ReadableStream({
     async start(controller) {
       try {
-        controller.enqueue(encoder.encode(sseEvent({ step: 'sources', progress: 10, message: 'Researching same-day publisher feeds and validating optional references…' })));
-        const automatedSources = (await researchArticleMarketNews(input.keyword, input.researchDate)).slice(0, Math.max(1, 5 - input.sources.length));
+        controller.enqueue(encoder.encode(sseEvent({ step: 'sources', progress: 10, message: 'Searching publisher feeds and the open web for sources...' })));
+        const automatedSources = (await researchArticleMarketNews(input.keyword, input.researchDate, {
+          angle: input.angle,
+          onProgress: (message) => {
+            controller.enqueue(encoder.encode(sseEvent({ step: 'sources', progress: 18, message })));
+          },
+        })).slice(0, Math.max(1, 5 - input.sources.length));
         const researchedInput = { ...input, sources: [...automatedSources, ...input.sources] };
         const effectiveInput = {
           ...researchedInput,
