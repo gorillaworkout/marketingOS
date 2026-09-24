@@ -223,6 +223,7 @@ test('researchEventPricing cites a page price and a Jina fallback without callin
   });
   assert.ok(calls.some((url) => url.startsWith('https://r.jina.ai/https://ancol.example/sewa')));
   assert.equal(calls.some((url) => url.includes('127.0.0.1')), false);
+  assert.equal(calls.filter((url) => url.includes('google.serper.dev/search')).length, 4);
   const venueHit = research.hits.find((hit) => hit.url === 'https://ancol.example/sewa' && hit.amounts.includes(40_000_000));
   assert.ok(venueHit);
   assert.equal(venueHit?.category, 'venue');

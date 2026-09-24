@@ -1,7 +1,13 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import Link from 'next/link';
+import { useCallback, useEffect, useState } from 'react';
 import { buildEventPlanDownload, eventPlanDownloadFilename } from '@/lib/event-plan-download';
+import {
+  EVENT_PLAN_HISTORY_TYPE,
+  restoreEventPlan,
+  type EventPlanHistoryTask,
+} from '@/lib/event-plan-history';
 import { NO_PUBLIC_PRICE_NOTE } from '@/lib/event-plan-pricing';
 import type { EventPlanResearch } from '@/lib/event-plan-research';
 import { Button, DataTableFrame, FormField, Panel, PageHeader, PageStack, SectionHeader, StatusBadge, TextArea, TextInput, Toolbar } from '@/components/ui/dashboard';
@@ -28,6 +34,15 @@ type GenerationEvent = {
   result?: { success?: boolean; options?: EventPlanOption[]; usage?: { plan?: unknown } };
 };
 type TokenUsage = { inputTokens?: number; outputTokens?: number; model?: string };
+type ProgressState = { message: string; progress?: number; step?: string };
+
+const EVENT_PLAN_LIVE_STEPS = ['Searching', 'Reading', 'Drafting'] as const;
+
+function liveStepIndex(step?: string) {
+  if (step === 'reading') return 1;
+  if (step === 'draft' || step === 'done') return 2;
+  return 0;
+}
 
 export function formatIDR(value: number | string) {
   const amount = typeof value === 'number' ? value : Number(String(value).replace(/\D/g, ''));
@@ -42,7 +57,7 @@ function formatBudgetAmount(value: number | null | undefined) {
 function formatTargetDate(value: string) {
   if (!value) return '';
   const date = new Date(`${value}T00:00:00`);
-  return Number.isNaN(date.getTime()) ? value : new Intl.DateTimeFormat('id-ID', { dateStyle: 'long' }).format(date);
+  return Number.isNaN(date.getTime()) ? value : new Intl.DateTimeFormat('en-GB', { dateStyle: 'long' }).format(date);
 }
 
 function asRupiah(value: unknown): number | null {
@@ -95,9 +110,23 @@ export default function EventPlanPage() {
   const [loading, setLoading] = useState(false);
   const [options, setOptions] = useState<EventPlanOption[]>([]);
   const [selectedOption, setSelectedOption] = useState(0);
-  const [progress, setProgress] = useState<{ message: string; progress?: number } | null>(null);
+  const [progress, setProgress] = useState<ProgressState | null>(null);
   const [error, setError] = useState('');
   const [tokenUsage, setTokenUsage] = useState<TokenUsage | null>(null);
+  const [recent, setRecent] = useState<EventPlanHistoryTask[]>([]);
+  const [recentError, setRecentError] = useState('');
+
+  const fetchRecent = useCallback(async () => {
+    try {
+      const response = await fetch(`/api/dashboard/history?type=${EVENT_PLAN_HISTORY_TYPE}`);
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || `History request failed (${response.status}).`);
+      setRecent(Array.isArray(data.tasks) ? data.tasks.slice(0, 10) : []);
+      setRecentError('');
+    } catch (cause) {
+      setRecentError(cause instanceof Error ? cause.message : 'Could not load recent event plans.');
+    }
+  }, []);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -107,6 +136,30 @@ export default function EventPlanPage() {
     if (template) setTheme(template);
   }, []);
 
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- standard data-fetch-on-mount pattern used across dashboard pages
+    void fetchRecent();
+  }, [fetchRecent]);
+
+  const restoreHistory = (task: EventPlanHistoryTask) => {
+    try {
+      const restored = restoreEventPlan(task);
+      setEventName(restored.eventName);
+      setTheme(restored.theme);
+      setLocation(restored.location);
+      setBudget(restored.budget);
+      setTargetDate(restored.targetDate);
+      setResearchLinks(restored.researchLinks);
+      setOptions(restored.options as EventPlanOption[]);
+      setSelectedOption(0);
+      setTokenUsage(restored.model ? { model: restored.model } : null);
+      setError('');
+      setProgress(null);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Could not open the saved event plan.');
+    }
+  };
+
   const handleGenerate = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
@@ -114,7 +167,7 @@ export default function EventPlanPage() {
     setOptions([]);
     setSelectedOption(0);
     setTokenUsage(null);
-    setProgress({ message: 'Starting event plan generation…', progress: 0 });
+    setProgress({ message: 'Starting event plan generation…', progress: 0, step: 'research' });
     try {
       const res = await fetch('/api/event-plan/generate', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -134,7 +187,13 @@ export default function EventPlanPage() {
           if (!line.startsWith('data: ')) continue;
           try {
             const event = JSON.parse(line.slice('data: '.length)) as GenerationEvent;
-            if (event.message) setProgress({ message: event.message, progress: event.progress });
+            if (event.message || event.step) {
+              setProgress((current) => ({
+                message: event.message || current?.message || 'Working on the event plan…',
+                progress: event.progress ?? current?.progress,
+                step: event.step || current?.step,
+              }));
+            }
             if (event.step === 'error') setError(event.message || 'Generation failed');
             if (event.step === 'done') {
               if (!event.result?.success) setError(event.message || 'Generation failed');
@@ -144,6 +203,7 @@ export default function EventPlanPage() {
                 setSelectedOption(0);
                 const usage = event.result.usage?.plan;
                 setTokenUsage(usage && typeof usage === 'object' ? usage as TokenUsage : null);
+                void fetchRecent();
               }
             }
           } catch {
@@ -184,7 +244,7 @@ export default function EventPlanPage() {
 
   return (
     <PageStack className="max-w-5xl">
-      <PageHeader eyebrow="Create / Events" title="Event plan" description="Research, proposal, and budgeting in one workflow with a clear source check." />
+      <PageHeader eyebrow="Create / Events" title="Event plan" description="Research, proposal, and budgeting in one workflow with a clear source check." actions={<Link href={`/dashboard/history?type=${EVENT_PLAN_HISTORY_TYPE}`} className="inline-flex h-9 items-center rounded-[var(--mos-radius-control)] border border-[var(--mos-border)] bg-[var(--mos-raised)] px-3.5 text-sm font-medium text-[var(--mos-text-secondary)] hover:border-[var(--mos-border-strong)]">Open history</Link>} />
       <InlineModelSelector feature="event-plan" />
 
       <Panel>
@@ -202,7 +262,7 @@ export default function EventPlanPage() {
       </form>
       </Panel>
 
-      {loading && progress && <div role="status"><Toolbar><span className="text-sm text-[var(--mos-text-secondary)]">{progress.message}</span>{progress.progress !== undefined && <StatusBadge tone="info" dot>{progress.progress}%</StatusBadge>}</Toolbar></div>}
+      {loading && progress && <div role="status" aria-live="polite"><Toolbar><span className="text-sm text-[var(--mos-text-secondary)]">{progress.message}</span>{progress.progress !== undefined && <StatusBadge tone="info" dot>{progress.progress}%</StatusBadge>}</Toolbar><ol className="mt-3 flex flex-wrap gap-2" aria-label="Event plan progress">{EVENT_PLAN_LIVE_STEPS.map((label, index) => { const active = liveStepIndex(progress.step) === index; const complete = liveStepIndex(progress.step) > index; return <li key={label}><StatusBadge tone={active ? 'info' : complete ? 'success' : 'neutral'} dot={active}>{label}</StatusBadge></li>; })}</ol></div>}
       {error && <div className="bg-red-500/10 border border-red-500/20 text-red-400 px-4 py-3 rounded-lg" role="alert">{error}</div>}
 
       {options.length > 0 && result && (
@@ -223,6 +283,14 @@ export default function EventPlanPage() {
           <Toolbar><div className="flex flex-wrap gap-2"><Button variant="primary" onClick={() => handleDownload('doc')}>Download event plan (.doc)</Button><Button onClick={() => handleDownload('json')}>Download JSON</Button></div>{tokenUsage && <div className="text-right"><p className="text-xs font-medium text-[var(--mos-text-secondary)]">{(tokenUsage.inputTokens || 0) + (tokenUsage.outputTokens || 0)} tokens</p>{tokenUsage.model && <p className="text-[11px] text-[var(--mos-text-faint)]">{tokenUsage.model}</p>}</div>}</Toolbar>
         </div>
       )}
+
+      <Panel padding="none">
+        <div className="flex items-center justify-between border-b border-[var(--mos-border-subtle)] px-5 py-4">
+          <SectionHeader title="Recent Generated" description="Open a saved event plan without generating again." />
+          <Link href={`/dashboard/history?type=${EVENT_PLAN_HISTORY_TYPE}`} className="text-sm text-[var(--mos-accent-soft)] hover:underline">View all history</Link>
+        </div>
+        {recentError ? <p className="p-5 text-sm text-red-300">{recentError}</p> : recent.length === 0 ? <p className="p-5 text-sm text-[var(--mos-text-muted)]">No saved event plans yet.</p> : <div className="divide-y divide-[var(--mos-border-subtle)]">{recent.map(task => <button type="button" key={task.id} onClick={() => restoreHistory(task)} className="flex w-full items-center justify-between gap-4 px-5 py-4 text-left hover:bg-[var(--mos-raised)]"><span className="min-w-0"><span className="block truncate text-sm font-medium text-white">{task.title}</span><span className="block text-xs text-[var(--mos-text-faint)]">{new Date(task.created_at).toLocaleString()}</span></span><span className="text-xs text-[var(--mos-accent-soft)]">Open</span></button>)}</div>}
+      </Panel>
     </PageStack>
   );
 }
