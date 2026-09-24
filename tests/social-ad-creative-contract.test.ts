@@ -36,7 +36,7 @@ test('image-prompt system encodes Dupoin Brand Guidelines 2026 locks', () => {
     assert.match(prompt, /[Ss]ubheadline/i);
     assert.match(prompt, /CTA/);
     // The model must RESERVE the header and footer bands. The official
-    // Instagram chrome is composited from public/brand/dupoin-ig-chrome.png.
+    // plates are public/brand/dupoin-social-header.png and dupoin-social-footer.png.
     assert.match(prompt, /pita atas/i);
     assert.match(prompt, /pita bawah/i);
     assert.match(prompt, /Jangan gambar logo|Jangan menggambar logo/i);

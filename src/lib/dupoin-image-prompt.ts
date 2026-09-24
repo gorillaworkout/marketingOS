@@ -16,7 +16,8 @@ export const DUPOIN_BLUE_RGB = '46,181,196';
  *
  * The model must NOT draw the Dupoin wordmark, the CNN 2025 badge, or the
  * regulatory footer. Those pixels are composited from
- * public/brand/dupoin-ig-chrome.png by src/lib/dupoin-ig-chrome.ts.
+ * public/brand/dupoin-social-header.png and dupoin-social-footer.png
+ * by src/lib/dupoin-ig-chrome.ts. Black on those plates is transparent.
  * Text-to-image invents logotypes and legal lines; the prompt only reserves
  * the top and bottom bands and describes the middle scene.
  */

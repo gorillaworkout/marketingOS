@@ -7,9 +7,9 @@ import sharp from 'sharp';
  *
  * Extracted from the brand CDN (static.dupoin.co.id/std/logo/brand-dark.svg)
  * and cropped to the wordmark alone. Social Post creatives do not use this
- * stamp — they composite the full Instagram chrome (wordmark + CNN badge +
- * regulatory footer) from public/brand/dupoin-ig-chrome.png. This wordmark
- * remains for non-social image types so they are not left unbranded.
+ * stamp — they composite Bayu's header and footer plates
+ * (public/brand/dupoin-social-header.png and dupoin-social-footer.png).
+ * This wordmark remains for non-social image types so they are not left unbranded.
  *
  * Every opaque pixel is Dupoin Blue #2EB5C4; the background is transparent.
  */
