@@ -233,13 +233,17 @@ export default function VideoScriptPage() {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const template = params.get('template');
+    // URL and same-tab handoff are external inputs read once on mount. Prefill only. Do not call handleGeneratePreview.
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- URL is an external input read once on mount
     if (template) setEvent(template);
     if (params.get(AI_RESEARCH_HANDOFF_QUERY) !== AI_RESEARCH_HANDOFF_VALUE) return;
     const handoff = readAiResearchHandoff('video-script');
     if (!handoff?.brief) return;
-    // Prefill only. Do not call handleGeneratePreview.
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- read a same-tab handoff once on mount
     setEvent(handoff.brief);
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- read a same-tab handoff once on mount
     if (handoff.references) setReferences(handoff.references);
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- read a same-tab handoff once on mount
     setResearchHandoff(true);
   }, []);
 
@@ -763,7 +767,7 @@ export default function VideoScriptPage() {
           {/* Streaming Progress Indicator */}
           {progress && loading && (
             <Panel className="space-y-4">
-              <SectionHeader title={step === 'full' ? 'Generating full script' : 'Generating preview options'} description={progress.message} action={<StatusBadge tone="info" dot>{progress.progress}%</StatusBadge>} />
+              <SectionHeader title={STEP_LABELS[progress.step] || (step === 'full' ? 'Generating full script' : 'Generating preview options')} description={progress.message} action={<StatusBadge tone="info" dot>{progress.progress}%</StatusBadge>} />
 
               <div className="relative h-3 bg-[var(--mos-raised)] rounded-full overflow-hidden">
                 <div
