@@ -2,12 +2,36 @@ import { COMPETITOR_BROKERS, jakartaDate } from './article-market-news';
 
 export type MarketProductCategory = 'Forex' | 'Commodity' | 'US Indices' | 'US Stocks';
 
+/** Fixed product groups plus an open-web theme/sector hit that is not one ticker. */
+export type MarketBriefCategory = MarketProductCategory | 'Theme';
+
+export type MarketResearchEvidenceLevel = 'publisher-metadata' | 'search-snippet' | 'full-text';
+
+export function formatMarketResearchEvidenceLevel(level: MarketResearchEvidenceLevel | undefined): string {
+  if (level === 'full-text') return 'Full text read';
+  if (level === 'search-snippet') return 'Search snippet';
+  return 'Publisher metadata';
+}
+
+export function marketResearchEvidenceNotice(level: MarketResearchEvidenceLevel | undefined): string {
+  if (level === 'full-text') return 'Full page text was read. Review the source before external use.';
+  if (level === 'search-snippet') return 'Open-web snippet only. The full page was not read. Review the source before external use.';
+  return 'Publisher metadata — manual full-article review required.';
+}
+
+/** Pause for a human shortlist only when there is a real choice to make. */
+export function marketResearchNeedsShortlist(candidateCount: number): boolean {
+  return candidateCount > 1;
+}
+
 /** Maximum high-impact articles per report. Raised from 5 so the team has more to pick from. */
 export const MARKET_RESEARCH_MAX_ITEMS = 10;
 
 export interface MarketResearchInput {
   brief: string;
   researchDate: string;
+  gatherToken?: string;
+  candidateIds?: string[];
 }
 
 export interface MarketNewsCandidate {
@@ -17,18 +41,21 @@ export interface MarketNewsCandidate {
   url: string;
   publishedAt: string;
   updatedAt: string | null;
-  categories: MarketProductCategory[];
+  categories: MarketBriefCategory[];
   symbols: string[];
   origin: 'indonesia' | 'international';
   importanceCategory: string;
   evidence: string;
-  evidenceLevel: 'publisher-metadata';
+  evidenceLevel: MarketResearchEvidenceLevel;
+  /** False when the clock on publishedAt was not stated by the source. */
+  publicationTimeKnown?: boolean;
+  gatheredVia?: 'publisher-feed' | 'open-web';
 }
 
 export interface MarketResearchSelectionItem {
   candidateId: string;
   eventKey: string;
-  productCategory: MarketProductCategory;
+  productCategory: MarketBriefCategory;
   symbol: string;
   mainEvent: string;
   latestFactualDevelopment: string;
@@ -43,7 +70,7 @@ export interface MarketResearchItem {
   publicationDate: string;
   publicationTime: string;
   latestUpdateTime: string | null;
-  productCategory: MarketProductCategory;
+  productCategory: MarketBriefCategory;
   symbol: string;
   importanceCategory: string;
   origin: 'indonesia' | 'international';
@@ -51,7 +78,7 @@ export interface MarketResearchItem {
   latestFactualDevelopment: string;
   marketRelevance: string;
   articleUrl: string;
-  evidenceLevel: 'publisher-metadata';
+  evidenceLevel: MarketResearchEvidenceLevel;
 }
 
 export interface MarketResearchReport {
@@ -72,7 +99,21 @@ export function normalizeMarketResearchInput(value: unknown, today = jakartaDate
   const researchDate = typeof raw.researchDate === 'string' ? raw.researchDate.trim() : '';
   if (!/^\d{4}-\d{2}-\d{2}$/.test(researchDate)) throw new Error('Research date must use YYYY-MM-DD.');
   if (researchDate !== today) throw new Error('Research date must be today in WIB.');
-  return { brief, researchDate };
+  const gatherToken = typeof raw.gatherToken === 'string' ? raw.gatherToken.trim() : '';
+  if (!gatherToken) return { brief, researchDate };
+  if (gatherToken.length > 1_500_000) throw new Error('Shortlist token is too large.');
+  if (!Array.isArray(raw.candidateIds) || raw.candidateIds.length === 0) throw new Error('Select at least one candidate.');
+  if (raw.candidateIds.length > 40) throw new Error('Select at most 40 candidates.');
+  const candidateIds: string[] = [];
+  const seen = new Set<string>();
+  for (const id of raw.candidateIds) {
+    if (typeof id !== 'string' || !/^[a-f0-9]{16}$/.test(id)) throw new Error('Candidate id is invalid.');
+    if (seen.has(id)) continue;
+    seen.add(id);
+    candidateIds.push(id);
+  }
+  if (candidateIds.length === 0) throw new Error('Select at least one candidate.');
+  return { brief, researchDate, gatherToken, candidateIds };
 }
 
 function normalize(value: string): string {
@@ -177,13 +218,18 @@ function stampTime(value: string | null): string {
 }
 
 /**
- * Evidence is the RSS headline + summary only, so a WIB publication day is often
- * absent from that string. Day/month/clock tokens from the title or timestamps
- * count only when the narrative uses them as a date or time. Bare rates, prices,
- * and lot sizes stay unsupported.
+ * Day/month/clock tokens count only when the narrative uses them as a date or time
+ * and the candidate packet actually states them. A placeholder clock (publication
+ * time not stated) is not evidence. Bare rates, prices, and lot sizes stay unsupported.
  */
 function isPublisherCalendarFact(number: string, narrative: string, candidate: MarketNewsCandidate): boolean {
-  const packet = [candidate.evidence, candidate.title, stampDate(candidate.publishedAt), stampDate(candidate.updatedAt)].join('\n');
+  const trustTimestamps = candidate.publicationTimeKnown !== false;
+  const packet = [
+    candidate.evidence,
+    candidate.title,
+    trustTimestamps ? stampDate(candidate.publishedAt) : '',
+    trustTimestamps ? stampDate(candidate.updatedAt) : '',
+  ].join('\n');
   const days = new Set<number>();
   const months = new Set<number>();
   for (const part of calendarTokens(packet)) {
@@ -198,7 +244,9 @@ function isPublisherCalendarFact(number: string, narrative: string, candidate: M
       if (part.role === 'month' && months.has(value)) return true;
     }
   }
-  const clocks = new Set([stampTime(candidate.publishedAt), stampTime(candidate.updatedAt)].filter(Boolean));
+  const clocks = new Set(
+    trustTimestamps ? [stampTime(candidate.publishedAt), stampTime(candidate.updatedAt)].filter(Boolean) : [],
+  );
   return clockTokens(narrative).some(mention => clocks.has(mention.normalized) && mention.tokens.includes(number));
 }
 
@@ -261,8 +309,9 @@ export function validateAndHydrateMarketResearchSelection(value: unknown, candid
     if (!candidate) throw new Error(`Selection ${index + 1} references an unknown candidate.`);
     if (seen.has(candidateId)) throw new Error('Selected candidate IDs must be unique.');
     seen.add(candidateId);
-    const productCategory = raw.productCategory as MarketProductCategory;
-    if (!candidate.categories.includes(productCategory)) throw new Error(`Selection ${index + 1} has an unsupported product category.`);
+    const productCategory = raw.productCategory as MarketBriefCategory;
+    const allowedCategories = new Set<MarketBriefCategory>(['Forex', 'Commodity', 'US Indices', 'US Stocks', 'Theme']);
+    if (!allowedCategories.has(productCategory) || !candidate.categories.includes(productCategory)) throw new Error(`Selection ${index + 1} has an unsupported product category.`);
     const symbol = typeof raw.symbol === 'string' ? raw.symbol.trim() : '';
     if (!candidate.symbols.includes(symbol)) throw new Error(`Selection ${index + 1} has a symbol that its article does not cover.`);
     // One symbol per report: two articles may not both speak for e.g. XAUUSD.
@@ -289,7 +338,7 @@ export function validateAndHydrateMarketResearchSelection(value: unknown, candid
       articleTitle: candidate.title,
       newsSource: candidate.outlet,
       publicationDate: candidate.publishedAt.slice(0, 10),
-      publicationTime: candidate.publishedAt.slice(11, 16),
+      publicationTime: candidate.publicationTimeKnown === false ? '' : candidate.publishedAt.slice(11, 16),
       latestUpdateTime: candidate.updatedAt?.slice(11, 16) || null,
       productCategory,
       symbol,
@@ -316,11 +365,12 @@ COVERAGE RULES:
 - Prefer spreading selections across Forex majors (AUD, CAD, CHF, EUR, GBP, JPY, NZD, USD, IDR), Commodity (XAUUSD, WTI), US Indices (DJIA, SPX, NDX), and US Stocks.
 - At most one Indonesian-media article may be selected; prefer international publishers for the rest.
 - Retail gold shop pricing is never a market event.
+- Theme candidates use productCategory Theme and the exact symbol listed for that candidate. Do not replace a Theme symbol with a ticker that is not in eligibleSymbols.
 
-You may select only exact candidateId values supplied in CANDIDATES. Never invent or alter titles, sources, publication/update times, URLs, numbers, quotes, or events. For every selection, provide an eventKey in canonical lowercase English form "subject-confirmed_action-object". Semantically identical events MUST use the exact same eventKey even when publishers use synonyms. Main event, latest factual development, and market relevance must be concise Bahasa Indonesia paraphrases. Do not invent prices, percentages, basis points, lot sizes, counts, or any other numeric fact. Reuse a number only when it appears in that candidate's evidence or title, or when it is that candidate's publication/update calendar date or clock time (publishedAtWIB / updatedAtWIB) written as a date or time. Do not mention competitor brokers. Do not claim that publisher metadata means the complete article was independently verified.
+You may select only exact candidateId values supplied in CANDIDATES. Never invent or alter titles, sources, publication/update times, URLs, numbers, quotes, or events. For every selection, provide an eventKey in canonical lowercase English form "subject-confirmed_action-object". Semantically identical events MUST use the exact same eventKey even when publishers use synonyms. Main event, latest factual development, and market relevance must be concise Bahasa Indonesia paraphrases. Do not invent prices, percentages, basis points, lot sizes, counts, or any other numeric fact. Reuse a number only when it appears in that candidate's evidence or title, or when it is that candidate's publication/update calendar date or clock time (publishedAtWIB / updatedAtWIB) written as a date or time. When publicationTimeKnown is false, do not cite a clock time. Evidence may be publisher metadata, an open-web snippet, or full page text. Do not mention competitor brokers. Do not claim that publisher metadata means the complete article was independently verified.
 
 Return ONLY valid JSON:
-{"items":[{"candidateId":"exact ID","eventKey":"subject-confirmed_action-object","productCategory":"Forex|Commodity|US Indices|US Stocks","symbol":"exact symbol from that candidate","mainEvent":"...","latestFactualDevelopment":"...","marketRelevance":"..."}]}`;
+{"items":[{"candidateId":"exact ID","eventKey":"subject-confirmed_action-object","productCategory":"Forex|Commodity|US Indices|US Stocks|Theme","symbol":"exact symbol from that candidate","mainEvent":"...","latestFactualDevelopment":"...","marketRelevance":"..."}]}`;
   const safeCandidates = candidates.map(candidate => ({
     candidateId: candidate.id,
     title: candidate.title,
@@ -331,8 +381,10 @@ Return ONLY valid JSON:
     eligibleSymbols: candidate.symbols,
     importanceCategory: candidate.importanceCategory,
     mediaOrigin: candidate.origin,
+    evidenceLevel: candidate.evidenceLevel,
+    publicationTimeKnown: candidate.publicationTimeKnown !== false,
     evidence: candidate.evidence,
   }));
-  const userPrompt = `<USER_DATA>\nRESEARCH DATE WIB: ${input.researchDate}\nBRIEF: ${input.brief}\nPRODUCT GROUPS SEARCHED SEPARATELY: Forex, Commodity, US Indices, US Stocks\nCANDIDATES:\n${JSON.stringify(safeCandidates)}\n</USER_DATA>\nSelect the strongest current factual developments under the strict contract, one symbol each, no symbol repeated.`;
+  const userPrompt = `<USER_DATA>\nRESEARCH DATE WIB: ${input.researchDate}\nBRIEF: ${input.brief}\nPRODUCT GROUPS SEARCHED SEPARATELY: Forex, Commodity, US Indices, US Stocks\nOPEN WEB: theme and sector pages for this brief may use productCategory Theme when they are not a single ticker.\nCANDIDATES:\n${JSON.stringify(safeCandidates)}\n</USER_DATA>\nSelect the strongest current factual developments under the strict contract, one symbol each, no symbol repeated.`;
   return { systemPrompt, userPrompt };
 }

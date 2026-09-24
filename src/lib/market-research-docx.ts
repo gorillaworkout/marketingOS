@@ -1,5 +1,5 @@
 import { Document, ExternalHyperlink, HeadingLevel, Packer, Paragraph, TextRun } from 'docx';
-import type { MarketResearchItem } from './market-research';
+import { marketResearchEvidenceNotice, type MarketResearchItem } from './market-research';
 
 function labelValue(label: string, value: string): Paragraph {
   return new Paragraph({
@@ -13,7 +13,7 @@ export async function buildMarketResearchDocxBlob(brief: string, researchDate: s
     new Paragraph({ text: 'Latest Market News Research & Selection', heading: HeadingLevel.TITLE }),
     labelValue('Research Date (WIB)', researchDate),
     labelValue('Brief', brief),
-    new Paragraph({ text: 'Verification notice: publisher RSS metadata is used for AI-assisted selection. Open every source link and review the complete article before external use.', spacing: { after: 240 } }),
+    new Paragraph({ text: 'Verification notice: selection may use publisher metadata, an open-web snippet, or retrieved page text. Open every source link and review the complete article before external use.', spacing: { after: 240 } }),
   ];
   items.forEach((item, index) => {
     children.push(
@@ -30,7 +30,7 @@ export async function buildMarketResearchDocxBlob(brief: string, researchDate: s
         children: [new TextRun({ text: 'Article URL: ', bold: true }), new ExternalHyperlink({ children: [new TextRun({ text: item.articleUrl, style: 'Hyperlink' })], link: item.articleUrl })],
         spacing: { after: 120 },
       }),
-      labelValue('Evidence Level', 'Publisher metadata — manual full-article review required'),
+      labelValue('Evidence Level', marketResearchEvidenceNotice(item.evidenceLevel)),
     );
   });
   const document = new Document({

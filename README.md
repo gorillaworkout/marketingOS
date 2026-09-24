@@ -63,14 +63,19 @@ Open http://localhost:3000
 # OpenRouter API (text + image generation)
 OPENROUTER_API_KEY=sk-or-...
 
-# JWT Secret untuk auth
+# JWT Secret untuk auth. Market Research also uses it to sign the candidate shortlist.
 JWT_SECRET=your-secret-key
+
+# Open-web gather for AI Research, Social Post, Event Plan, Article Market News, Video Script, and Market Research.
+SERPER_API_KEY=
 
 # Optional: Embedding model
 EMBEDDING_MODEL=text-embedding-3-small
 ```
 
 **Codex CLI** di-authenticate via `~/.codex/config.toml` dan `~/.codex/auth.json` (OAuth ChatGPT Plus). Tidak perlu env var.
+
+Market Research gathers with the category RSS feeds plus Serper, then reads pages directly and falls back to Jina Reader (`https://r.jina.ai/`, no extra key). Live check when `SERPER_API_KEY` is set: brief a theme such as semiconductor export controls, confirm the English search/read progress, deselect a candidate on the shortlist, then continue. Unsourced figures still fail the evidence repair loop. History restore and DOCX stay available after the review checkbox. There is no `.env` in the agent VM, so that live call is an operator check.
 
 ## Project Structure
 

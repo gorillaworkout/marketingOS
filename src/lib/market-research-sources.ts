@@ -225,6 +225,14 @@ export function isHighImportanceHeadline(title: string, description = ''): boole
   return importanceCategoryOf(title, description) !== null;
 }
 
+export function isSpeculativeMarketHeadline(title: string): boolean {
+  return isSpeculativeHeadline(title);
+}
+
+export function isRetailGoldHeadline(title: string): boolean {
+  return containsAnyMarker(title, RETAIL_GOLD_MARKERS);
+}
+
 /** At most ONE Indonesian-origin article may reach the selection pool. */
 export function limitIndonesianOrigin<T extends { origin: MarketResearchOrigin }>(rows: T[]): T[] {
   let indonesian = 0;

@@ -346,7 +346,13 @@ test('Market Research is admin-only, gateway-routed, persisted, downloadable, an
   assert.match(route, /requireFeature\(request, 'market-research'\)/);
   assert.match(route, /getUserPreferredModel\(auth\.id, 'market-research'\)/);
   assert.doesNotMatch(route, /codexTextOnly|getModelProvider|gpt-5\.6-sol/);
-  assert.match(route, /researchLatestMarketNews/);
+  assert.match(route, /gatherMarketResearch/);
+  assert.match(route, /marketResearchNeedsShortlist/);
+  assert.match(route, /Searching the open web for this brief/);
+  assert.match(route, /Reading source pages/);
+  assert.match(read('src/lib/market-research-web.ts'), /researchLatestMarketNews/);
+  assert.match(read('src/lib/market-research-web.ts'), /searchSerper/);
+  assert.match(read('src/lib/market-research-web.ts'), /jinaReaderUrl/);
   assert.match(route, /EmptyMarketResearchPoolError/);
   assert.match(route, /payload\.sourceStatus/);
   assert.match(page, /errorSourceStatus/);
