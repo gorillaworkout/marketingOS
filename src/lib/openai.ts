@@ -866,7 +866,7 @@ ${EVENT_PLAN_GROUNDED_BUDGET_RULES}
 
 Output practical, executable plans. Not marketing fluff.
 
-Output JSON: { "objective": "...", "concept": "...", "theme": "...", "venue": "...", "speakers": ["..."], "budget": { "currency": "IDR", "total": null, "items": [{ "category": "Venue", "estimatedCost": null, "suggestedVendor": "Hotel Indonesia Kempinski Jakarta", "venue": "Hotel Indonesia Kempinski Jakarta, Jakarta", "sourceUrl": null, "notes": "Belum ditemukan harga publik — minta quotation ke vendor. Venue/location: Hotel Indonesia Kempinski Jakarta, Jakarta. Cara minta quotation: hubungi tim sales atau events lewat situs resmi." }], "contingency": null }, "timeline": "..." }`,
+Output JSON: { "objective": "...", "concept": "...", "theme": "...", "venue": "...", "speakers": ["..."], "budget": { "currency": "IDR", "total": null, "items": [{ "category": "Venue", "estimatedCost": null, "suggestedVendor": "Hotel Indonesia Kempinski Jakarta", "venue": "Hotel Indonesia Kempinski Jakarta, Jakarta", "sourceUrl": null, "notes": "No public price found — request a quotation from the vendor. Venue/location: Hotel Indonesia Kempinski Jakarta, Jakarta. How to request a quotation: contact the sales or events team through the official site." }], "contingency": null }, "timeline": "..." }`,
 
     'image-prompt': IMAGE_PROMPT_SYSTEM,
   };

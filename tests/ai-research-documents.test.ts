@@ -107,7 +107,7 @@ test('classifies PDF, DOCX, and PPTX separately from images and spreadsheets', (
   assert.match(AI_RESEARCH_FILE_PICKER_ACCEPT, /application\/pdf/);
   assert.match(AI_RESEARCH_FILE_PICKER_ACCEPT, /\.docx/);
   assert.match(AI_RESEARCH_FILE_PICKER_ACCEPT, /\.pptx/);
-  assert.match(AI_RESEARCH_SYSTEM_PROMPT, /PDF, dokumen Word \(DOCX\), atau presentasi PowerPoint \(PPTX\)/);
+  assert.match(AI_RESEARCH_SYSTEM_PROMPT, /PDF, Word document \(DOCX\), or PowerPoint presentation \(PPTX\)/);
 });
 
 test('extracts PDF, DOCX, and PPTX text into the research prompt', async () => {
@@ -252,9 +252,9 @@ test('AI Research composer accepts documents from the picker, drop zone, and pas
   assert.match(page, /onDrop=\{handleAttachmentDrop\}/);
   assert.match(page, /onPaste=\{handleComposerPaste\}/);
   assert.match(page, /addAttachments\(files\)/);
-  assert.match(page, /Gambar, Excel, CSV, PDF, Word, atau PowerPoint/);
-  assert.match(page, /PDF, Word, atau PowerPoint\.\.\./);
-  assert.match(page, /PDF, Word, dan PowerPoint \(maks\. 4 per jenis\)/);
+  assert.match(page, /Images, Excel, CSV, PDF, Word, or PowerPoint/);
+  assert.match(page, /PDF, Word, or PowerPoint file\.\.\./);
+  assert.match(page, /PDF, Word, and PowerPoint \(max 4 of each\)/);
   assert.match(page, /AI_RESEARCH_MAX_DOCUMENTS/);
   assert.match(page, /AI_RESEARCH_MAX_DOCUMENT_BYTES/);
   assert.match(read('src/app/api/ai-research/chat/route.ts'), /await hydrateMessageFiles/);

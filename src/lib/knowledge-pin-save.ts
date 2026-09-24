@@ -70,16 +70,16 @@ export async function savePinnedResearchFact(
       projectId: body.projectId,
     });
   } catch (error) {
-    return { status: 400, body: { error: error instanceof Error ? error.message : 'Fakta tidak valid.' } };
+    return { status: 400, body: { error: error instanceof Error ? error.message : 'Fact is not valid.' } };
   }
 
   if (prepared.conversationId) {
     const conversation = await ownedConversation(userId, prepared.conversationId);
-    if (!conversation) return { status: 404, body: { error: 'Percakapan tidak ditemukan.' } };
+    if (!conversation) return { status: 404, body: { error: 'Conversation was not found.' } };
     if (conversation.project_id) prepared = { ...prepared, projectId: conversation.project_id };
   }
   if (prepared.projectId && !(await ownedProject(userId, prepared.projectId))) {
-    return { status: 404, body: { error: 'Proyek tidak ditemukan.' } };
+    return { status: 404, body: { error: 'Project was not found.' } };
   }
 
   let embedding: number[] = [];

@@ -64,7 +64,7 @@ test('example filler formats five ordered competitor structures and five unique 
   assert.deepEqual(input.sources, []);
 });
 
-test('generator shows the shared examples and Isi contoh fills both fields', () => {
+test('generator shows the shared examples and Fill example fills both fields', () => {
   assert.match(generator, /exampleCompetitorHeadings/);
   assert.match(generator, /examplePaaText/);
   assert.match(generator, /setKeyword\(ARTICLE_MARKET_NEWS_EXAMPLE_KEYWORD\)/);
@@ -73,9 +73,9 @@ test('generator shows the shared examples and Isi contoh fills both fields', () 
   assert.match(generator, /setPaaText\(examplePaaText\)/);
   assert.match(generator, /\{exampleCompetitorHeadings\}/);
   assert.match(generator, /\{examplePaaText\}/);
-  assert.match(generator, /Isi contoh/);
-  assert.match(generator, /Salin struktur/);
-  assert.match(generator, /Salin PAA/);
-  assert.match(generator, /5 struktur kompetitor/);
-  assert.match(generator, /5 pertanyaan PAA/);
+  assert.match(generator, /Fill example/);
+  assert.match(generator, /Copy structure/);
+  assert.match(generator, /Copy PAA/);
+  assert.match(generator, /5 competitor structures/);
+  assert.match(generator, /5 PAA questions/);
 });

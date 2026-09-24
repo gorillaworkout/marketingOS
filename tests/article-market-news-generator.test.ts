@@ -155,7 +155,7 @@ test('system prompt requires a bare JSON object response', () => {
 test('page exposes the admin Article Market News generation workflow', () => {
   assert.match(generator, /Publication Time \(WIB\)/);
   assert.match(generator, /type="time"/);
-  assert.match(generator, /Tanggal otomatis mengikuti Research Date/);
+  assert.match(generator, /The date follows the Research Date automatically/);
   assert.match(generator, /`\$\{researchDate\}T\$\{event\.target\.value\}`/);
   assert.doesNotMatch(generator, /type="datetime-local"/);
   assert.match(page, /ArticleMarketNewsGenerator/);
@@ -216,8 +216,8 @@ test('user references are optional because the server always performs automated 
   assert.match(route, /automatedSources/);
   assert.match(route, /sources: \[\.\.\.automatedSources, \.\.\.input\.sources\]/);
   assert.match(generator, /Reference Articles \(Optional\)/i);
-  assert.match(generator, /Isi contoh/i);
-  assert.match(generator, /Lihat contoh input/);
+  assert.match(generator, /Fill example/i);
+  assert.match(generator, /See example input/);
   assert.doesNotMatch(generator, /sources\.length >= 1/);
 });
 

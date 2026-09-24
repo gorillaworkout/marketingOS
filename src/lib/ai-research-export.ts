@@ -43,26 +43,26 @@ function markdownLinkLabel(title: string, url: string): string {
 }
 
 export function buildResearchMarkdownExport(input: ResearchExportInput): string {
-  const title = (input.title || 'Riset Dupoin AI').replace(/\s+/g, ' ').trim() || 'Riset Dupoin AI';
+  const title = (input.title || 'Dupoin AI research').replace(/\s+/g, ' ').trim() || 'Dupoin AI research';
   const when = (input.exportedAt ?? new Date()).toISOString().slice(0, 10);
-  const modeLabel = input.mode === 'deep' ? 'Mendalam' : 'Cepat';
+  const modeLabel = input.mode === 'deep' ? 'Deep' : 'Fast';
   const sources = researchExportSources(input.sources);
   const sourceLines = sources.length
     ? sources.map((source, index) => `${index + 1}. [${markdownLinkLabel(source.title, source.url)}](${source.url})`).join('\n')
-    : '_Tidak ada sumber yang tersimpan pada pesan ini._';
-  const answer = input.answer.trim() || '_Jawaban kosong._';
+    : '_No sources were saved on this message._';
+  const answer = input.answer.trim() || '_Empty answer._';
   return [
     `# ${title}`,
     '',
-    `- Asisten: ${AI_RESEARCH_ASSISTANT_NAME}`,
+    `- Assistant: ${AI_RESEARCH_ASSISTANT_NAME}`,
     `- Mode: ${modeLabel}`,
-    `- Diekspor: ${when}`,
+    `- Exported: ${when}`,
     '',
-    '## Jawaban',
+    '## Answer',
     '',
     answer,
     '',
-    '## Sumber',
+    '## Sources',
     '',
     sourceLines,
     '',
@@ -70,12 +70,12 @@ export function buildResearchMarkdownExport(input: ResearchExportInput): string 
 }
 
 export function researchExportFilename(title: string, extension: 'md' | 'pdf', date = new Date()): string {
-  const slug = (title || 'riset')
+  const slug = (title || 'research')
     .normalize('NFKD')
     .replace(/[\u0300-\u036f]/g, '')
     .replace(/[^a-zA-Z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '')
-    .slice(0, 60) || 'riset';
+    .slice(0, 60) || 'research';
   const day = date.toISOString().slice(0, 10);
   return `dupoin-ai-research-${slug}-${day}.${extension}`;
 }
@@ -172,9 +172,9 @@ function wrapText(text: string, fontSize: number, bold: boolean): string[] {
 }
 
 function layoutExportLines(input: ResearchExportInput): PdfLine[] {
-  const title = (input.title || 'Riset Dupoin AI').replace(/\s+/g, ' ').trim() || 'Riset Dupoin AI';
+  const title = (input.title || 'Dupoin AI research').replace(/\s+/g, ' ').trim() || 'Dupoin AI research';
   const when = (input.exportedAt ?? new Date()).toISOString().slice(0, 10);
-  const modeLabel = input.mode === 'deep' ? 'Mendalam' : 'Cepat';
+  const modeLabel = input.mode === 'deep' ? 'Deep' : 'Fast';
   const lines: PdfLine[] = [];
   const push = (text: string, font: 'F1' | 'F2', size: number, gapBefore: number) => {
     for (const line of wrapText(text, size, font === 'F2')) {
@@ -184,19 +184,19 @@ function layoutExportLines(input: ResearchExportInput): PdfLine[] {
   };
   push(title, 'F2', 16, 0);
   push(`${AI_RESEARCH_ASSISTANT_NAME} · Mode ${modeLabel} · ${when}`, 'F1', 9, 8);
-  push('Jawaban', 'F2', 12, 16);
-  push(researchAnswerToPlainText(input.answer.trim() || 'Jawaban kosong.'), 'F1', 11, 8);
-  push('Sumber', 'F2', 12, 16);
+  push('Answer', 'F2', 12, 16);
+  push(researchAnswerToPlainText(input.answer.trim() || 'Empty answer.'), 'F1', 11, 8);
+  push('Sources', 'F2', 12, 16);
   const sources = researchExportSources(input.sources);
   if (!sources.length) {
-    push('Tidak ada sumber yang tersimpan pada pesan ini.', 'F1', 11, 8);
+    push('No sources were saved on this message.', 'F1', 11, 8);
   } else {
     sources.forEach((source, index) => {
       push(`${index + 1}. ${source.title}`, 'F1', 11, 8);
       push(source.url, 'F1', 9, 2);
     });
   }
-  push('Diekspor dari Dupoin AI Research. Periksa ulang fakta pada sumber.', 'F1', 9, 18);
+  push('Exported from Dupoin AI Research. Check the facts against the sources.', 'F1', 9, 18);
   return lines;
 }
 

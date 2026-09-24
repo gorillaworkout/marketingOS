@@ -27,7 +27,7 @@ test('follow-up chips are 3–5 Indonesian questions and skip empty or error ans
     query: 'Buatkan strategi konten Instagram untuk broker forex',
     answer: ANSWER,
   });
-  assert.ok(strategy.some(item => /langkah|kanal|mengukur/i.test(item)));
+  assert.ok(strategy.some(item => /steps|channel|measured/i.test(item)));
 
   assert.deepEqual(suggestAiResearchFollowUps({ query: 'Siapa Dupoin?', answer: '' }), []);
   assert.deepEqual(suggestAiResearchFollowUps({ query: 'Siapa Dupoin?', answer: 'Pendek.' }), []);
@@ -42,7 +42,7 @@ test('AI Research page shows follow-up chips only from a completed assistant ans
   const page = read('src/app/dashboard/ai-research/page.tsx');
   assert.match(page, /suggestAiResearchFollowUps/);
   assert.match(page, /data-testid="ai-research-followups"/);
-  assert.match(page, /Pertanyaan lanjutan/);
+  assert.match(page, /Follow-up questions/);
   assert.match(page, /if \(loading \|\| streaming\) return \[\]/);
   assert.match(page, /onClick=\{\(\) => sendMessage\(suggestion\)\}/);
   assert.match(page, /const fromChip = typeof rawText === 'string'/);

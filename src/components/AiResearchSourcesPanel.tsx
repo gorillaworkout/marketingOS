@@ -13,9 +13,9 @@ import {
 } from '@/lib/ai-research-inspector';
 
 const ORIGIN_CHIP_LABEL: Record<ResearchOriginChip, string> = {
-  official: 'Resmi',
+  official: 'Official',
   indonesia: 'Indonesia',
-  international: 'Internasional',
+  international: 'International',
 };
 
 const ORIGIN_CHIP_CLASS: Record<ResearchOriginChip, string> = {
@@ -30,8 +30,8 @@ const TRACE_LABEL: Record<ResearchTraceKind, string> = {
 };
 
 const TRACE_HINT: Record<ResearchTraceKind, string> = {
-  person_fact: 'Roster resmi Dupoin/Bappebti',
-  other_public_trace: 'Jejak publik lain — belum tentu orang yang sama',
+  person_fact: 'Official Dupoin/Bappebti roster',
+  other_public_trace: 'Other public trace — not necessarily the same person',
 };
 
 const TRACE_CLASS: Record<ResearchTraceKind, string> = {
@@ -102,14 +102,14 @@ function SourceCard({
           type="button"
           onClick={() => onTogglePin(source.url)}
           aria-pressed={pinned}
-          title={pinned ? 'Lepas sematan' : 'Sematkan sumber ini'}
+          title={pinned ? 'Unpin' : 'Pin this source'}
           className={`flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg border transition-colors ${
             pinned
               ? 'border-indigo-400/40 bg-indigo-500/20 text-indigo-200'
               : 'border-[var(--mos-border)] text-[var(--mos-text-muted)] hover:text-[var(--mos-text)] hover:bg-[var(--mos-hover)]'
           }`}
         >
-          <span className="sr-only">{pinned ? 'Lepas sematan' : 'Sematkan'}</span>
+          <span className="sr-only">{pinned ? 'Unpin' : 'Pin'}</span>
           <svg className="h-3.5 w-3.5" fill={pinned ? 'currentColor' : 'none'} viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.8">
             <path strokeLinecap="round" strokeLinejoin="round" d="M16 3v6.5a4 4 0 01-1.2 2.85L12 15l-2.8-2.65A4 4 0 018 9.5V3h8zM8 3h8M12 15v6" />
           </svg>
@@ -122,12 +122,12 @@ function SourceCard({
             {TRACE_LABEL[source.traceKind]}
           </Chip>
         )}
-        {pinned && <Chip className="border-indigo-400/30 bg-indigo-400/10 text-indigo-200">Disematkan</Chip>}
+        {pinned && <Chip className="border-indigo-400/30 bg-indigo-400/10 text-indigo-200">Pinned</Chip>}
       </div>
       {source.snippet ? (
         <p className="mt-2 text-[11px] leading-4 text-[var(--mos-text-muted)] break-words">{source.snippet}</p>
       ) : (
-        <p className="mt-2 text-[11px] italic leading-4 text-[var(--mos-text-faint)]">Tidak ada cuplikan — buka URL untuk memeriksa sumber.</p>
+        <p className="mt-2 text-[11px] italic leading-4 text-[var(--mos-text-faint)]">No excerpt — open the URL to check the source.</p>
       )}
     </article>
   );
@@ -152,7 +152,7 @@ export function AiResearchSourcesPanel({
 }) {
   const pinned = new Set(pinnedUrls);
   const copy = grounding ? RESEARCH_STATUS_COPY[grounding] : null;
-  const title = copy?.title || 'Sumber yang dipakai';
+  const title = copy?.title || 'Sources used';
   const pinnedCount = sources.filter(source => pinned.has(source.url)).length;
 
   return (
@@ -160,13 +160,13 @@ export function AiResearchSourcesPanel({
       {open && (
         <button
           type="button"
-          aria-label="Tutup panel sumber"
+          aria-label="Close sources panel"
           onClick={onClose}
           className="absolute inset-0 z-20 bg-black/50 md:hidden"
         />
       )}
       <aside
-        aria-label="Sumber yang dipakai"
+        aria-label="Sources used"
         className={`absolute inset-y-0 right-0 z-30 flex w-[min(100vw,20rem)] flex-col border-l border-[var(--mos-border)] bg-[var(--mos-bg)] shadow-2xl transition-transform duration-200 md:static md:z-0 md:h-full md:shadow-none ${
           open ? 'translate-x-0' : 'translate-x-full md:translate-x-0 pointer-events-none md:pointer-events-auto'
         } ${open ? 'md:w-80 md:pointer-events-auto' : 'md:w-0 md:border-l-0 md:overflow-hidden'}`}
@@ -183,23 +183,23 @@ export function AiResearchSourcesPanel({
               type="button"
               onClick={onClose}
               className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg text-[var(--mos-text-muted)] hover:bg-[var(--mos-hover)] hover:text-[var(--mos-text)]"
-              title="Tutup"
+              title="Close"
             >
-              <span className="sr-only">Tutup panel sumber</span>
+              <span className="sr-only">Close sources panel</span>
               <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.8">
                 <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
               </svg>
             </button>
           </div>
           <div className="flex items-center justify-between gap-2 border-b border-[var(--mos-border-subtle)] px-3 py-1.5 text-[10px] text-[var(--mos-text-faint)]">
-            <span>{sources.length} sumber{pinnedCount ? ` · ${pinnedCount} disematkan` : ''}</span>
+            <span>{sources.length} source{sources.length === 1 ? '' : 's'}{pinnedCount ? ` · ${pinnedCount} pinned` : ''}</span>
             {grounding === 'ok' && (
-              <span className="text-[9px] uppercase tracking-wide text-emerald-300/80">Lengkap</span>
+              <span className="text-[9px] uppercase tracking-wide text-emerald-300/80">Complete</span>
             )}
           </div>
           <div className="flex-1 overflow-y-auto p-3 space-y-2">
             {loading && sources.length === 0 && !grounding && (
-              <p className="px-1 py-6 text-center text-[11px] text-[var(--mos-text-muted)]">Sedang mengumpulkan sumber…</p>
+              <p className="px-1 py-6 text-center text-[11px] text-[var(--mos-text-muted)]">Collecting sources…</p>
             )}
             {!loading && !grounding && sources.length === 0 && (
               <p className="px-1 py-6 text-center text-[11px] text-[var(--mos-text-muted)]">{RESEARCH_IDLE_COPY}</p>
@@ -230,7 +230,7 @@ export function AiResearchSourcesPanel({
           </div>
           {pinnedCount > 0 && (
             <p className="border-t border-[var(--mos-border-subtle)] px-3 py-2 text-[9px] leading-4 text-[var(--mos-text-faint)]">
-              Sumber yang disematkan dikirim ulang di giliran berikutnya agar model memprioritaskannya. Panel tetap menampilkan semua jejak.
+              Pinned sources are sent again on the next turn so the model prioritizes them. The panel still shows every trace.
             </p>
           )}
         </div>

@@ -60,7 +60,7 @@ function ExampleSample({
     <div>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h4 className="font-semibold text-cyan-100">{title}</h4>
-        <Button size="sm" onClick={onCopy}>{copied ? 'Tersalin' : copyLabel}</Button>
+        <Button size="sm" onClick={onCopy}>{copied ? 'Copied' : copyLabel}</Button>
       </div>
       <p className="mt-1 text-xs leading-5 text-[var(--mos-text-muted)]">{description}</p>
       <pre className="mt-2 overflow-x-auto whitespace-pre-wrap rounded-lg border border-cyan-500/20 bg-black/30 p-3 font-mono text-xs leading-5 text-cyan-50">{value}</pre>
@@ -95,7 +95,7 @@ export default function ArticleMarketNewsGenerator() {
       setRecent(Array.isArray(data.tasks) ? data.tasks.slice(0, 10) : []);
       setRecentError('');
     } catch (cause) {
-      setRecentError(cause instanceof Error ? cause.message : 'Gagal memuat riwayat Article Market News.');
+      setRecentError(cause instanceof Error ? cause.message : 'Could not load Article Market News history.');
     }
   }, []);
 
@@ -138,7 +138,7 @@ export default function ArticleMarketNewsGenerator() {
       setError('');
       setProgress('');
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Gagal membuka artikel tersimpan.');
+      setError(cause instanceof Error ? cause.message : 'Could not open the saved article.');
     }
   };
 
@@ -260,23 +260,23 @@ export default function ArticleMarketNewsGenerator() {
   return (
     <>
     <Panel aria-labelledby="article-generator-title">
-      <SectionHeader title="Generate article market news" description="Isi keyword, angle, struktur kompetitor, dan lima PAA. Sistem selalu melakukan research otomatis dari publisher feeds; reference tambahan dari user bersifat opsional." action={
+      <SectionHeader title="Generate article market news" description="Enter a keyword, angle, competitor structure, and five PAA questions. The system always researches publisher feeds automatically; extra references from you are optional." action={
         <div className="flex flex-wrap gap-2">
-          <Link href={`/dashboard/history?type=${ARTICLE_MARKET_NEWS_HISTORY_TYPE}`} className="rounded-lg border border-[var(--mos-border)] px-3 py-2 text-xs text-[var(--mos-text-secondary)] hover:border-[var(--mos-accent-border)]">Buka History</Link>
-          <Button size="sm" onClick={fillExample}>Isi contoh</Button>
+          <Link href={`/dashboard/history?type=${ARTICLE_MARKET_NEWS_HISTORY_TYPE}`} className="rounded-lg border border-[var(--mos-border)] px-3 py-2 text-xs text-[var(--mos-text-secondary)] hover:border-[var(--mos-accent-border)]">Open History</Link>
+          <Button size="sm" onClick={fillExample}>Fill example</Button>
         </div>
       } />
       {researchHandoff && (
         <p role="status" data-testid="article-research-handoff" className="mt-4 rounded-xl border border-indigo-400/30 bg-indigo-500/10 px-3 py-2 text-xs leading-5 text-indigo-100">
-          Diisi dari Dupoin AI Research. Keyword dan angle terisi dari ringkasan. Belum dipublikasikan — lengkapi struktur kompetitor dan PAA sebelum generate.
+          Filled from Dupoin AI Research. Keyword and angle come from the summary. Not published yet — complete the competitor structure and PAA questions before generating.
         </p>
       )}
 
       <section aria-labelledby="article-input-examples" className="mt-5 rounded-[var(--mos-radius-panel)] border border-cyan-500/20 bg-cyan-950/20 p-4 text-sm text-[var(--mos-text-secondary)]">
-        <h3 id="article-input-examples" className="font-semibold text-cyan-200">Lihat contoh input</h3>
+        <h3 id="article-input-examples" className="font-semibold text-cyan-200">See example input</h3>
         <p className="mt-2 leading-6">
-          Klik <strong>Isi contoh</strong> untuk mengisi keyword, angle, lima struktur kompetitor, dan lima pertanyaan PAA sekaligus. Setelah itu Generate bisa dijalankan. Reference artikel tetap opsional dan akan dikosongkan.
-          Atau salin format di bawah ke kolom yang sesuai.
+          Click <strong>Fill example</strong> to fill the keyword, angle, five competitor structures, and five PAA questions at once. Generate can run after that. Article references stay optional and will be cleared.
+          Or copy the format below into the matching fields.
         </p>
         <div className="mt-3 space-y-2 leading-6">
           <p><strong className="text-cyan-100">Keyword:</strong> {ARTICLE_MARKET_NEWS_EXAMPLE_KEYWORD}</p>
@@ -284,18 +284,18 @@ export default function ArticleMarketNewsGenerator() {
         </div>
         <div className="mt-4 space-y-4">
           <ExampleSample
-            title="5 struktur kompetitor"
-            description="Wajib lima blok berurutan, dari Competitor 1 sampai Competitor 5. Setiap blok punya tiga baris: H1:, H2:, dan H3:. Pisahkan blok dengan satu baris kosong."
+            title="5 competitor structures"
+            description="Exactly five blocks in order, from Competitor 1 through Competitor 5. Each block has three lines: H1:, H2:, and H3:. Separate blocks with one blank line."
             value={exampleCompetitorHeadings}
-            copyLabel="Salin struktur"
+            copyLabel="Copy structure"
             copied={copiedSample === 'competitors'}
             onCopy={() => { void copySample('competitors', exampleCompetitorHeadings); }}
           />
           <ExampleSample
-            title="5 pertanyaan PAA"
-            description="Tepat lima pertanyaan unik, satu per baris, tanpa nomor. Setiap baris harus diakhiri tanda tanya (?)."
+            title="5 PAA questions"
+            description="Exactly five unique questions, one per line, with no numbers. Each line must end with a question mark (?)."
             value={examplePaaText}
-            copyLabel="Salin PAA"
+            copyLabel="Copy PAA"
             copied={copiedSample === 'paa'}
             onCopy={() => { void copySample('paa', examplePaaText); }}
           />
@@ -304,24 +304,24 @@ export default function ArticleMarketNewsGenerator() {
 
       <div className="mt-6 grid gap-5 lg:grid-cols-2">
         <div className="space-y-4">
-          <FormField label="Main keyword"><TextInput value={keyword} onChange={event => setKeyword(event.target.value)} placeholder="Contoh: Harga Emas Hari Ini" /></FormField>
+          <FormField label="Main keyword"><TextInput value={keyword} onChange={event => setKeyword(event.target.value)} placeholder="Example: Gold price today" /></FormField>
           <FormField label="Research date"><TextInput type="date" value={researchDate} min={jakartaDate()} max={jakartaDate()} onChange={event => setResearchDate(event.target.value)} /></FormField>
-          <FormField label="Article angle"><TextArea value={angle} onChange={event => setAngle(event.target.value)} rows={3} placeholder="Sudut utama yang dipilih berdasarkan riset" /></FormField>
+          <FormField label="Article angle"><TextArea value={angle} onChange={event => setAngle(event.target.value)} rows={3} placeholder="Main angle chosen from the research" /></FormField>
           <FormField label="Competitor H1/H2/H3 structure" hint="Exactly 5 articles">
-            <TextArea value={competitorHeadings} onChange={event => setCompetitorHeadings(event.target.value)} rows={12} placeholder={'Competitor 1:\nH1: Harga Emas Hari Ini\nH2: Faktor Penggerak Harga Emas\nH3: Risiko yang Perlu Diperhatikan\n\nCompetitor 2:\nH1: ...\nH2: ...\nH3: ...'} className="font-mono" />
+            <TextArea value={competitorHeadings} onChange={event => setCompetitorHeadings(event.target.value)} rows={12} placeholder={'Competitor 1:\nH1: Gold price today\nH2: What is moving the gold price\nH3: Risks to watch\n\nCompetitor 2:\nH1: ...\nH2: ...\nH3: ...'} className="font-mono" />
             <span className={`mt-1 block text-xs ${competitorResearchCount === 5 ? 'text-emerald-400' : 'text-[var(--mos-text-faint)]'}`}>{competitorResearchCount}/5 competitor structures</span>
-            <span className="mt-1 block text-xs leading-5 text-[var(--mos-text-muted)]">Tulis Competitor 1: sampai Competitor 5:. Setiap blok wajib memuat H1:, H2:, dan H3:.</span>
+            <span className="mt-1 block text-xs leading-5 text-[var(--mos-text-muted)]">Write Competitor 1: through Competitor 5:. Each block must include H1:, H2:, and H3:.</span>
           </FormField>
           <FormField label="People Also Ask" hint="Exactly 5 questions">
-            <TextArea value={paaText} onChange={event => setPaaText(event.target.value)} rows={6} placeholder={'Apa yang memengaruhi harga emas hari ini?\nMengapa harga emas dapat naik atau turun?'} />
+            <TextArea value={paaText} onChange={event => setPaaText(event.target.value)} rows={6} placeholder={'What is moving the gold price today?\nWhy can the gold price rise or fall?'} />
             <span className={`mt-1 block text-xs ${paaQuestions.length === 5 && new Set(paaQuestions).size === 5 ? 'text-emerald-400' : 'text-[var(--mos-text-faint)]'}`}>{paaQuestions.length}/5 questions</span>
-            <span className="mt-1 block text-xs leading-5 text-[var(--mos-text-muted)]">Satu pertanyaan per baris, tepat lima, tidak boleh sama, dan diakhiri tanda tanya (?).</span>
+            <span className="mt-1 block text-xs leading-5 text-[var(--mos-text-muted)]">One question per line, exactly five, all unique, each ending with a question mark (?).</span>
           </FormField>
         </div>
 
         <div className="space-y-4">
           <div className="flex items-center justify-between">
-            <div><h3 className="font-semibold text-white">Reference Articles (Optional)</h3><p className="text-xs text-[var(--mos-text-muted)]">Boleh kosong. Jika diisi, tambahkan maksimal lima reference yang sudah kamu periksa; sistem tetap melakukan research otomatis.</p></div>
+            <div><h3 className="font-semibold text-white">Reference Articles (Optional)</h3><p className="text-xs text-[var(--mos-text-muted)]">Leave this empty if you want. If you add references, include at most five that you have already checked; automatic research still runs.</p></div>
             <Button size="sm" onClick={() => setSources(current => [...current, emptySource()])} disabled={sources.length >= 5}>Add source</Button>
           </div>
           {sources.map((source, index) => (
@@ -332,20 +332,20 @@ export default function ArticleMarketNewsGenerator() {
                 <label className="text-xs text-[var(--mos-text-muted)]">
                   Publication Time (WIB)
                   <div className="mt-1 flex items-center gap-2">
-                    <span className="rounded-lg border border-[var(--mos-border)] bg-[var(--mos-raised)] px-3 py-2 text-sm text-[var(--mos-text-secondary)]" title="Tanggal otomatis mengikuti Research Date">{researchDate}</span>
+                    <span className="rounded-lg border border-[var(--mos-border)] bg-[var(--mos-raised)] px-3 py-2 text-sm text-[var(--mos-text-secondary)]" title="The date follows the Research Date automatically">{researchDate}</span>
                     <TextInput type="time" value={source.publishedAt.split('T')[1] || ''} onChange={event => updateSource(index, 'publishedAt', event.target.value ? `${researchDate}T${event.target.value}` : '')} aria-label={`Source ${index + 1} publication time in WIB`} className="min-w-0 flex-1" />
                   </div>
-                  <span className="mt-1 block text-[11px] text-[var(--mos-text-faint)]">Tanggal otomatis mengikuti Research Date.</span>
+                  <span className="mt-1 block text-[11px] text-[var(--mos-text-faint)]">The date follows the Research Date automatically.</span>
                 </label>
               </div>
               <TextInput value={source.title} onChange={event => updateSource(index, 'title', event.target.value)} placeholder="Article title" />
               <TextInput type="url" value={source.url} onChange={event => updateSource(index, 'url', event.target.value)} placeholder="https://..." />
-              <TextArea value={source.verifiedFacts} onChange={event => updateSource(index, 'verifiedFacts', event.target.value)} rows={5} placeholder="Verified Facts / Quotes: angka, harga, perubahan %, institusi, dan kutipan yang benar-benar tercantum di sumber." />
+              <TextArea value={source.verifiedFacts} onChange={event => updateSource(index, 'verifiedFacts', event.target.value)} rows={5} placeholder="Verified Facts / Quotes: numbers, prices, percent changes, institutions, and quotes that actually appear in the source." />
             </Panel>
           ))}
           {sources.length > 0 && <label className="flex cursor-pointer gap-3 rounded-[var(--mos-radius-panel)] border border-red-500/20 bg-red-500/5 p-4 text-sm text-red-100">
             <input type="checkbox" checked={noCompetitorBroker} onChange={event => setNoCompetitorBroker(event.target.checked)} className="mt-0.5 h-4 w-4 accent-cyan-500" />
-            <span>Saya sudah memeriksa bahwa optional reference tidak menyebut competitor broker dan seluruh fakta/kutipan yang saya masukkan dapat ditelusuri ke sumber.</span>
+            <span>I have checked that the optional references do not name a competitor broker, and that every fact and quote I entered can be traced to its source.</span>
           </label>}
         </div>
       </div>
@@ -354,7 +354,7 @@ export default function ArticleMarketNewsGenerator() {
         <Button variant="primary" onClick={generateArticle} disabled={!ready || loading}>
           {loading ? 'Generating Article…' : 'Generate Article'}
         </Button>
-        {!ready && <p className="text-xs text-[var(--mos-text-muted)]">Lengkapi keyword, angle, lima struktur kompetitor, dan tepat lima PAA. Pakai Isi contoh jika formatnya belum jelas. Reference hanya perlu dilengkapi kalau kamu menambahkannya.</p>}
+        {!ready && <p className="text-xs text-[var(--mos-text-muted)]">Complete the keyword, angle, five competitor structures, and exactly five PAA questions. Use Fill example if the format is unclear. References only need to be completed if you add them.</p>}
         {progress && <p className="text-sm text-cyan-200">{progress}</p>}
       </div>
       {error && <div className="mt-4 rounded-lg border border-red-500/25 bg-red-500/10 px-4 py-3 text-sm text-red-300" role="alert">{error}</div>}
@@ -377,22 +377,22 @@ export default function ArticleMarketNewsGenerator() {
           {currentValidation && currentValidation.violations.length > 0 && <div className="rounded-[var(--mos-radius-panel)] border border-red-500/25 bg-red-500/10 p-4 text-sm text-red-200"><strong>Download locked:</strong> {currentValidation.violations.join(' ')}</div>}
           <label className="flex cursor-pointer gap-3 rounded-[var(--mos-radius-panel)] border border-amber-500/25 bg-amber-500/10 p-4 text-sm text-amber-100">
             <input type="checkbox" checked={factReviewConfirmed} onChange={event => setFactReviewConfirmed(event.target.checked)} disabled={!currentValidation || currentValidation.violations.length > 0} className="mt-0.5 h-4 w-4 accent-emerald-500" />
-            <span>Saya sudah memeriksa ulang setiap klaim nonnumeric, nama institusi/analis, peristiwa pasar, dan kutipan terhadap source snapshot yang digunakan saat generate.</span>
+            <span>I have rechecked every non-numeric claim, institution or analyst name, market event, and quote against the source snapshot used at generation time.</span>
           </label>
-          <div className="rounded-[var(--mos-radius-panel)] border border-amber-500/25 bg-amber-500/10 p-4 text-sm text-amber-100"><strong>Manual publication gate:</strong> upload DOCX ke SmallSEOTools. Skor harus &gt;90%. Jika di bawah 90%, revisi bagian yang ditandai lalu periksa kembali.</div>
+          <div className="rounded-[var(--mos-radius-panel)] border border-amber-500/25 bg-amber-500/10 p-4 text-sm text-amber-100"><strong>Manual publication gate:</strong> upload the DOCX to SmallSEOTools. The score must be above 90%. If it is below 90%, revise the flagged sections and check again.</div>
         </div>
       )}
     </Panel>
 
     <Panel padding="none">
       <div className="flex items-center justify-between border-b border-[var(--mos-border-subtle)] px-5 py-4">
-        <SectionHeader title="Recent Generated" description="Buka draf Article Market News yang tersimpan tanpa generate ulang." />
+        <SectionHeader title="Recent Generated" description="Open a saved Article Market News draft without generating it again." />
         <Link href={`/dashboard/history?type=${ARTICLE_MARKET_NEWS_HISTORY_TYPE}`} className="text-sm text-[var(--mos-accent-soft)] hover:underline">View all history</Link>
       </div>
       {recentError
         ? <p className="p-5 text-sm text-red-300">{recentError}</p>
         : recent.length === 0
-          ? <p className="p-5 text-sm text-[var(--mos-text-muted)]">Belum ada Article Market News tersimpan.</p>
+          ? <p className="p-5 text-sm text-[var(--mos-text-muted)]">No saved Article Market News yet.</p>
           : <div className="divide-y divide-[var(--mos-border-subtle)]">{recent.map(task => (
               <button type="button" key={task.id} onClick={() => restoreHistory(task)} className="flex w-full items-center justify-between gap-4 px-5 py-4 text-left hover:bg-[var(--mos-raised)]">
                 <span className="min-w-0">

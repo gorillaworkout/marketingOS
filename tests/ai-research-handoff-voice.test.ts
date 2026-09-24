@@ -33,18 +33,18 @@ test('handoff prefills social brief and article keyword without publishing', () 
     sources,
   };
   const brief = buildSocialPostBrief(input);
-  assert.match(brief, /Topik riset: Apa yang menggerakkan harga emas/);
+  assert.match(brief, /Research topic: Apa yang menggerakkan harga emas/);
   assert.match(brief, /https:\/\/www\.reuters\.com\/markets\/gold/);
   assert.doesNotMatch(brief, /127\.0\.0\.1/);
-  assert.match(brief, /Belum dipublikasikan/);
+  assert.match(brief, /Not published yet/);
   assert.ok(brief.length < 4_000);
 
   const article = buildArticleMarketNewsPrefill(input);
   assert.equal(article.keyword.endsWith('?'), false);
   assert.match(article.keyword, /harga emas/);
   assert.ok(article.keyword.length <= 120);
-  assert.match(article.angle, /Pertanyaan riset:/);
-  assert.match(article.angle, /struktur kompetitor dan PAA/);
+  assert.match(article.angle, /Research question:/);
+  assert.match(article.angle, /competitor structure and PAA/);
   assert.doesNotMatch(article.angle, /127\.0\.0\.1/);
 
   const raw = serializeAiResearchHandoff({
@@ -60,8 +60,8 @@ test('handoff prefills social brief and article keyword without publishing', () 
   assert.equal(parseAiResearchHandoff(raw, 'social-post', NOW + 3 * 60 * 60 * 1000), null);
 
   assert.deepEqual(AI_RESEARCH_HANDOFF_MODULES.map(module => module.label), [
-    'Kirim ke Social Post',
-    'Kirim ke Article Market News',
+    'Send to Social Post',
+    'Send to Article Market News',
   ]);
   assert.equal(AI_RESEARCH_HANDOFF_MODULES[1]?.href, '/dashboard/sop?from=ai-research');
 });
@@ -72,7 +72,7 @@ test('handoff lands on the existing forms and does not generate', () => {
   const tools = read('src/components/AiResearchAnswerTools.tsx');
   assert.match(social, /readAiResearchHandoff\('social-post'\)/);
   assert.match(social, /setBrief\(handoff\.brief\)/);
-  assert.match(social, /Belum dipublikasikan/);
+  assert.match(social, /Not published yet/);
   assert.match(social, /data-testid="social-post-research-handoff"/);
   assert.match(article, /readAiResearchHandoff\('article-market-news'\)/);
   assert.match(article, /setKeyword\(handoff\.keyword\)/);
@@ -80,7 +80,7 @@ test('handoff lands on the existing forms and does not generate', () => {
   assert.match(article, /Do not call generateArticle/);
   assert.match(article, /data-testid="article-research-handoff"/);
   assert.match(tools, /writeAiResearchHandoff/);
-  assert.match(tools, /Kirim ke Social Post|AI_RESEARCH_HANDOFF_MODULES/);
+  assert.match(tools, /Send to Social Post|AI_RESEARCH_HANDOFF_MODULES/);
   assert.match(tools, /window\.location\.assign\(href\)/);
   assert.doesNotMatch(tools, /\/api\/social-post\/generate|\/api\/article-market-news\/generate/);
   assert.match(read('src/lib/ai-research-handoff.ts'), new RegExp(AI_RESEARCH_HANDOFF_STORAGE_KEY.replace(/\./g, '\\.')));
@@ -115,7 +115,7 @@ test('voice input appends transcripts and falls back from id-ID to English', () 
     stop() {}
   };
   assert.equal(getSpeechRecognitionConstructor({ webkitSpeechRecognition: ctor }), ctor);
-  assert.match(voiceUnsupportedMessage(), /Chrome, Edge, atau Safari/);
+  assert.match(voiceUnsupportedMessage(), /Chrome, Edge, or Safari/);
 
   const button = read('src/components/AiResearchVoiceButton.tsx');
   const page = read('src/app/dashboard/ai-research/page.tsx');

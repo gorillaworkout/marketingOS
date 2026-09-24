@@ -24,11 +24,11 @@ test('markdown export includes the query, answer, and source URLs', () => {
     ],
   });
   assert.match(markdown, /^# Harga emas Indonesia/);
-  assert.match(markdown, /Mode: Mendalam/);
+  assert.match(markdown, /Mode: Deep/);
   assert.match(markdown, /2026-09-23/);
-  assert.match(markdown, /## Jawaban/);
+  assert.match(markdown, /## Answer/);
   assert.match(markdown, /Emas menguat/);
-  assert.match(markdown, /## Sumber/);
+  assert.match(markdown, /## Sources/);
   assert.match(markdown, /\[Bappebti emas\]\(https:\/\/bappebti\.go\.id\/emas\)/);
   assert.equal(markdown.match(/bappebti\.go\.id\/emas/g)?.length, 2);
   assert.doesNotMatch(markdown, /javascript:/);
@@ -56,7 +56,7 @@ test('pdf export is a multi-page Dupoin document with the answer and sources', (
   assert.match(text, /Kesenjangan dan keterbatasan/);
   assert.match(text, /https:\/\/www\.bi\.go\.id\/emas/);
   assert.match(text, /Dupoin AI Research/);
-  assert.match(text, /Periksa ulang fakta pada sumber/);
+  assert.match(text, /Check the facts against the sources/);
   assert.doesNotMatch(text, /official brand/i);
 });
 
@@ -64,9 +64,9 @@ test('AI Research answer actions expose markdown copy and both downloads', () =>
   const page = read('src/app/dashboard/ai-research/page.tsx');
   const actions = read('src/components/AiResearchExportActions.tsx');
   assert.match(page, /AiResearchExportActions/);
-  assert.match(actions, /Salin Markdown/);
-  assert.match(actions, /Unduh \.md/);
-  assert.match(actions, /Unduh PDF/);
+  assert.match(actions, /Copy Markdown/);
+  assert.match(actions, /Download \.md/);
+  assert.match(actions, /Download PDF/);
   assert.match(actions, /buildResearchMarkdownExport/);
   assert.match(actions, /buildResearchPdf/);
   assert.match(actions, /data-testid="ai-research-export"/);

@@ -1,4 +1,4 @@
-export const NO_PUBLIC_PRICE_NOTE = 'Belum ditemukan harga publik — minta quotation ke vendor';
+export const NO_PUBLIC_PRICE_NOTE = 'No public price found — request a quotation from the vendor';
 
 export type PricingCategory = 'venue' | 'speaker' | 'production' | 'catering' | 'promotion' | 'other';
 

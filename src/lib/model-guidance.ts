@@ -36,13 +36,13 @@ export function getModelGuidance(modelId: string): ModelGuidance {
     const low = lower.includes('low');
     return {
       family: 'Gemini',
-      summary: pro ? 'Model general-purpose untuk synthesis yang lebih kompleks dan struktur panjang.' : 'Model cepat untuk iterasi konten, variasi hook, dan workflow dengan beberapa langkah.',
+      summary: pro ? 'General-purpose model for more complex synthesis and long structure.' : 'Fast model for content iteration, hook variations, and multi-step workflows.',
       strengths: pro
-        ? ['Synthesis brief kompleks', 'Struktur panjang lebih terjaga', 'Cocok untuk planning dan review']
-        : ['Respons cepat', 'Efisien untuk menghasilkan beberapa opsi', 'Baik untuk output terstruktur dan ide visual'],
+        ? ['Complex brief synthesis', 'Long structure stays more intact', 'Fits planning and review']
+        : ['Fast responses', 'Efficient at producing several options', 'Good for structured output and visual ideas'],
       tradeoffs: pro
-        ? ['Lebih lambat daripada varian Flash', 'Berlebihan untuk caption sederhana', 'Tetap memerlukan fact-check untuk klaim pasar']
-        : ['Nuansa copy dapat terasa generik tanpa contoh brand', 'Reasoning mendalam lebih terbatas', low ? 'Varian low-compute perlu QC lebih ketat' : 'Long-form kompleks perlu review'],
+        ? ['Slower than the Flash variants', 'More than a simple caption needs', 'Market claims still need a fact check']
+        : ['Copy can feel generic without a brand example', 'Deep reasoning is more limited', low ? 'The low-compute variant needs tighter QC' : 'Complex long-form needs review'],
       bestFor: pro ? ['Event plan', 'Long-form outline', 'Complex brief synthesis'] : ['Social Post', 'Video Script preview', 'Image prompt', 'High-volume iteration'],
       speed: pro ? 'Moderate' : 'Fast', reasoning: pro ? 'Deep' : 'Balanced',
       workflowFit: fit({
@@ -52,7 +52,7 @@ export function getModelGuidance(modelId: string): ModelGuidance {
         'article-market-news': pro ? 'good' : 'limited',
         'market-research': pro ? 'good' : 'limited',
       }),
-      note: 'Panduan operasional berdasarkan karakter varian dan penggunaan MarketingOS; bukan hasil benchmark vendor.',
+      note: 'Operational guidance based on variant character and MarketingOS use; not a vendor benchmark.',
     };
   }
 
@@ -62,17 +62,17 @@ export function getModelGuidance(modelId: string): ModelGuidance {
     const thinking = lower.includes('thinking');
     return {
       family: 'Claude',
-      summary: opus || thinking ? 'Model deliberatif untuk editorial judgment, reasoning, dan brief yang ambigu.' : haiku ? 'Model ringan untuk draft cepat dan transformasi copy.' : 'Model writing-first untuk copy bernuansa, narasi, dan struktur editorial.',
+      summary: opus || thinking ? 'Deliberative model for editorial judgment, reasoning, and ambiguous briefs.' : haiku ? 'Light model for fast drafts and copy transforms.' : 'Writing-first model for nuanced copy, narrative, and editorial structure.',
       strengths: opus || thinking
-        ? ['Reasoning mendalam', 'Menangani instruksi kompleks', 'Kuat untuk critique dan editorial review']
+        ? ['Deep reasoning', 'Handles complex instructions', 'Strong for critique and editorial review']
         : haiku
-          ? ['Cepat untuk rewrite', 'Efisien untuk klasifikasi', 'Cocok untuk draft singkat']
-          : ['Natural writing dan tone', 'Storytelling serta alur narasi', 'Mengikuti style guidance dengan baik'],
+          ? ['Fast for rewrites', 'Efficient for classification', 'Fits short drafts']
+          : ['Natural writing and tone', 'Storytelling and narrative flow', 'Follows style guidance well'],
       tradeoffs: opus || thinking
-        ? ['Lebih lambat', 'Overkill untuk caption rutin', 'Output dapat terlalu panjang tanpa batas tegas']
+        ? ['Slower', 'Overkill for routine captions', 'Output can run long without a firm limit']
         : haiku
-          ? ['Nuansa dan reasoning lebih terbatas', 'Kurang cocok untuk report kompleks', 'Perlu QC editorial']
-          : ['Dapat verbose', 'Perlu schema/panjang yang eksplisit', 'Fakta pasar tetap harus terikat source'],
+          ? ['Nuance and reasoning are more limited', 'Less suited to complex reports', 'Needs editorial QC']
+          : ['Can be verbose', 'Needs an explicit schema or length', 'Market facts still have to stay tied to sources'],
       bestFor: opus || thinking ? ['Market research synthesis', 'Editorial review', 'Complex event plan'] : haiku ? ['Rewrite', 'Short caption draft', 'Content classification'] : ['Human-sounding Social Post', 'Video Script narration', 'Article structure'],
       speed: haiku ? 'Fast' : opus || thinking ? 'Deliberate' : 'Moderate', reasoning: opus || thinking ? 'Deep' : haiku ? 'Light' : 'Balanced',
       workflowFit: fit({
@@ -82,7 +82,7 @@ export function getModelGuidance(modelId: string): ModelGuidance {
         'article-market-news': haiku ? 'limited' : 'excellent',
         'market-research': opus || thinking ? 'excellent' : haiku ? 'limited' : 'good',
       }),
-      note: 'Kelebihan writing adalah panduan pemilihan internal; kualitas aktual tetap dipengaruhi prompt, source evidence, dan QC manusia.',
+      note: 'Writing strengths are an internal selection guide; actual quality still depends on the prompt, source evidence, and human QC.',
     };
   }
 
@@ -92,17 +92,17 @@ export function getModelGuidance(modelId: string): ModelGuidance {
     const sol = lower.includes('sol');
     return {
       family: 'GPT / Codex',
-      summary: review ? 'Varian review untuk mengecek struktur, konsistensi, dan kelemahan draft.' : mini ? 'Varian ringkas untuk pekerjaan cepat dan terstruktur.' : 'Model reasoning serbaguna untuk analisis, struktur, dan output dengan constraint ketat.',
+      summary: review ? 'Review variant for checking structure, consistency, and weak spots in a draft.' : mini ? 'Compact variant for fast, structured work.' : 'General reasoning model for analysis, structure, and tightly constrained output.',
       strengths: review
-        ? ['Critique dan quality review', 'Mendeteksi inkonsistensi', 'Cocok sebagai second pass']
+        ? ['Critique and quality review', 'Spots inconsistencies', 'Fits a second pass']
         : mini
-          ? ['Cepat dan ekonomis', 'Baik untuk schema sederhana', 'Cocok untuk volume tinggi']
-          : ['Reasoning terstruktur', 'Mengikuti constraint kompleks', 'Baik untuk research selection dan planning'],
+          ? ['Fast and economical', 'Good for simple schemas', 'Fits high volume']
+          : ['Structured reasoning', 'Follows complex constraints', 'Good for research selection and planning'],
       tradeoffs: review
-        ? ['Bukan pilihan utama untuk draft kreatif', 'Menambah satu tahap workflow', 'Masih membutuhkan reviewer manusia']
+        ? ['Not the first choice for a creative draft', 'Adds a workflow step', 'Still needs a human reviewer']
         : mini
-          ? ['Nuansa copy lebih terbatas', 'Analisis kompleks perlu model lebih besar', 'Perlu QC untuk long-form']
-          : ['Dapat terdengar formal untuk social copy', sol ? 'Tier premium untuk tugas rutin' : 'Latency tergantung model', 'Tidak menggantikan source verification'],
+          ? ['Copy nuance is more limited', 'Complex analysis needs a larger model', 'Long-form needs QC']
+          : ['Can sound formal for social copy', sol ? 'Premium tier for routine tasks' : 'Latency depends on the model', 'Does not replace source verification'],
       bestFor: review ? ['Draft review', 'Compliance pass', 'Editorial critique'] : mini ? ['Classification', 'Outline', 'Structured extraction'] : ['Market Research', 'Article Market News', 'Event planning', 'Complex structured output'],
       speed: mini ? 'Fast' : sol ? 'Deliberate' : 'Moderate', reasoning: mini ? 'Balanced' : 'Deep',
       workflowFit: fit({
@@ -113,15 +113,15 @@ export function getModelGuidance(modelId: string): ModelGuidance {
         'market-research': review ? 'specialist' : mini ? 'good' : 'excellent',
         'ai-research': review ? 'specialist' : sol ? 'excellent' : 'good',
       }),
-      note: review ? 'Gunakan setelah draft utama, bukan sebagai generator default.' : 'Panduan internal; model tidak boleh mengarang source, quotation, atau fakta pasar.',
+      note: review ? 'Use it after the main draft, not as the default generator.' : 'Internal guidance; the model must not invent sources, quotations, or market facts.',
     };
   }
 
   return {
-    family: 'GorillaWorkout', summary: 'Model gateway general-purpose yang belum memiliki profil penggunaan khusus.',
-    strengths: ['Tersedia melalui satu gateway', 'Dapat diuji per workflow'], tradeoffs: ['Belum ada observasi internal yang cukup', 'Perlu pilot dan rating user'],
+    family: 'GorillaWorkout', summary: 'General-purpose gateway model that does not have a specific usage profile yet.',
+    strengths: ['Available through one gateway', 'Can be tested per workflow'], tradeoffs: ['Not enough internal observation yet', 'Needs a pilot and user ratings'],
     bestFor: ['Controlled pilot'], speed: 'Variable', reasoning: 'Balanced', workflowFit: BASE_FIT,
-    note: 'Panduan awal; bukan vendor benchmark. Evaluasi dengan brief nyata sebelum menjadi default.',
+    note: 'Early guidance; not a vendor benchmark. Evaluate it on a real brief before making it the default.',
   };
 }
 

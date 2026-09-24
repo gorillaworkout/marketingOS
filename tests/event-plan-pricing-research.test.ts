@@ -78,7 +78,7 @@ test('grounded budget omits invented Rupiah when research hits have no numbers',
   for (const item of budget.items as Array<Record<string, unknown>>) {
     assert.equal(item.estimatedCost, null);
     assert.match(String(item.notes), new RegExp(NO_PUBLIC_PRICE_NOTE));
-    assert.match(String(item.notes), /Cara minta quotation/);
+    assert.match(String(item.notes), /How to request a quotation/);
   }
   assert.match(String((budget.items as Array<Record<string, unknown>>)[0].venue), /Ancol Beach City/);
   assert.match(String((budget.items as Array<Record<string, unknown>>)[0].suggestedVendor), /Ancol Beach City/);
@@ -123,7 +123,7 @@ test('a single public price is copied onto the matching budget line with its cit
   assert.equal(venue.sourceUrl, 'https://ancol.example/sewa');
   assert.match(String(venue.notes), /https:\/\/ancol\.example\/sewa/);
   assert.match(String(venue.notes), /events@ancol\.example/);
-  assert.match(String(venue.notes), /bukan quotation terverifikasi/);
+  assert.match(String(venue.notes), /not a verified quotation/);
   assert.equal(speaker?.estimatedCost, 15_000_000);
   assert.equal(speaker?.sourceUrl, 'https://speakers.example/fee');
   assert.equal(catering?.estimatedCost, null);
@@ -237,5 +237,5 @@ test('researchEventPricing cites a page price and a Jina fallback without callin
   const report = toEventPlanResearch(research, ['https://redirect.example/price']);
   assert.equal(report.contacts[0]?.verified, false);
   assert.equal(report.contacts[0]?.sourceUrl, 'https://ancol.example/sewa');
-  assert.ok(report.sources.every((source) => !source.claim.toLowerCase().includes('verified quotation')));
+  assert.ok(report.sources.every((source) => !source.claim.toLowerCase().replace(/not a verified quotation/g, '').includes('verified quotation')));
 });

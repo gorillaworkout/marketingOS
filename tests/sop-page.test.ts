@@ -12,8 +12,8 @@ test('SOP resource exposes the required manual workflow and admin-only access ha
   ]);
 
   for (const step of [
-    'Research & Seleksi Topik',
-    'Research & Seleksi Query',
+    'Research and topic selection',
+    'Research and query selection',
     'SEO Competitor Research',
     'Draft Article',
     'Plagiarism Check',
@@ -23,8 +23,8 @@ test('SOP resource exposes the required manual workflow and admin-only access ha
   }
 
   assert.match(page, />90%/);
-  assert.match(page, /10 menit/);
-  assert.match(page, /Tindakan SOP manual/);
+  assert.match(page, /10 minutes/);
+  assert.match(page, /Manual SOP steps/);
   assert.match(layout, /'\/dashboard\/sop'/);
   assert.match(layout, /label: 'Article Market News'/);
   assert.match(layout, /const generateItems = \[/);

@@ -29,12 +29,12 @@ export const AI_RESEARCH_HANDOFF_MODULES: Array<{
 }> = [
   {
     id: 'social-post',
-    label: 'Kirim ke Social Post',
+    label: 'Send to Social Post',
     href: `/dashboard/social-post?${AI_RESEARCH_HANDOFF_QUERY}=${AI_RESEARCH_HANDOFF_VALUE}`,
   },
   {
     id: 'article-market-news',
-    label: 'Kirim ke Article Market News',
+    label: 'Send to Article Market News',
     href: `/dashboard/sop?${AI_RESEARCH_HANDOFF_QUERY}=${AI_RESEARCH_HANDOFF_VALUE}`,
   },
 ];
@@ -76,18 +76,18 @@ export function buildSocialPostBrief(input: {
   answer: string;
   sources?: AiResearchHandoffSource[];
 }): string {
-  const query = condenseResearchText(input.query, 500) || 'Riset Dupoin AI';
+  const query = condenseResearchText(input.query, 500) || 'Dupoin AI research';
   const answer = condenseResearchText(input.answer, 1_600);
   const sources = sourceLines(input.sources || []);
   return [
-    `Topik riset: ${query}`,
+    `Research topic: ${query}`,
     '',
-    'Ringkasan:',
-    answer || '(Jawaban kosong)',
+    'Summary:',
+    answer || '(Empty answer)',
     '',
-    sources.length ? `Sumber:\n${sources.join('\n')}` : 'Sumber: tidak ada pada pesan ini.',
+    sources.length ? `Sources:\n${sources.join('\n')}` : 'Sources: none on this message.',
     '',
-    'Catatan: draf dari Dupoin AI Research. Belum dipublikasikan — edit sebelum generate.',
+    'Note: draft from Dupoin AI Research. Not published yet — edit before you generate.',
   ].join('\n');
 }
 
@@ -96,15 +96,15 @@ export function buildArticleMarketNewsPrefill(input: {
   answer: string;
   sources?: AiResearchHandoffSource[];
 }): { keyword: string; angle: string } {
-  const query = condenseResearchText(input.query, 500) || 'Riset pasar';
+  const query = condenseResearchText(input.query, 500) || 'Market research';
   const keyword = condenseResearchText(query.replace(/[?？]+$/g, ''), 120);
   const sources = sourceLines(input.sources || []);
   const angle = [
     condenseResearchText(input.answer, 1_800),
     '',
-    `Pertanyaan riset: ${query}`,
-    sources.length ? `Sumber riset:\n${sources.join('\n')}` : '',
-    'Lengkapi struktur kompetitor dan PAA. Jangan generate sebelum fakta dicek.',
+    `Research question: ${query}`,
+    sources.length ? `Research sources:\n${sources.join('\n')}` : '',
+    'Complete the competitor structure and PAA. Do not generate until the facts are checked.',
   ].filter(Boolean).join('\n');
   return { keyword, angle };
 }

@@ -40,10 +40,10 @@ export function suggestWatchTopic(text: string): string {
 }
 
 export function normalizeWatchTopic(value: unknown): string {
-  if (typeof value !== 'string') throw new Error('Topik wajib diisi.');
+  if (typeof value !== 'string') throw new Error('Topic is required.');
   const topic = value.replace(/\s+/g, ' ').trim();
-  if (topic.length < 2) throw new Error('Topik wajib diisi.');
-  if (topic.length > AI_RESEARCH_WATCH_TOPIC_MAX) throw new Error('Topik terlalu panjang.');
+  if (topic.length < 2) throw new Error('Topic is required.');
+  if (topic.length > AI_RESEARCH_WATCH_TOPIC_MAX) throw new Error('Topic is too long.');
   return topic;
 }
 
@@ -55,27 +55,27 @@ export function normalizeWatchKeywords(value: unknown, topic = ''): string[] {
       : value == null || value === ''
         ? []
         : null;
-  if (!raw) throw new Error('Kata kunci tidak valid.');
+  if (!raw) throw new Error('Keywords are not valid.');
   const topicKey = topic.replace(/\s+/g, ' ').trim().toLowerCase();
   const seen = new Set<string>();
   const keywords: string[] = [];
   for (const item of raw) {
-    if (typeof item !== 'string') throw new Error('Kata kunci tidak valid.');
+    if (typeof item !== 'string') throw new Error('Keywords are not valid.');
     const keyword = item.replace(/\s+/g, ' ').trim();
     if (!keyword) continue;
-    if (keyword.length > AI_RESEARCH_WATCH_KEYWORD_MAX) throw new Error('Kata kunci terlalu panjang.');
+    if (keyword.length > AI_RESEARCH_WATCH_KEYWORD_MAX) throw new Error('A keyword is too long.');
     const key = keyword.toLowerCase();
     if (key === topicKey || seen.has(key)) continue;
     seen.add(key);
     keywords.push(keyword);
-    if (keywords.length > AI_RESEARCH_WATCH_KEYWORDS_MAX) throw new Error('Terlalu banyak kata kunci.');
+    if (keywords.length > AI_RESEARCH_WATCH_KEYWORDS_MAX) throw new Error('Too many keywords.');
   }
   return keywords;
 }
 
 export function normalizeWatchStatus(value: unknown): ResearchWatchStatus {
   if (value === 'active' || value === 'paused') return value;
-  throw new Error('Status pantauan tidak valid.');
+  throw new Error('Watch status is not valid.');
 }
 
 export function buildWatchQuery(topic: string, keywords: string[]): string {
@@ -175,7 +175,7 @@ function hostLabel(url: string): string {
 }
 
 export function formatWatchCheckedAt(date: Date): string {
-  const formatted = new Intl.DateTimeFormat('id-ID', {
+  const formatted = new Intl.DateTimeFormat('en-US', {
     timeZone: 'Asia/Jakarta',
     day: 'numeric',
     month: 'short',
@@ -200,37 +200,37 @@ export function buildWatchDigest(input: {
 }): string {
   const diff = diffWatchSnapshots(input.previous, input.next);
   const lines = [
-    `Pantauan “${input.topic}” · ${formatWatchCheckedAt(input.checkedAt)}`,
+    `Watch “${input.topic}” · ${formatWatchCheckedAt(input.checkedAt)}`,
   ];
-  if (input.keywords.length) lines.push(`Kata kunci: ${input.keywords.join(', ')}`);
+  if (input.keywords.length) lines.push(`Keywords: ${input.keywords.join(', ')}`);
   lines.push('');
-  if (input.warning) lines.push(`Catatan: ${input.warning}`, '');
+  if (input.warning) lines.push(`Note: ${input.warning}`, '');
 
   if (!input.next.hits.length) {
-    lines.push(`Tidak ada hasil pencarian untuk “${input.topic}” pada pemeriksaan ini.`);
+    lines.push(`No search results for “${input.topic}” on this check.`);
   } else if (diff.firstCheck) {
-    lines.push(`Pemeriksaan pertama untuk “${input.topic}”. ${input.next.hits.length} temuan dicatat sebagai dasar pembanding.`);
+    lines.push(`First check for “${input.topic}”. ${input.next.hits.length} findings were saved as the baseline.`);
     lines.push('');
     for (const hit of input.next.hits.slice(0, 5)) lines.push(bullet(hit));
   } else if (!diff.added.length && !diff.removed.length && !diff.updated.length) {
-    lines.push(`Tidak ada perubahan judul atau tautan sejak pemeriksaan terakhir (${diff.unchanged} temuan tetap).`);
+    lines.push(`No title or link changes since the last check (${diff.unchanged} findings unchanged).`);
   } else {
     const parts = [
-      diff.added.length ? `${diff.added.length} temuan baru` : '',
-      diff.removed.length ? `${diff.removed.length} tidak muncul lagi` : '',
-      diff.updated.length ? `${diff.updated.length} judul diperbarui` : '',
+      diff.added.length ? `${diff.added.length} new findings` : '',
+      diff.removed.length ? `${diff.removed.length} no longer listed` : '',
+      diff.updated.length ? `${diff.updated.length} titles updated` : '',
     ].filter(Boolean);
     lines.push(`${parts.join(', ')}.`);
     if (diff.added.length) {
-      lines.push('', 'Baru:');
+      lines.push('', 'New:');
       for (const hit of diff.added.slice(0, 5)) lines.push(bullet(hit));
     }
     if (diff.removed.length) {
-      lines.push('', 'Tidak muncul lagi:');
+      lines.push('', 'No longer listed:');
       for (const hit of diff.removed.slice(0, 3)) lines.push(`• ${hit.title} (${hostLabel(hit.url)})`);
     }
     if (diff.updated.length) {
-      lines.push('', 'Judul diperbarui:');
+      lines.push('', 'Titles updated:');
       for (const item of diff.updated.slice(0, 3)) lines.push(`• ${item.previous.title} → ${item.next.title}`);
     }
   }

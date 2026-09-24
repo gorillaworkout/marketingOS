@@ -533,7 +533,7 @@ export default function AIResearchPage() {
     const nextUrls = urls.filter(url => !existing.has(url)).slice(0, Math.max(0, room));
     if (!nextUrls.length) {
       if (urls.some(url => !existing.has(url))) {
-        setError(`Maksimal ${AI_RESEARCH_MAX_CONTEXT_URLS} tautan per pesan.`);
+        setError(`At most ${AI_RESEARCH_MAX_CONTEXT_URLS} links per message.`);
       }
       return;
     }
@@ -708,9 +708,9 @@ export default function AIResearchPage() {
             const notes = Array.isArray(d.failures)
               ? d.failures.flatMap(item => {
                   const url = typeof item?.url === 'string' ? item.url : '';
-                  const reason = typeof item?.error === 'string' ? item.error : 'tidak bisa diambil';
+                  const reason = typeof item?.error === 'string' ? item.error : 'could not be fetched';
                   if (!url) return [];
-                  return [`Tautan tidak bisa diambil (${reason}): ${url}. Pertanyaan tetap dikirim tanpa halaman itu.`];
+                  return [`Link could not be fetched (${reason}): ${url}. The question was still sent without that page.`];
                 })
               : [];
             if (notes.length) setUrlNotices(notes);
@@ -842,7 +842,7 @@ export default function AIResearchPage() {
   const createProject = async () => {
     const name = projectDraft.trim();
     if (!name) {
-      setProjectError('Nama proyek wajib diisi.');
+      setProjectError('Project name is required.');
       return;
     }
     setProjectError('');
@@ -853,13 +853,13 @@ export default function AIResearchPage() {
         body: JSON.stringify({ name }),
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(typeof data.error === 'string' ? data.error : 'Gagal membuat proyek');
+      if (!res.ok) throw new Error(typeof data.error === 'string' ? data.error : 'Could not create the project');
       setProjectDraft('');
       setProjectDraftOpen(false);
       await loadProjects();
       if (data.project?.id) selectProject(data.project.id);
     } catch (e) {
-      setProjectError(e instanceof Error ? e.message : 'Gagal membuat proyek');
+      setProjectError(e instanceof Error ? e.message : 'Could not create the project');
     }
   };
 
@@ -867,7 +867,7 @@ export default function AIResearchPage() {
     if (!activeProjectId) return;
     const name = renameDraft.trim();
     if (!name) {
-      setProjectError('Nama proyek wajib diisi.');
+      setProjectError('Project name is required.');
       return;
     }
     setProjectError('');
@@ -878,11 +878,11 @@ export default function AIResearchPage() {
         body: JSON.stringify({ id: activeProjectId, name }),
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(typeof data.error === 'string' ? data.error : 'Gagal mengubah nama');
+      if (!res.ok) throw new Error(typeof data.error === 'string' ? data.error : 'Could not rename the project');
       setRenameOpen(false);
       await loadProjects();
     } catch (e) {
-      setProjectError(e instanceof Error ? e.message : 'Gagal mengubah nama');
+      setProjectError(e instanceof Error ? e.message : 'Could not rename the project');
     }
   };
 
@@ -897,10 +897,10 @@ export default function AIResearchPage() {
         body: JSON.stringify({ id: activeProjectId, notes: notesDraft }),
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(typeof data.error === 'string' ? data.error : 'Gagal menyimpan catatan');
+      if (!res.ok) throw new Error(typeof data.error === 'string' ? data.error : 'Could not save the notes');
       await loadProjects();
     } catch (e) {
-      setProjectError(e instanceof Error ? e.message : 'Gagal menyimpan catatan');
+      setProjectError(e instanceof Error ? e.message : 'Could not save the notes');
     }
   };
 
@@ -910,12 +910,12 @@ export default function AIResearchPage() {
     try {
       const res = await fetch(`/api/ai-research/projects?id=${encodeURIComponent(activeProjectId)}`, { method: 'DELETE' });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(typeof data.error === 'string' ? data.error : 'Gagal menghapus proyek');
+      if (!res.ok) throw new Error(typeof data.error === 'string' ? data.error : 'Could not delete the project');
       setDeleteProjectArmed(false);
       await loadProjects();
       selectProject(null);
     } catch (e) {
-      setProjectError(e instanceof Error ? e.message : 'Gagal menghapus proyek');
+      setProjectError(e instanceof Error ? e.message : 'Could not delete the project');
     }
   };
 
@@ -972,17 +972,17 @@ export default function AIResearchPage() {
     const withScheme = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
     const reason = contextUrlBlockReason(withScheme);
     if (reason) {
-      setError(`Tautan diblokir (${reason}). Gunakan http(s) publik.`);
+      setError(`Link blocked (${reason}). Use a public http(s) URL.`);
       return;
     }
     const canonical = scanContextUrls(withScheme).accepted[0]?.url;
     if (!canonical) {
-      setError('Masukkan tautan http atau https.');
+      setError('Enter an http or https link.');
       return;
     }
     const existing = scanContextUrls(input).accepted;
     if (existing.length >= AI_RESEARCH_MAX_CONTEXT_URLS && !existing.some(item => item.url === canonical)) {
-      setError(`Maksimal ${AI_RESEARCH_MAX_CONTEXT_URLS} tautan per pesan.`);
+      setError(`At most ${AI_RESEARCH_MAX_CONTEXT_URLS} links per message.`);
       return;
     }
     appendContextUrls([canonical]);
@@ -1027,7 +1027,7 @@ export default function AIResearchPage() {
 
   const formatCheckedAt = (iso: string) => {
     try {
-      return new Date(iso).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      return new Date(iso).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
     } catch {
       return iso;
     }
@@ -1049,7 +1049,7 @@ export default function AIResearchPage() {
 
         <span className="text-sm font-semibold text-[var(--mos-text)] truncate">AI Research</span>
         <span className="hidden sm:inline max-w-[160px] truncate text-[11px] text-[var(--mos-text-muted)]">
-          {activeProject ? activeProject.name : 'Percakapan biasa'}
+          {activeProject ? activeProject.name : 'General chat'}
         </span>
 
         <div className="ml-auto relative flex items-center gap-1.5 min-w-0">
@@ -1137,16 +1137,16 @@ export default function AIResearchPage() {
           onClick={() => setWatchOpen(true)}
           className="min-h-7 flex-shrink-0 rounded-lg border border-[var(--mos-border)] bg-[var(--mos-raised)] px-2 py-1 text-[11px] font-medium text-[var(--mos-text)] hover:bg-[var(--mos-hover)] transition-colors"
         >
-          Pantauan
+          Watches
         </button>
         <button
           type="button"
           onClick={() => setSourcesPanelOpen(open => !open)}
           aria-expanded={sourcesPanelOpen}
           className="min-h-7 flex-shrink-0 rounded-lg border border-[var(--mos-border)] bg-[var(--mos-raised)] px-2 py-1 text-[11px] font-medium text-[var(--mos-text)] hover:bg-[var(--mos-hover)] transition-colors"
-          title="Sumber yang dipakai"
+          title="Sources used"
         >
-          Sumber{typeof researchSourceCount === 'number' ? ` (${researchSourceCount})` : inspectorSources.length ? ` (${inspectorSources.length})` : ''}
+          Sources{typeof researchSourceCount === 'number' ? ` (${researchSourceCount})` : inspectorSources.length ? ` (${inspectorSources.length})` : ''}
         </button>
         <button
           onClick={newConversation}
@@ -1161,7 +1161,7 @@ export default function AIResearchPage() {
         {/* Sidebar */}
         <div className={`${sidebarOpen ? 'w-72' : 'w-0'} transition-all duration-200 overflow-hidden border-r border-[var(--mos-border)] flex-shrink-0 bg-[var(--mos-bg)] flex flex-col`}>
           <div className="p-3 space-y-2 border-b border-[var(--mos-border)]" data-testid="ai-research-project-switcher">
-            <p className="text-[10px] font-semibold uppercase tracking-wide text-[var(--mos-text-muted)]">Proyek riset</p>
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-[var(--mos-text-muted)]">Research projects</p>
             <button
               type="button"
               data-testid="ai-research-project-inbox"
@@ -1173,7 +1173,7 @@ export default function AIResearchPage() {
                   : 'text-[var(--mos-text-muted)] hover:bg-[var(--mos-hover)] hover:text-[var(--mos-text)]'
               }`}
             >
-              Percakapan biasa
+              General chat
             </button>
             <div className="max-h-36 space-y-1 overflow-y-auto">
               {projects.map(project => (
@@ -1204,20 +1204,20 @@ export default function AIResearchPage() {
                 <input
                   value={projectDraft}
                   onChange={event => setProjectDraft(event.target.value)}
-                  placeholder="Nama proyek, misalnya emas"
-                  aria-label="Nama proyek baru"
+                  placeholder="Project name, for example gold"
+                  aria-label="New project name"
                   className="w-full rounded-lg border border-[var(--mos-border)] bg-[var(--mos-raised)] px-2 py-1.5 text-xs text-[var(--mos-text)] outline-none focus:border-indigo-400/60"
                 />
                 <div className="flex gap-1.5">
                   <button type="submit" className="flex-1 rounded-lg bg-indigo-600 px-2 py-1 text-[11px] font-medium text-white hover:bg-indigo-500">
-                    Simpan
+                    Save
                   </button>
                   <button
                     type="button"
                     onClick={() => { setProjectDraftOpen(false); setProjectDraft(''); setProjectError(''); }}
                     className="rounded-lg border border-[var(--mos-border)] px-2 py-1 text-[11px] text-[var(--mos-text-muted)] hover:text-[var(--mos-text)]"
                   >
-                    Batal
+                    Cancel
                   </button>
                 </div>
               </form>
@@ -1228,7 +1228,7 @@ export default function AIResearchPage() {
                 onClick={() => { setProjectDraftOpen(true); setProjectError(''); }}
                 className="w-full rounded-lg border border-dashed border-[var(--mos-border)] px-2 py-1.5 text-[11px] text-[var(--mos-text-muted)] hover:text-[var(--mos-text)] hover:bg-[var(--mos-hover)]"
               >
-                + Proyek baru
+                + New project
               </button>
             )}
             {activeProject && (
@@ -1244,12 +1244,12 @@ export default function AIResearchPage() {
                     <input
                       value={renameDraft}
                       onChange={event => setRenameDraft(event.target.value)}
-                      aria-label="Ubah nama proyek"
+                      aria-label="Rename project"
                       className="w-full rounded-lg border border-[var(--mos-border)] bg-[var(--mos-bg)] px-2 py-1 text-xs text-[var(--mos-text)] outline-none focus:border-indigo-400/60"
                     />
                     <div className="flex gap-1.5">
-                      <button type="submit" className="flex-1 rounded-lg bg-indigo-600 px-2 py-1 text-[11px] font-medium text-white">Simpan</button>
-                      <button type="button" onClick={() => setRenameOpen(false)} className="rounded-lg px-2 py-1 text-[11px] text-[var(--mos-text-muted)]">Batal</button>
+                      <button type="submit" className="flex-1 rounded-lg bg-indigo-600 px-2 py-1 text-[11px] font-medium text-white">Save</button>
+                      <button type="button" onClick={() => setRenameOpen(false)} className="rounded-lg px-2 py-1 text-[11px] text-[var(--mos-text-muted)]">Cancel</button>
                     </div>
                   </form>
                 ) : (
@@ -1260,28 +1260,28 @@ export default function AIResearchPage() {
                       onClick={() => { setRenameDraft(activeProject.name); setRenameOpen(true); }}
                       className="flex-shrink-0 text-[10px] text-[var(--mos-text-muted)] hover:text-[var(--mos-text)]"
                     >
-                      Ubah nama
+                      Rename
                     </button>
                   </div>
                 )}
                 <label className="block text-[10px] text-[var(--mos-text-muted)]">
-                  Catatan sematan
+                  Pinned notes
                   <textarea
                     value={notesDraft}
                     onChange={event => setNotesDraft(event.target.value)}
                     onBlur={() => { void saveProjectNotes(); }}
                     rows={3}
-                    placeholder="Fakta atau batas yang harus diingat di proyek ini"
-                    aria-label="Catatan sematan"
+                    placeholder="Facts or limits this project should remember"
+                    aria-label="Pinned notes"
                     className="mt-1 w-full resize-none rounded-lg border border-[var(--mos-border)] bg-[var(--mos-bg)] px-2 py-1 text-[11px] text-[var(--mos-text)] outline-none focus:border-indigo-400/60"
                   />
                 </label>
                 {deleteProjectArmed ? (
                   <div className="space-y-1.5" data-testid="ai-research-project-delete-confirm">
-                    <p className="text-[10px] leading-4 text-amber-200">Hapus proyek ini? Percakapan kembali ke Percakapan biasa.</p>
+                    <p className="text-[10px] leading-4 text-amber-200">Delete this project? Conversations return to General chat.</p>
                     <div className="flex gap-1.5">
-                      <button type="button" onClick={() => { void deleteProject(); }} className="flex-1 rounded-lg bg-red-600 px-2 py-1 text-[11px] font-medium text-white">Hapus</button>
-                      <button type="button" onClick={() => setDeleteProjectArmed(false)} className="rounded-lg px-2 py-1 text-[11px] text-[var(--mos-text-muted)]">Batal</button>
+                      <button type="button" onClick={() => { void deleteProject(); }} className="flex-1 rounded-lg bg-red-600 px-2 py-1 text-[11px] font-medium text-white">Delete</button>
+                      <button type="button" onClick={() => setDeleteProjectArmed(false)} className="rounded-lg px-2 py-1 text-[11px] text-[var(--mos-text-muted)]">Cancel</button>
                     </div>
                   </div>
                 ) : (
@@ -1291,7 +1291,7 @@ export default function AIResearchPage() {
                     onClick={() => setDeleteProjectArmed(true)}
                     className="text-[10px] text-[var(--mos-text-muted)] hover:text-red-300"
                   >
-                    Hapus proyek
+                    Delete project
                   </button>
                 )}
               </div>
@@ -1301,7 +1301,7 @@ export default function AIResearchPage() {
               onClick={newConversation}
               className="w-full bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-medium py-2 rounded-lg transition-colors"
             >
-              Percakapan baru
+              New chat
             </button>
           </div>
           <div className="overflow-y-auto flex-1">
@@ -1325,7 +1325,7 @@ export default function AIResearchPage() {
                   <button
                     onClick={(e) => { e.stopPropagation(); deleteConversation(conv.id); }}
                     className="opacity-0 group-hover:opacity-100 text-[var(--mos-text-muted)] hover:text-red-400 p-0.5 transition-all flex-shrink-0"
-                    title="Hapus"
+                    title="Delete"
                   >
                     <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
                       <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
@@ -1335,7 +1335,7 @@ export default function AIResearchPage() {
               </div>
             ))}
             {visibleConversations.length === 0 && (
-              <p className="text-[10px] text-[var(--mos-text-muted)] text-center py-8 px-3">Belum ada percakapan</p>
+              <p className="text-[10px] text-[var(--mos-text-muted)] text-center py-8 px-3">No conversations yet</p>
             )}
           </div>
         </div>
@@ -1357,8 +1357,8 @@ export default function AIResearchPage() {
               className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center bg-indigo-500/10"
             >
               <div className="rounded-2xl border-2 border-dashed border-indigo-300 bg-[var(--mos-raised)]/95 px-5 py-4 text-center shadow-lg">
-                <p className="text-sm font-semibold text-[var(--mos-text)]">Lepas untuk lampirkan</p>
-                <p className="mt-1 text-[11px] text-[var(--mos-text-muted)]">Gambar, Excel, CSV, PDF, Word, atau PowerPoint</p>
+                <p className="text-sm font-semibold text-[var(--mos-text)]">Drop to attach</p>
+                <p className="mt-1 text-[11px] text-[var(--mos-text-muted)]">Images, Excel, CSV, PDF, Word, or PowerPoint</p>
               </div>
             </div>
           )}
@@ -1376,15 +1376,15 @@ export default function AIResearchPage() {
                   <h2 className="text-xl font-semibold text-[var(--mos-text)] mb-2">{AI_RESEARCH_ASSISTANT_NAME}</h2>
                   <p className="text-sm text-[var(--mos-text-muted)] max-w-md">
                     {activeProject
-                      ? `Riset di proyek ${activeProject.name}. Pertanyaan di sini mengingat catatan dan percakapan proyek ini.`
-                      : 'Ask anything — riset topik trading, analisis berita, strategi marketing, atau lampirkan gambar, Excel, CSV, PDF, Word, atau PowerPoint untuk dibaca AI.'}
+                      ? `Research in the ${activeProject.name} project. Questions here remember this project's notes and conversations.`
+                      : 'Ask anything — research a trading topic, analyze news, plan marketing, or attach an image, Excel, CSV, PDF, Word, or PowerPoint file for the AI to read.'}
                   </p>
                   <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 gap-2 w-full max-w-lg">
                     {[
-                      'Sella Susriana siapa di Dupoin?',
+                      'Who is Sella Susriana at Dupoin?',
                       'What affects gold prices today?',
-                      'Buatkan strategi konten Instagram untuk broker forex',
-                      'Analisis sentimen pasar setelah Fed rate decision',
+                      'Draft an Instagram content strategy for a forex broker',
+                      'Analyze market sentiment after the Fed rate decision',
                     ].map(s => (
                       <button
                         key={s}
@@ -1413,7 +1413,7 @@ export default function AIResearchPage() {
                         {msg.role === 'user' ? 'You' : AI_RESEARCH_ASSISTANT_NAME}
                         {msg.researchMode === 'deep' && (
                           <span data-testid="ai-research-deep-badge" className="rounded-full bg-emerald-500/15 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-emerald-200">
-                            Mendalam
+                            Deep
                           </span>
                         )}
                       </p>
@@ -1448,7 +1448,7 @@ export default function AIResearchPage() {
                       {msg.role === 'assistant' && msg.content.trim() && (
                         <>
                           <AiResearchExportActions
-                            title={[...messages].slice(0, i).reverse().find(item => item.role === 'user')?.content || 'Riset Dupoin AI'}
+                            title={[...messages].slice(0, i).reverse().find(item => item.role === 'user')?.content || 'Dupoin AI research'}
                             answer={msg.content}
                             sources={msg.sources?.length ? msg.sources : (i === messages.length - 1 ? inspectorSources : [])}
                             mode={msg.researchMode}
@@ -1471,7 +1471,7 @@ export default function AIResearchPage() {
                       )}
                       {i === followUpIndex && (
                         <div className="mt-2" data-testid="ai-research-followups">
-                          <p className="mb-1.5 px-1 text-[10px] font-semibold text-[var(--mos-text-muted)]">Pertanyaan lanjutan</p>
+                          <p className="mb-1.5 px-1 text-[10px] font-semibold text-[var(--mos-text-muted)]">Follow-up questions</p>
                           <div className="flex flex-wrap gap-1.5">
                             {followUps.map(suggestion => (
                               <button
@@ -1502,16 +1502,16 @@ export default function AIResearchPage() {
                       <p className="text-[10px] font-semibold text-[var(--mos-text-muted)] mb-1 px-1 flex items-center gap-2">
                         {AI_RESEARCH_ASSISTANT_NAME}
                         {runMode === 'deep' && (
-                          <span className="rounded-full bg-emerald-500/15 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-emerald-200">Mendalam</span>
+                          <span className="rounded-full bg-emerald-500/15 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-emerald-200">Deep</span>
                         )}
                         <span className="text-[9px] font-medium text-emerald-300/80">
                           {runMode === 'deep' && deepStatus
                             ? deepStatus
                             : groundingStatus === 'failed'
-                              ? 'Pencarian sumber gagal'
+                              ? 'Source search failed'
                               : researchSourceCount
-                                ? `Sedang meneliti ${researchSourceCount} sumber`
-                                : 'Sedang meneliti'}
+                                ? `Researching ${researchSourceCount} sources`
+                                : 'Researching'}
                         </span>
                       </p>
                       <div
@@ -1519,7 +1519,7 @@ export default function AIResearchPage() {
                         className="px-4 py-3 bg-[var(--mos-raised)] border border-[var(--mos-border)] text-[var(--mos-text)] rounded-2xl rounded-tl-md"
                       >
                         {runMode === 'deep' && (
-                          <p className="mb-2 text-[11px] text-[var(--mos-text-muted)]">{deepStatus || 'Menyusun riset mendalam…'}</p>
+                          <p className="mb-2 text-[11px] text-[var(--mos-text-muted)]">{deepStatus || 'Writing the deep research answer…'}</p>
                         )}
                         <span className="sr-only">Thinking</span>
                         <span className="ai-research-typing-dots" aria-hidden="true">
@@ -1545,7 +1545,7 @@ export default function AIResearchPage() {
                         {AI_RESEARCH_ASSISTANT_NAME}
                         {runMode === 'deep' && (
                           <span className="rounded-full bg-emerald-500/15 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-emerald-200">
-                            {deepStatus || 'Mendalam'}
+                            {deepStatus || 'Deep'}
                           </span>
                         )}
                         <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
@@ -1570,7 +1570,7 @@ export default function AIResearchPage() {
                       : 'bg-amber-400/10 border-amber-400/20 text-amber-100'
                   }`}>
                     {researchNotice.text}
-                    <button onClick={() => setResearchNotice(null)} className="ml-2 underline hover:opacity-80">Tutup</button>
+                    <button onClick={() => setResearchNotice(null)} className="ml-2 underline hover:opacity-80">Close</button>
                   </div>
                 </div>
               )}
@@ -1582,7 +1582,7 @@ export default function AIResearchPage() {
                     {urlNotices.map(notice => (
                       <p key={notice} className="leading-5">{notice}</p>
                     ))}
-                    <button type="button" onClick={() => setUrlNotices([])} className="mt-1 underline hover:opacity-80">Tutup</button>
+                    <button type="button" onClick={() => setUrlNotices([])} className="mt-1 underline hover:opacity-80">Close</button>
                   </div>
                 </div>
               )}
@@ -1614,8 +1614,8 @@ export default function AIResearchPage() {
                             type="button"
                             onClick={() => removeContextUrl(item.raw)}
                             className="text-[var(--mos-text-muted)] hover:text-red-300"
-                            title="Hapus tautan"
-                            aria-label={`Hapus tautan ${item.url}`}
+                            title="Remove link"
+                            aria-label={`Remove link ${item.url}`}
                           >
                             ×
                           </button>
@@ -1625,12 +1625,12 @@ export default function AIResearchPage() {
                   )}
                   {linkScan.blocked.map(item => (
                     <p key={item.url} className="text-[11px] text-amber-200" role="status">
-                      Tautan diblokir ({contextUrlBlockReason(item.url) || 'alamat tidak publik'}): {item.url}. Pertanyaan tetap bisa dikirim tanpa halaman itu.
+                      Link blocked ({contextUrlBlockReason(item.url) || 'address is not public'}): {item.url}. The question can still be sent without that page.
                     </p>
                   ))}
                   {linkScan.overflow.length > 0 && (
                     <p className="text-[11px] text-amber-200" role="status">
-                      Hanya {AI_RESEARCH_MAX_CONTEXT_URLS} tautan pertama yang diambil. Lewati: {linkScan.overflow.map(item => item.url).join(', ')}
+                      Only the first {AI_RESEARCH_MAX_CONTEXT_URLS} links are fetched. Skipped: {linkScan.overflow.map(item => item.url).join(', ')}
                     </p>
                   )}
                   {linkDraftOpen && (
@@ -1645,7 +1645,7 @@ export default function AIResearchPage() {
                         value={linkDraft}
                         onChange={event => setLinkDraft(event.target.value)}
                         placeholder="https://..."
-                        aria-label="Tautan untuk konteks"
+                        aria-label="Link for context"
                         className="min-h-8 flex-1 rounded-lg border border-[var(--mos-border)] bg-[var(--mos-raised)] px-2.5 text-[12px] text-[var(--mos-text)] outline-none focus:border-indigo-400/60"
                       />
                       <button type="submit" className="rounded-lg bg-indigo-600 px-2.5 text-[11px] font-medium text-white hover:bg-indigo-500">
@@ -1659,13 +1659,13 @@ export default function AIResearchPage() {
                 <div className="flex flex-wrap items-center gap-2">
                   <div
                     role="group"
-                    aria-label="Mode riset"
+                    aria-label="Research mode"
                     data-testid="ai-research-mode-toggle"
                     className="inline-flex rounded-xl border border-[var(--mos-border)] bg-[var(--mos-raised)] p-0.5"
                   >
                     {([
-                      ['fast', 'Cepat'],
-                      ['deep', 'Mendalam'],
+                      ['fast', 'Fast'],
+                      ['deep', 'Deep'],
                     ] as const).map(([mode, label]) => (
                       <button
                         key={mode}
@@ -1695,15 +1695,15 @@ export default function AIResearchPage() {
                         : 'border-[var(--mos-border)] bg-[var(--mos-raised)] text-[var(--mos-text-muted)] hover:text-[var(--mos-text)]'
                     }`}
                   >
-                    Bandingkan
+                    Compare
                   </button>
                 </div>
                 <p className="text-[10px] text-[var(--mos-text-muted)]">
                   {compareMode
-                    ? 'Bandingkan memakai riset cepat untuk kedua sisi. Harga dan fakta hanya dari sumber.'
+                    ? 'Compare uses fast research for both sides. Prices and facts come only from sources.'
                     : researchMode === 'deep'
-                      ? 'Mendalam: beberapa putaran pencarian, lalu sintesis. Lebih lama.'
-                      : 'Cepat: satu putaran riset.'}
+                      ? 'Deep: several search rounds, then a synthesis. Takes longer.'
+                      : 'Fast: one research pass.'}
                 </p>
               </div>
               {compareMode && (
@@ -1718,8 +1718,8 @@ export default function AIResearchPage() {
                       }
                     }}
                     disabled={loading}
-                    placeholder="Entitas / klaim A"
-                    aria-label="Entitas atau klaim A"
+                    placeholder="Entity / claim A"
+                    aria-label="Entity or claim A"
                     className="min-h-9 rounded-xl border border-[var(--mos-border)] bg-[var(--mos-raised)] px-3 text-sm text-[var(--mos-text)] outline-none focus:border-indigo-400/60"
                   />
                   <input
@@ -1732,8 +1732,8 @@ export default function AIResearchPage() {
                       }
                     }}
                     disabled={loading}
-                    placeholder="Entitas / klaim B"
-                    aria-label="Entitas atau klaim B"
+                    placeholder="Entity / claim B"
+                    aria-label="Entity or claim B"
                     className="min-h-9 rounded-xl border border-[var(--mos-border)] bg-[var(--mos-raised)] px-3 text-sm text-[var(--mos-text)] outline-none focus:border-indigo-400/60"
                   />
                 </div>
@@ -1813,8 +1813,8 @@ export default function AIResearchPage() {
                   onClick={() => setLinkDraftOpen(open => !open)}
                   disabled={loading}
                   className="text-[var(--mos-text-muted)] hover:text-[var(--mos-text)] disabled:opacity-30 p-2 rounded-xl transition-colors flex-shrink-0"
-                  title="Tambah tautan sebagai konteks"
-                  aria-label="Tambah tautan sebagai konteks"
+                  title="Add a link as context"
+                  aria-label="Add a link as context"
                   aria-expanded={linkDraftOpen}
                 >
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.8">
@@ -1830,8 +1830,8 @@ export default function AIResearchPage() {
                   onKeyDown={handleKeyDown}
                   onPaste={handleComposerPaste}
                   placeholder={compareMode
-                    ? 'Fokus perbandingan (opsional) — misalnya harga, regulasi, atau risiko'
-                    : 'Tanyakan apapun — seret, tempel, atau klik untuk lampirkan gambar, Excel, CSV, PDF, Word, atau PowerPoint... Tempel tautan http(s) untuk dijadikan konteks.'}
+                    ? 'Comparison focus (optional) — for example price, regulation, or risk'
+                    : 'Ask anything — drag, paste, or click to attach an image, Excel, CSV, PDF, Word, or PowerPoint file... Paste an http(s) link to use it as context.'}
                   disabled={loading}
                   rows={1}
                   className="flex-1 min-h-[24px] max-h-[160px] resize-none bg-transparent border-none text-sm text-[var(--mos-text)] placeholder-[var(--mos-text-muted)] focus:outline-none"
@@ -1856,7 +1856,7 @@ export default function AIResearchPage() {
                 </button>
               </div>
               <p className="text-[9px] text-[var(--mos-text-faint)] text-center mt-2">
-                {AI_RESEARCH_ASSISTANT_NAME} may produce inaccurate information. Enter to send · Shift+Enter for newline · Mic memakai Web Speech API di browser (id-ID, atau English jika id-ID tidak didukung; Chrome, Edge, Safari). Seret, tempel, atau klik ikon untuk gambar, Excel/CSV, PDF, Word, dan PowerPoint (maks. 4 per jenis). Tombol kamera mengambil foto lalu melampirkannya. Tempel tautan http(s), maks. {AI_RESEARCH_MAX_CONTEXT_URLS} per pesan.
+                {AI_RESEARCH_ASSISTANT_NAME} may produce inaccurate information. Enter to send · Shift+Enter for a new line · The mic uses the browser Web Speech API (id-ID, or English if id-ID is not supported; Chrome, Edge, Safari). Drag, paste, or click the icon for images, Excel/CSV, PDF, Word, and PowerPoint (max 4 of each). The camera button takes a photo and attaches it. Paste http(s) links, up to {AI_RESEARCH_MAX_CONTEXT_URLS} per message.
               </p>
             </div>
           </div>

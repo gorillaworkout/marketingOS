@@ -60,7 +60,7 @@ export function AiResearchExportActions({
       URL.revokeObjectURL(url);
       setExportError('');
     } catch (error) {
-      setExportError(error instanceof Error ? error.message : 'Gagal mengekspor jawaban');
+      setExportError(error instanceof Error ? error.message : 'Could not export the answer');
     }
   };
 
@@ -72,21 +72,21 @@ export function AiResearchExportActions({
           onClick={() => { void copyMarkdown(); }}
           className="rounded-full border border-[var(--mos-border)] bg-[var(--mos-bg)] px-2.5 py-1 text-[10px] font-medium text-[var(--mos-text)] hover:bg-[var(--mos-hover)]"
         >
-          {copied ? 'Tersalin' : 'Salin Markdown'}
+          {copied ? 'Copied' : 'Copy Markdown'}
         </button>
         <button
           type="button"
           onClick={() => download('md')}
           className="rounded-full border border-[var(--mos-border)] bg-[var(--mos-bg)] px-2.5 py-1 text-[10px] font-medium text-[var(--mos-text)] hover:bg-[var(--mos-hover)]"
         >
-          Unduh .md
+          Download .md
         </button>
         <button
           type="button"
           onClick={() => download('pdf')}
           className="rounded-full border border-[var(--mos-border)] bg-[var(--mos-bg)] px-2.5 py-1 text-[10px] font-medium text-[var(--mos-text)] hover:bg-[var(--mos-hover)]"
         >
-          Unduh PDF
+          Download PDF
         </button>
       </div>
       {exportError && <p className="mt-1 px-1 text-[10px] text-red-300">{exportError}</p>}

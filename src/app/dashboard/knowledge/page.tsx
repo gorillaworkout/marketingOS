@@ -209,16 +209,16 @@ export default function KnowledgePage() {
 
       {!loading && entries.length === 0 && (
         <div className="rounded-[var(--mos-radius-panel)] border border-blue-500/20 bg-blue-500/10 p-6">
-          <h2 className="font-semibold text-blue-200">Knowledge belum memiliki selection</h2>
+          <h2 className="font-semibold text-blue-200">Knowledge has no selection yet</h2>
           <p className="mt-2 text-sm text-[var(--mos-text-secondary)]">
-            Knowledge terbentuk otomatis saat Anda memilih output di Social Post atau Video Script. Sistem menyimpan pilihan nyata untuk mempelajari tone, hook, platform, dan style yang Anda sukai.
+            Knowledge is built automatically when you choose an output in Social Post or Video Script. The system stores real choices so it can learn the tone, hook, platform, and style you prefer.
           </p>
           <p className="mt-2 text-xs text-[var(--mos-text-muted)]">
-            MarketingOS tidak membuat data contoh palsu. Karena akun ini belum menyimpan pilihan, analytics masih kosong.
+            MarketingOS does not create fake sample data. Because this account has not saved a choice yet, analytics is still empty.
           </p>
           <div className="mt-4 flex flex-wrap gap-2">
-            <a href="/dashboard/social-post" className="rounded-lg bg-blue-600 px-3 py-2 text-sm text-white hover:bg-blue-500">Buka Social Post</a>
-            <a href="/dashboard/video-script" className="rounded-lg bg-[var(--mos-raised)] px-3 py-2 text-sm text-[var(--mos-text-secondary)] hover:bg-[var(--mos-raised)]">Buka Video Script</a>
+            <a href="/dashboard/social-post" className="rounded-lg bg-blue-600 px-3 py-2 text-sm text-white hover:bg-blue-500">Open Social Post</a>
+            <a href="/dashboard/video-script" className="rounded-lg bg-[var(--mos-raised)] px-3 py-2 text-sm text-[var(--mos-text-secondary)] hover:bg-[var(--mos-raised)]">Open Video Script</a>
           </div>
         </div>
       )}
@@ -574,7 +574,7 @@ export default function KnowledgePage() {
           {entries.length === 0 ? (
             <div className="text-center py-16 text-[var(--mos-text-faint)]">
               <p className="text-xl mb-2">No knowledge entries yet</p>
-              <p className="text-sm">Generate social posts and click &quot;Pilih ini&quot; to start building your style profile!</p>
+              <p className="text-sm">Generate social posts and click &quot;Choose and save to Knowledge&quot; to start building your style profile!</p>
             </div>
           ) : (
             entries.map(entry => {

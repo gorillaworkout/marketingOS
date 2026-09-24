@@ -51,17 +51,17 @@ async function assertFetchable(
   parsed.hash = '';
   const host = bareHost(parsed.hostname);
   if (isIP(host) || host.includes(':')) {
-    if (isNonPublicIpAddress(host)) return { ok: false, error: 'alamat tidak publik' };
+    if (isNonPublicIpAddress(host)) return { ok: false, error: 'address is not public' };
     return { ok: true, url: parsed.toString() };
   }
   let addresses: string[] = [];
   try {
     addresses = await lookupImpl(host);
   } catch {
-    return { ok: false, error: 'nama host tidak ditemukan' };
+    return { ok: false, error: 'host name was not found' };
   }
   if (!addresses.length || addresses.some(address => isNonPublicIpAddress(address))) {
-    return { ok: false, error: 'alamat tidak publik' };
+    return { ok: false, error: 'address is not public' };
   }
   return { ok: true, url: parsed.toString() };
 }
@@ -72,7 +72,7 @@ async function readBounded(
 ): Promise<{ text: string; contentType: string }> {
   const contentType = response.headers.get('content-type') || '';
   const declared = Number(response.headers.get('content-length') || 0);
-  if (declared > maxBytes) throw new Error('halaman terlalu besar');
+  if (declared > maxBytes) throw new Error('page is too large');
   if (!response.body) {
     const text = await response.text();
     return { text: text.slice(0, maxBytes), contentType };
@@ -126,15 +126,15 @@ async function fetchOnce(
     });
     if (response.status >= 300 && response.status < 400) {
       const location = response.headers.get('location');
-      if (!location) throw new Error('pengalihan tanpa tujuan');
+      if (!location) throw new Error('redirect has no destination');
       throw Object.assign(new Error('redirect'), { redirectTo: new URL(location, url).toString() });
     }
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const body = await readBounded(response, maxBytes);
-    if (!readableContentType(body.contentType)) throw new Error('halaman bukan teks');
+    if (!readableContentType(body.contentType)) throw new Error('page is not text');
     return { url, ...body };
   } catch (error) {
-    if (error instanceof Error && error.name === 'AbortError') throw new Error('waktu habis');
+    if (error instanceof Error && error.name === 'AbortError') throw new Error('timed out');
     throw error;
   } finally {
     clearTimeout(timer);
@@ -143,7 +143,7 @@ async function fetchOnce(
 
 function failureMessage(error: unknown): string {
   if (error instanceof Error && error.message) return error.message.slice(0, 160);
-  return 'gagal mengambil halaman';
+  return 'could not fetch the page';
 }
 
 async function fetchPageText(
@@ -153,12 +153,12 @@ async function fetchPageText(
   const started = Date.now();
   const remaining = () => options.timeoutMs - (Date.now() - started);
   let current = startUrl;
-  let directError = 'gagal mengambil halaman';
+  let directError = 'could not fetch the page';
 
   for (let hop = 0; hop < 3; hop += 1) {
     const allowed = await assertFetchable(current, options.lookupImpl);
     if (!allowed.ok) return { error: allowed.error };
-    if (remaining() < 500) return { error: 'waktu habis' };
+    if (remaining() < 500) return { error: 'timed out' };
     try {
       const page = await fetchOnce(
         options.fetchImpl,
@@ -174,7 +174,7 @@ async function fetchPageText(
       if (extracted.text.length >= AI_RESEARCH_URL_MIN_TEXT && !isEmptyOrLoginWallSource(extracted.text, page.url, extracted.title)) {
         return { title: extracted.title, text: extracted.text, url: page.url };
       }
-      directError = 'halaman kosong';
+      directError = 'page is empty';
       break;
     } catch (error) {
       const redirectTo = error && typeof error === 'object' && 'redirectTo' in error
@@ -206,7 +206,7 @@ async function fetchPageText(
     }
     const extracted = contextPageText(page.text, page.contentType, options.maxChars);
     if (extracted.text.length < AI_RESEARCH_URL_MIN_TEXT || isEmptyOrLoginWallSource(extracted.text, startUrl, extracted.title)) {
-      return { error: 'halaman kosong' };
+      return { error: 'page is empty' };
     }
     return { title: extracted.title, text: extracted.text, url: startUrl };
   } catch (error) {
@@ -235,9 +235,9 @@ export async function fetchAiResearchContextUrls(
   const failures: ContextUrlFailure[] = [
     ...scan.blocked.map(item => ({
       url: item.url,
-      error: contextUrlBlockReason(item.url) || 'alamat tidak publik',
+      error: contextUrlBlockReason(item.url) || 'address is not public',
     })),
-    ...scan.overflow.map(item => ({ url: item.url, error: 'maksimal 3 tautan per pesan' })),
+    ...scan.overflow.map(item => ({ url: item.url, error: 'at most 3 links per message' })),
   ];
   const fetchImpl = options.fetchImpl || fetch;
   const lookupImpl = options.lookupImpl || defaultLookup;

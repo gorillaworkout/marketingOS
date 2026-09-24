@@ -22,7 +22,7 @@ function assertQuotePath(item: { notes?: unknown; suggestedVendor?: unknown; ven
   assert.ok(String(item.suggestedVendor).length > 3, 'suggested vendor must be a concrete name, not blank');
   assert.doesNotMatch(String(item.suggestedVendor), /^vendor$/i);
   assert.match(String(item.notes), new RegExp(NO_PUBLIC_PRICE_NOTE));
-  assert.match(String(item.notes), /Cara minta quotation/i);
+  assert.match(String(item.notes), /How to request a quotation/i);
   assert.match(String(item.notes), /Venue\/location/i);
   assert.match(String(item.venue), new RegExp(city, 'i'));
   assert.equal((item as { estimatedCost?: unknown }).estimatedCost, null);
@@ -42,10 +42,10 @@ test('Event Plan client consumes its SSE generator and shows grounded budget sou
   assert.match(page, /Venue \/ location/);
   assert.match(page, /item\.suggestedVendor/);
   assert.match(page, /NO_PUBLIC_PRICE_NOTE/);
-  assert.match(page, /Sumber riset anggaran/);
+  assert.match(page, /Budget research sources/);
   assert.match(page, /source\.title/);
   assert.match(page, /source\.snippet/);
-  assert.match(page, /Belum diketahui/);
+  assert.match(page, /Not known yet/);
   assert.doesNotMatch(page, /\{result\.venue &&/);
   assert.doesNotMatch(page, /Harga di bawah adalah estimasi AI/);
 });
@@ -102,7 +102,7 @@ test('fallback budget names a vendor and venue without inventing Rupiah', () => 
   assert.match(String(items[0].suggestedVendor), /Kempinski|Shangri-La|JCC|Convention/i);
   assert.match(String(items[1].suggestedVendor), /Dyandra|Sound of Music/i);
   assert.match(String(items[2].suggestedVendor), /Plataran|in-house/i);
-  assert.match(String(items[3].suggestedVendor), /Blue Bird|Pembicara|narasumber/i);
+  assert.match(String(items[3].suggestedVendor), /Blue Bird|Financial seminar speaker/i);
   assert.doesNotMatch(JSON.stringify(jakarta), /30\.000\.000|20\.000\.000|12\.000\.000|40000000/);
 
   const surabaya = buildPreliminaryBudget(50_000_000, 'Surabaya');
@@ -141,7 +141,7 @@ test('normalizeGeneratedBudget drops invented prices and keeps a sourced price w
   assert.equal(venue.estimatedCost, 25_000_000);
   assert.equal(venue.sourceUrl, 'https://hilton.example/bandung');
   assert.match(String(venue.notes), /https:\/\/hilton\.example\/bandung/);
-  assert.match(String(venue.notes), /bukan quotation terverifikasi/);
+  assert.match(String(venue.notes), /not a verified quotation/);
   assert.doesNotMatch(String(venue.notes), new RegExp(NO_PUBLIC_PRICE_NOTE));
   assert.equal(sourced.total, 25_000_000);
   const speaker = (sourced.items as Array<Record<string, unknown>>).find((item) => String(item.category).includes('Speaker'));
@@ -161,6 +161,6 @@ test('plan venue names the submitted place and the quotation path', () => {
   assert.equal(resolvePlanVenue('', 'Ancol Beach City'), 'Ancol Beach City');
   const notes = quoteRequestPath('Hilton Bandung', formatVenueLine('Bandung'));
   assert.match(notes, /Hilton Bandung/);
-  assert.match(notes, /Cara minta quotation/);
-  assert.match(notes, /situs resmi/);
+  assert.match(notes, /How to request a quotation/);
+  assert.match(notes, /official site/);
 });

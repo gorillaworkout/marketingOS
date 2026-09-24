@@ -167,23 +167,23 @@ test('chat route SSE research event serializes sources and does not treat a clie
   assert.match(route, /applyPinnedResearchSources/);
 });
 
-test('AI Research page and panel show every grounded source in Indonesian inspector UI', () => {
+test('AI Research page and panel show every grounded source in the inspector UI', () => {
   const page = read('src/app/dashboard/ai-research/page.tsx');
   const panel = read('src/components/AiResearchSourcesPanel.tsx');
   const inspector = read('src/lib/ai-research-inspector.ts');
   assert.match(page, /AiResearchSourcesPanel/);
-  assert.match(page, /Sumber yang dipakai/);
+  assert.match(page, /Sources used/);
   assert.match(page, /pinnedSourceUrls/);
   assert.match(page, /RESEARCH_FAILED_BANNER/);
   assert.match(page, /RESEARCH_DISCONNECT_BANNER/);
   assert.match(page, /streamCompleted/);
-  assert.match(panel, /Sumber yang dipakai/);
+  assert.match(panel, /Sources used/);
   assert.match(panel, /PERSON_FACT/);
   assert.match(panel, /OTHER_PUBLIC_TRACE/);
-  assert.match(panel, /Roster resmi/);
-  assert.match(panel, /Jejak publik lain/);
-  assert.match(panel, /Sematkan/);
-  assert.match(inspector, /Tidak ada sumber/);
-  assert.match(inspector, /Pencarian sumber gagal/);
-  assert.match(inspector, /Riset web dilewati/);
+  assert.match(panel, /Official Dupoin\/Bappebti roster/);
+  assert.match(panel, /Other public trace/);
+  assert.match(panel, /Pin this source/);
+  assert.match(inspector, /No sources/);
+  assert.match(inspector, /Source search failed/);
+  assert.match(inspector, /Web research skipped/);
 });

@@ -156,15 +156,15 @@ export default function ImageModelsPage() {
       <Panel className="border-amber-400/15 bg-amber-400/[0.035]">
         <h3 className="text-sm font-medium text-amber-100">ℹ️ About Image Models</h3>
         <p className="mt-2 text-xs leading-5 text-[var(--mos-text-muted)]">
-          Image generation mengalir lewat <strong>GorillaWorkout gateway</strong> (llmdupoin.gorillaworkout.id) satu pintu
-          (`POST /images/generations`). Model yang dipilih di sini akan muncul sebagai dropdown di Social Post page
-          saat user mau generate image.
+          Image generation goes through the <strong>GorillaWorkout gateway</strong> (llmdupoin.gorillaworkout.id) as a single entry point
+          (`POST /images/generations`). The model selected here appears in the Social Post page dropdown
+          when someone generates an image.
         </p>
         <ul className="mt-3 space-y-1 text-xs text-[var(--mos-text-muted)]">
-          <li>• <strong>GPT-5.5 Image:</strong> Codex (ChatGPT) T2I — default, quality tertinggi</li>
+          <li>• <strong>GPT-5.5 Image:</strong> Codex (ChatGPT) T2I — default, highest quality</li>
           <li>• <strong>Nano Banana / Nano Banana Pro:</strong> Antigravity Gemini T2I</li>
           <li>• <strong>Gemini 3.1 Flash Image:</strong> Antigravity Gemini 3.1 Flash T2I</li>
-          <li>• <strong>Catatan:</strong> GPT-5.4 Image ditolak akun ChatGPT, jadi tidak disediakan.</li>
+          <li>• <strong>Note:</strong> GPT-5.4 Image is rejected by the ChatGPT account, so it is not offered.</li>
         </ul>
       </Panel>
 

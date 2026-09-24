@@ -32,8 +32,8 @@ test('compare request requires both sides and keeps them trimmed', () => {
     a: 'emas Antam',
     b: 'emas Pegadaian',
   });
-  assert.throws(() => parseCompareSides({ a: 'emas', b: '   ' }), /entitas A dan entitas B/i);
-  assert.throws(() => parseCompareSides('emas vs perak'), /tidak valid/i);
+  assert.throws(() => parseCompareSides({ a: 'emas', b: '   ' }), /entity A and entity B/i);
+  assert.throws(() => parseCompareSides('emas vs perak'), /not valid/i);
 
   const parsed = parseAiResearchChatBody({
     compare: { a: 'klaim A', b: 'klaim B' },
@@ -49,17 +49,17 @@ test('compare prompt asks for structured sections and forbids invented prices', 
   const prompt = buildCompareUserPrompt('harga emas Antam', 'harga emas Pegadaian', 'fokus spread');
   assert.match(prompt, /A: harga emas Antam/);
   assert.match(prompt, /B: harga emas Pegadaian/);
-  assert.match(prompt, /Fokus: fokus spread/);
-  assert.match(prompt, /Jangan mengarang harga atau fakta/);
+  assert.match(prompt, /Focus: fokus spread/);
+  assert.match(prompt, /Do not invent prices or facts/);
 
   const addendum = buildCompareSystemAddendum({ a: 'Dupoin', b: 'Kompetitor X' });
   for (const section of AI_RESEARCH_COMPARE_SECTIONS) {
     assert.match(addendum, new RegExp(`## ${section}`));
   }
-  assert.match(addendum, /Jangan mengarang harga, angka, tanggal, atau fakta/);
-  assert.match(addendum, /bukti tidak ditemukan di sumber/);
-  assert.match(addendum, /\[Sisi A\]/);
-  assert.match(addendum, /\[Sisi B\]/);
+  assert.match(addendum, /Do not invent prices, figures, dates, or facts/);
+  assert.match(addendum, /no evidence found in the sources/);
+  assert.match(addendum, /\[Side A\]/);
+  assert.match(addendum, /\[Side B\]/);
 });
 
 test('compare merge tags each side, dedupes URLs, and does not invent sources', () => {
@@ -89,9 +89,9 @@ test('compare merge tags each side, dedupes URLs, and does not invent sources', 
 
   assert.equal(merged.sources.length, 3);
   const byUrl = new Map(merged.sources.map(item => [item.url, item.snippet]));
-  assert.match(byUrl.get('https://antam.com/harga') || '', /\[Sisi A\]/);
-  assert.match(byUrl.get('https://pegadaian.co.id/emas') || '', /\[Sisi B\]/);
-  assert.match(byUrl.get('https://bappebti.go.id/emas') || '', /\[Sisi A dan B\]/);
+  assert.match(byUrl.get('https://antam.com/harga') || '', /\[Side A\]/);
+  assert.match(byUrl.get('https://pegadaian.co.id/emas') || '', /\[Side B\]/);
+  assert.match(byUrl.get('https://bappebti.go.id/emas') || '', /\[Side A and B\]/);
   assert.equal(byUrl.has('https://example.com/extra'), false);
   assert.doesNotMatch(merged.sources.map(item => item.snippet).join('\n'), /Rp\s?\d/);
 
@@ -114,10 +114,10 @@ test('compare mode is wired to the fast gather pipeline and the composer', () =>
   assert.match(route, /buildCompareSystemAddendum\(compare\)/);
   assert.match(route, /parseAiResearchChatBody as parseChatRequest/);
   assert.match(page, /data-testid="ai-research-compare-toggle"/);
-  assert.match(page, /Bandingkan/);
+  assert.match(page, />\s*Compare\s*</);
   assert.match(page, /data-testid="ai-research-compare-fields"/);
-  assert.match(page, /aria-label="Entitas atau klaim A"/);
-  assert.match(page, /aria-label="Entitas atau klaim B"/);
+  assert.match(page, /aria-label="Entity or claim A"/);
+  assert.match(page, /aria-label="Entity or claim B"/);
   assert.match(page, /buildCompareUserPrompt/);
   assert.match(page, /compare: compareRequest/);
   assert.match(page, /compareRequest \? 'fast' : researchMode/);

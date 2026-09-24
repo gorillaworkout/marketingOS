@@ -54,76 +54,76 @@ function usableSourceTitle(title?: string): string | null {
 }
 
 function templatesFor(intent: FollowUpIntent, topic: string, sources: FollowUpSource[]): string[] {
-  const subject = topic || 'topik ini';
+  const subject = topic || 'this topic';
   const sourceTitle = sources.map(source => usableSourceTitle(source.title)).find(Boolean) || null;
-  const sourceChip = sourceTitle ? [`Apa isi utama dari "${sourceTitle}"?`] : [];
+  const sourceChip = sourceTitle ? [`What is the main point of "${sourceTitle}"?`] : [];
   const shared = [
-    'Apa implikasinya untuk tim marketing Dupoin?',
-    'Apa yang masih belum jelas dari jawaban ini?',
-    'Langkah praktis apa yang bisa dikerjakan minggu ini?',
+    'What does this mean for the Dupoin marketing team?',
+    'What is still unclear in this answer?',
+    'What practical step can be done this week?',
   ];
 
   if (intent === 'person') {
     return [
-      `Apa peran ${subject} yang disebutkan sumber?`,
-      `Jejak publik lain apa yang terkait ${subject}?`,
+      `What role do the sources give ${subject}?`,
+      `What other public traces mention ${subject}?`,
       ...sourceChip,
-      `Lembaga atau perusahaan mana yang disebut bersama ${subject}?`,
-      `Fakta mana tentang ${subject} yang belum terkonfirmasi?`,
+      `Which institution or company is named with ${subject}?`,
+      `Which fact about ${subject} is still unconfirmed?`,
       ...shared,
     ];
   }
   if (intent === 'compare') {
     return [
-      'Apa perbedaan paling penting dari perbandingan ini?',
-      'Opsi mana yang lebih relevan untuk tim marketing Dupoin?',
+      'What is the most important difference in this comparison?',
+      'Which option is more relevant for the Dupoin marketing team?',
       ...sourceChip,
-      'Risiko apa yang ada pada masing-masing opsi?',
-      'Data apa yang masih kurang untuk membandingkannya?',
+      'What risks does each option have?',
+      'What data is still missing for the comparison?',
       ...shared,
     ];
   }
   if (intent === 'strategy') {
     return [
-      'Apa 5 langkah yang bisa dikerjakan minggu ini?',
-      'Kanal mana yang paling cocok untuk eksekusi pertama?',
+      'What are 5 steps that can be done this week?',
+      'Which channel fits the first execution best?',
       ...sourceChip,
-      'Bagaimana cara mengukur keberhasilan pendekatan ini?',
-      'Risiko atau kendala apa yang perlu diantisipasi?',
+      'How should success of this approach be measured?',
+      'What risks or constraints should be anticipated?',
       ...shared,
     ];
   }
   if (intent === 'data') {
     return [
-      'Angka mana yang paling penting dari temuan ini?',
-      'Bagaimana angkanya dibanding periode sebelumnya?',
+      'Which figure matters most in these findings?',
+      'How does the figure compare with the previous period?',
       ...sourceChip,
-      'Sumber mana yang menyebut angka tersebut?',
-      'Apa implikasi angka ini untuk keputusan marketing?',
+      'Which source states that figure?',
+      'What does this figure mean for a marketing decision?',
       ...shared,
     ];
   }
   if (intent === 'url') {
     return [
-      'Apa poin paling penting dari halaman yang dilampirkan?',
-      'Angka atau data apa yang disebut di tautan itu?',
+      'What is the most important point on the attached page?',
+      'What figures or data does that link mention?',
       ...sourceChip,
-      'Apa yang tidak dijelaskan di halaman tersebut?',
-      'Bagaimana isi tautan ini relevan untuk tim marketing Dupoin?',
+      'What does that page leave unexplained?',
+      'How is this link relevant for the Dupoin marketing team?',
       ...shared,
     ];
   }
   return [
-    `Apa yang belum dijawab tentang ${subject}?`,
-    `Bisakah kamu ringkas ${subject} dalam 5 butir?`,
+    `What is still unanswered about ${subject}?`,
+    `Can you summarize ${subject} in 5 bullets?`,
     ...sourceChip,
-    `Sumber mana yang paling mendukung jawaban tentang ${subject}?`,
+    `Which source best supports the answer about ${subject}?`,
     ...shared,
   ];
 }
 
 function looksLikeErrorAnswer(answer: string): boolean {
-  return /^(api error|unknown error|server error|an error occurred|failed to|gagal mengambil|pencarian sumber gagal)\b/i.test(answer);
+  return /^(api error|unknown error|server error|an error occurred|failed to|source search failed|gagal mengambil|pencarian sumber gagal)\b/i.test(answer);
 }
 
 export function suggestAiResearchFollowUps(input: {
