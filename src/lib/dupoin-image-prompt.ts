@@ -5,7 +5,7 @@ import {
   withImageAspectPrompt,
   type ImageAspectRatio,
 } from '@/lib/image-aspect-ratio';
-import { chromeClearancePercents } from '@/lib/dupoin-ig-chrome';
+import { chromeClearancePercents } from '@/lib/dupoin-ig-chrome-layout';
 
 /** Official Dupoin Brand Guidelines 2026 primary (Hex resmi). */
 export const DUPOIN_BLUE_HEX = '#2EB5C4';
