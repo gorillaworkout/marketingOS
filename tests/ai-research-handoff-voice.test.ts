@@ -16,6 +16,9 @@ import {
   finalTranscript,
   getSpeechRecognitionConstructor,
   nextSpeechLang,
+  voiceDeniedMessage,
+  voiceListeningStatus,
+  voiceMissedMessage,
   voiceUnsupportedMessage,
 } from '../src/lib/ai-research-voice';
 
@@ -116,15 +119,33 @@ test('voice input appends transcripts and falls back from id-ID to English', () 
   };
   assert.equal(getSpeechRecognitionConstructor({ webkitSpeechRecognition: ctor }), ctor);
   assert.match(voiceUnsupportedMessage(), /Chrome, Edge, or Safari/);
+  assert.match(voiceDeniedMessage(), /Microphone access was denied/);
+  assert.match(voiceMissedMessage(), /No speech was captured/);
+  assert.equal(voiceListeningStatus(), 'Listening… tap mic to stop');
+  assert.match(voiceListeningStatus(true), /Switching to English\./);
+  assert.match(voiceListeningStatus(true), /Listening… tap mic to stop/);
 
   const button = read('src/components/AiResearchVoiceButton.tsx');
   const page = read('src/app/dashboard/ai-research/page.tsx');
   assert.match(button, /data-testid="ai-research-voice"/);
+  assert.match(button, /data-listening=\{listening \? 'true' : 'false'\}/);
+  assert.match(button, /aria-pressed=\{listening\}/);
+  assert.match(button, /voiceListeningStatus\(lang === VOICE_LANG_EN\), 'listening'/);
+  assert.match(button, /listening\s*\?\s*'ai-research-voice-active bg-red-500 text-white/);
+  assert.match(button, /\{listening && <span className="ai-research-voice-ripple"/);
+  assert.match(button, /data-testid="ai-research-voice-bars"/);
+  assert.match(button, /@keyframes ai-research-voice-pulse/);
+  assert.match(button, /@keyframes ai-research-voice-bar/);
+  assert.match(button, /prefers-reduced-motion: reduce/);
   assert.match(button, /VOICE_LANG_ID/);
   assert.match(button, /nextSpeechLang/);
   assert.doesNotMatch(button, /fetch\(|\/api\/.*stt|whisper/i);
+  assert.doesNotMatch(button, /Mendengarkan|Input suara|Mikrofon ditolak/);
   assert.match(page, /AiResearchVoiceButton/);
   assert.match(page, /appendVoiceTranscript/);
   assert.match(page, /data-testid="ai-research-voice-status"/);
+  assert.match(page, /data-tone=\{voiceStatus\.tone\}/);
+  assert.match(page, /voiceStatus\.tone === 'error' \? 'alert' : 'status'/);
+  assert.match(page, /voiceStatus\.tone === 'listening'/);
   assert.match(page, /Web Speech API/);
 });

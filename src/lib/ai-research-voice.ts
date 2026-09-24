@@ -19,6 +19,12 @@ export function voiceMissedMessage(): string {
   return 'No speech was captured. Try again, or type your question.';
 }
 
+/** Short composer status while the browser speech session is open. */
+export function voiceListeningStatus(englishFallback = false): string {
+  const listening = 'Listening… tap mic to stop';
+  return englishFallback ? `${voiceFallbackMessage()} ${listening}` : listening;
+}
+
 export type SpeechRecognitionLike = {
   lang: string;
   continuous: boolean;

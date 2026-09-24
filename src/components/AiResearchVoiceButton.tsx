@@ -8,13 +8,11 @@ import {
   getSpeechRecognitionConstructor,
   nextSpeechLang,
   voiceDeniedMessage,
-  voiceFallbackMessage,
+  voiceListeningStatus,
   voiceMissedMessage,
   voiceUnsupportedMessage,
   type SpeechRecognitionLike,
 } from '@/lib/ai-research-voice';
-
-const LISTENING_STATUS = 'Listening… speak now. Click the mic to stop.';
 
 export function AiResearchVoiceButton({
   disabled,
@@ -23,7 +21,7 @@ export function AiResearchVoiceButton({
 }: {
   disabled?: boolean;
   onTranscript: (text: string) => void;
-  onStatus?: (message: string) => void;
+  onStatus?: (message: string, tone?: 'listening' | 'error') => void;
 }) {
   const [listening, setListening] = useState(false);
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
@@ -35,8 +33,8 @@ export function AiResearchVoiceButton({
     onStatusRef.current = onStatus;
   }, [onTranscript, onStatus]);
 
-  const publish = (message: string) => {
-    onStatusRef.current?.(message);
+  const publish = (message: string, tone: 'listening' | 'error' = 'error') => {
+    onStatusRef.current?.(message, tone);
   };
 
   const stop = () => {
@@ -127,7 +125,7 @@ export function AiResearchVoiceButton({
 
     recognitionRef.current = recognition;
     setListening(true);
-    publish(lang === VOICE_LANG_EN ? `${voiceFallbackMessage()} ${LISTENING_STATUS}` : LISTENING_STATUS);
+    publish(voiceListeningStatus(lang === VOICE_LANG_EN), 'listening');
     try {
       recognition.start();
     } catch {
@@ -148,24 +146,76 @@ export function AiResearchVoiceButton({
   };
 
   return (
-    <button
-      type="button"
-      data-testid="ai-research-voice"
-      data-listening={listening ? 'true' : 'false'}
-      aria-pressed={listening}
-      aria-label={listening ? 'Stop listening' : 'Voice input'}
-      title={listening ? 'Listening… click to stop' : 'Voice input (Chrome, Edge, Safari — id-ID, or English)'}
-      disabled={disabled}
-      onClick={toggle}
-      className={`p-2 rounded-xl transition-colors flex-shrink-0 disabled:opacity-30 ${
-        listening
-          ? 'bg-red-500/20 text-red-200'
-          : 'text-[var(--mos-text-muted)] hover:text-[var(--mos-text)]'
-      }`}
-    >
-      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
-        <path strokeLinecap="round" strokeLinejoin="round" d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z" />
-      </svg>
-    </button>
+    <>
+      <button
+        type="button"
+        data-testid="ai-research-voice"
+        data-listening={listening ? 'true' : 'false'}
+        aria-pressed={listening}
+        aria-label={listening ? 'Stop listening' : 'Voice input'}
+        title={listening ? 'Listening… tap mic to stop' : 'Voice input (Chrome, Edge, Safari — id-ID, or English)'}
+        disabled={disabled}
+        onClick={toggle}
+        className={`relative inline-flex items-center justify-center gap-1 p-2 rounded-xl transition-colors flex-shrink-0 disabled:opacity-30 ${
+          listening
+            ? 'ai-research-voice-active bg-red-500 text-white ring-2 ring-red-300 shadow-[0_0_0_4px_rgba(239,68,68,0.35)]'
+            : 'text-[var(--mos-text-muted)] hover:text-[var(--mos-text)]'
+        }`}
+      >
+        {listening && <span className="ai-research-voice-ripple" aria-hidden="true" />}
+        <svg className="relative w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+          <path strokeLinecap="round" strokeLinejoin="round" d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z" />
+        </svg>
+        {listening && (
+          <span className="ai-research-voice-bars relative" data-testid="ai-research-voice-bars" aria-hidden="true">
+            <span />
+            <span />
+            <span />
+          </span>
+        )}
+      </button>
+      <style>{`
+        .ai-research-voice-ripple {
+          position: absolute;
+          inset: 0;
+          border-radius: inherit;
+          border: 2px solid rgba(254, 202, 202, 0.95);
+          pointer-events: none;
+          animation: ai-research-voice-pulse 1.15s ease-out infinite;
+        }
+        .ai-research-voice-bars {
+          display: inline-flex;
+          align-items: center;
+          gap: 2px;
+          height: 14px;
+        }
+        .ai-research-voice-bars span {
+          display: block;
+          width: 2px;
+          height: 12px;
+          border-radius: 999px;
+          background: currentColor;
+          transform-origin: center;
+          animation: ai-research-voice-bar 0.85s ease-in-out infinite;
+        }
+        .ai-research-voice-bars span:nth-child(2) { animation-delay: 0.16s; }
+        .ai-research-voice-bars span:nth-child(3) { animation-delay: 0.32s; }
+        @keyframes ai-research-voice-pulse {
+          0% { transform: scale(1); opacity: 0.9; }
+          100% { transform: scale(1.65); opacity: 0; }
+        }
+        @keyframes ai-research-voice-bar {
+          0%, 100% { transform: scaleY(0.35); }
+          50% { transform: scaleY(1); }
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .ai-research-voice-ripple,
+          .ai-research-voice-bars span {
+            animation: none;
+          }
+          .ai-research-voice-bars span { transform: scaleY(0.7); }
+        }
+      `}</style>
+    </>
   );
 }

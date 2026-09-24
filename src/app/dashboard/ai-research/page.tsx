@@ -270,7 +270,7 @@ export default function AIResearchPage() {
   const [urlNotices, setUrlNotices] = useState<string[]>([]);
   const [linkDraftOpen, setLinkDraftOpen] = useState(false);
   const [linkDraft, setLinkDraft] = useState('');
-  const [voiceStatus, setVoiceStatus] = useState('');
+  const [voiceStatus, setVoiceStatus] = useState<{ message: string; tone: 'listening' | 'error' } | null>(null);
   const [error, setError] = useState('');
   const researchMode = useSyncExternalStore<'fast' | 'deep'>(
     subscribeResearchMode,
@@ -1792,11 +1792,14 @@ export default function AIResearchPage() {
               )}
               {voiceStatus && (
                 <p
-                  role="status"
+                  role={voiceStatus.tone === 'error' ? 'alert' : 'status'}
                   data-testid="ai-research-voice-status"
-                  className="mb-2 rounded-xl border border-amber-400/30 bg-amber-500/10 px-3 py-2 text-[11px] leading-5 text-amber-100"
+                  data-tone={voiceStatus.tone}
+                  className={voiceStatus.tone === 'listening'
+                    ? 'mb-2 px-1 text-[11px] leading-5 text-red-200'
+                    : 'mb-2 rounded-xl border border-red-400/35 bg-red-500/10 px-3 py-2 text-[11px] leading-5 text-red-100'}
                 >
-                  {voiceStatus}
+                  {voiceStatus.message}
                 </p>
               )}
               <div className={`flex gap-2 items-end bg-[var(--mos-raised)] border rounded-2xl px-3 py-3 transition-all ${
@@ -1845,7 +1848,13 @@ export default function AIResearchPage() {
                     <path strokeLinecap="round" strokeLinejoin="round" d="M10.81 15.312a4.5 4.5 0 01-1.242-7.244l4.5-4.5a4.5 4.5 0 016.364 6.364l-1.757 1.757" />
                   </svg>
                 </button>
-                <AiResearchVoiceButton disabled={loading} onTranscript={applyVoiceTranscript} onStatus={setVoiceStatus} />
+                <AiResearchVoiceButton
+                  disabled={loading}
+                  onTranscript={applyVoiceTranscript}
+                  onStatus={(message, tone = 'error') => {
+                    setVoiceStatus(message ? { message, tone } : null);
+                  }}
+                />
                 <textarea
                   ref={inputRef}
                   value={input}
