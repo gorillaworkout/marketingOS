@@ -5,6 +5,13 @@ import { rateLimit } from '@/lib/rate-limit';
 import { generateContent, getSmartSystemPrompt, fetchContextMemory, fetchStyleContext, fetchKnowledgeContext, getUserPreferredModel, runQC, generateDupoinFileName, type BrandGuidelines, type QCResult } from '@/lib/openai';
 import { buildSocialPostImagePromptUserMessage } from '@/lib/dupoin-image-prompt';
 import { DEFAULT_IMAGE_ASPECT_RATIO } from '@/lib/image-aspect-ratio';
+import {
+  applyGroundedFactsCheck,
+  formatSocialPostEvidence,
+  researchSocialPostWeb,
+  resolveSocialPostCitations,
+  type SocialPostWebResearch,
+} from '@/lib/social-post-research';
 import { v4 as uuidv4 } from 'uuid';
 import fs from 'fs';
 import path from 'path';
@@ -24,8 +31,9 @@ const STYLE_VARIANTS = [
 - Use emojis generously throughout
 - Punchy, short sentences
 - Create urgency and FOMO
-- Bold claims backed by excitement
-- High energy, high impact`,
+- Bold claims use excitement, not invented statistics
+- High energy, high impact
+- Do not invent numbers, prices, or competitor facts`,
     temperature: 0.9,
   },
   {
@@ -36,8 +44,9 @@ const STYLE_VARIANTS = [
 - Corporate tone with data-driven language
 - Minimal emojis (1-2 max)
 - Focus on credibility and trust
-- Include statistics or authority references
-- Clear, logical flow`,
+- Include a statistic or authority reference only when WEB_RESEARCH states it, and cite that source
+- Clear, logical flow
+- Do not invent numbers, prices, or competitor facts`,
     temperature: 0.5,
   },
   {
@@ -49,7 +58,8 @@ const STYLE_VARIANTS = [
 - Emotional connection and authenticity
 - Trendy references and cultural context
 - Surprise twist or unexpected angle
-- Memorable and shareable`,
+- Memorable and shareable
+- Do not invent numbers, prices, or competitor facts`,
     temperature: 0.95,
   },
 ];
@@ -139,11 +149,43 @@ export async function POST(request: NextRequest) {
           const taskId = uuidv4();
           const smartSystem = getSmartSystemPrompt('social-post', platform, brandGuidelines, targetAudience, styleContext);
 
-          // Step 0: Research — fetch last 5 similar posts
+          // Step 0: Open-web grounding, then past posts as a secondary signal.
+          let webResearch: SocialPostWebResearch;
+          try {
+            webResearch = await researchSocialPostWeb({
+              brief,
+              platform,
+              targetAudience,
+              goal,
+              onProgress: (message) => {
+                controller.enqueue(encoder.encode(sseEvent({
+                  step: 'research',
+                  progress: 4,
+                  message,
+                })));
+              },
+            });
+          } catch (error) {
+            console.warn('Social post web research failed:', error);
+            webResearch = {
+              status: 'empty',
+              queries: [],
+              sources: [],
+              warnings: ['Web research failed. Continuing with past posts only.'],
+            };
+          }
+
+          const readCount = webResearch.sources.filter((source) => source.read).length;
+          const webMessage = webResearch.status === 'skipped'
+            ? webResearch.skippedReason || 'Web grounding was skipped. Continuing with past posts only.'
+            : webResearch.sources.length
+              ? `Read ${readCount} source page${readCount === 1 ? '' : 's'} from ${webResearch.sources.length} web hit${webResearch.sources.length === 1 ? '' : 's'}.`
+              : (webResearch.warnings[0] || 'Open-web search returned no usable sources. Continuing with past posts only.');
           controller.enqueue(encoder.encode(sseEvent({
             step: 'research',
-            progress: 3,
-            message: '🔍 Researching past similar posts...',
+            progress: 8,
+            message: webMessage,
+            webResearch,
           })));
 
           let researchPosts: Array<{ brief: string; style: string; rating: number; caption: string }> = [];
@@ -188,16 +230,19 @@ export async function POST(request: NextRequest) {
 
           controller.enqueue(encoder.encode(sseEvent({
             step: 'research',
-            progress: 8,
-            message: `✅ Found ${researchPosts.length} reference posts`,
+            progress: 12,
+            message: `Found ${researchPosts.length} past post${researchPosts.length === 1 ? '' : 's'}. ${webResearch.status === 'grounded' ? 'Web sources are included in the caption prompt.' : 'Web grounding was not available, so captions use past posts only.'}`,
             researchPosts,
+            webResearch,
           })));
+
+          const evidence = formatSocialPostEvidence(webResearch);
 
           // Generate 3 options in parallel
           controller.enqueue(encoder.encode(sseEvent({
             step: 'draft',
-            progress: 5,
-            message: '🚀 Generating 3 style options in parallel...',
+            progress: 16,
+            message: 'Generating 3 style options in parallel...',
           })));
 
           const optionPromises = STYLE_VARIANTS.map(async (variant, index) => {
@@ -212,9 +257,11 @@ ${bestExamples}
 ${contextMemory}
 ${knowledgeContext}
 
-Follow the SOP strictly. Output JSON format with: { "hook": "...", "caption": "...", "hashtags": ["..."] }`;
+${evidence}
 
-            const progressBase = 10 + index * 20;
+Follow the SOP strictly. Output JSON format with: { "hook": "...", "caption": "...", "hashtags": ["..."], "citationIds": [1] }`;
+
+            const progressBase = 20 + index * 16;
 
             controller.enqueue(encoder.encode(sseEvent({
               step: 'draft',
@@ -249,7 +296,8 @@ Follow the SOP strictly. Output JSON format with: { "hook": "...", "caption": ".
               styleLabel: variant.styleLabel,
               hook: captionData.hook || '',
               caption: captionData.caption || result,
-              hashtags: captionData.hashtags || [],
+              hashtags: Array.isArray(captionData.hashtags) ? captionData.hashtags : [],
+              citations: resolveSocialPostCitations(captionData, webResearch.sources),
               imagePrompt: '', // Will be filled below
             };
           });
@@ -261,7 +309,11 @@ Follow the SOP strictly. Output JSON format with: { "hook": "...", "caption": ".
             message: '🔍 Running quality checks...',
           })));
 
-          const qcResults: QCResult[] = options.map(opt => runQC(opt.caption, opt.hashtags, platform));
+          const qcResults: QCResult[] = options.map(opt => applyGroundedFactsCheck(
+            runQC(opt.caption, opt.hashtags, platform),
+            opt.caption,
+            opt.citations,
+          ));
 
           controller.enqueue(encoder.encode(sseEvent({
             step: 'qc',
@@ -318,6 +370,7 @@ Follow the SOP strictly. Output JSON format with: { "hook": "...", "caption": ".
           const outputData = {
             options,
             imagePrompt: imagePrompts[0].content,
+            webResearch,
           };
 
           const dateStr = new Date().toISOString().split('T')[0];
@@ -344,6 +397,7 @@ Follow the SOP strictly. Output JSON format with: { "hook": "...", "caption": ".
               qcResults,
               dupoinFileName,
               researchPosts,
+              webResearch,
               status: 'draft',
             },
           })));
