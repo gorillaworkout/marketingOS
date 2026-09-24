@@ -340,7 +340,7 @@ export default function ArticleMarketNewsGenerator() {
               </div>
               <TextInput value={source.title} onChange={event => updateSource(index, 'title', event.target.value)} placeholder="Article title" />
               <TextInput type="url" value={source.url} onChange={event => updateSource(index, 'url', event.target.value)} placeholder="https://..." />
-              <TextArea value={source.verifiedFacts} onChange={event => updateSource(index, 'verifiedFacts', event.target.value)} rows={5} placeholder="Verified facts / quotes: numbers, prices, percent changes, institutions, and quotes that actually appear in the source." />
+              <TextArea value={source.verifiedFacts} onChange={event => updateSource(index, 'verifiedFacts', event.target.value)} rows={5} placeholder="Verified Facts / Quotes: numbers, prices, percent changes, institutions, and quotes that actually appear in the source." />
             </Panel>
           ))}
           {sources.length > 0 && <label className="flex cursor-pointer gap-3 rounded-[var(--mos-radius-panel)] border border-red-500/20 bg-red-500/5 p-4 text-sm text-red-100">

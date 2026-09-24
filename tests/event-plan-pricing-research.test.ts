@@ -237,5 +237,5 @@ test('researchEventPricing cites a page price and a Jina fallback without callin
   const report = toEventPlanResearch(research, ['https://redirect.example/price']);
   assert.equal(report.contacts[0]?.verified, false);
   assert.equal(report.contacts[0]?.sourceUrl, 'https://ancol.example/sewa');
-  assert.ok(report.sources.every((source) => !source.claim.toLowerCase().includes('verified quotation')));
+  assert.ok(report.sources.every((source) => !source.claim.toLowerCase().replace(/not a verified quotation/g, '').includes('verified quotation')));
 });

@@ -252,9 +252,9 @@ test('AI Research composer accepts documents from the picker, drop zone, and pas
   assert.match(page, /onDrop=\{handleAttachmentDrop\}/);
   assert.match(page, /onPaste=\{handleComposerPaste\}/);
   assert.match(page, /addAttachments\(files\)/);
-  assert.match(page, /Gambar, Excel, CSV, PDF, Word, atau PowerPoint/);
-  assert.match(page, /PDF, Word, atau PowerPoint\.\.\./);
-  assert.match(page, /PDF, Word, dan PowerPoint \(maks\. 4 per jenis\)/);
+  assert.match(page, /Images, Excel, CSV, PDF, Word, or PowerPoint/);
+  assert.match(page, /PDF, Word, or PowerPoint file\.\.\./);
+  assert.match(page, /PDF, Word, and PowerPoint \(max 4 of each\)/);
   assert.match(page, /AI_RESEARCH_MAX_DOCUMENTS/);
   assert.match(page, /AI_RESEARCH_MAX_DOCUMENT_BYTES/);
   assert.match(read('src/app/api/ai-research/chat/route.ts'), /await hydrateMessageFiles/);

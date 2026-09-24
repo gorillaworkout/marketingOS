@@ -237,7 +237,7 @@ export async function fetchAiResearchContextUrls(
       url: item.url,
       error: contextUrlBlockReason(item.url) || 'address is not public',
     })),
-    ...scan.overflow.map(item => ({ url: item.url, error: 'maksimal 3 tautan per pesan' })),
+    ...scan.overflow.map(item => ({ url: item.url, error: 'at most 3 links per message' })),
   ];
   const fetchImpl = options.fetchImpl || fetch;
   const lookupImpl = options.lookupImpl || defaultLookup;

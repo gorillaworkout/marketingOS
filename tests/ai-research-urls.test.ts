@@ -192,7 +192,7 @@ test('AI Research chat route grounds user URLs without dropping document attach'
   assert.match(page, /if \(!files\.length\) return;/);
   assert.match(page, /onPaste=\{handleComposerPaste\}/);
   assert.match(page, /addAttachments\(files\)/);
-  assert.match(page, /PDF, Word, atau PowerPoint\.\.\./);
+  assert.match(page, /PDF, Word, or PowerPoint file\.\.\./);
   assert.doesNotMatch(read('src/lib/ai-research-urls.ts'), /node:dns|node:net/);
   assert.match(read('src/lib/ai-research-url-fetch.ts'), /node:dns\/promises/);
   assert.match(route, /ai-research-url-fetch/);

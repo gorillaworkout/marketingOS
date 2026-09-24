@@ -138,5 +138,5 @@ test('Article Market News page restores recent history and clears the fact-revie
   assert.match(generator, /recentError/);
   assert.match(generator, /response\.ok/);
   assert.match(generator, /void fetchRecent\(\)/);
-  assert.match(page, /Buka history/);
+  assert.match(page, /Open history/);
 });

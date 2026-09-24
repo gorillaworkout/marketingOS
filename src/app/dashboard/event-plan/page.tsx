@@ -100,7 +100,8 @@ export default function EventPlanPage() {
   const [tokenUsage, setTokenUsage] = useState<TokenUsage | null>(null);
 
   useEffect(() => {
-    const template = new URLSearchParams(window.location.search).get('template');
+    const params = new URLSearchParams(window.location.search);
+    const template = params.get('template');
     // Apply the template query after mount so the server render stays stable.
     // eslint-disable-next-line react-hooks/set-state-in-effect -- URL is an external input read once on mount
     if (template) setTheme(template);
