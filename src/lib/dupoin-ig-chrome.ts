@@ -36,8 +36,11 @@ export const DUPOIN_IG_LOCKUP_HEIGHT = 108;
  */
 export const DUPOIN_IG_HEADER_BAND_PX = 172;
 
-/** Opaque white regulatory footer, pinned to the bottom of the native chrome. */
-export const DUPOIN_IG_FOOTER_BAND_PX = 80;
+/**
+ * Thin opaque white regulatory footer, pinned to the bottom of the native chrome.
+ * Two legal lines, tighter than a banner, matching the feed's disclaimer strip.
+ */
+export const DUPOIN_IG_FOOTER_BAND_PX = 64;
 
 /** Exact disclaimer on Bayu's template. Spelling "resiko" is intentional. */
 export const DUPOIN_IG_FOOTER_LINE_1 =

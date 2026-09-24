@@ -27,8 +27,8 @@ function footerSvg(): Buffer {
   return Buffer.from(`<?xml version="1.0" encoding="UTF-8"?>
 <svg width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" xmlns="http://www.w3.org/2000/svg">
   <rect width="${width}" height="${height}" fill="#ffffff"/>
-  <text x="${width / 2}" y="34" text-anchor="middle" font-family="Inter" font-size="15.5" fill="#111111">${DUPOIN_IG_FOOTER_LINE_1}</text>
-  <text x="${width / 2}" y="58" text-anchor="middle" font-family="Inter" font-size="13.5" fill="#111111">${DUPOIN_IG_FOOTER_LINE_2}</text>
+  <text x="${width / 2}" y="27" text-anchor="middle" font-family="Inter" font-size="14.5" fill="#111111">${DUPOIN_IG_FOOTER_LINE_1}</text>
+  <text x="${width / 2}" y="48" text-anchor="middle" font-family="Inter" font-size="12.5" fill="#111111">${DUPOIN_IG_FOOTER_LINE_2}</text>
 </svg>`);
 }
 

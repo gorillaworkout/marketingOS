@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import {
   DUPOIN_BLUE_HEX,
+  DUPOIN_IG_STYLE_LOCK,
   DUPOIN_LOGO_REQUIRED_LINE,
   IMAGE_PROMPT_SYSTEM,
   applyDupoinImagePromptLocks,
@@ -41,7 +42,12 @@ test('image-prompt system encodes Dupoin Brand Guidelines 2026 locks', () => {
     assert.match(prompt, /Jangan gambar logo|Jangan menggambar logo/i);
     assert.match(prompt, /badge CNN/i);
     assert.match(prompt, /footer regulasi/i);
-    assert.match(prompt, /pill outline putih/i);
+    assert.match(prompt, /pill terisi Dupoin Blue/i);
+    assert.match(prompt, /Swipe left/);
+    assert.match(prompt, /carousel atau story/i);
+    assert.match(prompt, /navy atau hitam/i);
+    assert.match(prompt, /laptop dengan chart/i);
+    assert.match(prompt, /1080x1080 persegi/);
     assert.doesNotMatch(prompt, /kanan-bawah/i);
     assert.doesNotMatch(prompt, /telah teregulasi/);
     assert.doesNotMatch(prompt, /MOST TRUSTED BROKER/);
@@ -82,7 +88,13 @@ test('sample image-prompt builder requires official logo, brand hex, and dropdow
   assert.match(sample, /Exact headline/);
   assert.match(sample, /Subheadline/);
   assert.match(sample, /CTA/);
-  assert.match(sample, /pill outline putih/i);
+  assert.match(sample, /pill terisi Dupoin Blue/i);
+  assert.match(sample, /Swipe left/);
+  assert.match(sample, /carousel atau story/i);
+  assert.match(sample, /navy\/hitam/i);
+  assert.match(sample, /laptop dengan chart/i);
+  assert.match(sample, /1080x1080/);
+  assert.match(sample, /1080x1350/);
   assert.match(sample, /ditempel otomatis/i);
   assert.match(sample, /JANGAN digambar/i);
   assert.match(sample, /DILARANG/);
@@ -115,6 +127,11 @@ test('applyDupoinImagePromptLocks reserves chrome bands and locks the selected s
   assert.match(locked, /#2EB5C4/);
   assert.equal(locked.includes(DUPOIN_LOGO_REQUIRED_LINE), true);
   assert.match(locked, /No overlay/i, 'scene-integrity negatives ride along with every prompt');
+  assert.equal(locked.includes(DUPOIN_IG_STYLE_LOCK), true, 'Instagram style lock rides along with every prompt');
+  assert.equal(locked.split(DUPOIN_IG_STYLE_LOCK).length, 2, 'style lock is applied once');
+  assert.match(locked, /filled Dupoin Blue pill/);
+  assert.match(locked, /Swipe left →/);
+  assert.match(locked, /brief's own short CTA/);
   assert.doesNotMatch(locked, /lower-right/);
   assert.doesNotMatch(locked, /graphic mark \+ wordmark/);
   assert.doesNotMatch(locked, /telah teregulasi/);

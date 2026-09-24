@@ -174,6 +174,37 @@ test('compositing pins chrome to the edges and leaves the middle scene alone', a
   assert.deepEqual(justAboveFooter.slice(0, 3), [180, 20, 20], 'scene just above the footer must remain');
 });
 
+test('compositing scales the same chrome onto a square feed canvas', async () => {
+  const width = 1024;
+  const height = 1024;
+  const canvas = await sharp({
+    create: { width, height, channels: 4, background: { r: 8, g: 16, b: 32, alpha: 1 } },
+  }).png().toBuffer();
+  const stamped = await compositeDupoinInstagramChrome(canvas);
+  const meta = await sharp(stamped).metadata();
+  assert.equal(meta.width, width, 'square dropdown size is preserved');
+  assert.equal(meta.height, height);
+
+  const { data, info } = await raw(stamped);
+  const at = (x: number, y: number) => {
+    const i = (y * info.width + x) * 4;
+    return [data[i], data[i + 1], data[i + 2]];
+  };
+  const place = chromePlacement(width, height);
+  assert.ok(place.headerHeight + place.footerHeight < height);
+  assert.deepEqual(at(Math.round(width / 2), Math.round(height / 2)), [8, 16, 32], 'square middle stays the generated scene');
+  const bottom = at(12, height - 3);
+  assert.ok(bottom[0] > 245 && bottom[1] > 245 && bottom[2] > 245, 'square canvas still gets the white footer');
+  let topTeal = 0;
+  for (let y = 0; y < place.headerHeight; y += 2) {
+    for (let x = 0; x < 700; x += 2) {
+      const [r, g, b] = at(x, y);
+      if (isTeal(r, g, b)) topTeal += 1;
+    }
+  }
+  assert.ok(topTeal > 150, 'square canvas still gets the upper-left lockup');
+});
+
 test('compositing scales the same chrome onto a landscape canvas', async () => {
   const width = 1536;
   const height = 1024;
