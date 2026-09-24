@@ -289,7 +289,7 @@ export default function AIResearchPage() {
   const [healthResults, setHealthResults] = useState<ModelHealthResult[] | null>(null);
   const [healthError, setHealthError] = useState('');
   const [healthOpen, setHealthOpen] = useState(false);
-  const chatEndRef = useRef<HTMLDivElement>(null);
+  const transcriptRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const skipNextLoadRef = useRef(false);
@@ -299,6 +299,18 @@ export default function AIResearchPage() {
   const selectResearchMode = (mode: 'fast' | 'deep') => {
     writeResearchMode(mode);
   };
+
+  useEffect(() => {
+    const root = document.documentElement;
+    const previousRoot = root.style.overflow;
+    const previousBody = document.body.style.overflow;
+    root.style.overflow = 'hidden';
+    document.body.style.overflow = 'hidden';
+    return () => {
+      root.style.overflow = previousRoot;
+      document.body.style.overflow = previousBody;
+    };
+  }, []);
 
   useEffect(() => {
     fetch('/api/settings/model')
@@ -409,7 +421,9 @@ export default function AIResearchPage() {
   }, [activeConvoId]);
 
   useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    const transcript = transcriptRef.current;
+    if (!transcript) return;
+    transcript.scrollTo({ top: transcript.scrollHeight });
   }, [messages, streaming, loading]);
 
   const clearPendingAttachments = () => {
@@ -1034,7 +1048,10 @@ export default function AIResearchPage() {
   };
 
   return (
-    <div className="h-[calc(100vh-64px)] flex flex-col bg-[var(--mos-bg)] relative overflow-hidden">
+    <div
+      data-testid="ai-research-shell"
+      className="fixed inset-x-0 bottom-0 top-14 z-10 flex min-h-0 min-w-0 flex-col overflow-hidden bg-[var(--mos-bg)] lg:left-[264px] lg:top-0"
+    >
       {/* Top bar */}
       <div className="flex items-center gap-3 px-4 py-2.5 border-b border-[var(--mos-border)] bg-[var(--mos-bg)] flex-shrink-0 flex-wrap">
         <button
@@ -1157,10 +1174,10 @@ export default function AIResearchPage() {
       </div>
 
       {/* Main area: sidebar + chat */}
-      <div className="flex-1 flex min-h-0">
+      <div className="flex min-h-0 flex-1 overflow-hidden">
         {/* Sidebar */}
-        <div className={`${sidebarOpen ? 'w-72' : 'w-0'} transition-all duration-200 overflow-hidden border-r border-[var(--mos-border)] flex-shrink-0 bg-[var(--mos-bg)] flex flex-col`}>
-          <div className="p-3 space-y-2 border-b border-[var(--mos-border)]" data-testid="ai-research-project-switcher">
+        <div className={`${sidebarOpen ? 'w-72' : 'w-0'} flex min-h-0 flex-shrink-0 flex-col overflow-hidden border-r border-[var(--mos-border)] bg-[var(--mos-bg)] transition-all duration-200`}>
+          <div className="max-h-[min(52%,20rem)] shrink-0 space-y-2 overflow-y-auto border-b border-[var(--mos-border)] p-3" data-testid="ai-research-project-switcher">
             <p className="text-[10px] font-semibold uppercase tracking-wide text-[var(--mos-text-muted)]">Research projects</p>
             <button
               type="button"
@@ -1304,7 +1321,7 @@ export default function AIResearchPage() {
               New chat
             </button>
           </div>
-          <div className="overflow-y-auto flex-1">
+          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
             {visibleConversations.map(conv => (
               <div
                 key={conv.id}
@@ -1344,7 +1361,7 @@ export default function AIResearchPage() {
         <div
           data-testid="ai-research-drop-zone"
           data-drag-active={fileDragActive ? 'true' : 'false'}
-          className={`relative flex-1 flex flex-col min-w-0 ${fileDragActive ? 'ring-2 ring-inset ring-indigo-400' : ''}`}
+          className={`relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden ${fileDragActive ? 'ring-2 ring-inset ring-indigo-400' : ''}`}
           onDragEnter={handleAttachmentDragEnter}
           onDragOver={handleAttachmentDragOver}
           onDragLeave={handleAttachmentDragLeave}
@@ -1362,8 +1379,12 @@ export default function AIResearchPage() {
               </div>
             </div>
           )}
-          {/* Messages — only this scrolls */}
-          <div className="flex-1 overflow-y-auto">
+          {/* Messages — only this region scrolls */}
+          <div
+            ref={transcriptRef}
+            data-testid="ai-research-transcript"
+            className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain"
+          >
             <div className="max-w-3xl mx-auto px-4 sm:px-6 py-6 space-y-6">
               {/* Empty state */}
               {messages.length === 0 && !loading && (
@@ -1436,7 +1457,7 @@ export default function AIResearchPage() {
                           ))}
                         </div>
                       )}
-                      <div className={`px-4 py-2.5 text-sm leading-relaxed ${
+                      <div className={`min-w-0 max-w-full px-4 py-2.5 text-sm leading-relaxed ${
                         msg.role === 'user'
                           ? 'bg-indigo-600 text-white rounded-2xl rounded-tr-md whitespace-pre-wrap'
                           : 'bg-[var(--mos-raised)] border border-[var(--mos-border)] text-[var(--mos-text)] rounded-2xl rounded-tl-md'
@@ -1596,12 +1617,14 @@ export default function AIResearchPage() {
                 </div>
               )}
 
-              <div ref={chatEndRef} />
             </div>
           </div>
 
-          {/* Input — sticky at bottom */}
-          <div className="flex-shrink-0 border-t border-[var(--mos-border)] bg-[var(--mos-bg)] px-4 py-3">
+          {/* Composer stays in the column; tall attachment stacks scroll inside it */}
+          <div
+            data-testid="ai-research-composer"
+            className="min-h-0 max-h-80 shrink overflow-y-auto overscroll-contain border-t border-[var(--mos-border)] bg-[var(--mos-bg)] px-4 py-3"
+          >
             <div className="max-w-3xl mx-auto">
               {(linkScan.accepted.length > 0 || linkScan.blocked.length > 0 || linkScan.overflow.length > 0 || linkDraftOpen) && (
                 <div className="mb-2 space-y-1.5" data-testid="ai-research-context-links">

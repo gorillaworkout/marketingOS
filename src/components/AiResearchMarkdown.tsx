@@ -64,7 +64,7 @@ function renderBlock(block: MarkdownBlock, index: number): ReactNode {
   }
   if (block.type === 'table') {
     return (
-      <div key={index} className="overflow-x-auto">
+      <div key={index} className="max-w-full overflow-x-auto">
         <table className="w-full border-collapse text-left text-[13px]">
           <thead>
             <tr>
@@ -93,7 +93,7 @@ function renderBlock(block: MarkdownBlock, index: number): ReactNode {
   return (
     <pre
       key={index}
-      className="overflow-x-auto rounded-lg bg-black/30 px-3 py-2 font-mono text-[12px] leading-5"
+      className="max-w-full overflow-x-auto rounded-lg bg-black/30 px-3 py-2 font-mono text-[12px] leading-5"
     >
       <code>{block.value}</code>
     </pre>
@@ -111,7 +111,7 @@ export function AiResearchMarkdown({
 }) {
   const blocks = parseMarkdown(text);
   return (
-    <div className={`space-y-2 break-words ${className}`.trim()} data-markdown="assistant">
+    <div className={`min-w-0 max-w-full space-y-2 break-words ${className}`.trim()} data-markdown="assistant">
       {blocks.length === 0 ? <p className="whitespace-pre-wrap">{text}</p> : blocks.map(renderBlock)}
       {trailing}
     </div>

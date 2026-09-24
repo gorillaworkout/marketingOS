@@ -167,12 +167,12 @@ export function AiResearchSourcesPanel({
       )}
       <aside
         aria-label="Sources used"
-        className={`absolute inset-y-0 right-0 z-30 flex w-[min(100vw,20rem)] flex-col border-l border-[var(--mos-border)] bg-[var(--mos-bg)] shadow-2xl transition-transform duration-200 md:static md:z-0 md:h-full md:shadow-none ${
+        className={`absolute inset-y-0 right-0 z-30 flex min-h-0 w-[min(100vw,20rem)] flex-col overflow-hidden border-l border-[var(--mos-border)] bg-[var(--mos-bg)] shadow-2xl transition-transform duration-200 md:static md:z-0 md:h-full md:shadow-none ${
           open ? 'translate-x-0' : 'translate-x-full md:translate-x-0 pointer-events-none md:pointer-events-auto'
         } ${open ? 'md:w-80 md:pointer-events-auto' : 'md:w-0 md:border-l-0 md:overflow-hidden'}`}
       >
         <div className={`${open ? 'flex' : 'hidden md:flex'} h-full min-h-0 flex-col ${open ? '' : 'md:hidden'}`}>
-          <div className="flex items-start justify-between gap-2 border-b border-[var(--mos-border)] px-3 py-2.5">
+          <div className="flex shrink-0 items-start justify-between gap-2 border-b border-[var(--mos-border)] px-3 py-2.5">
             <div className="min-w-0">
               <p className="text-xs font-semibold text-[var(--mos-text)]">{title}</p>
               <p className="mt-0.5 text-[10px] leading-4 text-[var(--mos-text-muted)]">
@@ -191,13 +191,13 @@ export function AiResearchSourcesPanel({
               </svg>
             </button>
           </div>
-          <div className="flex items-center justify-between gap-2 border-b border-[var(--mos-border-subtle)] px-3 py-1.5 text-[10px] text-[var(--mos-text-faint)]">
+          <div className="flex shrink-0 items-center justify-between gap-2 border-b border-[var(--mos-border-subtle)] px-3 py-1.5 text-[10px] text-[var(--mos-text-faint)]">
             <span>{sources.length} source{sources.length === 1 ? '' : 's'}{pinnedCount ? ` · ${pinnedCount} pinned` : ''}</span>
             {grounding === 'ok' && (
               <span className="text-[9px] uppercase tracking-wide text-emerald-300/80">Complete</span>
             )}
           </div>
-          <div className="flex-1 overflow-y-auto p-3 space-y-2">
+          <div className="min-h-0 flex-1 space-y-2 overflow-y-auto overscroll-contain p-3">
             {loading && sources.length === 0 && !grounding && (
               <p className="px-1 py-6 text-center text-[11px] text-[var(--mos-text-muted)]">Collecting sources…</p>
             )}
@@ -229,7 +229,7 @@ export function AiResearchSourcesPanel({
             ))}
           </div>
           {pinnedCount > 0 && (
-            <p className="border-t border-[var(--mos-border-subtle)] px-3 py-2 text-[9px] leading-4 text-[var(--mos-text-faint)]">
+            <p className="shrink-0 border-t border-[var(--mos-border-subtle)] px-3 py-2 text-[9px] leading-4 text-[var(--mos-text-faint)]">
               Pinned sources are sent again on the next turn so the model prioritizes them. The panel still shows every trace.
             </p>
           )}

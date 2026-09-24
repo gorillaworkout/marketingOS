@@ -121,8 +121,8 @@ export function AiResearchWatchPanel({
   return (
     <div className="fixed inset-0 z-40 flex justify-end" data-testid="ai-research-watch-panel">
       <button type="button" aria-label="Close watches" className="absolute inset-0 bg-black/45" onClick={onClose} />
-      <aside className="relative flex h-full w-[min(100vw,24rem)] flex-col border-l border-[var(--mos-border)] bg-[var(--mos-bg)] shadow-2xl">
-        <div className="flex items-start justify-between gap-2 border-b border-[var(--mos-border)] px-4 py-3">
+      <aside className="relative flex h-full min-h-0 w-[min(100vw,24rem)] flex-col overflow-hidden border-l border-[var(--mos-border)] bg-[var(--mos-bg)] shadow-2xl">
+        <div className="flex shrink-0 items-start justify-between gap-2 border-b border-[var(--mos-border)] px-4 py-3">
           <div>
             <h2 className="text-sm font-semibold text-[var(--mos-text)]">Topic watches</h2>
             <p className="mt-0.5 text-[11px] text-[var(--mos-text-muted)]">{watches.length}/{limit} watches · check daily or now</p>
@@ -132,7 +132,7 @@ export function AiResearchWatchPanel({
           </button>
         </div>
         <form
-          className="space-y-2 border-b border-[var(--mos-border)] px-4 py-3"
+          className="shrink-0 space-y-2 border-b border-[var(--mos-border)] px-4 py-3"
           onSubmit={event => {
             event.preventDefault();
             void createWatch();
@@ -163,7 +163,7 @@ export function AiResearchWatchPanel({
           </button>
         </form>
         {error && <p className="px-4 pt-2 text-[11px] text-amber-200">{error}</p>}
-        <div className="flex-1 space-y-3 overflow-y-auto px-4 py-3">
+        <div className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain px-4 py-3">
           {loading && watches.length === 0 && <p className="text-[11px] text-[var(--mos-text-muted)]">Loading watches…</p>}
           {!loading && watches.length === 0 && (
             <p className="text-[11px] leading-5 text-[var(--mos-text-muted)]">No watches yet. Add a topic such as gold, the rupiah, or a competitor name.</p>
