@@ -6,6 +6,8 @@ import {
   AI_RESEARCH_HANDOFF_STORAGE_KEY,
   buildArticleMarketNewsPrefill,
   buildSocialPostBrief,
+  buildVideoScriptBrief,
+  buildVideoScriptReferenceLinks,
   parseAiResearchHandoff,
   serializeAiResearchHandoff,
 } from '../src/lib/ai-research-handoff';
@@ -65,8 +67,54 @@ test('handoff prefills social brief and article keyword without publishing', () 
   assert.deepEqual(AI_RESEARCH_HANDOFF_MODULES.map(module => module.label), [
     'Send to Social Post',
     'Send to Article Market News',
+    'Send to Video Script',
   ]);
   assert.equal(AI_RESEARCH_HANDOFF_MODULES[1]?.href, '/dashboard/sop?from=ai-research');
+  assert.equal(AI_RESEARCH_HANDOFF_MODULES[2]?.href, '/dashboard/video-script?from=ai-research');
+});
+
+test('handoff prefills a video script brief and reference links without generating', () => {
+  const sources = [
+    { title: 'Reuters', url: 'https://www.reuters.com/markets/gold' },
+    { title: 'skip', url: 'http://127.0.0.1/secret' },
+  ];
+  const input = {
+    query: 'What moved gold this week?',
+    answer: 'Spot gold rose after the central bank held rates. '.repeat(20),
+    sources,
+  };
+  const brief = buildVideoScriptBrief(input);
+  assert.match(brief, /Research topic: What moved gold/);
+  assert.match(brief, /https:\/\/www\.reuters\.com\/markets\/gold/);
+  assert.match(brief, /Not published yet/);
+  assert.match(brief, /video script/);
+  assert.doesNotMatch(brief, /127\.0\.0\.1/);
+  assert.equal(buildVideoScriptReferenceLinks(sources), 'https://www.reuters.com/markets/gold');
+
+  const raw = serializeAiResearchHandoff({
+    target: 'video-script',
+    query: input.query,
+    answer: input.answer,
+    sources,
+    savedAt: new Date(NOW).toISOString(),
+  });
+  const video = parseAiResearchHandoff(raw, 'video-script', NOW + 1_000);
+  assert.match(video?.brief || '', /Reuters/);
+  assert.equal(video?.references, 'https://www.reuters.com/markets/gold');
+  assert.equal(parseAiResearchHandoff(raw, 'social-post', NOW), null);
+  assert.equal(parseAiResearchHandoff(raw, 'article-market-news', NOW), null);
+
+  const page = read('src/app/dashboard/video-script/page.tsx');
+  const tools = read('src/components/AiResearchAnswerTools.tsx');
+  assert.match(page, /readAiResearchHandoff\('video-script'\)/);
+  assert.match(page, /setEvent\(handoff\.brief\)/);
+  assert.match(page, /setReferences\(handoff\.references\)/);
+  assert.match(page, /Do not call handleGeneratePreview/);
+  assert.match(page, /data-testid="video-script-research-handoff"/);
+  assert.match(page, /Not published yet/);
+  assert.match(tools, /writeAiResearchHandoff/);
+  assert.match(tools, /AI_RESEARCH_HANDOFF_MODULES/);
+  assert.doesNotMatch(tools, /\/api\/video-script\/generate/);
 });
 
 test('handoff lands on the existing forms and does not generate', () => {

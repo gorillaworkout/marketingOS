@@ -7,7 +7,7 @@ export const AI_RESEARCH_HANDOFF_QUERY = 'from';
 export const AI_RESEARCH_HANDOFF_VALUE = 'ai-research';
 export const AI_RESEARCH_HANDOFF_MAX_AGE_MS = 2 * 60 * 60 * 1000;
 
-export type AiResearchHandoffTarget = 'social-post' | 'article-market-news';
+export type AiResearchHandoffTarget = 'social-post' | 'article-market-news' | 'video-script';
 
 export interface AiResearchHandoffSource {
   title: string;
@@ -36,6 +36,11 @@ export const AI_RESEARCH_HANDOFF_MODULES: Array<{
     id: 'article-market-news',
     label: 'Send to Article Market News',
     href: `/dashboard/sop?${AI_RESEARCH_HANDOFF_QUERY}=${AI_RESEARCH_HANDOFF_VALUE}`,
+  },
+  {
+    id: 'video-script',
+    label: 'Send to Video Script',
+    href: `/dashboard/video-script?${AI_RESEARCH_HANDOFF_QUERY}=${AI_RESEARCH_HANDOFF_VALUE}`,
   },
 ];
 
@@ -91,6 +96,30 @@ export function buildSocialPostBrief(input: {
   ].join('\n');
 }
 
+export function buildVideoScriptBrief(input: {
+  query: string;
+  answer: string;
+  sources?: AiResearchHandoffSource[];
+}): string {
+  const query = condenseResearchText(input.query, 500) || 'Dupoin AI research';
+  const answer = condenseResearchText(input.answer, 1_600);
+  const sources = sourceLines(input.sources || []);
+  return [
+    `Research topic: ${query}`,
+    '',
+    'Summary:',
+    answer || '(Empty answer)',
+    '',
+    sources.length ? `Sources:\n${sources.join('\n')}` : 'Sources: none on this message.',
+    '',
+    'Note: draft from Dupoin AI Research. Not published yet — edit before you generate a video script.',
+  ].join('\n');
+}
+
+export function buildVideoScriptReferenceLinks(sources?: AiResearchHandoffSource[]): string {
+  return safeSources(sources || []).slice(0, 4).map((source) => source.url).join('\n');
+}
+
 export function buildArticleMarketNewsPrefill(input: {
   query: string;
   answer: string;
@@ -125,7 +154,7 @@ export function parseAiResearchHandoff(
   raw: string | null | undefined,
   target: AiResearchHandoffTarget,
   now = Date.now(),
-): { brief?: string; keyword?: string; angle?: string; query: string } | null {
+): { brief?: string; keyword?: string; angle?: string; references?: string; query: string } | null {
   if (!raw) return null;
   let parsed: Partial<AiResearchHandoffRecord>;
   try {
@@ -142,6 +171,13 @@ export function parseAiResearchHandoff(
   if (target === 'social-post') {
     return { query, brief: buildSocialPostBrief({ query, answer, sources }) };
   }
+  if (target === 'video-script') {
+    return {
+      query,
+      brief: buildVideoScriptBrief({ query, answer, sources }),
+      references: buildVideoScriptReferenceLinks(sources),
+    };
+  }
   const article = buildArticleMarketNewsPrefill({ query, answer, sources });
   return { query, keyword: article.keyword, angle: article.angle };
 }
@@ -154,7 +190,7 @@ export function writeAiResearchHandoff(record: Omit<AiResearchHandoffRecord, 'sa
 export function readAiResearchHandoff(
   target: AiResearchHandoffTarget,
   now = Date.now(),
-): { brief?: string; keyword?: string; angle?: string; query: string } | null {
+): { brief?: string; keyword?: string; angle?: string; references?: string; query: string } | null {
   if (typeof sessionStorage === 'undefined') return null;
   return parseAiResearchHandoff(sessionStorage.getItem(AI_RESEARCH_HANDOFF_STORAGE_KEY), target, now);
 }
