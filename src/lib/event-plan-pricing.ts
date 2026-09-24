@@ -117,6 +117,36 @@ export function buildEventPricingQueries(input: { eventName?: string; theme?: st
   return [...new Set(queries.map((query) => query.replace(/\s+/g, ' ').trim()))].slice(0, 4);
 }
 
+/** A pack is thin until a public venue price is cited. Speaker-only or empty packs get one follow-up search. */
+export function eventPricingPackIsThin(hits: EventPricingHit[]): boolean {
+  return !hits.some((hit) => hit.category === 'venue' && hit.amounts.length > 0);
+}
+
+export function buildEventPricingFollowUpQueries(input: {
+  eventName?: string;
+  theme?: string;
+  location: string;
+  existingQueries: string[];
+}): string[] {
+  const location = input.location.replace(/\s+/g, ' ').trim() || 'Jakarta';
+  const topic = (input.theme || input.eventName || 'event').replace(/\s+/g, ' ').trim();
+  const candidates = [
+    `${location} daftar harga sewa ballroom`,
+    `${location} vendor event organizer paket harga`,
+    `speaker fee ${topic} Indonesia`,
+  ];
+  const seen = new Set(input.existingQueries.map((query) => query.toLowerCase()));
+  const unique: string[] = [];
+  for (const query of candidates) {
+    const normalized = query.replace(/\s+/g, ' ').trim();
+    if (normalized.length < 3 || seen.has(normalized.toLowerCase())) continue;
+    seen.add(normalized.toLowerCase());
+    unique.push(normalized);
+    if (unique.length >= 2) break;
+  }
+  return unique;
+}
+
 export function extractPublicContacts(text: string): { phones: string[]; emails: string[] } {
   const emails = [...new Set((text.match(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi) || []).map((email) => email.toLowerCase()))].slice(0, 3);
   const phones: string[] = [];

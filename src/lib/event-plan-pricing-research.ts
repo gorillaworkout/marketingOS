@@ -10,9 +10,12 @@ import {
   searchSerper,
 } from './ai-research-grounding';
 import { resolveEventLocation } from './event-plan-budget';
+import { EVENT_PLAN_PROGRESS } from './event-plan-progress';
 import type { EventPlanResearch } from './event-plan-research';
 import {
+  buildEventPricingFollowUpQueries,
   buildEventPricingQueries,
+  eventPricingPackIsThin,
   extractPublicContacts,
   extractPublicRupiahAmounts,
   inferPricingCategory,
@@ -21,13 +24,22 @@ import {
 } from './event-plan-pricing';
 
 const MAX_PAGE_FETCHES = 5;
+const FOLLOW_UP_PAGE_FETCHES = 3;
+const MAX_HITS = 12;
 const MAX_BYTES = 400_000;
 const DEFAULT_TIMEOUT_MS = 8_000;
+
+export type EventPricingProgress = {
+  phase: 'searching' | 'reading';
+  round: number;
+  message: string;
+};
 
 export type EventPricingResearch = {
   queries: string[];
   hits: EventPricingHit[];
   warnings: string[];
+  rounds?: number;
 };
 
 type FetchLike = typeof fetch;
@@ -248,6 +260,54 @@ async function searchPublicWeb(
   return found;
 }
 
+function orderedCandidates(candidates: Candidate[]): Candidate[] {
+  const priced = candidates.filter((candidate) => extractPublicRupiahAmounts(candidate.snippet).length > 0);
+  return [...candidates.filter((candidate) => candidate.submitted), ...priced, ...candidates]
+    .filter((candidate, index, list) => list.findIndex((item) => item.url === candidate.url) === index);
+}
+
+function pendingFetches(
+  candidates: Candidate[],
+  documents: Map<string, string>,
+  limit: number,
+  preferQueries?: Set<string>,
+): Candidate[] {
+  const pending = orderedCandidates(candidates).filter((candidate) => !documents.has(candidate.url));
+  if (!preferQueries) return pending.slice(0, limit);
+  const preferred = pending.filter((candidate) => preferQueries.has(candidate.query));
+  const rest = pending.filter((candidate) => !preferQueries.has(candidate.query));
+  return [...preferred, ...rest].slice(0, limit);
+}
+
+function collectNewHits(
+  candidates: Candidate[],
+  documents: Map<string, string>,
+  fetchedNow: Set<string>,
+  hits: EventPricingHit[],
+  consumed: Set<string>,
+) {
+  const priced = new Set(
+    candidates.filter((candidate) => extractPublicRupiahAmounts(candidate.snippet).length > 0).map((candidate) => candidate.url),
+  );
+  for (const candidate of orderedCandidates(candidates)) {
+    if (consumed.has(candidate.url)) continue;
+    const fetchedThisRound = fetchedNow.has(candidate.url);
+    const pricedSnippet = priced.has(candidate.url);
+    if (!fetchedThisRound && !pricedSnippet) continue;
+    const text = documents.get(candidate.url) || candidate.snippet;
+    if (!text.trim() && !candidate.submitted) continue;
+    hits.push(...hitsFromDocument(candidate, text));
+    consumed.add(candidate.url);
+  }
+}
+
+function capPricingHits(hits: EventPricingHit[], rounds: number): EventPricingHit[] {
+  if (rounds < 2) return hits.slice(0, MAX_HITS);
+  const priced = hits.filter((hit) => hit.amounts.length > 0);
+  const unpriced = hits.filter((hit) => hit.amounts.length === 0);
+  return [...priced, ...unpriced].slice(0, MAX_HITS);
+}
+
 export async function researchEventPricing(input: {
   eventName?: string;
   theme?: string;
@@ -257,6 +317,7 @@ export async function researchEventPricing(input: {
   serperApiKey?: string;
   timeoutMs?: number;
   enableJina?: boolean;
+  onProgress?: (event: EventPricingProgress) => void;
 }): Promise<EventPricingResearch> {
   const fetchImpl = input.fetchImpl ?? fetch;
   const timeoutMs = input.timeoutMs ?? DEFAULT_TIMEOUT_MS;
@@ -265,7 +326,6 @@ export async function researchEventPricing(input: {
   const queries = buildEventPricingQueries({ eventName: input.eventName, theme: input.theme, location });
   const warnings: string[] = [];
   const serperKey = input.serperApiKey !== undefined ? input.serperApiKey.trim() : resolveSearchApiKeys().serper;
-  const searched = await searchPublicWeb(queries, fetchImpl, serperKey, timeoutMs, warnings);
   const candidates: Candidate[] = [];
   const seen = new Set<string>();
   const push = (candidate: Candidate) => {
@@ -276,32 +336,53 @@ export async function researchEventPricing(input: {
   for (const url of input.researchUrls || []) {
     push({ url, title: url, snippet: '', query: `${location} sewa venue`, submitted: true });
   }
-  for (const candidate of searched) push(candidate);
-
-  const priced = candidates.filter((candidate) => extractPublicRupiahAmounts(candidate.snippet).length > 0);
-  const fetchList = [...candidates.filter((candidate) => candidate.submitted), ...priced, ...candidates]
-    .filter((candidate, index, list) => list.findIndex((item) => item.url === candidate.url) === index)
-    .slice(0, MAX_PAGE_FETCHES);
 
   const documents = new Map<string, string>();
-  await Promise.all(fetchList.map(async (candidate) => {
-    const text = await fetchPublicDocument(candidate.url, fetchImpl, timeoutMs, MAX_BYTES, enableJina);
-    if (text) documents.set(candidate.url, text);
-  }));
-
   const hits: EventPricingHit[] = [];
   const consumed = new Set<string>();
-  for (const candidate of fetchList) {
-    const text = documents.get(candidate.url) || candidate.snippet;
-    if (!text.trim() && !candidate.submitted) continue;
-    hits.push(...hitsFromDocument(candidate, text));
-    consumed.add(candidate.url);
+  const allQueries = [...queries];
+  let rounds = 0;
+
+  const runRound = async (roundQueries: string[], fetchBudget: number) => {
+    rounds += 1;
+    input.onProgress?.({
+      phase: 'searching',
+      round: rounds,
+      message: EVENT_PLAN_PROGRESS.searching(rounds),
+    });
+    if (roundQueries.length) {
+      const searched = await searchPublicWeb(roundQueries, fetchImpl, serperKey, timeoutMs, warnings);
+      for (const candidate of searched) push(candidate);
+    }
+    input.onProgress?.({
+      phase: 'reading',
+      round: rounds,
+      message: EVENT_PLAN_PROGRESS.reading(rounds),
+    });
+    const preferQueries = rounds > 1 ? new Set(roundQueries) : undefined;
+    const fetchList = pendingFetches(candidates, documents, fetchBudget, preferQueries);
+    await Promise.all(fetchList.map(async (candidate) => {
+      const text = await fetchPublicDocument(candidate.url, fetchImpl, timeoutMs, MAX_BYTES, enableJina);
+      if (text) documents.set(candidate.url, text);
+    }));
+    collectNewHits(candidates, documents, new Set(fetchList.map((candidate) => candidate.url)), hits, consumed);
+  };
+
+  await runRound(queries, MAX_PAGE_FETCHES);
+  if (eventPricingPackIsThin(hits)) {
+    const followUps = buildEventPricingFollowUpQueries({
+      eventName: input.eventName,
+      theme: input.theme,
+      location,
+      existingQueries: allQueries,
+    });
+    if (followUps.length) {
+      allQueries.push(...followUps);
+      await runRound(followUps, FOLLOW_UP_PAGE_FETCHES);
+    }
   }
-  for (const candidate of priced) {
-    if (consumed.has(candidate.url)) continue;
-    hits.push(...hitsFromDocument(candidate, candidate.snippet));
-  }
-  return { queries, hits: hits.slice(0, 12), warnings };
+
+  return { queries: allQueries, hits: capPricingHits(hits, rounds), warnings: [...new Set(warnings)], rounds };
 }
 
 export function toEventPlanResearch(research: EventPricingResearch, submittedUrls: string[] = []): EventPlanResearch {
