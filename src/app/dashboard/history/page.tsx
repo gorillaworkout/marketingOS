@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import { articleDocxFilename, buildArticleDocxBlob } from '@/lib/article-market-news-docx';
 import type { ArticleSourceInput } from '@/lib/article-market-news';
 import { buildMarketResearchDocxBlob, marketResearchDocxFilename } from '@/lib/market-research-docx';
-import type { MarketResearchItem } from '@/lib/market-research';
+import { formatMarketResearchEvidenceLevel, type MarketResearchItem } from '@/lib/market-research';
 import { formatMarketResearchSourceStatus } from '@/lib/market-research-status';
 import { Button, EmptyState, FilterGroup, LoadingState, Panel, PageHeader, PageStack, StatusBadge, Toolbar } from '@/components/ui/dashboard';
 
@@ -204,7 +204,7 @@ export default function HistoryPage() {
                             {items.map((item, index) => <article key={item.candidateId} className="rounded-[var(--mos-radius-panel)] border border-[var(--mos-border)] bg-[var(--mos-surface)] p-4">
                               <p className="text-xs font-semibold text-cyan-400">#{index + 1} · {item.symbol || item.productCategory} · {item.productCategory}{item.importanceCategory ? ` · ${item.importanceCategory}` : ''}</p>
                               <h4 className="mt-1 font-semibold text-white">{item.articleTitle}</h4>
-                              <p className="mt-1 text-xs text-[var(--mos-text-faint)]">{item.newsSource} · {item.publicationDate} {item.publicationTime} WIB · Latest Update Time: {item.latestUpdateTime ? `${item.latestUpdateTime} WIB` : 'Not provided'}</p>
+                              <p className="mt-1 text-xs text-[var(--mos-text-faint)]">{item.newsSource} · {item.publicationDate} {item.publicationTime ? `${item.publicationTime} WIB` : 'time not stated'} · Latest Update Time: {item.latestUpdateTime ? `${item.latestUpdateTime} WIB` : 'Not provided'} · {formatMarketResearchEvidenceLevel(item.evidenceLevel)}</p>
                               <dl className="mt-3 space-y-2 text-sm"><div><dt className="text-[var(--mos-text-faint)]">Main Event</dt><dd className="text-[var(--mos-text-secondary)]">{item.mainEvent}</dd></div><div><dt className="text-[var(--mos-text-faint)]">Latest Factual Development</dt><dd className="text-[var(--mos-text-secondary)]">{item.latestFactualDevelopment}</dd></div><div><dt className="text-[var(--mos-text-faint)]">Market Relevance</dt><dd className="text-[var(--mos-text-secondary)]">{item.marketRelevance}</dd></div></dl>
                               <a href={item.articleUrl} target="_blank" rel="noreferrer" className="mt-3 block break-all text-sm text-cyan-400 hover:underline">{item.articleUrl}</a>
                             </article>)}
