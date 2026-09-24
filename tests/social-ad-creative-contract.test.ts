@@ -9,6 +9,7 @@ import {
   applyDupoinImagePromptLocks,
   buildSocialPostImagePromptUserMessage,
 } from '../src/lib/dupoin-image-prompt';
+import { chromeClearancePercents } from '../src/lib/dupoin-ig-chrome';
 import { getImageGenerationSpec } from '../src/lib/image-aspect-ratio';
 import { getSmartSystemPrompt, getSystemPrompt } from '../src/lib/openai';
 
@@ -33,10 +34,17 @@ test('image-prompt system encodes Dupoin Brand Guidelines 2026 locks', () => {
     assert.match(prompt, /[Hh]eadline/);
     assert.match(prompt, /[Ss]ubheadline/i);
     assert.match(prompt, /CTA/);
-    // The model must RESERVE space, never draw the logo: the official wordmark
-    // is composited from public/brand/dupoin-logo.png after generation.
-    assert.match(prompt, /kanan-bawah/i);
+    // The model must RESERVE the header and footer bands. The official
+    // Instagram chrome is composited from public/brand/dupoin-ig-chrome.png.
+    assert.match(prompt, /pita atas/i);
+    assert.match(prompt, /pita bawah/i);
     assert.match(prompt, /Jangan gambar logo|Jangan menggambar logo/i);
+    assert.match(prompt, /badge CNN/i);
+    assert.match(prompt, /footer regulasi/i);
+    assert.match(prompt, /pill outline putih/i);
+    assert.doesNotMatch(prompt, /kanan-bawah/i);
+    assert.doesNotMatch(prompt, /telah teregulasi/);
+    assert.doesNotMatch(prompt, /MOST TRUSTED BROKER/);
     assert.doesNotMatch(prompt, /graphic mark \+ wordmark/,
       'the real Dupoin logo is wordmark-only — there is no graphic mark to draw');
     assert.match(prompt, /[Tt]rader Indonesia usia 25-45/);
@@ -65,12 +73,16 @@ test('sample image-prompt builder requires official logo, brand hex, and dropdow
 
   assert.match(sample, /#2EB5C4/);
   assert.equal(sample.includes(DUPOIN_BLUE_HEX), true);
-  assert.match(sample, /kanan-bawah/i);
+  assert.match(sample, /pita atas/i);
+  assert.match(sample, /pita bawah/i);
+  assert.doesNotMatch(sample, /kanan-bawah/i);
   assert.doesNotMatch(sample, /graphic mark \+ wordmark/);
+  assert.doesNotMatch(sample, /telah teregulasi/);
   assert.match(sample, /80px/);
   assert.match(sample, /Exact headline/);
   assert.match(sample, /Subheadline/);
   assert.match(sample, /CTA/);
+  assert.match(sample, /pill outline putih/i);
   assert.match(sample, /ditempel otomatis/i);
   assert.match(sample, /JANGAN digambar/i);
   assert.match(sample, /DILARANG/);
@@ -79,7 +91,7 @@ test('sample image-prompt builder requires official logo, brand hex, and dropdow
   assert.match(sample, /Rencana dulu, baru entry/, 'must use the selected hook');
   assert.match(sample, /Kelola risiko sebelum membuka posisi/, 'must use the selected caption');
   assert.match(sample, /no hashtags/i);
-  assert.match(sample, /no logo\/wordmark\/monogram\/symbol of any kind/i);
+  assert.match(sample, /no logo, no wordmark, no CNN badge, no laurel, no regulatory footer/i);
   assert.match(sample, /"Dupoin" lettering drawn into the art/i);
   assert.match(sample, /bukan sebagai lapisan/i);
   assert.match(sample, new RegExp(spec.size));
@@ -90,22 +102,34 @@ test('sample image-prompt builder requires official logo, brand hex, and dropdow
   assert.doesNotMatch(sample, /Include a small official Dupoin logo/i);
 });
 
-test('applyDupoinImagePromptLocks reserves logo space and locks the selected size', () => {
+test('applyDupoinImagePromptLocks reserves chrome bands and locks the selected size', () => {
   const locked = applyDupoinImagePromptLocks('Premium Instagram advertising poster', '4:3');
   const spec = getImageGenerationSpec('4:3');
+  const [width, height] = spec.size.split('x').map(Number);
+  const clearance = chromeClearancePercents(width, height);
 
-  assert.match(locked, /lower-right/);
-  assert.match(locked, /reserved/i);
+  assert.match(locked, new RegExp(`top ${clearance.headerPercent}%`));
+  assert.match(locked, new RegExp(`bottom ${clearance.footerPercent}%`));
+  assert.match(locked, /composited Dupoin header lockup/);
+  assert.match(locked, /composited white regulatory footer/);
   assert.match(locked, /#2EB5C4/);
-  assert.match(locked, /draw no logo/i);
+  assert.equal(locked.includes(DUPOIN_LOGO_REQUIRED_LINE), true);
   assert.match(locked, /No overlay/i, 'scene-integrity negatives ride along with every prompt');
+  assert.doesNotMatch(locked, /lower-right/);
   assert.doesNotMatch(locked, /graphic mark \+ wordmark/);
+  assert.doesNotMatch(locked, /telah teregulasi/);
   assert.equal(locked.includes(spec.promptSuffix), true);
   assert.equal(applyDupoinImagePromptLocks(locked, '4:3'), locked, 'locks must be idempotent for the same ratio');
 
   const switched = applyDupoinImagePromptLocks(locked, '1:1');
+  const square = getImageGenerationSpec('1:1');
+  const [squareWidth, squareHeight] = square.size.split('x').map(Number);
+  const squareClearance = chromeClearancePercents(squareWidth, squareHeight);
   assert.match(switched, /exact 1:1 square aspect ratio \(1024x1024\)/);
   assert.doesNotMatch(switched, /exact 4:3 landscape aspect ratio \(1536x1024\)/);
+  assert.match(switched, new RegExp(`top ${squareClearance.headerPercent}%`));
+  assert.notEqual(squareClearance.headerPercent, clearance.headerPercent);
+  assert.doesNotMatch(switched, new RegExp(`top ${clearance.headerPercent}%`));
 });
 
 test('Social Post generate route uses the Brand Guidelines 2026 image-prompt builder', () => {
@@ -120,4 +144,11 @@ test('Social Post generate route uses the Brand Guidelines 2026 image-prompt bui
   assert.doesNotMatch(route, /Buat advertising creative prompt yang menerjemahkan post ini menjadi iklan siap tayang\.\nBrief:/);
   assert.doesNotMatch(openai, /#2eb5c4/);
   assert.doesNotMatch(openai, /small Dupoin logo in the (bottom|lower)-right corner/);
+});
+
+test('Social Post image route composites Instagram chrome instead of the lower-right wordmark', () => {
+  const imageRoute = read('src/app/api/generate-image/route.ts');
+  assert.match(imageRoute, /compositeDupoinInstagramChrome/);
+  assert.match(imageRoute, /type === 'social-post'\s*\?\s*await compositeDupoinInstagramChrome\(imageBytes\)\s*:\s*await compositeDupoinLogo\(imageBytes\)/);
+  assert.doesNotMatch(imageRoute, /imageBytes = await compositeDupoinLogo\(imageBytes\)/);
 });

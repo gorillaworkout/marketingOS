@@ -1,27 +1,27 @@
 import {
   DEFAULT_IMAGE_ASPECT_RATIO,
   getImageGenerationSpec,
+  stripImageAspectPrompt,
   withImageAspectPrompt,
   type ImageAspectRatio,
 } from '@/lib/image-aspect-ratio';
+import { chromeClearancePercents } from '@/lib/dupoin-ig-chrome';
 
 /** Official Dupoin Brand Guidelines 2026 primary (Hex resmi). */
 export const DUPOIN_BLUE_HEX = '#2EB5C4';
 export const DUPOIN_BLUE_RGB = '46,181,196';
 
 /**
- * Required logo line for AI image prompts.
+ * Required chrome line for AI image prompts.
  *
- * The model must NOT draw the logo. The real Dupoin wordmark is composited onto
- * the finished image by src/lib/dupoin-logo-composite.ts, because text-to-image
- * cannot reproduce a specific script logotype from a description — it invents one.
- * The prompt's only job is to reserve clean, uncluttered space for it.
- *
- * For reference, the official mark is WORDMARK-ONLY: the word "Dupoin" in teal
- * #2EB5C4 brush script. There is no icon, symbol, monogram, or graphic mark.
+ * The model must NOT draw the Dupoin wordmark, the CNN 2025 badge, or the
+ * regulatory footer. Those pixels are composited from
+ * public/brand/dupoin-ig-chrome.png by src/lib/dupoin-ig-chrome.ts.
+ * Text-to-image invents logotypes and legal lines; the prompt only reserves
+ * the top and bottom bands and describes the middle scene.
  */
 export const DUPOIN_LOGO_REQUIRED_LINE =
-  'clean empty space in the lower-right corner reserved for the brand logo — draw no logo, no wordmark, no monogram, no symbol there'
+  'Draw no logo, no wordmark, no CNN badge, no laurel, no regulatory footer, and no "Dupoin" lettering'
 
 /** @deprecated Use DUPOIN_LOGO_REQUIRED_LINE — image prompts must include the official mark. */
 export const DUPOIN_LOGO_IN_PROMPT_LINE = DUPOIN_LOGO_REQUIRED_LINE;
@@ -55,24 +55,28 @@ WARNA:
 
 CAHAYA:
 - Satu arah cahaya utama yang jelas + fill lembut
-- Sebutkan sumbernya: jendela samping, lampu meja, pantulan monitor, senja dari balik jendela
-- Bayangan lembut, highlight terkendali. Hindari pencahayaan datar
+- Default feed Instagram: spotlight cyan dari atas, atau rim light Dupoin Blue di tepi subjek. Sumber lain (layar, lampu studio) boleh selama adegan tetap gelap dan moody
+- Bayangan lembut, highlight terkendali. Hindari pencahayaan datar dan kantor terang generik
 
 COPY DI GAMBAR:
 - Headline ≤6 kata, subheadline ≤10, CTA ≤4 — tulis persis dalam tanda kutip
+- Headline utama: sans tebal berwarna Dupoin Blue ${DUPOIN_BLUE_HEX}. Baris kedua: sans putih
+- CTA adalah pill outline putih, pendek, duduk tepat di atas pita footer
 - Maksimal 2 jenis huruf: display tebal + sans bersih
-- Tempatkan pada area yang secara alami polos: dinding, langit, meja kosong, area out-of-focus
-- Semua teks di dalam safe zone 80px
+- Tempatkan pada area tengah yang secara alami gelap: dinding, langit, area out-of-focus
+- Semua teks di zona tengah, minimal 80px dari tepi kiri dan kanan, di luar pita header dan footer
 
 SUBJEK — konkret, bukan abstrak:
 - Trader Indonesia usia 25-45 dengan ekspresi dan postur spesifik
 - Detail nyata: tekstur kemeja, cangkir kopi, layar chart, tepi meja kayu, tangan di mouse
 - JANGAN tulis "suasana profesional" atau "nuansa modern" — itu tidak bisa digambar
 
-LOGO — JANGAN DIGAMBAR:
-- Logo Dupoin asli ditempel otomatis setelah gambar jadi
-- Tugasmu hanya menyisakan sudut kanan-bawah yang tenang: permukaan polos, kontras rendah, tanpa teks atau detail ramai
-- Jangan gambar logo/wordmark/monogram/simbol apa pun; jangan tulis kata "Dupoin" di dalam art
+CHROME — JANGAN DIGAMBAR:
+- Wordmark Dupoin, badge CNN 2025, dan footer regulasi putih ditempel otomatis dari aset setelah gambar jadi
+- Jangan gambar logo, wordmark, monogram, laurel, badge, atau footer regulasi; jangan tulis kata "Dupoin" di dalam art
+- Pita atas: kosong dari teks, wajah, dan logo. Background dan tekstur boleh menyambung di belakang lockup
+- Pita bawah: kosong. CTA pill duduk tepat di atasnya, bukan di dalamnya
+- Gaya feed Instagram Dupoin: background gelap/moody, Dupoin Blue sebagai spotlight atau rim light, bukan kantor terang generik
 
 FORMAT:
 - Kunci ukuran/rasio dari brief. Default social still 1080x1350 potret atau 1080x1080 persegi bila tidak disebut
@@ -83,19 +87,19 @@ URUTAN MENULIS PROMPT:
 3. Cahaya — arah, sumber, kualitas
 4. Copy persis + di permukaan mana teks duduk
 5. Aksen Dupoin Blue sebagai objek/cahaya nyata
-6. Sudut kanan-bawah tenang untuk logo
+6. Pita atas dan pita bawah kosong untuk chrome yang ditempel kemudian
 7. Kualitas — lensa, depth of field, resolusi
 8. Negatif
 
 CONTOH — tiru pendekatannya, jangan salin isinya:
-"Editorial photograph for an Indonesian financial brand, 1080x1350 portrait.
-A trader in his early thirties sits at a walnut desk beside a tall window, turned three-quarters toward a monitor at the right edge of the frame. Late afternoon light rakes across from camera left, catching the rim of his shoulder and the steam rising from a ceramic cup. The wall behind him is plain warm grey and falls gently out of focus.
-Headline 'TRADE WITH A PLAN' is set in heavy white sans across that empty upper wall, where the surface is already smooth and unlit.
-Subheadline 'Kelola risiko sebelum entry' sits directly beneath in a lighter weight.
-A compact CTA 'PELAJARI SEKARANG' reads in Dupoin Blue ${DUPOIN_BLUE_HEX}, echoing the same blue glowing from the chart lines on the monitor and the thin rim light along his jaw.
-The lower-right corner holds only quiet, unbroken desk surface in soft shadow.
-Shot on 50mm at f/2, shallow depth of field, natural contrast, fine grain, 8K.
-No overlay, no panel or box behind the text, no gradient layer, no opacity effects, no logo or wordmark, no 'Dupoin' lettering in the art, no hashtags, no stock-photo look."
+"Editorial photograph for an Indonesian financial brand, 1080x1350 portrait, Dupoin Instagram still.
+A trader in his early thirties sits in a dim studio, turned three-quarters toward camera, one hand resting on a phone that shows a trading chart. The wall behind him is a dark textured grid and falls gently out of focus. A single cyan spotlight drops from above, catching the rim of his shoulder and the edge of the phone in Dupoin Blue ${DUPOIN_BLUE_HEX}. The rest of the room stays deep and quiet.
+Headline 'JAGA MODALMU' is set in heavy Dupoin Blue sans in the lower middle, where the background is already dark.
+Subheadline 'Risiko duluan, baru entry' sits directly beneath in white.
+A white outlined pill reads 'Swipe left →' just above the empty bottom band.
+The top band is only the continuing dark wall — no logo, no badge, no type. The bottom band is empty background.
+Shot on 50mm at f/2, shallow depth of field, moody contrast, fine grain, 8K.
+No overlay, no panel or box behind the text, no gradient layer, no opacity effects, no logo or wordmark, no CNN badge, no laurel, no regulatory footer, no 'Dupoin' lettering in the art, no hashtags, no stock-photo look."
 
 Tulis prompt langsung tanpa pembuka. Satu paragraf mengalir, bukan daftar berpoin.`;
 
@@ -108,18 +112,28 @@ export interface SocialPostImagePromptInput {
   aspectRatio?: ImageAspectRatio;
 }
 
-/** True when the prompt already reserves clean lower-right space for the composited logo. */
-function hasReservedLogoSpace(prompt: string): boolean {
-  return /lower-right/i.test(prompt)
-    && /(reserved|reserve|empty|clean)/i.test(prompt)
-    && /draw no logo|no logo/i.test(prompt);
+const CHROME_LOCK_RE = /\n\nLeave the top \d+% of the frame empty of type, faces, and logos \(background and texture may continue\) for the composited Dupoin header lockup, and the bottom \d+% empty for the composited white regulatory footer\. Draw no logo, no wordmark, no CNN badge, no laurel, no regulatory footer, and no "Dupoin" lettering anywhere in the image\. Primary accent Dupoin Blue #2EB5C4 as real light inside the scene\./g;
+
+/** Drop a previously baked chrome reservation so a new aspect ratio can replace the percentages. */
+export function stripDupoinChromeLock(prompt: string): string {
+  return String(prompt || '').replace(CHROME_LOCK_RE, '');
 }
 
-/** Guarantee official logo language is present in image-prompt text. */
-export function ensureOfficialDupoinLogo(prompt: string): string {
-  const trimmed = String(prompt || '').trim();
-  if (hasReservedLogoSpace(trimmed)) return trimmed;
-  const logoLine = `Leave ${DUPOIN_LOGO_REQUIRED_LINE}. Primary color Dupoin Blue ${DUPOIN_BLUE_HEX}. The real logo is composited afterwards — draw no logo, wordmark, monogram, or "Dupoin" lettering anywhere in the image.`;
+/** English reservation appended to every image prompt. Percentages follow the selected canvas. */
+export function dupoinChromeLockLine(aspectRatio: ImageAspectRatio): string {
+  const spec = getImageGenerationSpec(aspectRatio);
+  const [width, height] = spec.size.split('x').map(Number);
+  const { headerPercent, footerPercent } = chromeClearancePercents(width, height);
+  return `Leave the top ${headerPercent}% of the frame empty of type, faces, and logos (background and texture may continue) for the composited Dupoin header lockup, and the bottom ${footerPercent}% empty for the composited white regulatory footer. ${DUPOIN_LOGO_REQUIRED_LINE} anywhere in the image. Primary accent Dupoin Blue ${DUPOIN_BLUE_HEX} as real light inside the scene.`;
+}
+
+/** Guarantee the Instagram chrome reservation is present, replacing any stale percentages. */
+export function ensureOfficialDupoinLogo(
+  prompt: string,
+  aspectRatio: ImageAspectRatio = DEFAULT_IMAGE_ASPECT_RATIO,
+): string {
+  const trimmed = stripDupoinChromeLock(prompt).trim();
+  const logoLine = dupoinChromeLockLine(aspectRatio);
   return trimmed ? `${trimmed}\n\n${logoLine}` : logoLine;
 }
 
@@ -181,16 +195,16 @@ const SCENE_INTEGRITY_NEGATIVES =
   'No overlay, no translucent panel or box behind the text, no gradient layer over the image, '
   + 'no opacity or transparency effects. Text contrast must come from the scene\'s own lighting and composition.';
 
-/** Apply required Dupoin logo language plus the UI size/aspect dropdown. */
+/** Apply the Instagram chrome reservation plus the UI size/aspect dropdown. */
 export function applyDupoinImagePromptLocks(
   prompt: string,
   aspectRatio: ImageAspectRatio = DEFAULT_IMAGE_ASPECT_RATIO,
 ): string {
-  const cleaned = stripFlatOverlayLanguage(prompt);
+  const cleaned = stripDupoinChromeLock(stripImageAspectPrompt(stripFlatOverlayLanguage(prompt))).trim();
   const guarded = cleaned.includes(SCENE_INTEGRITY_NEGATIVES)
     ? cleaned
-    : `${cleaned}\n\n${SCENE_INTEGRITY_NEGATIVES}`;
-  return withImageAspectPrompt(ensureOfficialDupoinLogo(guarded), aspectRatio);
+    : `${cleaned}\n\n${SCENE_INTEGRITY_NEGATIVES}`.trim();
+  return withImageAspectPrompt(ensureOfficialDupoinLogo(guarded, aspectRatio), aspectRatio);
 }
 
 /** User message that drives Social Post image-prompt generation from a selected caption. */
@@ -209,11 +223,11 @@ Selected caption: ${input.caption}
 Tulis satu paragraf mengalir yang mendeskripsikan satu adegan utuh — bukan daftar berpoin.
 
 Format: kunci ${spec.size} ${spec.orientation} (${aspectRatio}). ${spec.promptSuffix}
-Adegan: subjek konkret dengan kedalaman nyata, arah cahaya yang jelas, dan permukaan polos tempat teks bisa duduk secara alami.
-Copy: Exact headline (≤6 kata), Subheadline (≤10), CTA (≤4) dalam tanda kutip, ditempatkan pada area adegan yang memang sudah bersih. Semua dalam safe zone 80px.
-Warna: Dupoin Blue ${DUPOIN_BLUE_HEX} muncul sebagai cahaya atau objek nyata di dalam adegan — pantulan layar, rim light, garis chart, tombol CTA. Bukan sebagai lapisan.
-Logo: JANGAN digambar. Sisakan sudut kanan-bawah tenang dan berkontras rendah; wordmark Dupoin asli ditempel otomatis setelah gambar jadi.
+Adegan: subjek konkret dengan kedalaman nyata, background gelap/moody, satu sumber cahaya cyan (spotlight atau rim light), dan permukaan gelap tempat teks bisa duduk secara alami di zona tengah.
+Copy: Exact headline (≤6 kata) dalam Dupoin Blue sebagai sans tebal, Subheadline (≤10) putih, CTA (≤4) di dalam pill outline putih tepat di atas pita bawah. Semua dalam safe zone 80px dari tepi kiri dan kanan.
+Warna: Dupoin Blue ${DUPOIN_BLUE_HEX} muncul sebagai cahaya nyata di dalam adegan — spotlight, rim light, garis chart — dan sebagai warna headline. Bukan sebagai lapisan.
+Chrome: JANGAN digambar. Wordmark Dupoin, badge CNN 2025, dan footer regulasi putih ditempel otomatis setelah gambar jadi. Sisakan pita atas kosong dari teks, wajah, dan logo (background boleh menyambung). Sisakan pita bawah kosong.
 
 DILARANG: overlay, panel, box, scrim, banner, atau bar di belakang teks; nilai opacity/transparansi; gradient sebagai lapisan di atas gambar; hex code untuk background. Kalau teks kurang terbaca, atur ulang cahaya dan komposisi — jangan menambal dengan lapisan.
-Negatif lain: no hashtags, no long captions, no fake claims/numbers not in the brief, no wrong teal, no logo/wordmark/monogram/symbol of any kind, no "Dupoin" lettering drawn into the art, no generic stock look.`;
+Negatif lain: no hashtags, no long captions, no fake claims/numbers not in the brief, no wrong teal, no logo, no wordmark, no CNN badge, no laurel, no regulatory footer, no "Dupoin" lettering drawn into the art, no generic stock look.`;
 }
