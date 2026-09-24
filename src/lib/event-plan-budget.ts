@@ -122,7 +122,7 @@ export function suggestedVendorsForCategory(category: string, location: unknown)
         ? ['Plataran Catering', 'hotel in-house F&B (same venue)']
         : [`${city} hotel in-house catering`, `local ${city} catering (request 3 quotations)`];
     case 'speaker':
-      return ['Pembicara seminar keuangan (ajukan fee)', 'Blue Bird Group (transport — minta quotation)'];
+      return ['Financial seminar speaker (request a fee)', 'Blue Bird Group (transport — request a quotation)'];
     case 'promotion':
       return inJakartaMetro
         ? ['in-house Meta Ads', 'Dyandra Promosindo (activation / on-ground)']
@@ -149,7 +149,7 @@ export function formatRupiah(amount: number): string {
 }
 
 export function quoteRequestPath(vendor: string, venue: string): string {
-  return `Cara minta quotation: hubungi tim sales atau events ${vendor} lewat situs resmi atau formulir permintaan sewa untuk ${venue}.`;
+  return `How to request a quotation: contact the ${vendor} sales or events team through the official site or the rental request form for ${venue}.`;
 }
 
 function parseRupiahAmount(value: unknown): number | undefined {
@@ -178,7 +178,7 @@ function contactSuffix(hits: EventPricingHit[]): string {
   if (!phones.length && !emails.length) return '';
   const parts = [...phones, ...emails];
   const url = hits.find((hit) => hit.phones.length || hit.emails.length)?.url;
-  return ` Kontak publik dari sumber (bukan quotation terverifikasi): ${parts.join(', ')}${url ? `. Sumber kontak: ${url}` : ''}.`;
+  return ` Public contact from the source (not a verified quotation): ${parts.join(', ')}${url ? `. Contact source: ${url}` : ''}.`;
 }
 
 function lineNotes(input: {
@@ -194,12 +194,12 @@ function lineNotes(input: {
   const place = `Venue/location: ${input.venue}. Suggested vendor: ${input.vendor}.`;
   const contacts = contactSuffix(input.hits);
   if (input.amount !== null && input.sourceUrl) {
-    const excerpt = input.snippet ? ` Kutipan: ${input.snippet.slice(0, 240)}.` : '';
-    return `Harga publik yang tercantum di sumber (bukan quotation terverifikasi): ${formatRupiah(input.amount)}. Sumber: ${input.sourceUrl}.${excerpt} ${place} ${quote}${contacts}`;
+    const excerpt = input.snippet ? ` Excerpt: ${input.snippet.slice(0, 240)}.` : '';
+    return `Public price stated in the source (not a verified quotation): ${formatRupiah(input.amount)}. Source: ${input.sourceUrl}.${excerpt} ${place} ${quote}${contacts}`;
   }
   if (input.citedAmounts.length > 1 && input.sourceUrl) {
     const listed = input.citedAmounts.map((amount) => formatRupiah(amount)).join(', ');
-    return `Sumber menyebut lebih dari satu angka (${listed}). Minta quotation ke vendor untuk mengunci satu harga. Sumber: ${input.sourceUrl}. ${place} ${quote}${contacts}`;
+    return `The source lists more than one figure (${listed}). Request a quotation from the vendor to lock one price. Source: ${input.sourceUrl}. ${place} ${quote}${contacts}`;
   }
   return `${NO_PUBLIC_PRICE_NOTE}. ${place} ${quote}${contacts}`;
 }
@@ -278,7 +278,7 @@ export function groundEventPlanBudget(input: {
     contingency: null,
     grounded: true,
     publicPricesFound: known.length > 0,
-    ...(overCeiling ? { ceilingNote: 'Harga publik yang ditemukan melebihi plafon anggaran yang diajukan. Minta quotation sebelum booking.' } : {}),
+    ...(overCeiling ? { ceilingNote: 'The public prices found exceed the proposed budget ceiling. Request a quotation before booking.' } : {}),
   };
 }
 

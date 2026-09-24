@@ -396,7 +396,7 @@ export default function SocialPostPage() {
     } catch (e) {
       const message = e instanceof Error ? e.message : 'Unknown error';
       console.error('Failed to save knowledge:', e);
-      setKnowledgeError(`Gagal menyimpan ke Knowledge: ${message}`);
+      setKnowledgeError(`Could not save to Knowledge: ${message}`);
       setSelectedIndex(null);
     }
 
@@ -656,7 +656,7 @@ export default function SocialPostPage() {
             <SectionHeader title="Generation brief" description="Define the channel, audience, objective, and content direction." />
             {researchHandoff && (
               <p role="status" data-testid="social-post-research-handoff" className="rounded-xl border border-indigo-400/30 bg-indigo-500/10 px-3 py-2 text-xs leading-5 text-indigo-100">
-                Diisi dari Dupoin AI Research. Belum dipublikasikan — edit brief ini sebelum generate.
+                Filled from Dupoin AI Research. Not published yet — edit this brief before you generate.
               </p>
             )}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -667,15 +667,15 @@ export default function SocialPostPage() {
               </FormField>
               <FormField label="Target audience">
                 <Select value={targetAudience} onChange={e => setTargetAudience(e.target.value)}>
-                  <option value="">Pilih audience...</option>
-                  <option value="Trader Pemula">Trader Pemula</option>
-                  <option value="Trader Aktif">Trader Aktif</option>
-                  <option value="Trader Profesional">Trader Profesional</option>
+                  <option value="">Choose an audience...</option>
+                  <option value="Beginner trader">Beginner trader</option>
+                  <option value="Active trader">Active trader</option>
+                  <option value="Professional trader">Professional trader</option>
                   <option value="Investor">Investor</option>
-                  <option value="Pecinta Finansial">Pecinta Finansial</option>
-                  <option value="Pelajar & Mahasiswa">Pelajar & Mahasiswa</option>
-                  <option value="Pengusaha">Pengusaha</option>
-                  <option value="Karyawan & Profesional Muda">Karyawan & Profesional Muda</option>
+                  <option value="Finance enthusiast">Finance enthusiast</option>
+                  <option value="Students">Students</option>
+                  <option value="Business owner">Business owner</option>
+                  <option value="Young professional">Young professional</option>
                   <option value="General Public">General Public</option>
                 </Select>
               </FormField>
@@ -766,17 +766,17 @@ export default function SocialPostPage() {
           {knowledgeSaved && (
             <div className="bg-green-500/10 border border-green-500/20 text-green-400 px-4 py-3 rounded-lg flex items-center gap-2">
               <span></span>
-              <span>Tersimpan ke Knowledge. Pilihan ini akan membantu generation berikutnya mengikuti preferensi Anda.</span>
+              <span>Saved to Knowledge. This choice will help the next generation follow your preferences.</span>
             </div>
           )}
           {savingKnowledge && (
             <div className="bg-blue-500/10 border border-blue-500/20 text-blue-300 px-4 py-3 rounded-lg">
-              Menyimpan pilihan ke Knowledge…
+              Saving the choice to Knowledge…
             </div>
           )}
           {knowledgeError && (
             <div className="bg-red-500/10 border border-red-500/20 text-red-400 px-4 py-3 rounded-lg" role="alert">
-              {knowledgeError} Silakan pilih ulang untuk mencoba lagi.
+              {knowledgeError} Choose it again to retry.
             </div>
           )}
 
@@ -812,8 +812,8 @@ export default function SocialPostPage() {
               <SectionHeader title="Select a preferred style" description="Review all three options, then approve one for Knowledge." />
               {selectedIndex === null && (
                 <div className="rounded-lg border border-amber-500/20 bg-amber-500/10 px-4 py-3">
-                  <p className="text-sm font-medium text-amber-200">Belum masuk Knowledge</p>
-                  <p className="mt-1 text-xs text-[var(--mos-text-secondary)]">Pilih satu output yang disetujui. Hanya pilihan tersebut yang disimpan agar Knowledge tidak belajar dari draft yang ditolak.</p>
+                  <p className="text-sm font-medium text-amber-200">Not in Knowledge yet</p>
+                  <p className="mt-1 text-xs text-[var(--mos-text-secondary)]">Choose one approved output. Only that choice is saved, so Knowledge does not learn from rejected drafts.</p>
                 </div>
               )}
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -880,7 +880,7 @@ export default function SocialPostPage() {
                             disabled={savingKnowledge}
                             className="mt-2 w-full"
                           >
-                            {savingKnowledge ? 'Menyimpan…' : 'Pilih dan simpan ke Knowledge'}
+                            {savingKnowledge ? 'Saving…' : 'Choose and save to Knowledge'}
                           </Button>
                         )}
 
@@ -975,7 +975,7 @@ export default function SocialPostPage() {
                 <div className="flex items-center gap-3">
                   <div>
                     <h3 className="text-sm font-[560] text-[var(--mos-text)]">Image prompt</h3>
-                    <p className="text-xs text-[var(--mos-text-muted)]">Edit prompt sesuai kebutuhan sebelum generate gambar</p>
+                    <p className="text-xs text-[var(--mos-text-muted)]">Edit the prompt before you generate the image</p>
                   </div>
                 </div>
                 <Button size="sm" onClick={() => copyToClipboard(editableImagePrompt)}>Copy</Button>
@@ -989,7 +989,7 @@ export default function SocialPostPage() {
                     onChange={(e) => setEditableImagePrompt(e.target.value)}
                     style={{ minHeight: '120px', maxHeight: '400px', resize: 'vertical' }}
                     className="font-mono"
-                    placeholder="Deskripsikan gambar yang ingin di-generate..."
+                    placeholder="Describe the image you want to generate..."
                     rows={6}
                   />
                   <div className="absolute bottom-3 right-3 text-xs text-gray-600">
@@ -1158,7 +1158,7 @@ export default function SocialPostPage() {
                 </div>
                 {postStatus === 'published' && (
                   <div className="mt-3 bg-blue-500/10 border border-blue-500/20 rounded-lg px-3 py-2">
-                    <p className="text-xs text-blue-300"><strong>Kirim ke Admin Social Media</strong> untuk proses posting ke platform.</p>
+                    <p className="text-xs text-blue-300"><strong>Send it to the social media admin</strong> so they can post it on the platform.</p>
                   </div>
                 )}
               </div>

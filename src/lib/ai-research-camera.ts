@@ -37,25 +37,25 @@ export function inPageCameraBlockReason(input: {
   hasGetUserMedia?: boolean;
 }): string | null {
   if (!input.secureContext) {
-    return 'Kamera di halaman butuh HTTPS. Pilih foto dari galeri, atau buka situs lewat HTTPS.';
+    return 'In-page camera needs HTTPS. Choose a photo from your library, or open the site over HTTPS.';
   }
   if (!input.hasGetUserMedia) {
-    return 'Browser ini tidak mendukung pratinjau kamera. Pilih foto dari galeri.';
+    return 'This browser does not support a camera preview. Choose a photo from your library.';
   }
   return null;
 }
 
 export function cameraCaptureErrorMessage(errorName?: string): string {
   if (errorName === 'NotAllowedError' || errorName === 'PermissionDeniedError' || errorName === 'SecurityError') {
-    return 'Izin kamera ditolak. Izinkan kamera di browser, atau pilih foto dari galeri.';
+    return 'Camera permission was denied. Allow the camera in the browser, or choose a photo from your library.';
   }
   if (errorName === 'NotFoundError' || errorName === 'DevicesNotFoundError' || errorName === 'OverconstrainedError') {
-    return 'Kamera tidak ditemukan. Pilih foto dari galeri.';
+    return 'No camera was found. Choose a photo from your library.';
   }
   if (errorName === 'NotReadableError' || errorName === 'TrackStartError' || errorName === 'AbortError') {
-    return 'Kamera sedang dipakai aplikasi lain. Tutup aplikasi itu, atau pilih foto dari galeri.';
+    return 'The camera is in use by another app. Close that app, or choose a photo from your library.';
   }
-  return 'Kamera tidak bisa dibuka. Pilih foto dari galeri.';
+  return 'The camera could not be opened. Choose a photo from your library.';
 }
 
 function sniffImageType(bytes: Uint8Array): AiResearchImageType | null {

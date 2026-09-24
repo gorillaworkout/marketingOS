@@ -112,7 +112,7 @@ export default function TemplatesPage() {
 
   return (
     <PageStack>
-      <PageHeader eyebrow="Library / Reusable briefs" title="Template library" description="Template bawaan dan brief reusable untuk mempercepat content generation. Template buatan Anda tersimpan per akun." actions={<Button variant="primary" onClick={handleNew}>New template</Button>} />
+      <PageHeader eyebrow="Library / Reusable briefs" title="Template library" description="Built-in templates and reusable briefs that speed up content generation. Templates you create are saved on your account." actions={<Button variant="primary" onClick={handleNew}>New template</Button>} />
 
       {/* Filters */}
       <Toolbar><FilterGroup>

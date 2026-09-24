@@ -350,10 +350,10 @@ test('AI Research chat route grounds answers, raises the token budget, and updat
   assert.match(envExample, /TAVILY_API_KEY=/);
   assert.match(envExample, /Brave is not required/);
   assert.match(envExample, /Serper free tier/);
-  assert.match(lib, /Jangan mengarang fakta perusahaan/);
-  assert.match(lib, /utamakan sumber Indonesia/);
+  assert.match(lib, /Do not invent company facts/);
+  assert.match(lib, /prefer Indonesian sources/);
   assert.equal(AI_RESEARCH_MAX_OUTPUT_TOKENS, 4000);
-  assert.match(AI_RESEARCH_SYSTEM_PROMPT, /Cantumkan sitasi/);
+  assert.match(AI_RESEARCH_SYSTEM_PROMPT, /Cite title \+ URL/);
 });
 
 const sellaQuery = 'sella susriana siapa sih jir di dupoin';
@@ -549,13 +549,13 @@ test('Sella Susriana + Dupoin research grounds Bappebti wakil pialang hits inste
   assert.match(String(messages[lastUserIdx - 1].content), new RegExp(AI_RESEARCH_GROUNDED_PERSON_HEADER));
   assert.match(String(messages[lastUserIdx - 1].content), /PERSON_FACT: Sella Susriana \| Wakil Pialang/i);
   assert.match(String(messages[lastUserIdx].content), /PERSON_FACT: Sella Susriana \| Wakil Pialang/i);
-  assert.match(AI_RESEARCH_SYSTEM_PROMPT, /apa yang sumber sebutkan/);
-  assert.match(AI_RESEARCH_SYSTEM_PROMPT, /belum terverifikasi/);
-  assert.match(AI_RESEARCH_SYSTEM_PROMPT, /LinkedIn publik|berita, direktori/);
-  assert.match(AI_RESEARCH_SYSTEM_PROMPT, /belum ada sumber publik terverifikasi/);
-  assert.match(AI_RESEARCH_SYSTEM_PROMPT, /daftar CPNS|profil freelancer/);
-  assert.match(AI_RESEARCH_SYSTEM_PROMPT, /Jangan menggabungkan identitas/);
-  assert.match(AI_RESEARCH_SYSTEM_PROMPT, /[Pp]engguna yang memutuskan/);
+  assert.match(AI_RESEARCH_SYSTEM_PROMPT, /what the sources say/);
+  assert.match(AI_RESEARCH_SYSTEM_PROMPT, /unverified/);
+  assert.match(AI_RESEARCH_SYSTEM_PROMPT, /public LinkedIn/);
+  assert.match(AI_RESEARCH_SYSTEM_PROMPT, /no verified public sources/);
+  assert.match(AI_RESEARCH_SYSTEM_PROMPT, /civil-service lists, freelancer profiles/);
+  assert.match(AI_RESEARCH_SYSTEM_PROMPT, /Do not merge identities/);
+  assert.match(AI_RESEARCH_SYSTEM_PROMPT, /The user decides/);
 });
 
 test('long Bappebti broker pages keep wakil pialang heading with a late person name', () => {
@@ -1126,10 +1126,10 @@ test('AI Research UI shows a thinking bubble before tokens and keeps the stream 
   assert.match(page, /loading && !streaming/);
   assert.match(page, /ai-research-thinking/);
   assert.match(page, /ai-research-typing-dots/);
-  assert.match(page, /Sedang meneliti/);
+  assert.match(page, /Researching/);
   assert.match(page, /d\.type === 'research'/);
   assert.match(page, /sourceCount/);
-  assert.match(page, /Sumber yang dipakai/);
+  assert.match(page, /Sources used/);
   assert.match(page, /pinnedSourceUrls/);
   assert.match(page, /RESEARCH_FAILED_BANNER/);
   assert.match(page, /RESEARCH_DISCONNECT_BANNER/);

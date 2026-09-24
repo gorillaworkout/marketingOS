@@ -22,10 +22,10 @@ export const AI_RESEARCH_DEEP_MAX_SOURCES = 16;
 export const AI_RESEARCH_MODE_STORAGE_KEY = 'dupoin-ai-research-mode';
 
 export const AI_RESEARCH_DEEP_STATUS = {
-  plan: 'menyusun rencana…',
-  search: 'mencari…',
-  read: 'membaca sumber…',
-  synthesize: 'menyusun…',
+  plan: 'planning…',
+  search: 'searching…',
+  read: 'reading sources…',
+  synthesize: 'writing…',
 } as const;
 
 export type DeepResearchPhase = keyof typeof AI_RESEARCH_DEEP_STATUS;
@@ -54,18 +54,18 @@ export interface DeepGatherResult {
   stoppedReason: DeepStopReason;
 }
 
-export const AI_RESEARCH_DEEP_PLAN_PROMPT = `Kamu merencanakan riset web untuk Dupoin AI. Balas HANYA JSON valid, tanpa markdown:
-{"outline":["langkah 1","langkah 2","langkah 3"],"queries":["kueri pencarian 1","kueri 2"]}
-Aturan:
-- 3 langkah outline singkat dalam Bahasa Indonesia.
-- Maksimal 3 kueri pencarian yang spesifik dan berbeda. Jangan mengulang pertanyaan pengguna kata per kata jika sudah cukup spesifik; boleh memperluas sudut (regulator, berita, definisi).
-- Jangan menulis jawaban riset dan jangan mengarang fakta.`;
+export const AI_RESEARCH_DEEP_PLAN_PROMPT = `You are planning web research for Dupoin AI. Reply with ONLY valid JSON, no markdown:
+{"outline":["step 1","step 2","step 3"],"queries":["search query 1","query 2"]}
+Rules:
+- 3 short outline steps in English.
+- At most 3 specific, different search queries. Do not repeat the user's question word for word if it is already specific; you may widen the angle (regulator, news, definition).
+- Do not write the research answer and do not invent facts.`;
 
-export const AI_RESEARCH_DEEP_SYSTEM_ADDENDUM = `Mode riset mendalam aktif.
-- Ikuti kerangka riset yang diberikan, lalu jawab pertanyaan pengguna secara utuh.
-- Gunakan sumber dari beberapa putaran pencarian. Sitasi judul dan URL untuk klaim faktual.
-- Akhiri jawaban dengan heading persis "## Kesenjangan dan keterbatasan".
-- Di bagian itu sebutkan fakta yang belum tercakup sumber, ketidakpastian identitas atau angka, dan batas pencarian. Jangan mengisi kekosongan dengan tebakan.`;
+export const AI_RESEARCH_DEEP_SYSTEM_ADDENDUM = `Deep research mode is on.
+- Follow the research outline you were given, then answer the user's question in full.
+- Use sources from several search rounds. Cite title and URL for factual claims.
+- End the answer with the exact heading "## Gaps and limitations".
+- In that section, name facts the sources do not cover, uncertainty about identity or figures, and the search limits. Do not fill gaps with guesses.`;
 
 const QUERY_MAX = 180;
 const OUTLINE_MAX = 240;
@@ -94,13 +94,13 @@ export function fallbackDeepResearchPlan(query: string): DeepResearchPlan {
     pushUniqueQuery(queries, seen, item);
     if (queries.length >= AI_RESEARCH_DEEP_MAX_QUERIES) break;
   }
-  if (!queries.length) queries.push(base || 'riset');
-  const topic = (base || 'pertanyaan ini').slice(0, 120);
+  if (!queries.length) queries.push(base || 'research');
+  const topic = (base || 'this question').slice(0, 120);
   return {
     outline: [
-      `Definisikan cakupan: ${topic}`,
-      'Kumpulkan fakta dari beberapa kueri dan sumber yang saling mengecek.',
-      'Sintesis jawaban bersitasi dan catat kesenjangan yang belum tertutup sumber.',
+      `Define the scope: ${topic}`,
+      'Collect facts from several queries and sources that check each other.',
+      'Synthesize a cited answer and note gaps the sources do not cover.',
     ],
     queries,
     source: 'fallback',
@@ -186,14 +186,14 @@ export function formatDeepResearchPlanNote(
 ): string {
   const outline = plan.outline.map((item, index) => `${index + 1}. ${item}`).join('\n');
   const queries = plan.queries.map((item, index) => `${index + 1}. ${item}`).join('\n');
-  const origin = plan.source === 'model' ? 'model' : 'cadangan deterministik';
+  const origin = plan.source === 'model' ? 'model' : 'deterministic fallback';
   return [
-    'KERANGKA RISET MENDALAM',
-    `Asal rencana: ${origin}`,
-    `Putaran dijalankan: ${meta.roundsRun}. Status: ${meta.stoppedReason}.`,
+    'DEEP RESEARCH OUTLINE',
+    `Plan source: ${origin}`,
+    `Rounds run: ${meta.roundsRun}. Status: ${meta.stoppedReason}.`,
     'Outline:',
     outline,
-    'Kueri:',
+    'Queries:',
     queries,
   ].join('\n');
 }
@@ -208,26 +208,26 @@ export function ensureDeepLimitationsSection(
     skipped?: 'url-only' | 'not-needed' | null;
   },
 ): string {
-  if (/^#{1,3}\s+kesenjangan dan keterbatasan\s*$/im.test(answer)) return answer;
+  if (/^#{1,3}\s+(gaps and limitations|kesenjangan dan keterbatasan)\s*$/im.test(answer)) return answer;
   let reason: string;
   if (meta.skipped === 'url-only') {
-    reason = 'Pencarian web tambahan dilewati karena pesan hanya berisi tautan. Konteks diambil dari halaman tautan bila berhasil.';
+    reason = 'Extra web search was skipped because the message only contains links. Context comes from those pages when the fetch succeeds.';
   } else if (meta.skipped === 'not-needed') {
-    reason = 'Pencarian web tidak dijalankan untuk pertanyaan singkat ini.';
+    reason = 'Web search was not run for this short question.';
   } else if (meta.stoppedReason === 'budget') {
-    reason = 'Pencarian dihentikan karena batas waktu riset mendalam.';
+    reason = 'Search stopped because the deep-research time limit was reached.';
   } else if (meta.stoppedReason === 'cap') {
-    reason = 'Pencarian dihentikan karena batas jumlah putaran.';
+    reason = 'Search stopped because the round limit was reached.';
   } else {
-    reason = 'Semua putaran pencarian yang direncanakan dijalankan dalam batas yang ditetapkan.';
+    reason = 'Every planned search round ran within the set limits.';
   }
   const section = [
     '',
     '',
-    '## Kesenjangan dan keterbatasan',
+    '## Gaps and limitations',
     '',
-    `${reason} Putaran pencarian: ${meta.roundsRun} dari ${meta.plannedQueries}. Sumber yang dipakai: ${meta.sourceCount}.`,
-    'Klaim di luar cuplikan sumber tidak diverifikasi. Jika suatu fakta tidak disebut di sumber, anggap belum terkonfirmasi.',
+    `${reason} Search rounds: ${meta.roundsRun} of ${meta.plannedQueries}. Sources used: ${meta.sourceCount}.`,
+    'Claims outside the source excerpts are not verified. If a fact is not stated in the sources, treat it as unconfirmed.',
     '',
   ].join('\n');
   return `${answer}${section}`;

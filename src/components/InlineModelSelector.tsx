@@ -57,7 +57,7 @@ export default function InlineModelSelector({ feature }: { feature: GenerationFe
       const data = await response.json() as { currentModel?: string; error?: string };
       if (!response.ok || !data.currentModel) throw new Error(data.error || 'Model preference could not be saved.');
       setPreference(current => current ? { ...current, currentModel: data.currentModel! } : current);
-      setMessage(model === null ? 'Mengikuti organization default.' : 'Model untuk workflow ini sudah disimpan.');
+      setMessage(model === null ? 'Following the organization default.' : 'The model for this workflow is saved.');
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Model preference could not be saved.');
     } finally {
@@ -67,7 +67,7 @@ export default function InlineModelSelector({ feature }: { feature: GenerationFe
 
   if (loading) return <Panel padding="compact"><p className="text-xs text-[var(--mos-text-muted)]">Loading model options…</p></Panel>;
   if (error && !preference) return <Panel padding="compact" className="border-red-400/20 bg-red-400/5"><p role="alert" className="text-xs text-red-300">{error}</p></Panel>;
-  if (!preference) return <Panel padding="compact" className="border-amber-400/15 bg-amber-400/[0.035]"><p className="text-xs leading-5 text-amber-100">Model selection belum tersedia untuk workflow ini. Hubungi administrator untuk memeriksa entitlement fitur.</p></Panel>;
+  if (!preference) return <Panel padding="compact" className="border-amber-400/15 bg-amber-400/[0.035]"><p className="text-xs leading-5 text-amber-100">Model selection is not available for this workflow yet. Ask an administrator to check the feature entitlement.</p></Panel>;
 
   return <Panel padding="compact" className="border-indigo-300/15 bg-indigo-400/[0.025]">
     <div className="grid gap-4 lg:grid-cols-[minmax(240px,360px)_1fr] lg:items-start">
@@ -77,7 +77,7 @@ export default function InlineModelSelector({ feature }: { feature: GenerationFe
           <StatusBadge tone="info">Personal preference</StatusBadge>
         </div>
         <label className="mt-3 block">
-          <span className="text-xs font-medium text-[var(--mos-text-secondary)]">Pilih model</span>
+          <span className="text-xs font-medium text-[var(--mos-text-secondary)]">Choose a model</span>
           <select
             aria-label={`Model for ${preference.label}`}
             value={preference.currentModel}

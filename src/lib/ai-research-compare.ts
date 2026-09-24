@@ -7,12 +7,12 @@ import {
 
 export const AI_RESEARCH_COMPARE_MAX_SIDE = 400;
 export const AI_RESEARCH_COMPARE_SECTIONS = [
-  'Kesamaan',
-  'Perbedaan',
-  'Bukti A',
-  'Bukti B',
-  'Kesimpulan',
-  'Sumber',
+  'Similarities',
+  'Differences',
+  'Evidence A',
+  'Evidence B',
+  'Conclusion',
+  'Sources',
 ] as const;
 
 export interface AiResearchCompareRequest {
@@ -28,12 +28,12 @@ function cleanSide(value: unknown): string {
 export function parseCompareSides(value: unknown): AiResearchCompareRequest | undefined {
   if (value == null) return undefined;
   if (!value || typeof value !== 'object') {
-    throw new Error('Perbandingan tidak valid.');
+    throw new Error('Comparison is not valid.');
   }
   const raw = value as { a?: unknown; b?: unknown };
   const a = cleanSide(raw.a);
   const b = cleanSide(raw.b);
-  if (!a || !b) throw new Error('Isi entitas A dan entitas B untuk membandingkan.');
+  if (!a || !b) throw new Error('Enter entity A and entity B to compare.');
   return { a, b };
 }
 
@@ -45,28 +45,28 @@ export function buildCompareUserPrompt(a: string, b: string, focus?: string): st
   const left = cleanSide(a);
   const right = cleanSide(b);
   const lines = [
-    'Bandingkan dua hal berikut secara berimbang.',
+    'Compare the two items below in a balanced way.',
     `A: ${left}`,
     `B: ${right}`,
   ];
   const extra = (focus || '').replace(/\s+/g, ' ').trim();
   if (extra && extra !== left && extra !== right) {
-    lines.push(`Fokus: ${extra.slice(0, 500)}`);
+    lines.push(`Focus: ${extra.slice(0, 500)}`);
   }
-  lines.push('Gunakan hanya bukti dari sumber yang ditemukan. Jangan mengarang harga atau fakta.');
+  lines.push('Use only evidence from the sources that were found. Do not invent prices or facts.');
   return lines.join('\n');
 }
 
 export function buildCompareSystemAddendum(compare: AiResearchCompareRequest): string {
   return [
-    'MODE PERBANDINGAN A VS B.',
-    `Entitas/klaim A: ${compare.a}`,
-    `Entitas/klaim B: ${compare.b}`,
-    'Riset kedua sisi secara terpisah dari sumber yang diberikan. Cuplikan yang diawali [Sisi A] hanya untuk A, [Sisi B] hanya untuk B, dan [Sisi A dan B] untuk keduanya.',
-    'Jangan mengarang harga, angka, tanggal, atau fakta. Jika satu sisi tidak punya bukti di sumber, tulis "bukti tidak ditemukan di sumber" pada bagian itu.',
-    'Wajib memakai heading markdown persis ini, berurutan:',
+    'COMPARE MODE A VS B.',
+    `Entity/claim A: ${compare.a}`,
+    `Entity/claim B: ${compare.b}`,
+    'Research both sides separately from the sources provided. Excerpts tagged [Side A] are only for A, [Side B] only for B, and [Side A and B] for both.',
+    'Do not invent prices, figures, dates, or facts. If one side has no evidence in the sources, write "no evidence found in the sources" in that section.',
+    'Use these markdown headings exactly, in this order:',
     ...AI_RESEARCH_COMPARE_SECTIONS.map(section => `## ${section}`),
-    'Di bagian Sumber, cantumkan setiap URL yang dipakai sebagai tautan markdown. Jangan menambah sumber yang tidak ada di konteks.',
+    'In the Sources section, list every URL you used as a markdown link. Do not add sources that are not in the context.',
   ].join('\n');
 }
 
@@ -81,9 +81,9 @@ function sourceKey(url: string): string {
 }
 
 function tagSnippet(snippet: string, side: 'A' | 'B' | 'both'): string {
-  const tag = side === 'both' ? '[Sisi A dan B]' : side === 'A' ? '[Sisi A]' : '[Sisi B]';
+  const tag = side === 'both' ? '[Side A and B]' : side === 'A' ? '[Side A]' : '[Side B]';
   const body = snippet.replace(/\s+/g, ' ').trim();
-  if (body.startsWith('[Sisi')) return body;
+  if (body.startsWith('[Side') || body.startsWith('[Sisi')) return body;
   return body ? `${tag} ${body}` : tag;
 }
 
@@ -117,7 +117,7 @@ export function mergeCompareResearch(input: {
     const side = sides.has('A') && sides.has('B') ? 'both' : sides.has('A') ? 'A' : 'B';
     return { ...source, snippet: tagSnippet(source.snippet, side) };
   });
-  const label = `Bandingkan A (${input.aLabel}) vs B (${input.bLabel})`;
+  const label = `Compare A (${input.aLabel}) vs B (${input.bLabel})`;
   return {
     query: label,
     indonesiaPreferred: prefersIndonesiaSources(`${input.aLabel} ${input.bLabel}`),

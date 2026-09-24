@@ -44,14 +44,14 @@ test('research pins normalize facts, source URLs, and graph focus links', () => 
   assert.equal(knowledgeBriefFromFact('x'.repeat(300)).length, 240);
   assert.deepEqual(parseStoredSourceUrls(JSON.stringify(prepared.sourceUrls)), prepared.sourceUrls);
   assert.match(knowledgeGraphFocusUrl('abc'), /\/dashboard\/knowledge-graph\?focus=abc/);
-  assert.throws(() => prepareResearchKnowledgePin({ taskType: 'ai-research', selectedOutput: 'pendek' }), /Fakta terlalu pendek/);
-  assert.throws(() => normalizePinnedSourceUrls(['javascript:alert(1)']), /URL sumber tidak valid/);
-  assert.throws(() => normalizePinnedSourceUrls(['http://localhost/secret']), /URL sumber tidak valid/);
+  assert.throws(() => prepareResearchKnowledgePin({ taskType: 'ai-research', selectedOutput: 'pendek' }), /Fact is too short/);
+  assert.throws(() => normalizePinnedSourceUrls(['javascript:alert(1)']), /Source URL is not valid/);
+  assert.throws(() => normalizePinnedSourceUrls(['http://localhost/secret']), /Source URL is not valid/);
   assert.throws(() => prepareResearchKnowledgePin({
     taskType: 'ai-research',
     selectedOutput: 'fakta yang cukup panjang',
     conversationId: 'nope',
-  }), /ID tidak valid/);
+  }), /Invalid id/);
 });
 
 test('cited claims can be pinned while uncited bullets stay out', () => {
@@ -68,9 +68,9 @@ test('cited claims can be pinned while uncited bullets stay out', () => {
   assert.deepEqual(claims[0].sourceUrls, ['https://www.reuters.com/markets/gold']);
 });
 
-test('watch topics, diffs, and Indonesian digests stay bounded', () => {
+test('watch topics, diffs, and digests stay bounded', () => {
   assert.equal(normalizeWatchTopic('  emas   Antam  '), 'emas Antam');
-  assert.throws(() => normalizeWatchTopic(' '), /Topik wajib diisi/);
+  assert.throws(() => normalizeWatchTopic(' '), /Topic is required/);
   assert.deepEqual(normalizeWatchKeywords('emas, Rupiah, rupiah', 'emas'), ['Rupiah']);
   assert.equal(buildWatchQuery('emas', ['Rupiah']), 'emas Rupiah');
   assert.equal(suggestWatchTopic(`${'topik '.repeat(40)}`).length, 120);
@@ -100,11 +100,11 @@ test('watch topics, diffs, and Indonesian digests stay bounded', () => {
     next,
     checkedAt: new Date('2026-09-23T02:00:00Z'),
   });
-  assert.match(digest, /Pantauan “emas”/);
+  assert.match(digest, /Watch “emas”/);
   assert.match(digest, /WIB/);
-  assert.match(digest, /1 temuan baru/);
+  assert.match(digest, /1 new findings/);
   assert.match(digest, /Rupiah melemah/);
-  assert.match(digest, /Tidak muncul lagi/);
+  assert.match(digest, /No longer listed/);
 
   const first = buildWatchDigest({
     topic: 'emas',
@@ -113,7 +113,7 @@ test('watch topics, diffs, and Indonesian digests stay bounded', () => {
     next,
     checkedAt: new Date('2026-09-23T02:00:00Z'),
   });
-  assert.match(first, /Pemeriksaan pertama/);
+  assert.match(first, /First check/);
 
   const same = buildWatchDigest({
     topic: 'emas',
@@ -122,7 +122,7 @@ test('watch topics, diffs, and Indonesian digests stay bounded', () => {
     next,
     checkedAt: new Date('2026-09-23T03:00:00Z'),
   });
-  assert.match(same, /Tidak ada perubahan judul atau tautan/);
+  assert.match(same, /No title or link changes/);
 });
 
 test('watch cron secret is required and compared exactly', () => {
@@ -208,15 +208,15 @@ test('pin and watch wiring reuses knowledge writes and documents the daily check
   assert.match(pinSave, /project_id/);
   assert.match(pinSave, /knowledge_edges/);
   assert.doesNotMatch(pinSave, /INTO user_style_preferences|UPDATE user_style_preferences/);
-  assert.match(pinUi, /Pin ke Knowledge Graph/);
-  assert.match(pinUi, /Simpan fakta/);
+  assert.match(pinUi, /Pin to Knowledge Graph/);
+  assert.match(pinUi, /Save fact/);
   assert.match(pinUi, /\/api\/knowledge\/save/);
-  assert.match(pinUi, /Buka di Knowledge Graph/);
-  assert.match(page, /Pantauan/);
+  assert.match(pinUi, /Open in Knowledge Graph/);
+  assert.match(page, /Watches/);
   assert.match(page, /AiResearchPinFact/);
-  assert.match(watchUi, /Cek sekarang/);
-  assert.match(watchUi, /Jeda/);
-  assert.match(watchUi, /Pantau topik/);
+  assert.match(watchUi, /Check now/);
+  assert.match(watchUi, /Pause/);
+  assert.match(watchUi, /Watch topic/);
   assert.match(watches, /requireFeature\(request, 'ai-research'\)/);
   assert.match(run, /watchCronAuthorization/);
   assert.match(run, /npm run research:watches/);

@@ -45,8 +45,8 @@ export function researchShareSecret(env: NodeJS.ProcessEnv = process.env): strin
 
 export function signResearchShareToken(claims: ShareTokenClaims, secret: string, now = Date.now()): string {
   if (!secret.trim()) throw new Error('Share signing secret is required');
-  if (!/^[0-9a-f-]{36}$/i.test(claims.id)) throw new Error('ID tidak valid');
-  if (!Number.isFinite(claims.exp) || claims.exp <= now) throw new Error('Kedaluwarsa tidak valid');
+  if (!/^[0-9a-f-]{36}$/i.test(claims.id)) throw new Error('Invalid id');
+  if (!Number.isFinite(claims.exp) || claims.exp <= now) throw new Error('Invalid expiry');
   const payload = Buffer.from(JSON.stringify({ id: claims.id, exp: claims.exp }), 'utf8').toString('base64url');
   const sig = createHmac('sha256', secret).update(`${TOKEN_VERSION}~${payload}`).digest('base64url');
   return `${TOKEN_VERSION}~${payload}~${sig}`;
@@ -101,7 +101,7 @@ export function matchShareSnapshot(messages: ShareMessage[], answer: string): Sh
     }
   }
   return {
-    query: query || 'Riset Dupoin AI',
+    query: query || 'Dupoin AI research',
     answer: matched.content.trim().slice(0, 40_000),
     sources: validateStoredSources(matched.sources),
   };

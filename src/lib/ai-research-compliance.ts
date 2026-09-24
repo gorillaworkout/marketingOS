@@ -3,7 +3,7 @@
  * This is a writing reminder for marketing, not a legal review.
  */
 
-export const COMPLIANCE_BANNER_TEXT = 'Perhatian compliance — review sebelum dipakai ke konten publik.';
+export const COMPLIANCE_BANNER_TEXT = 'Compliance check — review before this is used in public content.';
 
 export type ComplianceFlagKind = 'guaranteed-return' | 'aggressive-solicitation';
 
@@ -19,8 +19,8 @@ export interface ComplianceScan {
 }
 
 const FLAG_LABEL: Record<ComplianceFlagKind, string> = {
-  'guaranteed-return': 'Bahasa jaminan imbal hasil',
-  'aggressive-solicitation': 'Ajakan buka akun yang menekan',
+  'guaranteed-return': 'Guaranteed-return language',
+  'aggressive-solicitation': 'High-pressure account solicitation',
 };
 
 /** Calm Dupoin account CTA used by Article Market News. Not a pressure pattern. */

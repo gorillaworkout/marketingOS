@@ -59,8 +59,8 @@ test('context URL scan keeps public http(s), blocks internal targets, and caps a
   assert.match(blocked, /169\.254\.169\.254/);
   assert.match(blocked, /file:\/\/\/etc\/passwd/);
   assert.match(blocked, /intranet/);
-  assert.equal(contextUrlBlockReason('http://2130706433/'), 'alamat tidak publik');
-  assert.equal(contextUrlBlockReason('http://[::ffff:10.0.0.1]/'), 'alamat tidak publik');
+  assert.equal(contextUrlBlockReason('http://2130706433/'), 'address is not public');
+  assert.equal(contextUrlBlockReason('http://[::ffff:10.0.0.1]/'), 'address is not public');
   assert.equal(contextUrlBlockReason('https://example.com/ok'), null);
   assert.equal(scan.accepted[0]?.raw, 'https://example.com/emas');
   assert.equal(isUrlOnlyQuery('https://example.com/emas'), true);
@@ -152,7 +152,7 @@ test('URL fetch uses the page, falls back to Jina, and fails soft on blocks, DNS
     },
   });
   assert.equal(redirected.sources.length, 0);
-  assert.equal(redirected.failures[0]?.error, 'alamat tidak publik');
+  assert.equal(redirected.failures[0]?.error, 'address is not public');
   assert.equal(calls.filter(url => url.includes('169.254')).length, 0);
 
   const dnsBlocked = await fetchAiResearchContextUrls('https://example.com/rebind', {
@@ -162,14 +162,14 @@ test('URL fetch uses the page, falls back to Jina, and fails soft on blocks, DNS
     },
   });
   assert.equal(dnsBlocked.sources.length, 0);
-  assert.equal(dnsBlocked.failures[0]?.error, 'alamat tidak publik');
+  assert.equal(dnsBlocked.failures[0]?.error, 'address is not public');
 
   const incoming = applyContextUrlsToIncoming(
     [{ role: 'user', content: 'https://example.com/story' }],
-    [{ url: 'http://127.0.0.1/admin', error: 'alamat tidak publik' }],
+    [{ url: 'http://127.0.0.1/admin', error: 'address is not public' }],
   );
   assert.match(incoming[0]?.content || '', new RegExp(AI_RESEARCH_URL_ONLY_PROMPT));
-  assert.match(incoming[0]?.content || '', /Jangan mengarang isi halaman itu/);
+  assert.match(incoming[0]?.content || '', /Do not invent the contents of that page/);
   const gateway = buildGatewayMessages('system', [], incoming);
   assert.match(String(gateway[1]?.content), /127\.0\.0\.1/);
 });
@@ -183,12 +183,12 @@ test('AI Research chat route grounds user URLs without dropping document attach'
   assert.match(route, /type: 'context-urls'/);
   assert.match(route, /gatherAiResearchContext/);
   assert.match(route, /hydrateMessageFiles/);
-  assert.match(AI_RESEARCH_SYSTEM_PROMPT, /teks halaman dipotong/);
+  assert.match(AI_RESEARCH_SYSTEM_PROMPT, /page text was truncated/);
   assert.match(page, /scanContextUrls/);
   assert.match(page, /data-testid="ai-research-context-links"/);
   assert.match(page, /data-testid="ai-research-url-error"/);
   assert.match(page, /d\.type === 'context-urls'/);
-  assert.match(page, /Tambah tautan sebagai konteks/);
+  assert.match(page, /Add a link as context/);
   assert.match(page, /if \(!files\.length\) return;/);
   assert.match(page, /onPaste=\{handleComposerPaste\}/);
   assert.match(page, /addAttachments\(files\)/);

@@ -14,7 +14,7 @@ export const AI_RESEARCH_URL_TIMEOUT_MS = 8_000;
 export const AI_RESEARCH_URL_MAX_BYTES = 500_000;
 export const AI_RESEARCH_URL_MAX_CHARS = 8_000;
 export const AI_RESEARCH_URL_TRUNCATION_NOTE = '[Catatan: teks halaman dipotong karena terlalu panjang.]';
-export const AI_RESEARCH_URL_ONLY_PROMPT = 'Tolong rangkum dan jelaskan tautan yang disertakan.';
+export const AI_RESEARCH_URL_ONLY_PROMPT = 'Please summarize and explain the included links.';
 export const AI_RESEARCH_URL_MIN_TEXT = 40;
 
 const CANDIDATE_SOURCE = "\\b(?:https?|file|ftp|data):\\/\\/[^\\s<>\"'`]+";
@@ -103,14 +103,14 @@ export function contextUrlBlockReason(value: string): string | null {
   try {
     parsed = new URL(value.trim());
   } catch {
-    return 'tautan tidak valid';
+    return 'invalid link';
   }
-  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return 'skema tidak didukung';
-  if (!isPublicHttpUrl(parsed.toString())) return 'alamat tidak publik';
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return 'unsupported scheme';
+  if (!isPublicHttpUrl(parsed.toString())) return 'address is not public';
   const host = bareHost(parsed.hostname);
-  if (isNonPublicIpAddress(host)) return 'alamat tidak publik';
-  if (isLikelyLoginWallHost(parsed.toString())) return 'halaman membutuhkan login';
-  if (!host.includes('.') && !host.includes(':')) return 'alamat tidak publik';
+  if (isNonPublicIpAddress(host)) return 'address is not public';
+  if (isLikelyLoginWallHost(parsed.toString())) return 'page requires login';
+  if (!host.includes('.') && !host.includes(':')) return 'address is not public';
   return null;
 }
 
@@ -225,7 +225,7 @@ export function applyContextUrlsToIncoming(
   if (isUrlOnlyQuery(content)) content = `${AI_RESEARCH_URL_ONLY_PROMPT}\n${content}`;
   if (failures.length) {
     const notes = failures
-      .map(item => `[Tautan tidak diambil: ${item.url} — ${item.error}. Jangan mengarang isi halaman itu.]`)
+      .map(item => `[Link not fetched: ${item.url} — ${item.error}. Do not invent the contents of that page.]`)
       .join('\n');
     content = `${content}\n\n${notes}`;
   }

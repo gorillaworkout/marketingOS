@@ -52,15 +52,15 @@ test('Kanban is removed from the application surface without destructive databas
 });
 
 test('Knowledge empty state explains how real selections populate it', () => {
-  assert.match(knowledgePage, /Knowledge terbentuk otomatis/);
-  assert.match(knowledgePage, /Social Post atau Video Script/);
-  assert.match(knowledgePage, /tidak membuat data contoh palsu/i);
+  assert.match(knowledgePage, /Knowledge is built automatically/);
+  assert.match(knowledgePage, /Social Post or Video Script/);
+  assert.match(knowledgePage, /does not create fake sample data/i);
 });
 
 test('Templates API provides built-in starter templates and UI distinguishes them', () => {
   assert.match(templatesRoute, /BUILT_IN_TEMPLATES/);
   assert.match(templatesPage, /Built-in/);
-  assert.match(templatesPage, /Template bawaan/);
+  assert.match(templatesPage, /Built-in templates/);
 });
 
 test('Using a template prefills every supported generator', () => {

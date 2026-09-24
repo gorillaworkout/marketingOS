@@ -33,10 +33,10 @@ function collapseWhitespace(value: string): string {
 }
 
 export function normalizePinnedFact(value: unknown): string {
-  if (typeof value !== 'string') throw new Error('Fakta wajib diisi.');
+  if (typeof value !== 'string') throw new Error('Fact is required.');
   const fact = value.replace(/\r\n/g, '\n').replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
-  if (fact.length < PINNED_FACT_MIN_CHARS) throw new Error('Fakta terlalu pendek.');
-  if (fact.length > PINNED_FACT_MAX_CHARS) throw new Error('Fakta terlalu panjang.');
+  if (fact.length < PINNED_FACT_MIN_CHARS) throw new Error('Fact is too short.');
+  if (fact.length > PINNED_FACT_MAX_CHARS) throw new Error('Fact is too long.');
   return fact;
 }
 
@@ -73,19 +73,19 @@ function canonicalSourceUrl(value: string): string | null {
 export function normalizePinnedSourceUrls(value: unknown): string[] {
   if (value == null || value === '') return [];
   const list = Array.isArray(value) ? value : typeof value === 'string' ? [value] : null;
-  if (!list) throw new Error('URL sumber tidak valid.');
+  if (!list) throw new Error('Source URL is not valid.');
   const seen = new Set<string>();
   const urls: string[] = [];
   for (const item of list) {
-    if (typeof item !== 'string') throw new Error('URL sumber tidak valid.');
+    if (typeof item !== 'string') throw new Error('Source URL is not valid.');
     const trimmed = item.trim();
     if (!trimmed) continue;
     const canonical = canonicalSourceUrl(trimmed);
-    if (!canonical) throw new Error('URL sumber tidak valid.');
+    if (!canonical) throw new Error('Source URL is not valid.');
     if (seen.has(canonical)) continue;
     seen.add(canonical);
     urls.push(canonical);
-    if (urls.length > PINNED_SOURCE_URL_MAX) throw new Error('Terlalu banyak URL sumber.');
+    if (urls.length > PINNED_SOURCE_URL_MAX) throw new Error('Too many source URLs.');
   }
   return urls;
 }
@@ -115,7 +115,7 @@ const RECORD_ID = /^[A-Za-z0-9_-]{8,80}$/;
 
 export function normalizeOptionalRecordId(value: unknown): string | null {
   if (value == null || value === '') return null;
-  if (typeof value !== 'string' || !RECORD_ID.test(value.trim())) throw new Error('ID tidak valid.');
+  if (typeof value !== 'string' || !RECORD_ID.test(value.trim())) throw new Error('Invalid id.');
   return value.trim();
 }
 
@@ -126,7 +126,7 @@ export function prepareResearchKnowledgePin(input: {
   conversationId?: unknown;
   projectId?: unknown;
 }): PreparedResearchPin {
-  if (input.taskType !== AI_RESEARCH_KNOWLEDGE_TASK) throw new Error('Jenis knowledge tidak valid.');
+  if (input.taskType !== AI_RESEARCH_KNOWLEDGE_TASK) throw new Error('Knowledge type is not valid.');
   const fact = normalizePinnedFact(input.selectedOutput);
   return {
     taskType: AI_RESEARCH_KNOWLEDGE_TASK,

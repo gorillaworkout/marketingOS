@@ -107,7 +107,7 @@ test('classifies PDF, DOCX, and PPTX separately from images and spreadsheets', (
   assert.match(AI_RESEARCH_FILE_PICKER_ACCEPT, /application\/pdf/);
   assert.match(AI_RESEARCH_FILE_PICKER_ACCEPT, /\.docx/);
   assert.match(AI_RESEARCH_FILE_PICKER_ACCEPT, /\.pptx/);
-  assert.match(AI_RESEARCH_SYSTEM_PROMPT, /PDF, dokumen Word \(DOCX\), atau presentasi PowerPoint \(PPTX\)/);
+  assert.match(AI_RESEARCH_SYSTEM_PROMPT, /PDF, Word document \(DOCX\), or PowerPoint presentation \(PPTX\)/);
 });
 
 test('extracts PDF, DOCX, and PPTX text into the research prompt', async () => {

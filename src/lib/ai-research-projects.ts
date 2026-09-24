@@ -27,15 +27,15 @@ function clip(text: string, max: number): string {
 }
 
 export function normalizeProjectName(value: unknown): string {
-  if (typeof value !== 'string') throw new Error('Nama proyek wajib diisi.');
+  if (typeof value !== 'string') throw new Error('Project name is required.');
   const name = value.replace(/\s+/g, ' ').trim();
-  if (!name) throw new Error('Nama proyek wajib diisi.');
+  if (!name) throw new Error('Project name is required.');
   return name.slice(0, AI_RESEARCH_PROJECT_NAME_MAX);
 }
 
 export function normalizeProjectNotes(value: unknown): string {
   if (value == null) return '';
-  if (typeof value !== 'string') throw new Error('Catatan proyek tidak valid.');
+  if (typeof value !== 'string') throw new Error('Project notes are not valid.');
   return value.replace(/\r\n/g, '\n').trim().slice(0, AI_RESEARCH_PROJECT_NOTES_MAX);
 }
 
@@ -43,7 +43,7 @@ export function normalizeProjectId(value: unknown): string | undefined {
   if (typeof value !== 'string') return undefined;
   const id = value.trim();
   if (!id || id === AI_RESEARCH_INBOX_PROJECT) return undefined;
-  if (id.length > 80) throw new Error('Proyek tidak valid.');
+  if (id.length > 80) throw new Error('Project is not valid.');
   return id;
 }
 
@@ -60,7 +60,7 @@ export function appendProjectSummary(previous: string, userText: string, assista
   const user = clip(userText, 180);
   const assistant = clip(assistantText, 280);
   if (!user && !assistant) return previous.replace(/\r\n/g, '\n').trim().slice(-AI_RESEARCH_PROJECT_SUMMARY_MAX);
-  const line = `User: ${user || '(tanpa teks)'}\nAsisten: ${assistant || '(tanpa jawaban)'}`;
+  const line = `User: ${user || '(no text)'}\nAssistant: ${assistant || '(no answer)'}`;
   const prior = previous.replace(/\r\n/g, '\n').trim();
   const combined = [prior, line].filter(Boolean).join('\n');
   if (combined.length <= AI_RESEARCH_PROJECT_SUMMARY_MAX) return combined;
@@ -101,25 +101,25 @@ export function buildProjectMemoryBlock(input: ProjectMemoryInput): string {
   const name = input.name.replace(/\s+/g, ' ').trim();
   if (!name) return '';
   const lines = [
-    'KONTEKS PROYEK RISET (ingatan di dalam proyek ini; bukan bukti web baru):',
-    `Nama proyek: ${name}`,
-    'Gunakan konteks ini hanya untuk menjaga kelanjutan percakapan di proyek yang sama. Jangan mengarang fakta, harga, atau angka yang tidak ada di konteks ini atau di sumber riset. Jika konteks tidak cukup, katakan belum tercatat di proyek.',
+    'RESEARCH PROJECT CONTEXT (memory inside this project; not new web evidence):',
+    `Project name: ${name}`,
+    'Use this context only to continue the conversation in the same project. Do not invent facts, prices, or figures that are not in this context or in the research sources. If the context is not enough, say it is not recorded in the project yet.',
   ];
   const notes = clip(input.notes || '', 600);
   if (notes) {
-    lines.push('Catatan sematan:');
+    lines.push('Pinned notes:');
     lines.push(notes);
   }
   const summary = clip(input.summary || '', 700);
   if (summary) {
-    lines.push('Ringkasan percakapan proyek:');
+    lines.push('Project conversation summary:');
     lines.push(summary);
   }
   const turns = input.recentTurns || [];
   if (turns.length) {
-    lines.push('Giliran terbaru dari utas lain di proyek ini:');
+    lines.push('Latest turns from other threads in this project:');
     for (const turn of turns) {
-      lines.push(`${turn.role === 'user' ? 'User' : 'Asisten'}: ${turn.content}`);
+      lines.push(`${turn.role === 'user' ? 'User' : 'Assistant'}: ${turn.content}`);
     }
   }
   const text = lines.join('\n');

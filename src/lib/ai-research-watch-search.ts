@@ -118,11 +118,11 @@ export async function searchWatchTopic(
         provider = 'serper';
       } else if (attempt.exhausted) {
         serperFailed = true;
-        warning = 'Kuota Serper habis atau ditolak. Memakai RSS Google News.';
+        warning = 'Serper quota is exhausted or was rejected. Using Google News RSS.';
       }
     } catch {
       serperFailed = true;
-      warning = 'Pencarian Serper gagal. Memakai RSS Google News.';
+      warning = 'Serper search failed. Using Google News RSS.';
     }
   }
 
@@ -136,11 +136,11 @@ export async function searchWatchTopic(
     if (rssHits.length) {
       hits = rssHits;
       provider = 'news-rss';
-      if (!keys.serper) warning = 'SERPER_API_KEY kosong. Memakai RSS Google News.';
+      if (!keys.serper) warning = 'SERPER_API_KEY is empty. Using Google News RSS.';
     } else if (!keys.serper) {
-      warning = 'SERPER_API_KEY kosong dan RSS tidak mengembalikan hasil.';
+      warning = 'SERPER_API_KEY is empty and RSS returned no results.';
     } else if (serperFailed) {
-      warning = warning || 'Pencarian gagal.';
+      warning = warning || 'Search failed.';
     }
   }
 

@@ -4,19 +4,19 @@ export const VOICE_LANG_ID = 'id-ID';
 export const VOICE_LANG_EN = 'en-US';
 
 export function voiceUnsupportedMessage(): string {
-  return 'Input suara tidak tersedia di browser ini. Ketik pertanyaan, atau gunakan Chrome, Edge, atau Safari.';
+  return 'Voice input is not available in this browser. Type your question, or use Chrome, Edge, or Safari.';
 }
 
 export function voiceDeniedMessage(): string {
-  return 'Mikrofon ditolak. Izinkan akses mic di browser, atau ketik pertanyaan.';
+  return 'Microphone access was denied. Allow the mic in the browser, or type your question.';
 }
 
 export function voiceFallbackMessage(): string {
-  return 'Bahasa id-ID tidak didukung di browser ini. Beralih ke English.';
+  return 'Indonesian (id-ID) is not supported in this browser. Switching to English.';
 }
 
 export function voiceMissedMessage(): string {
-  return 'Suara tidak tertangkap. Coba lagi, atau ketik pertanyaan.';
+  return 'No speech was captured. Try again, or type your question.';
 }
 
 export type SpeechRecognitionLike = {

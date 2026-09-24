@@ -555,15 +555,15 @@ export default function VideoScriptPage() {
                 </FormField>
                 <FormField label="Target audience">
                   <Select value={targetAudience} onChange={e => setTargetAudience(e.target.value)}>
-                    <option value="">Pilih audience...</option>
-                    <option value="Trader Pemula">Trader Pemula</option>
-                    <option value="Trader Aktif">Trader Aktif</option>
-                    <option value="Trader Profesional">Trader Profesional</option>
+                    <option value="">Choose an audience...</option>
+                    <option value="Beginner trader">Beginner trader</option>
+                    <option value="Active trader">Active trader</option>
+                    <option value="Professional trader">Professional trader</option>
                     <option value="Investor">Investor</option>
-                    <option value="Pecinta Finansial">Pecinta Finansial</option>
-                    <option value="Pelajar & Mahasiswa">Pelajar & Mahasiswa</option>
-                    <option value="Pengusaha">Pengusaha</option>
-                    <option value="Karyawan & Profesional Muda">Karyawan & Profesional Muda</option>
+                    <option value="Finance enthusiast">Finance enthusiast</option>
+                    <option value="Students">Students</option>
+                    <option value="Business owner">Business owner</option>
+                    <option value="Young professional">Young professional</option>
                     <option value="General Public">General Public</option>
                   </Select>
                 </FormField>
@@ -703,7 +703,7 @@ export default function VideoScriptPage() {
                             onClick={(e) => { e.stopPropagation(); handleSelectPreview(index); }}
                             className="w-full mt-2 px-4 py-2 bg-[var(--mos-raised)] hover:bg-[var(--mos-raised)] text-white text-sm font-medium rounded-lg transition-colors border border-[var(--mos-border)]"
                           >
-                            Pilih & Edit
+                            Choose & edit
                           </button>
                         )}
 

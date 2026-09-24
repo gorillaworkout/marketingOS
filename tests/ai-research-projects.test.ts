@@ -20,8 +20,8 @@ const read = (path: string) => readFileSync(path, 'utf8');
 test('project names and notes are trimmed and capped', () => {
   assert.equal(normalizeProjectName('  emas   kompetitor  '), 'emas kompetitor');
   assert.equal(normalizeProjectName(`x${'y'.repeat(200)}`).length, AI_RESEARCH_PROJECT_NAME_MAX);
-  assert.throws(() => normalizeProjectName('   '), /Nama proyek wajib diisi/);
-  assert.throws(() => normalizeProjectName(12), /Nama proyek wajib diisi/);
+  assert.throws(() => normalizeProjectName('   '), /Project name is required/);
+  assert.throws(() => normalizeProjectName(12), /Project name is required/);
   assert.equal(normalizeProjectNotes('  catat spread\r\nAntam  '), 'catat spread\nAntam');
   assert.equal(normalizeProjectNotes(null), '');
   assert.ok(normalizeProjectNotes('a'.repeat(5_000)).length <= 2_000);
@@ -57,11 +57,11 @@ test('project memory keeps notes, summary, and other-thread turns inside a char 
     summary: 'User bertanya soal spread.',
     recentTurns: turns,
   });
-  assert.match(block, /Nama proyek: emas/);
+  assert.match(block, /Project name: emas/);
   assert.match(block, /Jangan mengarang harga Antam/);
-  assert.match(block, /Ringkasan percakapan proyek/);
-  assert.match(block, /utas lain/);
-  assert.match(block, /bukan bukti web baru/);
+  assert.match(block, /Project conversation summary/);
+  assert.match(block, /other threads/);
+  assert.match(block, /not new web evidence/);
   assert.ok(block.length <= AI_RESEARCH_PROJECT_MEMORY_MAX_CHARS);
 
   const huge = buildProjectMemoryBlock({
@@ -74,7 +74,7 @@ test('project memory keeps notes, summary, and other-thread turns inside a char 
     })),
   });
   assert.ok(huge.length <= AI_RESEARCH_PROJECT_MEMORY_MAX_CHARS);
-  assert.match(huge, /Nama proyek: emas/);
+  assert.match(huge, /Project name: emas/);
 });
 
 test('rolling project summary keeps the newest turn when the cap is exceeded', () => {
@@ -123,11 +123,11 @@ test('chat request carries an optional project id and the route scopes threads',
   assert.match(projectsRoute, new RegExp(`LIMIT \\?`));
   assert.equal(AI_RESEARCH_MAX_PROJECTS, 40);
   assert.match(page, /data-testid="ai-research-project-switcher"/);
-  assert.match(page, /Percakapan biasa/);
+  assert.match(page, /General chat/);
   assert.match(page, /data-testid="ai-research-project-create"/);
-  assert.match(page, /Catatan sematan/);
+  assert.match(page, /Pinned notes/);
   assert.match(page, /data-testid="ai-research-project-delete"/);
-  assert.match(page, /Hapus proyek ini\? Percakapan kembali ke Percakapan biasa\./);
+  assert.match(page, /Delete this project\? Conversations return to General chat\./);
   assert.match(page, /projectId: activeProjectId/);
   assert.match(page, /conversationBelongsToProject/);
   assert.match(page, /\?project=/);

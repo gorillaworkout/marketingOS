@@ -34,7 +34,7 @@ test('share tokens are signed, reject tampering, and expire', () => {
   const flipped = `${payload.slice(0, -1)}${payload.endsWith('a') ? 'b' : 'a'}`;
   assert.equal(verifyResearchShareToken(`${version}~${flipped}~${sig}`, SECRET, NOW), null);
   assert.match(researchSharePath(token), new RegExp(`^/share/ai-research/${version}~`));
-  assert.throws(() => signResearchShareToken({ id: 'nope', exp }, SECRET, NOW), /ID tidak valid/);
+  assert.throws(() => signResearchShareToken({ id: 'nope', exp }, SECRET, NOW), /Invalid id/);
 });
 
 test('a share snapshot must match a stored assistant answer', () => {

@@ -35,7 +35,7 @@ export function formatIDR(value: number | string) {
 }
 
 function formatBudgetAmount(value: number | null | undefined) {
-  if (value === null || value === undefined) return 'Belum diketahui';
+  if (value === null || value === undefined) return 'Not known yet';
   return formatIDR(value);
 }
 
@@ -183,7 +183,7 @@ export default function EventPlanPage() {
 
   return (
     <PageStack className="max-w-5xl">
-      <PageHeader eyebrow="Create / Events" title="Event plan" description="Riset, proposal, dan budgeting dalam satu workflow dengan kontrol sumber yang jelas." />
+      <PageHeader eyebrow="Create / Events" title="Event plan" description="Research, proposal, and budgeting in one workflow with a clear source check." />
       <InlineModelSelector feature="event-plan" />
 
       <Panel>
@@ -196,7 +196,7 @@ export default function EventPlanPage() {
           <FormField label="Budget ceiling" hint="IDR"><TextInput inputMode="numeric" value={budget ? formatIDR(budget) : ''} onChange={e => setBudget(e.target.value.replace(/\D/g, ''))} placeholder="Rp 50.000.000" /></FormField>
           <FormField label="Event target date"><TextInput type="date" value={targetDate} onChange={e => setTargetDate(e.target.value)} /></FormField>
         </div>
-        <FormField label="Research / quotation links" hint="Optional · maximum 5"><TextArea value={researchLinks} onChange={e => setResearchLinks(e.target.value)} rows={4} placeholder={'https://official-vendor.example/proposal\nhttps://hotel.example/price-list'} /><span className="mt-1.5 block text-xs leading-5 text-[var(--mos-text-faint)]">Satu URL publik per baris. Server membaca halaman itu dan mencari harga sewa venue serta fee narasumber. Hasilnya bukan quotation terverifikasi.</span></FormField>
+        <FormField label="Research / quotation links" hint="Optional · maximum 5"><TextArea value={researchLinks} onChange={e => setResearchLinks(e.target.value)} rows={4} placeholder={'https://official-vendor.example/proposal\nhttps://hotel.example/price-list'} /><span className="mt-1.5 block text-xs leading-5 text-[var(--mos-text-faint)]">One public URL per line. The server reads that page and looks for venue rental prices and speaker fees. The result is not a verified quotation.</span></FormField>
         <Button type="submit" variant="primary" disabled={loading || !eventName}>{loading ? 'Generating…' : 'Generate plan'}</Button>
       </form>
       </Panel>
@@ -235,7 +235,7 @@ function BudgetBreakdown({ budget }: { budget: Budget | null }) {
   return (
     <div className="mb-4">
       <label className="text-xs text-[var(--mos-text-faint)] uppercase tracking-wide">Budget breakdown</label>
-      <p className="mt-1 text-xs text-[var(--mos-text-faint)]">{NO_PUBLIC_PRICE_NOTE}. Angka di tabel hanya muncul jika angka itu ada di sumber publik. Ini bukan quotation terverifikasi.</p>
+      <p className="mt-1 text-xs text-[var(--mos-text-faint)]">{NO_PUBLIC_PRICE_NOTE}. Figures in the table appear only when they are in a public source. This is not a verified quotation.</p>
       {budget.ceilingNote && <p className="mt-1 text-xs text-amber-300">{budget.ceilingNote}</p>}
       <DataTableFrame className="mt-2">
         <table className="w-full text-sm text-left">
@@ -258,7 +258,7 @@ function BudgetBreakdown({ budget }: { budget: Budget | null }) {
                 <td className="p-3 max-w-xl whitespace-pre-wrap leading-6">{item.notes}</td>
                 <td className="p-3 text-right whitespace-nowrap">
                   <p>{formatBudgetAmount(item.estimatedCost)}</p>
-                  {item.sourceUrl && <a className="mt-1 inline-block text-xs underline" href={item.sourceUrl} target="_blank" rel="noreferrer">Sumber</a>}
+                  {item.sourceUrl && <a className="mt-1 inline-block text-xs underline" href={item.sourceUrl} target="_blank" rel="noreferrer">Source</a>}
                 </td>
               </tr>
             )) : (
@@ -273,7 +273,7 @@ function BudgetBreakdown({ budget }: { budget: Budget | null }) {
               <td className="p-3 text-right whitespace-nowrap">{formatBudgetAmount(budget.contingency)}</td>
             </tr>
             <tr>
-              <td className="p-3 font-semibold" colSpan={3}>Total harga publik</td>
+              <td className="p-3 font-semibold" colSpan={3}>Total public price</td>
               <td className="p-3 text-right font-semibold whitespace-nowrap">{formatBudgetAmount(budget.total)}</td>
             </tr>
           </tfoot>
@@ -288,9 +288,9 @@ function ResearchPanel({ research }: { research: EventPlanResearch }) {
   const hasSources = research.sources.length > 0;
   return (
     <section className={`mt-4 rounded-lg border p-4 ${hasSources ? 'border-blue-500/40 bg-blue-500/10 text-blue-100' : 'border-2 border-amber-400 bg-amber-500/15 text-amber-100'}`} role={hasSources ? undefined : 'alert'}>
-      <h4 className="font-semibold">Sumber riset anggaran</h4>
-      <p className="mt-1 text-sm">{NO_PUBLIC_PRICE_NOTE}. Halaman publik di bawah bukan quotation terverifikasi.</p>
-      {research.queries && research.queries.length > 0 && <p className="mt-2 text-xs">Pencarian: {research.queries.join(' · ')}</p>}
+      <h4 className="font-semibold">Budget research sources</h4>
+      <p className="mt-1 text-sm">{NO_PUBLIC_PRICE_NOTE}. The public pages below are not a verified quotation.</p>
+      {research.queries && research.queries.length > 0 && <p className="mt-2 text-xs">Searches: {research.queries.join(' · ')}</p>}
       {hasSources ? (
         <div className="mt-3">
           <p className="text-xs uppercase tracking-wide">Sources</p>
@@ -306,7 +306,7 @@ function ResearchPanel({ research }: { research: EventPlanResearch }) {
           </ul>
         </div>
       ) : (
-        <p className="mt-2 text-sm">Pencarian publik tidak menemukan halaman harga untuk anggaran ini.</p>
+        <p className="mt-2 text-sm">Public search did not find a price page for this budget.</p>
       )}
       {contacts.length > 0 && (
         <div className="mt-3">

@@ -28,7 +28,7 @@ function readOsCameraPreference(): boolean {
 }
 
 function readInPageCameraBlock(): string | null {
-  if (typeof window === 'undefined') return 'Kamera di halaman butuh browser.';
+  if (typeof window === 'undefined') return 'In-page camera needs a browser.';
   return inPageCameraBlockReason({
     secureContext: window.isSecureContext,
     hasGetUserMedia: typeof navigator.mediaDevices?.getUserMedia === 'function',
@@ -231,8 +231,8 @@ export function AiResearchCameraButton({
         onClick={openCamera}
         disabled={disabled}
         className="text-[var(--mos-text-muted)] hover:text-[var(--mos-text)] disabled:opacity-30 p-2 rounded-xl transition-colors flex-shrink-0"
-        title="Ambil foto lalu lampirkan"
-        aria-label="Ambil foto dengan kamera"
+        title="Take a photo and attach it"
+        aria-label="Take a photo with the camera"
       >
         <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
           <path strokeLinecap="round" strokeLinejoin="round" d="M6.827 6.175A2.31 2.31 0 015.186 7.23c-.38.054-.757.112-1.134.175C2.999 7.58 2.25 8.507 2.25 9.574V18a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9.574c0-1.067-.75-1.994-1.802-2.169a47.865 47.865 0 00-1.134-.175 2.31 2.31 0 01-1.64-1.055l-.822-1.316a2.192 2.192 0 00-1.736-1.039 48.774 48.774 0 00-5.232 0 2.192 2.192 0 00-1.736 1.039l-.821 1.316z" />
@@ -254,13 +254,13 @@ export function AiResearchCameraButton({
             onClick={event => event.stopPropagation()}
           >
             <div className="flex items-center justify-between gap-3 px-4 py-3">
-              <h3 id="ai-research-camera-title" className="text-sm font-semibold text-[var(--mos-text)]">Kamera</h3>
+              <h3 id="ai-research-camera-title" className="text-sm font-semibold text-[var(--mos-text)]">Camera</h3>
               <button
                 type="button"
                 onClick={closePreview}
                 className="text-[11px] text-[var(--mos-text-muted)] hover:text-[var(--mos-text)]"
               >
-                Tutup
+                Close
               </button>
             </div>
             <div className="bg-black">
@@ -279,7 +279,7 @@ export function AiResearchCameraButton({
               </p>
             )}
             {phase === 'starting' && !previewError && (
-              <p className="px-4 pt-3 text-[11px] text-[var(--mos-text-muted)]">Membuka kamera…</p>
+              <p className="px-4 pt-3 text-[11px] text-[var(--mos-text-muted)]">Opening camera…</p>
             )}
             <div className="flex flex-wrap gap-2 p-4">
               <button
@@ -289,7 +289,7 @@ export function AiResearchCameraButton({
                 disabled={phase !== 'live'}
                 className="rounded-xl bg-indigo-600 px-3 py-2 text-xs font-medium text-white disabled:opacity-30"
               >
-                Ambil foto
+                Take photo
               </button>
               <button
                 type="button"
@@ -298,7 +298,7 @@ export function AiResearchCameraButton({
                 disabled={phase === 'starting'}
                 className="rounded-xl border border-[var(--mos-border)] px-3 py-2 text-xs text-[var(--mos-text)] disabled:opacity-30"
               >
-                {facing === 'environment' ? 'Kamera depan' : 'Kamera belakang'}
+                {facing === 'environment' ? 'Front camera' : 'Back camera'}
               </button>
               <button
                 type="button"
@@ -306,7 +306,7 @@ export function AiResearchCameraButton({
                 onClick={openFileCapture}
                 className="rounded-xl border border-[var(--mos-border)] px-3 py-2 text-xs text-[var(--mos-text)]"
               >
-                Pilih foto
+                Choose photo
               </button>
             </div>
           </div>

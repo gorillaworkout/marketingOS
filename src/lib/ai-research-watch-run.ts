@@ -84,20 +84,20 @@ export async function createResearchWatch(userId: string, body: { topic?: unknow
     topic = normalizeWatchTopic(body.topic);
     keywords = normalizeWatchKeywords(body.keywords, topic);
   } catch (error) {
-    return { status: 400, body: { error: error instanceof Error ? error.message : 'Pantauan tidak valid.' } };
+    return { status: 400, body: { error: error instanceof Error ? error.message : 'Watch is not valid.' } };
   }
   const count = await queryOne<{ count: string }>(
     'SELECT COUNT(*)::text AS count FROM ai_research_watches WHERE user_id = ?',
     [userId],
   );
   if (Number(count?.count ?? 0) >= AI_RESEARCH_MAX_WATCHES) {
-    return { status: 400, body: { error: `Maksimal ${AI_RESEARCH_MAX_WATCHES} pantauan per pengguna.` } };
+    return { status: 400, body: { error: `At most ${AI_RESEARCH_MAX_WATCHES} watches per user.` } };
   }
   const duplicate = await queryOne<{ id: string }>(
     'SELECT id FROM ai_research_watches WHERE user_id = ? AND lower(topic) = lower(?)',
     [userId, topic],
   );
-  if (duplicate) return { status: 400, body: { error: 'Topik ini sudah dipantau.' } };
+  if (duplicate) return { status: 400, body: { error: 'This topic is already being watched.' } };
 
   const id = uuidv4();
   await execute(
@@ -114,10 +114,10 @@ export async function setResearchWatchStatus(userId: string, watchId: string, st
   try {
     next = normalizeWatchStatus(status);
   } catch (error) {
-    return { status: 400, body: { error: error instanceof Error ? error.message : 'Status pantauan tidak valid.' } };
+    return { status: 400, body: { error: error instanceof Error ? error.message : 'Watch status is not valid.' } };
   }
   const existing = await watchForUser(userId, watchId);
-  if (!existing) return { status: 404, body: { error: 'Pantauan tidak ditemukan.' } };
+  if (!existing) return { status: 404, body: { error: 'Watch was not found.' } };
   await execute(
     'UPDATE ai_research_watches SET status = ?, updated_at = NOW() WHERE id = ? AND user_id = ?',
     [next, watchId, userId],
@@ -128,7 +128,7 @@ export async function setResearchWatchStatus(userId: string, watchId: string, st
 
 export async function deleteResearchWatch(userId: string, watchId: string): Promise<{ status: number; body: Record<string, unknown> }> {
   const removed = await execute('DELETE FROM ai_research_watches WHERE id = ? AND user_id = ?', [watchId, userId]);
-  if (!removed) return { status: 404, body: { error: 'Pantauan tidak ditemukan.' } };
+  if (!removed) return { status: 404, body: { error: 'Watch was not found.' } };
   return { status: 200, body: { ok: true } };
 }
 
@@ -162,7 +162,7 @@ export async function checkStoredWatch(
     return {
       watch: presentResearchWatch(row),
       skipped: true,
-      message: 'Baru saja dicek. Coba lagi sebentar lagi.',
+      message: 'Checked just now. Try again in a moment.',
     };
   }
 
@@ -171,7 +171,7 @@ export async function checkStoredWatch(
   try {
     const result = await searchWatchTopic(buildWatchQuery(row.topic, keywords), { enrichThinSnippets: true });
     if (!result.ok) {
-      const digest = `Pemeriksaan gagal untuk “${row.topic}”: ${result.warning || 'pencarian tidak tersedia'}. Snapshot sebelumnya tidak diubah.`;
+      const digest = `Check failed for “${row.topic}”: ${result.warning || 'search is unavailable'}. The previous snapshot was not changed.`;
       const saved = await writeWatchCheck(row, digest, null);
       return { watch: presentResearchWatch(saved || { ...row, last_digest: digest, last_checked_at: now }), skipped: false };
     }
@@ -187,8 +187,8 @@ export async function checkStoredWatch(
     const saved = await writeWatchCheck(row, digest, snapshot);
     return { watch: presentResearchWatch(saved || { ...row, last_digest: digest, last_snapshot: JSON.stringify(snapshot), last_checked_at: now }), skipped: false };
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'pencarian gagal';
-    const digest = `Pemeriksaan gagal untuk “${row.topic}”: ${message}. Snapshot sebelumnya tidak diubah.`;
+    const message = error instanceof Error ? error.message : 'search failed';
+    const digest = `Check failed for “${row.topic}”: ${message}. The previous snapshot was not changed.`;
     const saved = await writeWatchCheck(row, digest, null);
     return { watch: presentResearchWatch(saved || { ...row, last_digest: digest, last_checked_at: now }), skipped: false };
   }
@@ -196,7 +196,7 @@ export async function checkStoredWatch(
 
 export async function checkResearchWatch(userId: string, watchId: string): Promise<{ status: number; body: Record<string, unknown> }> {
   const row = await watchForUser(userId, watchId);
-  if (!row) return { status: 404, body: { error: 'Pantauan tidak ditemukan.' } };
+  if (!row) return { status: 404, body: { error: 'Watch was not found.' } };
   const result = await checkStoredWatch(row, { minIntervalMs: AI_RESEARCH_WATCH_MIN_INTERVAL_MS });
   return { status: 200, body: result };
 }

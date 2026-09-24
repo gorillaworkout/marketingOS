@@ -71,7 +71,7 @@ test('page exposes both client-only download actions, disclaimer, and only rende
   assert.match(page, /Download JSON/);
   assert.match(page, /new Blob\(/);
   assert.match(page, /NO_PUBLIC_PRICE_NOTE/);
-  assert.match(page, /Sumber riset anggaran/);
+  assert.match(page, /Budget research sources/);
   assert.match(page, /source\.snippet/);
   assert.match(page, /contact\.sourceUrl/);
   assert.match(page, /researchUrls/);
@@ -93,10 +93,10 @@ test('download of fallback budget names vendors and venues without invented cont
   assert.match(download.content, /Suggested vendor/);
   assert.match(download.content, /Hotel Indonesia Kempinski Jakarta|Shangri-La Hotel Jakarta/);
   assert.match(download.content, /Dyandra Promosindo|Sound of Music/);
-  assert.match(download.content, /Blue Bird|Pembicara/);
+  assert.match(download.content, /Blue Bird|Financial seminar speaker/);
   assert.match(download.content, new RegExp(NO_PUBLIC_PRICE_NOTE));
   assert.match(download.content, /Venue\/location/);
-  assert.match(download.content, /Belum diketahui/);
+  assert.match(download.content, /Not known yet/);
   assert.doesNotMatch(download.content, /Rp\s*\d/);
   assert.doesNotMatch(download.content, /\+62\s*\d/);
   assert.doesNotMatch(download.content, /@[a-z0-9.-]+\.[a-z]{2,}/i);

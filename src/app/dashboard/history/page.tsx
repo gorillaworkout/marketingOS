@@ -184,7 +184,7 @@ export default function HistoryPage() {
                           {Array.isArray(input.sources) && input.sources.length > 0 && <div><label className="text-xs text-[var(--mos-text-faint)] uppercase tracking-wide">Research Sources</label><ul className="mt-2 space-y-2">{input.sources.map((source: ArticleSourceInput, index: number) => <li key={`${source.url}-${index}`} className="rounded-lg bg-[var(--mos-raised)] p-3 text-sm"><span className="text-[var(--mos-text-secondary)]">{source.outlet} — {source.title}</span><a href={source.url} target="_blank" rel="noreferrer" className="mt-1 block break-all text-cyan-400 hover:underline">{source.url}</a><span className="mt-1 block text-xs text-[var(--mos-text-faint)]">{source.provenance === 'automated' ? 'Automated publisher research' : 'Optional user reference'}</span></li>)}</ul></div>}
                           <label className="flex cursor-pointer gap-3 rounded-[var(--mos-radius-panel)] border border-amber-500/25 bg-amber-500/10 p-4 text-sm text-amber-100">
                             <input type="checkbox" checked={articleFactReviewConfirmed} onChange={event => setArticleFactReviewConfirmed(event.target.checked)} className="mt-0.5 h-4 w-4 accent-emerald-500" />
-                            <span>Saya sudah memeriksa ulang klaim nonnumeric dan source snapshot artikel ini. Aktifkan untuk Download DOCX.</span>
+                            <span>I have rechecked the non-numeric claims and the source snapshot for this article. Confirm to enable Download DOCX.</span>
                           </label>
                         </>
                       );
@@ -211,7 +211,7 @@ export default function HistoryPage() {
                           </div>
                           <label className="flex cursor-pointer gap-3 rounded-[var(--mos-radius-panel)] border border-amber-500/25 bg-amber-500/10 p-4 text-sm text-amber-100">
                             <input type="checkbox" checked={marketResearchReviewConfirmed} onChange={event => setMarketResearchReviewConfirmed(event.target.checked)} className="mt-0.5 h-4 w-4 accent-emerald-500" />
-                            <span>Saya sudah membuka seluruh link dan membaca artikel lengkap. Aktifkan untuk Download DOCX.</span>
+                            <span>I have opened every link and read the full articles. Confirm to enable Download DOCX.</span>
                           </label>
                         </>
                       );

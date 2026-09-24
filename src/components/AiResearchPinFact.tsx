@@ -76,7 +76,7 @@ export function AiResearchPinFact({
         }),
       });
       const payload = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(payload.error || 'Gagal menyimpan fakta');
+      if (!response.ok) throw new Error(payload.error || 'Could not save the fact');
       const knowledgeId = typeof payload.knowledgeId === 'string' ? payload.knowledgeId : '';
       const graphUrl = typeof payload.graphUrl === 'string'
         ? payload.graphUrl
@@ -86,7 +86,7 @@ export function AiResearchPinFact({
       setDraft(null);
       setToast({ graphUrl });
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Gagal menyimpan fakta');
+      setError(cause instanceof Error ? cause.message : 'Could not save the fact');
     } finally {
       setSaving(false);
     }
@@ -102,7 +102,7 @@ export function AiResearchPinFact({
           onClick={() => openDraft(answer.trim().slice(0, 4_000), sources.map(source => source.url))}
           className="rounded-full border border-emerald-400/30 bg-emerald-500/10 px-2.5 py-1 text-[10px] font-medium text-emerald-100 hover:bg-emerald-500/20"
         >
-          Pin ke Knowledge Graph
+          Pin to Knowledge Graph
         </button>
         {topicSuggestion && topicSuggestion.trim().length >= 2 && onWatchTopic && (
           <button
@@ -110,7 +110,7 @@ export function AiResearchPinFact({
             onClick={() => onWatchTopic(topicSuggestion.trim().slice(0, 120))}
             className="rounded-full border border-[var(--mos-border)] bg-[var(--mos-bg)] px-2.5 py-1 text-[10px] font-medium text-[var(--mos-text)] hover:bg-[var(--mos-hover)]"
           >
-            Pantau topik ini
+            Watch this topic
           </button>
         )}
         {claims.map(claim => (
@@ -121,7 +121,7 @@ export function AiResearchPinFact({
             className="max-w-[240px] truncate rounded-full border border-[var(--mos-border)] bg-[var(--mos-bg)] px-2.5 py-1 text-[10px] font-medium text-[var(--mos-text)] hover:bg-[var(--mos-hover)]"
             title={claim.text}
           >
-            Simpan fakta: {claim.text.slice(0, 72)}
+            Save fact: {claim.text.slice(0, 72)}
           </button>
         ))}
       </div>
@@ -135,20 +135,20 @@ export function AiResearchPinFact({
             data-testid="ai-research-pin-modal"
             className="w-full max-w-lg rounded-2xl border border-[var(--mos-border)] bg-[var(--mos-raised)] p-4 shadow-2xl"
           >
-            <h3 id="pin-fact-title" className="text-sm font-semibold text-[var(--mos-text)]">Simpan fakta</h3>
+            <h3 id="pin-fact-title" className="text-sm font-semibold text-[var(--mos-text)]">Save fact</h3>
             <p className="mt-1 text-[11px] leading-4 text-[var(--mos-text-muted)]">
-              Sunting teks sebelum disimpan ke Knowledge Graph. Izin sama dengan simpan knowledge lain.
+              Edit the text before it is saved to the Knowledge Graph. The same permission as other knowledge saves applies.
             </p>
             <textarea
               value={draft.text}
               onChange={event => setDraft({ ...draft, text: event.target.value })}
               rows={6}
-              aria-label="Teks fakta"
+              aria-label="Fact text"
               className="mt-3 w-full resize-y rounded-xl border border-[var(--mos-border)] bg-[var(--mos-bg)] px-3 py-2 text-sm text-[var(--mos-text)] outline-none focus:border-emerald-400/50"
             />
             {availableUrls.length > 0 && (
               <fieldset className="mt-3 space-y-1.5">
-                <legend className="text-[10px] font-semibold uppercase tracking-wide text-[var(--mos-text-muted)]">Sumber</legend>
+                <legend className="text-[10px] font-semibold uppercase tracking-wide text-[var(--mos-text-muted)]">Sources</legend>
                 {availableUrls.map(url => (
                   <label key={url} className="flex items-start gap-2 text-[11px] text-[var(--mos-text)]">
                     <input
@@ -174,7 +174,7 @@ export function AiResearchPinFact({
                 disabled={saving}
                 className="rounded-lg px-3 py-1.5 text-[11px] text-[var(--mos-text-muted)] hover:text-[var(--mos-text)]"
               >
-                Batal
+                Cancel
               </button>
               <button
                 type="button"
@@ -182,7 +182,7 @@ export function AiResearchPinFact({
                 disabled={saving || draft.text.trim().length < 8}
                 className="rounded-lg bg-emerald-600 px-3 py-1.5 text-[11px] font-medium text-white hover:bg-emerald-500 disabled:opacity-40"
               >
-                {saving ? 'Menyimpan…' : 'Simpan fakta'}
+                {saving ? 'Saving…' : 'Save fact'}
               </button>
             </div>
           </div>
@@ -195,13 +195,13 @@ export function AiResearchPinFact({
           data-testid="ai-research-pin-toast"
           className="fixed bottom-4 right-4 z-50 max-w-sm rounded-xl border border-emerald-400/30 bg-[var(--mos-raised)] px-3 py-2.5 shadow-xl"
         >
-          <p className="text-xs text-[var(--mos-text)]">Fakta tersimpan di Knowledge Graph.</p>
+          <p className="text-xs text-[var(--mos-text)]">Fact saved to the Knowledge Graph.</p>
           <div className="mt-1.5 flex items-center gap-3">
             <a href={toast.graphUrl} className="text-[11px] font-medium text-emerald-200 underline underline-offset-2">
-              Buka di Knowledge Graph
+              Open in Knowledge Graph
             </a>
             <button type="button" onClick={() => setToast(null)} className="text-[11px] text-[var(--mos-text-muted)] hover:text-[var(--mos-text)]">
-              Tutup
+              Close
             </button>
           </div>
         </div>

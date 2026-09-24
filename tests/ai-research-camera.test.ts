@@ -54,12 +54,12 @@ test('mobile browsers use the OS camera and desktop explains blocked previews', 
   }), true);
 
   assert.match(inPageCameraBlockReason({ secureContext: false, hasGetUserMedia: true }) || '', /HTTPS/);
-  assert.match(inPageCameraBlockReason({ secureContext: true, hasGetUserMedia: false }) || '', /tidak mendukung pratinjau/);
+  assert.match(inPageCameraBlockReason({ secureContext: true, hasGetUserMedia: false }) || '', /does not support a camera preview/);
   assert.equal(inPageCameraBlockReason({ secureContext: true, hasGetUserMedia: true }), null);
-  assert.match(cameraCaptureErrorMessage('NotAllowedError'), /Izin kamera ditolak/);
-  assert.match(cameraCaptureErrorMessage('NotFoundError'), /tidak ditemukan/);
-  assert.match(cameraCaptureErrorMessage('NotReadableError'), /sedang dipakai/);
-  assert.match(cameraCaptureErrorMessage('Oops'), /tidak bisa dibuka/);
+  assert.match(cameraCaptureErrorMessage('NotAllowedError'), /Camera permission was denied/);
+  assert.match(cameraCaptureErrorMessage('NotFoundError'), /No camera was found/);
+  assert.match(cameraCaptureErrorMessage('NotReadableError'), /in use by another app/);
+  assert.match(cameraCaptureErrorMessage('Oops'), /could not be opened/);
   assert.equal(AI_RESEARCH_CAMERA_ACCEPT, 'image/*');
   assert.equal(AI_RESEARCH_CAMERA_CAPTURE, 'environment');
 });
@@ -69,7 +69,7 @@ test('AI Research camera control feeds the existing attachment pipeline', () => 
   const button = read('src/components/AiResearchCameraButton.tsx');
   assert.match(page, /AiResearchCameraButton/);
   assert.match(page, /onCapture=\{file => addAttachments\(\[file\]\)\}/);
-  assert.match(page, /Tombol kamera mengambil foto lalu melampirkannya/);
+  assert.match(page, /The camera button takes a photo and attaches it/);
   assert.match(button, /data-testid="ai-research-camera"/);
   assert.match(button, /data-testid="ai-research-camera-input"/);
   assert.match(button, /accept=\{AI_RESEARCH_CAMERA_ACCEPT\}/);

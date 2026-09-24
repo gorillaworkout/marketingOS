@@ -130,10 +130,10 @@ test('limitations section is appended once and reports the real search caps', ()
     plannedQueries: 3,
   });
   assert.match(first, /Emas menguat\./);
-  assert.match(first, /## Kesenjangan dan keterbatasan/);
-  assert.match(first, /batas waktu/);
-  assert.match(first, /2 dari 3/);
-  assert.match(first, /Sumber yang dipakai: 4/);
+  assert.match(first, /## Gaps and limitations/);
+  assert.match(first, /time limit/);
+  assert.match(first, /2 of 3/);
+  assert.match(first, /Sources used: 4/);
   const second = ensureDeepLimitationsSection(first, {
     roundsRun: 2,
     sourceCount: 4,
@@ -147,7 +147,7 @@ test('limitations section is appended once and reports the real search caps', ()
     stoppedReason: 'complete',
     plannedQueries: 1,
     skipped: 'url-only',
-  }), /hanya berisi tautan/);
+  }), /only contains links/);
 });
 
 test('chat request defaults to fast and stored answers keep deep mode plus sources', () => {
@@ -204,8 +204,8 @@ test('deep route reuses the gather pipeline and the page exposes the mode toggle
   assert.equal(AI_RESEARCH_DEEP_ROUND_TIMEOUT_MS, 12_000);
   assert.equal(AI_RESEARCH_DEEP_PLAN_MAX_TOKENS, 600);
   assert.match(page, /data-testid="ai-research-mode-toggle"/);
-  assert.match(page, /Cepat/);
-  assert.match(page, /Mendalam/);
+  assert.match(page, /'Fast'/);
+  assert.match(page, /'Deep'/);
   assert.equal(AI_RESEARCH_MODE_STORAGE_KEY, 'dupoin-ai-research-mode');
   assert.match(page, /AI_RESEARCH_MODE_STORAGE_KEY/);
   assert.match(page, /localStorage/);

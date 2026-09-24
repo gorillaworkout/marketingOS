@@ -326,8 +326,8 @@ export function toEventPlanResearch(research: EventPricingResearch, submittedUrl
     snippet: hit.snippet,
     query: hit.query,
     claim: hit.amounts.length
-      ? 'Harga publik dari halaman ini (bukan quotation terverifikasi)'
-      : 'Belum ditemukan harga publik di halaman ini — minta quotation ke vendor',
+      ? 'Public price from this page (not a verified quotation)'
+      : 'No public price found on this page — request a quotation from the vendor',
   }));
   const listed = new Set(sources.map((source) => source.url));
   for (const url of submittedUrls) {
@@ -337,7 +337,7 @@ export function toEventPlanResearch(research: EventPricingResearch, submittedUrl
       title: url,
       snippet: '',
       query: 'submitted link',
-      claim: 'Halaman publik tidak berhasil diambil — minta quotation ke vendor',
+      claim: 'The public page could not be fetched — request a quotation from the vendor',
     });
   }
   const status = research.hits.length ? 'researched' : submittedUrls.length ? 'source-provided' : 'unverified';

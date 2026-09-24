@@ -31,7 +31,7 @@ export function AiResearchAnswerTools({
   const share = async () => {
     if (shareState === 'working') return;
     if (!conversationId) {
-      setShareError('Percakapan belum tersimpan.');
+      setShareError('This conversation is not saved yet.');
       return;
     }
     setShareState('working');
@@ -43,7 +43,7 @@ export function AiResearchAnswerTools({
         body: JSON.stringify({ conversationId, answer }),
       });
       const data = await response.json().catch(() => ({})) as { path?: string; error?: string; ttlDays?: number };
-      if (!response.ok || !data.path) throw new Error(data.error || 'Gagal membuat tautan');
+      if (!response.ok || !data.path) throw new Error(data.error || 'Could not create the link');
       const url = `${window.location.origin}${data.path}`;
       setShareUrl(url);
       try {
@@ -54,7 +54,7 @@ export function AiResearchAnswerTools({
       setShareState('done');
     } catch (error) {
       setShareState('idle');
-      setShareError(error instanceof Error ? error.message : 'Gagal membuat tautan');
+      setShareError(error instanceof Error ? error.message : 'Could not create the link');
     }
   };
 
@@ -65,7 +65,7 @@ export function AiResearchAnswerTools({
       answer,
       sources,
     });
-    setHandoffNote('Membuka formulir. Belum dipublikasikan.');
+    setHandoffNote('Opening the form. Not published yet.');
     window.location.assign(href);
   };
 
@@ -95,7 +95,7 @@ export function AiResearchAnswerTools({
           disabled={shareState === 'working' || !conversationId}
           className={chipClass}
         >
-          {shareState === 'working' ? 'Membagikan…' : shareState === 'done' ? 'Tautan disalin' : 'Bagikan'}
+          {shareState === 'working' ? 'Sharing…' : shareState === 'done' ? 'Link copied' : 'Share'}
         </button>
         {AI_RESEARCH_HANDOFF_MODULES.map(module => (
           <button
@@ -111,7 +111,7 @@ export function AiResearchAnswerTools({
       </div>
       {shareUrl && (
         <p className="break-all px-1 text-[10px] leading-4 text-[var(--mos-text-muted)]">
-          Tautan baca 30 hari:{' '}
+          Read-only link for 30 days:{' '}
           <a
             href={shareUrl}
             data-testid="ai-research-share-url"

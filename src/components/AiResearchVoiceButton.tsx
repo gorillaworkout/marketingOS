@@ -14,7 +14,7 @@ import {
   type SpeechRecognitionLike,
 } from '@/lib/ai-research-voice';
 
-const LISTENING_STATUS = 'Mendengarkan… bicara sekarang. Klik mic untuk berhenti.';
+const LISTENING_STATUS = 'Listening… speak now. Click the mic to stop.';
 
 export function AiResearchVoiceButton({
   disabled,
@@ -153,8 +153,8 @@ export function AiResearchVoiceButton({
       data-testid="ai-research-voice"
       data-listening={listening ? 'true' : 'false'}
       aria-pressed={listening}
-      aria-label={listening ? 'Berhenti mendengarkan' : 'Input suara'}
-      title={listening ? 'Mendengarkan… klik untuk berhenti' : 'Input suara (Chrome, Edge, Safari — id-ID, atau English)'}
+      aria-label={listening ? 'Stop listening' : 'Voice input'}
+      title={listening ? 'Listening… click to stop' : 'Voice input (Chrome, Edge, Safari — id-ID, or English)'}
       disabled={disabled}
       onClick={toggle}
       className={`p-2 rounded-xl transition-colors flex-shrink-0 disabled:opacity-30 ${

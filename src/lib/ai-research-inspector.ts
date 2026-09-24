@@ -35,29 +35,29 @@ export interface ResearchSsePayload {
 
 export const RESEARCH_STATUS_COPY: Record<ResearchGatherStatus, { title: string; body: string }> = {
   ok: {
-    title: 'Sumber yang dipakai',
-    body: 'Semua jejak yang di-ground ke model. Anda yang memutuskan mana yang dipercaya.',
+    title: 'Sources used',
+    body: 'Every trace grounded into the model. You decide which ones to trust.',
   },
   empty: {
-    title: 'Tidak ada sumber',
-    body: 'Pencarian selesai, tetapi tidak ada sumber web yang bisa dipakai. Jawaban tidak grounded.',
+    title: 'No sources',
+    body: 'Search finished, but no usable web sources were found. The answer is not grounded.',
   },
   failed: {
-    title: 'Pencarian sumber gagal',
-    body: 'Gagal mengambil sumber riset. Jawaban Dupoin AI mungkin tidak grounded ke web. Coba kirim ulang.',
+    title: 'Source search failed',
+    body: 'Research sources could not be fetched. The Dupoin AI answer may not be grounded to the web. Try sending again.',
   },
   skipped: {
-    title: 'Riset web dilewati',
-    body: 'Pertanyaan ini tidak membutuhkan pencarian sumber.',
+    title: 'Web research skipped',
+    body: 'This question does not need a source search.',
   },
 };
 
 export const RESEARCH_FAILED_BANNER =
-  'Pencarian sumber gagal. Jawaban Dupoin AI mungkin tidak grounded ke web.';
+  'Source search failed. The Dupoin AI answer may not be grounded to the web.';
 export const RESEARCH_DISCONNECT_BANNER =
-  'Koneksi terputus sebelum jawaban selesai. Cuplikan yang sudah diterima tetap ditampilkan.';
+  'The connection dropped before the answer finished. The text already received is still shown.';
 export const RESEARCH_IDLE_COPY =
-  'Sumber muncul setelah Anda mengirim pertanyaan riset. Semua jejak yang ditemukan akan ditampilkan di sini.';
+  'Sources appear after you send a research question. Every trace that is found will be listed here.';
 
 export function truncateResearchSnippet(
   snippet: string,

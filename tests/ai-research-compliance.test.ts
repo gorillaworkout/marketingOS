@@ -10,7 +10,7 @@ import { DUPOIN_ACCOUNT_CTA_SENTENCE } from '../src/lib/article-market-news';
 const read = (path: string) => readFileSync(path, 'utf8');
 
 test('compliance banner flags guaranteed returns and pressure, not the normal Dupoin CTA', () => {
-  assert.equal(COMPLIANCE_BANNER_TEXT, 'Perhatian compliance — review sebelum dipakai ke konten publik.');
+  assert.equal(COMPLIANCE_BANNER_TEXT, 'Compliance check — review before this is used in public content.');
 
   const calm = scanResearchCompliance(
     `Harga emas bergerak mengikuti dolar.\n\n${DUPOIN_ACCOUNT_CTA_SENTENCE}`,
