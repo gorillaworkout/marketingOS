@@ -33,9 +33,14 @@ export function getImageGenerationSpec(aspectRatio: ImageAspectRatio) {
   } as const;
 }
 
+/** Remove a previously baked aspect suffix so a new ratio can replace it. */
+export function stripImageAspectPrompt(prompt: string): string {
+  return String(prompt || '').replace(ASPECT_PROMPT_SUFFIX_RE, '').trimEnd();
+}
+
 /** Bake the dropdown size/aspect into image-prompt text without stacking duplicates. */
 export function withImageAspectPrompt(prompt: string, aspectRatio: ImageAspectRatio): string {
   const { promptSuffix } = getImageGenerationSpec(aspectRatio);
-  const trimmed = String(prompt || '').replace(ASPECT_PROMPT_SUFFIX_RE, '').trimEnd();
+  const trimmed = stripImageAspectPrompt(prompt);
   return trimmed ? `${trimmed}\n\n${promptSuffix}` : promptSuffix;
 }
