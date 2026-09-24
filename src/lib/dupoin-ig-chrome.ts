@@ -1,9 +1,32 @@
 import path from 'node:path';
 import fs from 'node:fs';
 import sharp from 'sharp';
+import {
+  DUPOIN_IG_CHROME_HEIGHT,
+  DUPOIN_IG_CHROME_WIDTH,
+  chromePlacement,
+} from '@/lib/dupoin-ig-chrome-layout';
+
+export {
+  DUPOIN_IG_CHROME_HEIGHT,
+  DUPOIN_IG_CHROME_WIDTH,
+  DUPOIN_IG_FOOTER_BAND_PX,
+  DUPOIN_IG_HEADER_BAND_PX,
+  DUPOIN_IG_LOCKUP_HEIGHT,
+  DUPOIN_IG_LOCKUP_LEFT,
+  DUPOIN_IG_LOCKUP_TOP,
+  DUPOIN_IG_LOCKUP_WIDTH,
+  chromeClearancePercents,
+  chromePlacement,
+  type ChromePlacement,
+} from '@/lib/dupoin-ig-chrome-layout';
 
 /**
- * Dupoin Indonesia Instagram chrome for Social Post creatives.
+ * Server-only Dupoin Indonesia Instagram chrome for Social Post creatives.
+ *
+ * Do not import this module from Client Components or from
+ * dupoin-image-prompt.ts. It loads sharp, fs, and the plate files.
+ * Band sizes and prompt clearance live in dupoin-ig-chrome-layout.ts.
  *
  * The committed plates are 1080×1350. The header is the Dupoin script
  * wordmark plus the white CNN 2025 laurel. The footer is the white
@@ -20,27 +43,6 @@ import sharp from 'sharp';
 export const DUPOIN_SOCIAL_HEADER_PNG_PATH = path.join(process.cwd(), 'public', 'brand', 'dupoin-social-header.png');
 export const DUPOIN_SOCIAL_FOOTER_PNG_PATH = path.join(process.cwd(), 'public', 'brand', 'dupoin-social-footer.png');
 
-export const DUPOIN_IG_CHROME_WIDTH = 1080;
-export const DUPOIN_IG_CHROME_HEIGHT = 1350;
-
-/**
- * Lockup box on Bayu's 1080×1350 sizing reference.
- * The composited mark must stay inside this box: more inset than a
- * full-width stamp, and not taller than the reference.
- */
-export const DUPOIN_IG_LOCKUP_LEFT = 80;
-export const DUPOIN_IG_LOCKUP_TOP = 64;
-export const DUPOIN_IG_LOCKUP_WIDTH = 435;
-export const DUPOIN_IG_LOCKUP_HEIGHT = 72;
-
-/**
- * Content height of each plate after the black background is removed.
- * Header band is the sizing-reference top inset plus the lockup height.
- * Prompt clearance uses the same numbers.
- */
-export const DUPOIN_IG_HEADER_BAND_PX = DUPOIN_IG_LOCKUP_TOP + DUPOIN_IG_LOCKUP_HEIGHT;
-export const DUPOIN_IG_FOOTER_BAND_PX = 64;
-
 /** Exact disclaimer on the official footer plate. Spelling "resiko" is intentional. */
 export const DUPOIN_IG_FOOTER_LINE_1 =
   'PT Dupoin Futures Indonesia telah teregulasi oleh BAPPEBTI, OJK, dan BI. Dan diawasi oleh JFX, KBI, dan ASPEBTINDO.';
@@ -52,13 +54,6 @@ const NEAR_BLACK_MAX = 12;
 
 /** A footer row this white is the regulatory bar, so black type on it stays. */
 const WHITE_ROW_MIN = 0.45;
-
-export interface ChromePlacement {
-  headerHeight: number;
-  footerHeight: number;
-  scaledWidth: number;
-  left: number;
-}
 
 export interface RgbaImage {
   data: Buffer;
@@ -145,51 +140,6 @@ export function firstContentRow(image: RgbaImage, minPixels = 8): number {
     }
   }
   return -1;
-}
-
-/**
- * Scale the native chrome with the canvas width and pin the bands to the
- * top and bottom. Very short canvases shrink both bands so they still fit.
- */
-export function chromePlacement(
-  canvasWidth: number,
-  canvasHeight: number,
-  bands: { headerPx: number; footerPx: number } = {
-    headerPx: DUPOIN_IG_HEADER_BAND_PX,
-    footerPx: DUPOIN_IG_FOOTER_BAND_PX,
-  },
-): ChromePlacement {
-  if (!Number.isFinite(canvasWidth) || !Number.isFinite(canvasHeight) || canvasWidth < 2 || canvasHeight < 2) {
-    throw new Error('Cannot composite Instagram chrome: generated image has no readable dimensions.');
-  }
-
-  const headerPx = bands.headerPx;
-  const footerPx = bands.footerPx;
-  let scale = canvasWidth / DUPOIN_IG_CHROME_WIDTH;
-  let headerHeight = Math.max(1, Math.round(headerPx * scale));
-  let footerHeight = Math.max(1, Math.round(footerPx * scale));
-  if (headerHeight + footerHeight > canvasHeight) {
-    scale = canvasHeight / (headerPx + footerPx);
-    headerHeight = Math.max(1, Math.round(headerPx * scale));
-    footerHeight = Math.max(1, canvasHeight - headerHeight);
-  }
-
-  let scaledWidth = Math.max(1, Math.round(DUPOIN_IG_CHROME_WIDTH * scale));
-  if (scaledWidth > canvasWidth) scaledWidth = canvasWidth;
-  const left = Math.max(0, Math.round((canvasWidth - scaledWidth) / 2));
-  return { headerHeight, footerHeight, scaledWidth, left };
-}
-
-/** Clearance the image prompt must reserve, as a percentage of the canvas height. */
-export function chromeClearancePercents(canvasWidth: number, canvasHeight: number): {
-  headerPercent: number;
-  footerPercent: number;
-} {
-  const place = chromePlacement(canvasWidth, canvasHeight);
-  return {
-    headerPercent: Math.ceil((place.headerHeight / canvasHeight) * 100),
-    footerPercent: Math.ceil((place.footerHeight / canvasHeight) * 100),
-  };
 }
 
 interface KeyedPlate {

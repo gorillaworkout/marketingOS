@@ -169,3 +169,19 @@ test('Social Post image route composites Instagram chrome instead of the lower-r
   assert.match(imageRoute, /type === 'social-post'\s*\?\s*await compositeDupoinInstagramChrome\(imageBytes\)\s*:\s*await compositeDupoinLogo\(imageBytes\)/);
   assert.doesNotMatch(imageRoute, /imageBytes = await compositeDupoinLogo\(imageBytes\)/);
 });
+
+test('Social Post client prompt helpers do not import the sharp compositor', () => {
+  const prompt = read('src/lib/dupoin-image-prompt.ts');
+  const page = read('src/app/dashboard/social-post/page.tsx');
+  const layout = read('src/lib/dupoin-ig-chrome-layout.ts');
+
+  assert.match(prompt, /from '@\/lib\/dupoin-ig-chrome-layout'/);
+  assert.doesNotMatch(prompt, /dupoin-ig-chrome['"]/);
+  assert.doesNotMatch(prompt, /from 'sharp'/);
+  assert.doesNotMatch(prompt, /node:fs/);
+  assert.match(page, /applyDupoinImagePromptLocks/);
+  assert.doesNotMatch(page, /dupoin-ig-chrome/);
+  assert.doesNotMatch(layout, /from 'sharp'/);
+  assert.doesNotMatch(layout, /node:fs/);
+  assert.doesNotMatch(layout, /node:path/);
+});
