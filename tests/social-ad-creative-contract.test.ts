@@ -206,6 +206,26 @@ test('Social Post page offers the swipe button before Generate image', () => {
   assert.ok(aspect >= 0 && swipe > aspect && generate > swipe, 'swipe option sits after aspect ratio and before Generate image');
 });
 
+test('Social Post result image and history View open the same preview', () => {
+  const page = read('src/app/dashboard/social-post/page.tsx');
+  assert.match(page, /data-testid="social-post-generated-image"/);
+  assert.match(page, /aria-label="Enlarge image"/);
+  assert.match(page, /setPreviewImage\(\{ src: generatedImage, alt: 'Generated social post' \}\)/);
+  assert.match(page, /data-testid="social-post-image-history-view"/);
+  assert.match(page, /const openHistoryPreview = \(\) => setPreviewImage\(\{ src: img\.imageUrl, alt: previewAlt \}\)/);
+  assert.match(page, /onClick=\{openHistoryPreview\}/);
+  assert.doesNotMatch(page, /setGeneratedImage\(img\.imageUrl\)/);
+  assert.match(page, /data-testid="social-post-image-preview"/);
+  assert.match(page, /role="dialog"/);
+  assert.match(page, /aria-modal="true"/);
+  assert.match(page, /aria-label="Image preview"/);
+  assert.match(page, /Click the image to enlarge\./);
+  const generated = page.indexOf('data-testid="social-post-generated-image"');
+  const view = page.indexOf('data-testid="social-post-image-history-view"');
+  const dialog = page.indexOf('data-testid="social-post-image-preview"');
+  assert.ok(generated > 0 && view > generated && dialog > view);
+});
+
 test('Social Post client prompt helpers do not import the sharp compositor', () => {
   const prompt = read('src/lib/dupoin-image-prompt.ts');
   const page = read('src/app/dashboard/social-post/page.tsx');

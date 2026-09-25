@@ -279,6 +279,7 @@ export default function SocialPostPage() {
   const [taskId, setTaskId] = useState<string | null>(null);
   const [generatingImage, setGeneratingImage] = useState(false);
   const [generatedImage, setGeneratedImage] = useState<string | null>(null);
+  const [previewImage, setPreviewImage] = useState<{ src: string; alt: string } | null>(null);
   const [editableImagePrompt, setEditableImagePrompt] = useState('');
   const [imageModel, setImageModel] = useState(DEFAULT_IMAGE_MODEL);
   const [imageAspectRatio, setImageAspectRatio] = useState<ImageAspectRatio>(DEFAULT_IMAGE_ASPECT_RATIO);
@@ -396,6 +397,15 @@ export default function SocialPostPage() {
     };
   }, [stopElapsedTimer, stopImageTracking]);
 
+  useEffect(() => {
+    if (!previewImage) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setPreviewImage(null);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [previewImage]);
+
   const handleGenerate = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
@@ -403,6 +413,7 @@ export default function SocialPostPage() {
     setOptions(null);
     setResult(null);
     setGeneratedImage(null);
+    setPreviewImage(null);
     setImageHistory([]);
     setImageNotice('');
     setGeneratedImageModel(null);
@@ -616,6 +627,7 @@ export default function SocialPostPage() {
     setGeneratingImage(true);
     setError('');
     setGeneratedImage(null);
+    setPreviewImage(null);
     setImageNotice('');
     setGeneratedImageModel(null);
     setImageProgress({ step: 'trying', progress: 5, message: 'Starting image generation...', elapsed: 0 });
@@ -723,6 +735,7 @@ export default function SocialPostPage() {
     setResult(null);
     setSelectedIndex(null);
     setGeneratedImage(null);
+    setPreviewImage(null);
     setImageNotice('');
     setGeneratedImageModel(null);
     setKnowledgeSaved(false);
@@ -1263,8 +1276,17 @@ export default function SocialPostPage() {
                   {imageNotice}
                 </div>
               )}
-              <div className="bg-[var(--mos-surface)] rounded-lg p-2 flex items-center justify-center">
-                <img src={generatedImage} alt="Generated" className="max-w-full max-h-[500px] rounded-lg" />
+              <div className="bg-[var(--mos-surface)] rounded-lg p-2 flex flex-col items-center justify-center gap-2">
+                <button
+                  type="button"
+                  data-testid="social-post-generated-image"
+                  aria-label="Enlarge image"
+                  className="cursor-zoom-in rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--mos-accent-ring)]"
+                  onClick={() => setPreviewImage({ src: generatedImage, alt: 'Generated social post' })}
+                >
+                  <img src={generatedImage} alt="Generated" className="max-w-full max-h-[500px] rounded-lg" />
+                </button>
+                <p className="text-xs text-[var(--mos-text-faint)]">Click the image to enlarge.</p>
               </div>
             </Panel>
           )}
@@ -1274,21 +1296,34 @@ export default function SocialPostPage() {
             <Panel>
               <SectionHeader title="Image history" description={`${imageHistory.length} image(s) generated for this post.`} />
               <div className="mt-4 space-y-2">
-                {imageHistory.slice().reverse().map((img: any, i: number) => (
+                {imageHistory.slice().reverse().map((img: any, i: number) => {
+                  const previewAlt = img.sopName || img.fileName || 'Generated social post';
+                  const openHistoryPreview = () => setPreviewImage({ src: img.imageUrl, alt: previewAlt });
+                  return (
                   <div key={`${img.fileName || img.imageUrl}-${i}`} className="flex items-center gap-3 rounded-[var(--mos-radius-control)] border border-[var(--mos-border)] bg-[var(--mos-surface)] p-2">
-                    <img src={img.imageUrl} alt={img.sopName || 'Generated'} className="h-14 w-14 rounded object-cover shrink-0" />
+                    <button type="button" onClick={openHistoryPreview} aria-label={`Enlarge ${previewAlt}`} className="shrink-0 cursor-zoom-in rounded">
+                      <img src={img.imageUrl} alt="" className="pointer-events-none h-14 w-14 rounded object-cover" />
+                    </button>
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-xs text-[var(--mos-text-secondary)]">{img.sopName || img.fileName}</p>
-                      <p className="text-[10px] text-[var(--mos-text-faint)]">
+                      <p className="truncate text-[10px] text-[var(--mos-text-faint)]">
                         {availableImageModels.find(item => item.id === img.model)?.name || img.model || 'unknown model'}
                         {img.fallbackFrom ? ` · fallback from ${availableImageModels.find(item => item.id === img.fallbackFrom)?.name || img.fallbackFrom}` : ''}
                         {img.aspectRatio ? ` · ${img.aspectRatio}` : ''}
                         {img.generatedAt ? ` · ${new Date(img.generatedAt).toLocaleString('id-ID')}` : ''}
                       </p>
                     </div>
-                    <button type="button" onClick={() => setGeneratedImage(img.imageUrl)} className="shrink-0 text-[10px] text-[var(--mos-text-secondary)] underline">View</button>
+                    <button
+                      type="button"
+                      data-testid="social-post-image-history-view"
+                      onClick={openHistoryPreview}
+                      className="relative z-10 shrink-0 rounded-[var(--mos-radius-control)] px-2 py-1.5 text-xs font-medium text-[var(--mos-accent-soft)] underline-offset-2 hover:underline"
+                    >
+                      View
+                    </button>
                   </div>
-                ))}
+                  );
+                })}
               </div>
             </Panel>
           )}
@@ -1432,6 +1467,33 @@ export default function SocialPostPage() {
           </Panel>
         </div>
       </div>
+
+      {previewImage && (
+        <div
+          className="fixed inset-0 z-[70] flex items-center justify-center bg-black/85 p-4 sm:p-8"
+          role="presentation"
+          onClick={() => setPreviewImage(null)}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label="Image preview"
+            data-testid="social-post-image-preview"
+            className="relative flex max-h-full w-full max-w-5xl flex-col items-center"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <button
+              type="button"
+              autoFocus
+              className="mb-3 self-end rounded-[var(--mos-radius-control)] border border-white/20 bg-black/50 px-3 py-1.5 text-xs font-medium text-white"
+              onClick={() => setPreviewImage(null)}
+            >
+              Close
+            </button>
+            <img src={previewImage.src} alt={previewImage.alt} className="max-h-[85vh] max-w-full rounded-lg object-contain" />
+          </div>
+        </div>
+      )}
 
       {/* Shimmer animation keyframes */}
       <style jsx global>{`
