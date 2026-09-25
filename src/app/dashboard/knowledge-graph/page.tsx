@@ -94,7 +94,7 @@ export default function AdminKnowledgeGraphPage() {
 
       <Panel padding="none">
         <div className="grid sm:grid-cols-2 lg:grid-cols-5">
-          <MetricCard label="Knowledge" value={data.totals.knowledge.toLocaleString()} note="Approved records" />
+          <MetricCard label="Knowledge" value={data.totals.knowledge.toLocaleString()} note="Selections, approvals, and research" />
           <MetricCard label="Stored relationships" value={data.totals.edges.toLocaleString()} note="Persisted connections" />
           <MetricCard label="Recent growth" value={data.totals.addedLast30Days.toLocaleString()} note="Last 30 days" />
           <MetricCard label="Contributors" value={data.totals.contributors.toLocaleString()} note="People represented" />
@@ -165,7 +165,7 @@ export default function AdminKnowledgeGraphPage() {
         </div>
       </Panel>
 
-      <footer className="flex flex-col gap-2 border-t border-[var(--mos-border-subtle)] pt-5 text-xs leading-5 text-[var(--mos-text-faint)] md:flex-row md:justify-between"><p>Only selected or approved outputs become knowledge. Draft volume is excluded.</p><p>More records do not imply better quality. Learning health depends on approvals, ratings, and feedback coverage.</p></footer>
+      <footer className="flex flex-col gap-2 border-t border-[var(--mos-border-subtle)] pt-5 text-xs leading-5 text-[var(--mos-text-faint)] md:flex-row md:justify-between"><p>Knowledge is saved from selected options, approvals, published posts, finished event plans, completed market research and articles, and grounded AI Research claims. Drafts, failed runs, and aborted answers stay out.</p><p>More records do not imply better quality. Learning health depends on approvals, ratings, and feedback coverage.</p></footer>
     </PageStack>
   );
 }

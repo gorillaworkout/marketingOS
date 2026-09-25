@@ -3,7 +3,8 @@ import { randomUUID } from 'node:crypto';
 import { requireFeature } from '@/lib/auth';
 import { execute } from '@/lib/database';
 import { rateLimit } from '@/lib/rate-limit';
-import { generateContent, getUserPreferredModel } from '@/lib/openai';
+import { fetchKnowledgeContext, generateContent, getUserPreferredModel } from '@/lib/openai';
+import { persistKnowledgeQuietly, summarizeMarketResearchKnowledge } from '@/lib/knowledge-persist';
 import {
   buildMarketResearchPrompts,
   marketResearchNeedsShortlist,
@@ -166,7 +167,10 @@ async function runSelection(
   userId: string,
   send: (data: Record<string, unknown>) => void,
 ) {
-  const { systemPrompt, userPrompt } = buildMarketResearchPrompts(input, research.candidates);
+  const knowledgeContext = await fetchKnowledgeContext(userId, `${input.brief} ${input.researchDate}`, undefined, 5, 'internal');
+  const built = buildMarketResearchPrompts(input, research.candidates);
+  const systemPrompt = `${built.systemPrompt}${knowledgeContext}\n\nIf internal knowledge conflicts with CANDIDATES, follow the candidate evidence contract.`;
+  const userPrompt = built.userPrompt;
   send({
     step: 'selection',
     progress: 72,
@@ -228,6 +232,23 @@ async function runSelection(
       evidenceSnapshot,
     })],
   );
+
+  const researchKnowledge = summarizeMarketResearchKnowledge({
+    brief: input.brief,
+    researchDate: input.researchDate,
+    items: report.items,
+  });
+  if (researchKnowledge) {
+    await persistKnowledgeQuietly({
+      userId,
+      taskType: 'market-research',
+      taskId: historyId,
+      brief: researchKnowledge.brief,
+      selectedOutput: researchKnowledge.selectedOutput,
+      sourceUrls: researchKnowledge.sourceUrls,
+      action: 'complete',
+    });
+  }
 
   send({
     step: 'done',

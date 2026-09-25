@@ -3,6 +3,7 @@ import { queryOne, queryAll, execute } from '@/lib/database';
 import { requireFeature } from '@/lib/auth';
 import { rateLimit } from '@/lib/rate-limit';
 import { generateContent, getSmartSystemPrompt, fetchContextMemory, fetchStyleContext, fetchKnowledgeContext, getUserPreferredModel, type BrandGuidelines } from '@/lib/openai';
+import { persistKnowledgeQuietly, summarizeVideoScriptKnowledge } from '@/lib/knowledge-persist';
 import { runVideoScriptQc } from '@/lib/video-script-qc';
 import {
   VIDEO_SCRIPT_WEB_SKIPPED_MESSAGE,
@@ -466,6 +467,20 @@ The fullScript must be the complete, detailed script with scene descriptions, di
           fs.writeFileSync(path.join(outputDir, fileName), JSON.stringify(outputData, null, 2));
 
           await execute('INSERT INTO tasks (id, user_id, type, title, brief, status, output_data) VALUES (?, ?, ?, ?, ?, ?, ?)', [taskId, userId, 'video-script', `Video Script: ${event.substring(0, 50)}`, event, 'completed', JSON.stringify(outputData)]);
+
+          const scriptKnowledge = summarizeVideoScriptKnowledge(finalOption);
+          if (scriptKnowledge) {
+            await persistKnowledgeQuietly({
+              userId,
+              taskType: 'video-script',
+              taskId,
+              brief: event,
+              selectedOutput: scriptKnowledge,
+              platform,
+              audience: targetAudience,
+              action: 'complete',
+            });
+          }
 
           emit({
             step: 'done',

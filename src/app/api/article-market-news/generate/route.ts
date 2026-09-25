@@ -3,7 +3,8 @@ import { randomUUID } from 'node:crypto';
 import { requireFeature } from '@/lib/auth';
 import { execute } from '@/lib/database';
 import { rateLimit } from '@/lib/rate-limit';
-import { generateContent, getUserPreferredModel } from '@/lib/openai';
+import { fetchKnowledgeContext, fetchStyleContext, generateContent, getUserPreferredModel } from '@/lib/openai';
+import { persistKnowledgeQuietly, summarizeArticleKnowledge } from '@/lib/knowledge-persist';
 import { buildArticleMarketNewsPrompts, ensureEndingDupoinAccountCta, normalizeArticleMarketNewsInput, parseGeneratedArticle, validateGeneratedArticle } from '@/lib/article-market-news';
 import { researchArticleMarketNews } from '@/lib/article-market-news-research';
 
@@ -76,7 +77,11 @@ export async function POST(request: NextRequest) {
           ...researchedInput,
           sources: [...new Map(researchedInput.sources.map(source => [source.url, source])).values()],
         };
-        const { systemPrompt, userPrompt } = buildArticleMarketNewsPrompts(effectiveInput);
+        const knowledgeContext = await fetchKnowledgeContext(auth.id, `${input.keyword}\n${input.angle}`, undefined, 5, 'internal');
+        const styleContext = await fetchStyleContext(auth.id, 'article-market-news');
+        const builtPrompts = buildArticleMarketNewsPrompts(effectiveInput);
+        const systemPrompt = `${builtPrompts.systemPrompt}${knowledgeContext}${styleContext}\n\nStyle notes, if present, apply to voice only. Do not use them to add facts, numbers, or sources.`;
+        const userPrompt = builtPrompts.userPrompt;
         controller.enqueue(encoder.encode(sseEvent({ step: 'draft', progress: 35, message: 'Writing the SOP-compliant article draft…' })));
 
         let generated: Awaited<ReturnType<typeof generateContent>> | undefined;
@@ -134,6 +139,24 @@ export async function POST(request: NextRequest) {
             qc: validation.qc,
           })],
         );
+
+        const articleKnowledge = summarizeArticleKnowledge({
+          keyword: effectiveInput.keyword,
+          title,
+          articleMarkdown,
+          sourceUrls: effectiveInput.sources.map(source => source.url),
+        });
+        if (articleKnowledge) {
+          await persistKnowledgeQuietly({
+            userId: auth.id,
+            taskType: 'article-market-news',
+            taskId: historyId,
+            brief: articleKnowledge.brief,
+            selectedOutput: articleKnowledge.selectedOutput,
+            sourceUrls: articleKnowledge.sourceUrls,
+            action: 'complete',
+          });
+        }
 
         controller.enqueue(encoder.encode(sseEvent({
           step: 'done',

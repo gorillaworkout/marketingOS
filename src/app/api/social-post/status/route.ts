@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { queryOne, execute } from '@/lib/database';
 import { getSession } from '@/lib/auth';
 import { rateLimit } from '@/lib/rate-limit';
+import { persistKnowledgeQuietly, primarySocialPostOutput } from '@/lib/knowledge-persist';
 
 const VALID_STATUSES = ['draft', 'review', 'approved', 'published', 'archived'];
 
@@ -25,7 +26,7 @@ export async function PUT(request: NextRequest) {
   }
 
   // Verify task exists and belongs to user
-  const task = await queryOne('SELECT id, status, output_data FROM tasks WHERE id = ? AND user_id = ? AND type = ?', [taskId, userId, 'social-post']) as { id: string; status: string; output_data: string } | undefined;
+  const task = await queryOne<{ id: string; status: string; output_data: string; brief: string | null }>('SELECT id, status, brief, output_data FROM tasks WHERE id = ? AND user_id = ? AND type = ?', [taskId, userId, 'social-post']);
 
   if (!task) {
     return NextResponse.json({ error: 'Task not found' }, { status: 404 });
@@ -33,6 +34,20 @@ export async function PUT(request: NextRequest) {
 
   // Update status
   await execute('UPDATE tasks SET status = ? WHERE id = ?', [status, taskId]);
+
+  if (status === 'approved' || status === 'published') {
+    const selectedOutput = primarySocialPostOutput(task.output_data);
+    if (selectedOutput) {
+      await persistKnowledgeQuietly({
+        userId,
+        taskType: 'social-post',
+        taskId,
+        brief: task.brief?.trim() || 'Social post',
+        selectedOutput,
+        action: status === 'published' ? 'publish' : 'approve',
+      });
+    }
+  }
 
   return NextResponse.json({
     success: true,
