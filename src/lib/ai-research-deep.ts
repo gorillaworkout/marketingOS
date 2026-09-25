@@ -6,6 +6,7 @@ import {
   type ResearchContext,
   type ResearchSource,
 } from './ai-research-grounding';
+import { throwIfResearchAborted } from './ai-research-abort';
 
 /**
  * Deep research caps. The chat route budget stays inside the route `maxDuration`.
@@ -307,6 +308,8 @@ export async function runDeepResearchGather(options: {
   maxRounds?: number;
   roundTimeoutMs?: number;
   onProgress?: (event: DeepResearchProgress) => void | Promise<void>;
+  /** Stops before the next search round. An in-flight round still finishes unless `gather` watches this signal. */
+  signal?: AbortSignal;
 }): Promise<DeepGatherResult> {
   const budgetMs = options.budgetMs ?? AI_RESEARCH_DEEP_TIME_BUDGET_MS;
   const maxRounds = options.maxRounds ?? AI_RESEARCH_DEEP_MAX_ROUNDS;
@@ -319,6 +322,7 @@ export async function runDeepResearchGather(options: {
   let failedRounds = 0;
 
   for (const searchQuery of queries) {
+    if (options.signal?.aborted) throwIfResearchAborted(options.signal);
     const remaining = budgetMs - (now() - started);
     if (remaining < 1_500) break;
     await options.onProgress?.({
@@ -331,7 +335,8 @@ export async function runDeepResearchGather(options: {
     const timeoutMs = Math.max(1_500, Math.min(roundTimeoutMs, remaining));
     try {
       contexts.push(await options.gather(searchQuery, timeoutMs));
-    } catch {
+    } catch (error) {
+      if (options.signal?.aborted) throw error;
       failedRounds += 1;
       contexts.push({
         query: searchQuery,
@@ -340,6 +345,7 @@ export async function runDeepResearchGather(options: {
       });
     }
     roundsRun += 1;
+    if (options.signal?.aborted) throwIfResearchAborted(options.signal);
     const merged = mergeDeepResearchContexts(contexts, options.query);
     await options.onProgress?.({
       phase: 'read',

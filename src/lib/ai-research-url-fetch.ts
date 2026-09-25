@@ -6,6 +6,7 @@ import {
   jinaReaderUrl,
   type ResearchSource,
 } from './ai-research-grounding';
+import { isAbortError, researchAbortError, throwIfResearchAborted } from './ai-research-abort';
 import {
   AI_RESEARCH_URL_MAX_BYTES,
   AI_RESEARCH_URL_MAX_CHARS,
@@ -29,6 +30,8 @@ export interface FetchContextUrlOptions {
   maxBytes?: number;
   maxChars?: number;
   lookupImpl?: (hostname: string) => Promise<string[]>;
+  /** When aborted, page fetches are cancelled and the call rejects. */
+  signal?: AbortSignal;
 }
 
 function bareHost(hostname: string): string {
@@ -114,9 +117,17 @@ async function fetchOnce(
   timeoutMs: number,
   maxBytes: number,
   headers: Record<string, string>,
+  parentSignal?: AbortSignal,
 ): Promise<{ url: string; text: string; contentType: string }> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), Math.max(500, timeoutMs));
+  const onParentAbort = () => {
+    if (!controller.signal.aborted) controller.abort(parentSignal?.reason);
+  };
+  if (parentSignal) {
+    if (parentSignal.aborted) controller.abort(parentSignal.reason);
+    else parentSignal.addEventListener('abort', onParentAbort, { once: true });
+  }
   try {
     const response = await fetchImpl(url, {
       headers,
@@ -134,10 +145,12 @@ async function fetchOnce(
     if (!readableContentType(body.contentType)) throw new Error('page is not text');
     return { url, ...body };
   } catch (error) {
+    if (parentSignal?.aborted) throw isAbortError(error) ? error : researchAbortError(error);
     if (error instanceof Error && error.name === 'AbortError') throw new Error('timed out');
     throw error;
   } finally {
     clearTimeout(timer);
+    parentSignal?.removeEventListener('abort', onParentAbort);
   }
 }
 
@@ -148,7 +161,9 @@ function failureMessage(error: unknown): string {
 
 async function fetchPageText(
   startUrl: string,
-  options: Required<Pick<FetchContextUrlOptions, 'fetchImpl' | 'timeoutMs' | 'maxBytes' | 'maxChars' | 'lookupImpl'>>,
+  options: Required<Pick<FetchContextUrlOptions, 'fetchImpl' | 'timeoutMs' | 'maxBytes' | 'maxChars' | 'lookupImpl'>> & {
+    signal?: AbortSignal;
+  },
 ): Promise<{ title: string; text: string; url: string } | { error: string }> {
   const started = Date.now();
   const remaining = () => options.timeoutMs - (Date.now() - started);
@@ -169,6 +184,7 @@ async function fetchPageText(
           Accept: 'text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.8',
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
         },
+        options.signal,
       );
       const extracted = contextPageText(page.text, page.contentType, options.maxChars);
       if (extracted.text.length >= AI_RESEARCH_URL_MIN_TEXT && !isEmptyOrLoginWallSource(extracted.text, page.url, extracted.title)) {
@@ -177,6 +193,9 @@ async function fetchPageText(
       directError = 'page is empty';
       break;
     } catch (error) {
+      if (isAbortError(error) || options.signal?.aborted) {
+        throw isAbortError(error) ? error : researchAbortError(error);
+      }
       const redirectTo = error && typeof error === 'object' && 'redirectTo' in error
         ? String((error as { redirectTo?: string }).redirectTo || '')
         : '';
@@ -200,6 +219,7 @@ async function fetchPageText(
       remaining(),
       options.maxBytes,
       { Accept: 'text/plain' },
+      options.signal,
     );
     if (/just a moment|cf-browser-verification|challenge-platform|target url returned error|failed to fetch/i.test(page.text.slice(0, 500))) {
       return { error: directError };
@@ -210,6 +230,9 @@ async function fetchPageText(
     }
     return { title: extracted.title, text: extracted.text, url: startUrl };
   } catch (error) {
+    if (isAbortError(error) || options.signal?.aborted) {
+      throw isAbortError(error) ? error : researchAbortError(error);
+    }
     const message = failureMessage(error);
     return { error: message === 'redirect' ? directError : message };
   }
@@ -231,6 +254,7 @@ export async function fetchAiResearchContextUrls(
   text: string,
   options: FetchContextUrlOptions = {},
 ): Promise<ContextUrlFetchResult> {
+  if (options.signal) throwIfResearchAborted(options.signal);
   const scan = scanContextUrls(text);
   const failures: ContextUrlFailure[] = [
     ...scan.blocked.map(item => ({
@@ -242,12 +266,14 @@ export async function fetchAiResearchContextUrls(
   const fetchImpl = options.fetchImpl || fetch;
   const lookupImpl = options.lookupImpl || defaultLookup;
   const settled = await Promise.all(scan.accepted.map(async item => {
+    if (options.signal) throwIfResearchAborted(options.signal);
     const result = await fetchPageText(item.url, {
       fetchImpl,
       lookupImpl,
       timeoutMs: options.timeoutMs ?? AI_RESEARCH_URL_TIMEOUT_MS,
       maxBytes: options.maxBytes ?? AI_RESEARCH_URL_MAX_BYTES,
       maxChars: options.maxChars ?? AI_RESEARCH_URL_MAX_CHARS,
+      signal: options.signal,
     });
     if ('error' in result) return { failure: { url: item.url, error: result.error } };
     return { source: toSource(result.url, result.title, result.text) };
