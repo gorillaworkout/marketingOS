@@ -10,18 +10,7 @@ import {
   normalizePinnedSourceUrls,
 } from './knowledge-pin';
 
-/** Task types that participate in the shared knowledge graph. */
-export const KNOWLEDGE_TASK_TYPES = [
-  'social-post',
-  'video-script',
-  'event-plan',
-  'market-research',
-  'article-market-news',
-  'ai-research',
-  'internal-docs',
-] as const;
-
-export type KnowledgeTaskType = (typeof KNOWLEDGE_TASK_TYPES)[number];
+export { KNOWLEDGE_TASK_TYPES, type KnowledgeTaskType } from './knowledge-task-types';
 
 export type KnowledgePersistAction = 'select' | 'approve' | 'publish' | 'complete' | 'pin';
 
