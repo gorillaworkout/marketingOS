@@ -7,6 +7,7 @@ import { formatMarketResearchEvidenceLevel, type MarketResearchEvidenceLevel, ty
 import { formatMarketResearchSourceStatus, type MarketResearchSourceStatus } from '@/lib/market-research-status';
 import { Button, FormField, Panel, PageHeader, PageStack, SectionHeader, StatusBadge, TextArea, TextInput, Toolbar } from '@/components/ui/dashboard';
 import InlineModelSelector from '@/components/InlineModelSelector';
+import { TASK_EDITOR_QUERY, fetchOwnHistoryTask } from '@/lib/history-editor';
 
 interface MarketResearchResult {
   items: MarketResearchItem[];
@@ -125,6 +126,18 @@ export default function MarketResearchPage() {
       setError(cause instanceof Error ? cause.message : 'Failed to restore saved report.');
     }
   };
+
+  useEffect(() => {
+    const taskId = new URLSearchParams(window.location.search).get(TASK_EDITOR_QUERY);
+    if (!taskId) return;
+    let active = true;
+    void fetchOwnHistoryTask('market-research', taskId).then(task => {
+      if (active && task) restoreHistory(task as MarketResearchHistoryTask);
+    });
+    return () => { active = false; };
+    // Open the history deep link once. restoreHistory closes over stable setters.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const fillExample = () => setBrief('Prepare a morning briefing for the Dupoin marketing team. Prioritize central-bank decisions, official economic data, geopolitics, OPEC+, and the factual developments that matter most for trading sentiment today.');
   const fillThemeExample = () => setBrief('Brief the semiconductor export-control sector for today. Focus on confirmed policy actions and what they mean for US stocks sentiment.');

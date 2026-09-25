@@ -23,6 +23,8 @@ import {
   socialPostStatusFromResponse,
   viewingPostWithConfirmedStatus,
 } from '@/lib/social-post-status';
+import { TASK_EDITOR_QUERY, fetchOwnHistoryTask } from '@/lib/history-editor';
+import { IMAGE_REMIX_QUERY, readImageRemix, type ImageRemixRecord } from '@/lib/image-remix';
 
 interface QCCheck {
   name: string;
@@ -286,6 +288,7 @@ export default function SocialPostPage() {
   const [generatedImage, setGeneratedImage] = useState<string | null>(null);
   const [previewImage, setPreviewImage] = useState<{ src: string; alt: string } | null>(null);
   const [editableImagePrompt, setEditableImagePrompt] = useState('');
+  const [promptEditorOpen, setPromptEditorOpen] = useState(false);
   const [imageModel, setImageModel] = useState(DEFAULT_IMAGE_MODEL);
   const [imageAspectRatio, setImageAspectRatio] = useState<ImageAspectRatio>(DEFAULT_IMAGE_ASPECT_RATIO);
   // Off by default: header and footer chrome only, matching posts from before this option.
@@ -299,6 +302,7 @@ export default function SocialPostPage() {
   const imageRunRef = useRef(0);
   // Statuses already saved this session. History reloads must not paint the previous value back.
   const confirmedStatusRef = useRef<Record<string, string>>({});
+  const imageModelLocked = useRef(false);
   const [ratingMessage, setRatingMessage] = useState('');
   const [recentPosts, setRecentPosts] = useState<any[]>([]);
   const [imageHistory, setImageHistory] = useState<any[]>([]);
@@ -344,7 +348,7 @@ export default function SocialPostPage() {
         if (data.models && Array.isArray(data.models) && data.models.length > 0) {
           setAvailableImageModels(data.models);
           if (data.defaultModel) {
-            setImageModel(data.defaultModel);
+            setImageModel(current => imageModelLocked.current ? current : data.defaultModel);
           }
         }
       })
@@ -426,6 +430,7 @@ export default function SocialPostPage() {
     setGeneratedImage(null);
     setPreviewImage(null);
     setImageHistory([]);
+    setPromptEditorOpen(false);
     setImageNotice('');
     setGeneratedImageModel(null);
     setTokenUsage(null);
@@ -767,18 +772,20 @@ export default function SocialPostPage() {
       const latest = history[history.length - 1];
       const restoredRatio = IMAGE_ASPECT_RATIOS.includes(latest?.aspectRatio) ? latest.aspectRatio : DEFAULT_IMAGE_ASPECT_RATIO;
       const restoredSwipe = latest?.includeSwipeLeft === true;
+      const generatedPrompt = typeof latest?.prompt === 'string' ? latest.prompt.trim() : '';
       setImageAspectRatio(restoredRatio);
       setIncludeSwipeLeft(restoredSwipe);
-      // Handle both old format (single result) and new format (3 options)
+      // Handle both old format (single result) and new format (3 options).
+      // Prefer the prompt stored on the generated image; fall back to the caption prompt.
       if (data.options && Array.isArray(data.options)) {
         setOptions(data.options);
         setTaskId(post.id);
-        if (data.options[0]) {
-          setEditableImagePrompt(applyDupoinImagePromptLocks(data.options[0].imagePrompt || data.imagePrompt || '', restoredRatio, { includeSwipeLeft: restoredSwipe }));
-        }
+        const captionPrompt = data.options[0]?.imagePrompt || data.imagePrompt || '';
+        const prompt = generatedPrompt || captionPrompt;
+        if (prompt) setEditableImagePrompt(applyDupoinImagePromptLocks(prompt, restoredRatio, { includeSwipeLeft: restoredSwipe }));
       } else {
         // Old format - convert to single option
-        const imagePrompt = data.imagePrompt || '';
+        const imagePrompt = generatedPrompt || data.imagePrompt || '';
         setResult({ caption: data.captionData || data, imagePrompt, taskId: post.id });
         setTaskId(post.id);
         setEditableImagePrompt(applyDupoinImagePromptLocks(imagePrompt, restoredRatio, { includeSwipeLeft: restoredSwipe }));
@@ -793,6 +800,10 @@ export default function SocialPostPage() {
       const restoredUrl = latest?.imageUrl || data.imageUrl || null;
       if (restoredUrl) setGeneratedImage(restoredUrl);
       const restoredModelId = latest?.usedModel || latest?.model;
+      if (typeof restoredModelId === 'string' && restoredModelId) {
+        imageModelLocked.current = true;
+        setImageModel(restoredModelId);
+      }
       setGeneratedImageModel(
         restoredModelId
           ? (availableImageModels.find(item => item.id === restoredModelId)?.name || restoredModelId)
@@ -801,6 +812,58 @@ export default function SocialPostPage() {
       setImageNotice(typeof latest?.fallbackMessage === 'string' ? latest.fallbackMessage : '');
     } catch {}
   };
+
+  const applyImageRemix = (remix: ImageRemixRecord) => {
+    const ratio = (IMAGE_ASPECT_RATIOS as readonly string[]).includes(remix.aspectRatio || '')
+      ? remix.aspectRatio as ImageAspectRatio
+      : DEFAULT_IMAGE_ASPECT_RATIO;
+    const swipe = remix.includeSwipeLeft === true;
+    setImageAspectRatio(ratio);
+    setIncludeSwipeLeft(swipe);
+    setEditableImagePrompt(applyDupoinImagePromptLocks(remix.prompt, ratio, { includeSwipeLeft: swipe }));
+    if (remix.brief) setBrief(remix.brief);
+    if (remix.model) {
+      imageModelLocked.current = true;
+      setImageModel(remix.model);
+    }
+    if (remix.imageUrl) setGeneratedImage(remix.imageUrl);
+    setPromptEditorOpen(true);
+  };
+
+  const useImageInEditor = (img: { prompt?: unknown; aspectRatio?: unknown; model?: unknown; usedModel?: unknown; includeSwipeLeft?: unknown }) => {
+    if (typeof img.prompt !== 'string' || !img.prompt.trim()) return;
+    applyImageRemix({
+      target: 'social-post',
+      prompt: img.prompt,
+      aspectRatio: typeof img.aspectRatio === 'string' ? img.aspectRatio : undefined,
+      model: typeof img.model === 'string' ? img.model : typeof img.usedModel === 'string' ? img.usedModel : undefined,
+      includeSwipeLeft: img.includeSwipeLeft === true,
+      savedAt: new Date().toISOString(),
+    });
+    document.getElementById('image-prompt-editor')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const remix = params.get(IMAGE_REMIX_QUERY) === '1' ? readImageRemix('social-post') : null;
+    const requestedTaskId = params.get(TASK_EDITOR_QUERY) || remix?.taskId || '';
+    let active = true;
+    void (async () => {
+      if (requestedTaskId) {
+        const task = await fetchOwnHistoryTask('social-post', requestedTaskId);
+        if (!active) return;
+        if (task) viewPost(task);
+      }
+      if (!active || !remix) return;
+      applyImageRemix(remix);
+      requestAnimationFrame(() => {
+        document.getElementById('image-prompt-editor')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      });
+    })();
+    return () => { active = false; };
+    // Read the URL once. viewPost and applyImageRemix close over stable setters.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const copyToClipboard = (text: string) => navigator.clipboard.writeText(text);
   const downloadJSON = () => {
@@ -1160,14 +1223,14 @@ export default function SocialPostPage() {
           )}
 
           {/* Image Prompt + Generate (shown when options exist or result exists) */}
-          {(options || result) && (
-            <Panel padding="none">
+          {(options || result || promptEditorOpen) && (
+            <Panel padding="none" id="image-prompt-editor">
               {/* Header */}
               <div className="flex items-center justify-between border-b border-[var(--mos-border-subtle)] px-5 py-4">
                 <div className="flex items-center gap-3">
                   <div>
                     <h3 className="text-sm font-[560] text-[var(--mos-text)]">Image prompt</h3>
-                    <p className="text-xs text-[var(--mos-text-muted)]">Edit the prompt before you generate the image</p>
+                    <p className="text-xs text-[var(--mos-text-muted)]">{promptEditorOpen && !options && !result ? 'Loaded from the gallery. Adjust the prompt, then generate again.' : 'Edit the prompt before you generate the image'}</p>
                   </div>
                 </div>
                 <Button size="sm" onClick={() => copyToClipboard(editableImagePrompt)}>Copy</Button>
@@ -1328,6 +1391,16 @@ export default function SocialPostPage() {
                         {img.generatedAt ? ` · ${new Date(img.generatedAt).toLocaleString('id-ID')}` : ''}
                       </p>
                     </div>
+                    {typeof img.prompt === 'string' && img.prompt.trim() && (
+                      <button
+                        type="button"
+                        data-testid="social-post-image-history-remix"
+                        onClick={() => useImageInEditor(img)}
+                        className="relative z-10 shrink-0 rounded-[var(--mos-radius-control)] px-2 py-1.5 text-xs font-medium text-[var(--mos-accent-soft)] underline-offset-2 hover:underline"
+                      >
+                        Use in editor
+                      </button>
+                    )}
                     <button
                       type="button"
                       data-testid="social-post-image-history-view"

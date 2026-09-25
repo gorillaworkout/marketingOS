@@ -12,6 +12,7 @@ import { NO_PUBLIC_PRICE_NOTE } from '@/lib/event-plan-pricing';
 import type { EventPlanResearch } from '@/lib/event-plan-research';
 import { Button, DataTableFrame, FormField, Panel, PageHeader, PageStack, SectionHeader, StatusBadge, TextArea, TextInput, Toolbar } from '@/components/ui/dashboard';
 import InlineModelSelector from '@/components/InlineModelSelector';
+import { TASK_EDITOR_QUERY, fetchOwnHistoryTask } from '@/lib/history-editor';
 
 type BudgetItem = { category: string; estimatedCost: number | null; notes: string; suggestedVendor?: string; venue?: string; sourceUrl?: string | null };
 type Budget = { currency: 'IDR'; total?: number | null; items: BudgetItem[]; contingency?: number | null; preliminary?: boolean; publicPricesFound?: boolean; ceilingNote?: string };
@@ -159,6 +160,18 @@ export default function EventPlanPage() {
       setError(cause instanceof Error ? cause.message : 'Could not open the saved event plan.');
     }
   };
+
+  useEffect(() => {
+    const taskId = new URLSearchParams(window.location.search).get(TASK_EDITOR_QUERY);
+    if (!taskId) return;
+    let active = true;
+    void fetchOwnHistoryTask(EVENT_PLAN_HISTORY_TYPE, taskId).then(task => {
+      if (active && task) restoreHistory(task as EventPlanHistoryTask);
+    });
+    return () => { active = false; };
+    // Open the history deep link once. restoreHistory closes over stable setters.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleGenerate = async (e: React.FormEvent) => {
     e.preventDefault();

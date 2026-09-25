@@ -1,11 +1,13 @@
 'use client';
 import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { articleDocxFilename, buildArticleDocxBlob } from '@/lib/article-market-news-docx';
 import type { ArticleSourceInput } from '@/lib/article-market-news';
 import { buildMarketResearchDocxBlob, marketResearchDocxFilename } from '@/lib/market-research-docx';
 import { formatMarketResearchEvidenceLevel, type MarketResearchItem } from '@/lib/market-research';
 import { formatMarketResearchSourceStatus } from '@/lib/market-research-status';
 import { Button, EmptyState, FilterGroup, LoadingState, Panel, PageHeader, PageStack, StatusBadge, Toolbar } from '@/components/ui/dashboard';
+import { historyEditorHref, historyEditorLabel } from '@/lib/history-editor';
 
 interface HistoryTask {
   id: string;
@@ -18,6 +20,7 @@ interface HistoryTask {
 }
 
 export default function HistoryPage() {
+  const router = useRouter();
   const [tasks, setTasks] = useState<HistoryTask[]>([]);
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<HistoryTask | null>(null);
@@ -149,11 +152,22 @@ export default function HistoryPage() {
                     <p className="text-xs text-[var(--mos-text-faint)]">{new Date(selected.created_at).toLocaleString()}</p>
                   </div>
                 </div>
-                <Button variant="primary" onClick={() => selected.type === 'market-research' ? void downloadMarketResearchDocx(selected) : selected.type === 'article-market-news' ? void downloadArticleDocx(selected) : downloadJSON(selected)}
-                  disabled={(selected.type === 'article-market-news' && !articleFactReviewConfirmed) || (selected.type === 'market-research' && !marketResearchReviewConfirmed)}
-                >
-                  {selected.type === 'article-market-news' || selected.type === 'market-research' ? 'Download DOCX' : 'Download'}
-                </Button>
+                <div className="flex flex-wrap items-center gap-2">
+                  {historyEditorHref(selected.type, selected.id) && (
+                    <Button
+                      variant="primary"
+                      data-testid="history-use-in-editor"
+                      onClick={() => router.push(historyEditorHref(selected.type, selected.id) as string)}
+                    >
+                      {historyEditorLabel(selected.type)}
+                    </Button>
+                  )}
+                  <Button variant="primary" onClick={() => selected.type === 'market-research' ? void downloadMarketResearchDocx(selected) : selected.type === 'article-market-news' ? void downloadArticleDocx(selected) : downloadJSON(selected)}
+                    disabled={(selected.type === 'article-market-news' && !articleFactReviewConfirmed) || (selected.type === 'market-research' && !marketResearchReviewConfirmed)}
+                  >
+                    {selected.type === 'article-market-news' || selected.type === 'market-research' ? 'Download DOCX' : 'Download'}
+                  </Button>
+                </div>
               </div>
 
               <div className="space-y-4">

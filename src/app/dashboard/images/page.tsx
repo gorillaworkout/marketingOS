@@ -1,6 +1,8 @@
 'use client';
 import { useState, useEffect, useCallback } from 'react';
+import { useRouter } from 'next/navigation';
 import { Button, EmptyState, FilterGroup, LoadingState, Panel, PageHeader, PageStack, StatusBadge, Toolbar } from '@/components/ui/dashboard';
+import { imageRemixHref, imageRemixTarget, writeImageRemix } from '@/lib/image-remix';
 
 interface ImageItem {
   filename: string;
@@ -12,6 +14,11 @@ interface ImageItem {
   userId: string | null;
   username: string | null;
   name: string | null;
+  type: string | null;
+  prompt: string | null;
+  aspectRatio: string | null;
+  model: string | null;
+  includeSwipeLeft: boolean | null;
   linked: boolean;
 }
 
@@ -22,6 +29,7 @@ const FILTERS = [
 ];
 
 export default function ImagesPage() {
+  const router = useRouter();
   const [images, setImages] = useState<ImageItem[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -29,6 +37,7 @@ export default function ImagesPage() {
   const [offset, setOffset] = useState(0);
   const [lightbox, setLightbox] = useState<ImageItem | null>(null);
   const [copiedUrl, setCopiedUrl] = useState<string | null>(null);
+  const [copiedPrompt, setCopiedPrompt] = useState<string | null>(null);
   const limit = 20;
 
   const fetchImages = useCallback(async () => {
@@ -89,6 +98,39 @@ export default function ImagesPage() {
       setCopiedUrl(img.filename);
       setTimeout(() => setCopiedUrl(null), 2000);
     }
+  };
+
+  const handleCopyPrompt = async (img: ImageItem) => {
+    if (!img.prompt) return;
+    try {
+      await navigator.clipboard.writeText(img.prompt);
+    } catch {
+      const input = document.createElement('textarea');
+      input.value = img.prompt;
+      document.body.appendChild(input);
+      input.select();
+      document.execCommand('copy');
+      document.body.removeChild(input);
+    }
+    setCopiedPrompt(img.filename);
+    setTimeout(() => setCopiedPrompt(null), 2000);
+  };
+
+  const handleRegenerate = (img: ImageItem) => {
+    const target = imageRemixTarget(img.type);
+    if (!img.prompt || !target) return;
+    writeImageRemix({
+      target,
+      prompt: img.prompt,
+      brief: img.brief || undefined,
+      aspectRatio: img.aspectRatio || undefined,
+      model: img.model || undefined,
+      includeSwipeLeft: typeof img.includeSwipeLeft === 'boolean' ? img.includeSwipeLeft : undefined,
+      taskId: img.taskId || undefined,
+      filename: img.filename,
+      imageUrl: img.url,
+    });
+    router.push(imageRemixHref(target));
   };
 
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
@@ -286,11 +328,11 @@ export default function ImagesPage() {
             <img
               src={lightbox.url}
               alt={lightbox.brief || lightbox.filename}
-              className="max-w-full max-h-[80vh] mx-auto rounded-lg object-contain"
+              className="max-w-full max-h-[60vh] mx-auto rounded-lg object-contain"
             />
 
             {/* Info bar */}
-            <div className="mt-4 flex items-center justify-between bg-[var(--mos-raised)] rounded-lg p-3">
+            <div className="mt-4 space-y-3 bg-[var(--mos-raised)] rounded-lg p-3">
               <div>
                 {lightbox.title && <p className="text-white text-sm font-medium">{lightbox.title}</p>}
                 {lightbox.brief && <p className="text-[var(--mos-text-muted)] text-xs mt-0.5 line-clamp-1">{lightbox.brief}</p>}
@@ -301,7 +343,21 @@ export default function ImagesPage() {
                   )}
                 </div>
               </div>
-              <div className="flex gap-2">
+              <div>
+                <p className="text-[11px] uppercase tracking-wide text-[var(--mos-text-faint)]">Prompt</p>
+                {lightbox.prompt ? (
+                  <p data-testid="gallery-image-prompt" className="mt-1 max-h-40 overflow-y-auto whitespace-pre-wrap rounded-lg bg-[var(--mos-surface)] p-3 font-mono text-xs leading-5 text-[var(--mos-text-secondary)]">{lightbox.prompt}</p>
+                ) : (
+                  <p data-testid="gallery-image-prompt" className="mt-1 text-xs text-[var(--mos-text-muted)]">No saved prompt for this image.</p>
+                )}
+                {(lightbox.aspectRatio || typeof lightbox.includeSwipeLeft === 'boolean') && (
+                  <p className="mt-1 text-[11px] text-[var(--mos-text-faint)]">
+                    {lightbox.aspectRatio || 'Aspect ratio not saved'}
+                    {typeof lightbox.includeSwipeLeft === 'boolean' ? ` · Swipe left button: ${lightbox.includeSwipeLeft ? 'On' : 'Off'}` : ''}
+                  </p>
+                )}
+              </div>
+              <div className="flex flex-wrap gap-2">
                 <button
                   onClick={() => handleDownload(lightbox)}
                   className="bg-blue-600 hover:bg-blue-700 text-white text-xs px-4 py-2 rounded-lg transition-colors"
@@ -318,6 +374,30 @@ export default function ImagesPage() {
                 >
                   {copiedUrl === lightbox.filename ? 'Copied' : 'Copy URL'}
                 </button>
+                {lightbox.prompt && (
+                  <button
+                    type="button"
+                    data-testid="gallery-copy-prompt"
+                    onClick={() => void handleCopyPrompt(lightbox)}
+                    className={`text-xs px-4 py-2 rounded-lg transition-colors ${
+                      copiedPrompt === lightbox.filename
+                        ? 'bg-emerald-600 text-white'
+                        : 'bg-[var(--mos-raised)] text-[var(--mos-text-secondary)]'
+                    }`}
+                  >
+                    {copiedPrompt === lightbox.filename ? 'Copied' : 'Copy prompt'}
+                  </button>
+                )}
+                {lightbox.prompt && imageRemixTarget(lightbox.type) && (
+                  <button
+                    type="button"
+                    data-testid="gallery-regenerate"
+                    onClick={() => handleRegenerate(lightbox)}
+                    className="bg-blue-600 hover:bg-blue-700 text-white text-xs px-4 py-2 rounded-lg transition-colors"
+                  >
+                    Re-generate
+                  </button>
+                )}
               </div>
             </div>
           </div>

@@ -15,6 +15,7 @@ import {
 } from '@/components/ui/dashboard';
 import InlineModelSelector from '@/components/InlineModelSelector';
 import { AI_RESEARCH_HANDOFF_QUERY, AI_RESEARCH_HANDOFF_VALUE, readAiResearchHandoff } from '@/lib/ai-research-handoff';
+import { TASK_EDITOR_QUERY, fetchOwnHistoryTask } from '@/lib/history-editor';
 import type { QCResult } from '@/lib/openai';
 import { readStoredVideoScriptQc } from '@/lib/video-script-qc';
 import {
@@ -623,6 +624,18 @@ export default function VideoScriptPage() {
       setStep('form');
     }
   };
+
+  useEffect(() => {
+    const taskId = new URLSearchParams(window.location.search).get(TASK_EDITOR_QUERY);
+    if (!taskId) return;
+    let active = true;
+    void fetchOwnHistoryTask('video-script', taskId).then(task => {
+      if (active && task) viewScript(task);
+    });
+    return () => { active = false; };
+    // Open the history deep link once. viewScript closes over stable setters.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const copyToClipboard = (text: string) => navigator.clipboard.writeText(text);
 

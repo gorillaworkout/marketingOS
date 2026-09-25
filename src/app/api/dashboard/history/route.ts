@@ -7,11 +7,16 @@ export async function GET(request: NextRequest) {
   if (auth.error) return NextResponse.json({ error: auth.error }, { status: auth.status });
   const userId = auth.userId;
 
-  // Support filtering by type
+  // Support filtering by type, and loading one of the signed-in user's tasks by id.
   const type = request.nextUrl.searchParams.get('type');
+  const id = request.nextUrl.searchParams.get('id')?.trim() || '';
   let tasks: Record<string, unknown>[];
 
-  if (type) {
+  if (id && id.length <= 128) {
+    tasks = type
+      ? await queryAll('SELECT id, type, title, brief, status, output_data, created_at FROM tasks WHERE user_id = ? AND id = ? AND type = ? LIMIT 1', [userId, id, type]) as Record<string, unknown>[]
+      : await queryAll('SELECT id, type, title, brief, status, output_data, created_at FROM tasks WHERE user_id = ? AND id = ? LIMIT 1', [userId, id]) as Record<string, unknown>[];
+  } else if (type) {
     tasks = await queryAll('SELECT id, type, title, brief, status, output_data, created_at FROM tasks WHERE user_id = ? AND type = ? ORDER BY created_at DESC LIMIT 50', [userId, type]) as Record<string, unknown>[];
   } else {
     tasks = await queryAll('SELECT id, type, title, brief, status, output_data, created_at FROM tasks WHERE user_id = ? ORDER BY created_at DESC LIMIT 50', [userId]) as Record<string, unknown>[];
