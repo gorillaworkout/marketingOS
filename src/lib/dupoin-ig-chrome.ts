@@ -49,8 +49,9 @@ export {
  *
  * When includeSwipeLeft is set, the fixed "Swipe left →" pill is stamped
  * after the footer, centered, with its bottom edge above the white bar.
- * The pill plate is already transparent outside the capsule, so its black
- * fill is kept (unlike the header and footer fields).
+ * The pill is a ghost capsule: white stroke and white label only. Alpha
+ * stays 0 outside the capsule and inside the fill, so the generated scene
+ * shows through. The overlay uses source-over and is not flattened onto black.
  *
  * On any other canvas the plates scale with width and pin to the top and
  * bottom edges. The middle stays the generated scene.
@@ -255,7 +256,9 @@ export interface InstagramChromeOptions {
  * is left untouched. Throws on failure: a creative missing the regulatory
  * footer must surface as an error rather than pass silently.
  *
- * With includeSwipeLeft, the pill plate is added last, centered, above the footer.
+ * With includeSwipeLeft, the ghost pill is added last, centered, above the
+ * footer. Its transparent fill is composited with source-over so the scene
+ * remains visible inside the capsule.
  */
 export async function compositeDupoinInstagramChrome(
   imageBytes: Buffer,
@@ -281,7 +284,7 @@ export async function compositeDupoinInstagramChrome(
     place.footerHeight,
   );
 
-  const layers: { input: Buffer; left: number; top: number }[] = [
+  const layers: sharp.OverlayOptions[] = [
     { input: headerStrip, left: place.left, top: 0 },
     { input: footerStrip, left: place.left, top: baseMeta.height - place.footerHeight },
   ];
@@ -289,10 +292,11 @@ export async function compositeDupoinInstagramChrome(
   if (options?.includeSwipeLeft) {
     const button = await loadSwipeButton();
     const swipe = swipeButtonPlacement(baseMeta.width, baseMeta.height, place.footerHeight, place.headerHeight);
-    const input = swipe.width === button.width && swipe.height === button.height
-      ? button.png
-      : await sharp(button.png).resize(swipe.width, swipe.height, { fit: 'fill' }).png().toBuffer();
-    layers.push({ input, left: swipe.left, top: swipe.top });
+    const sized = swipe.width === button.width && swipe.height === button.height
+      ? sharp(button.png)
+      : sharp(button.png).resize(swipe.width, swipe.height, { fit: 'fill' });
+    const input = await sized.ensureAlpha().png().toBuffer();
+    layers.push({ input, left: swipe.left, top: swipe.top, blend: 'over' });
   }
 
   return base.composite(layers).png().toBuffer();

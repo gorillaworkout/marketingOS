@@ -82,7 +82,8 @@ export function chromeClearancePercents(canvasWidth: number, canvasHeight: numbe
 /**
  * Bayu's "Swipe left →" pill on the 1080×1350 template.
  * The plate is public/brand/dupoin-social-swipe-left.png: a tight crop of the
- * capsule (black fill, thin white border, white label) with transparency outside it.
+ * ghost capsule (transparent fill, thin white border, white label) with
+ * transparency outside it as well.
  * Compositing centers it and sits its bottom edge this many template pixels
  * above the white regulatory footer. The prompt reserves a little more so type
  * does not collide with the pill.

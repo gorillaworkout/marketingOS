@@ -345,10 +345,22 @@ test('the swipe-left plate is a tight transparent capsule at the template size',
     return [plate.data[i], plate.data[i + 1], plate.data[i + 2], plate.data[i + 3]];
   };
   assert.equal(at(0, 0)[3], 0, 'capsule corners stay transparent so the scene shows through');
-  const center = at(Math.floor(plate.info.width / 2), Math.floor(plate.info.height / 2));
-  assert.ok(center[0] < 16 && center[1] < 16 && center[2] < 16 && center[3] === 255, 'pill fill is opaque black');
+  const interior = at(14, Math.floor(plate.info.height / 2));
+  assert.deepEqual(interior, [0, 0, 0, 0], 'pill interior fill is transparent');
   const rim = at(Math.floor(plate.info.width / 2), 0);
   assert.ok(rim[0] > 200 && rim[1] > 200 && rim[2] > 200 && rim[3] > 200, 'top edge is the thin white border');
+
+  let opaqueBlack = 0;
+  let whiteLabel = 0;
+  for (let y = 0; y < plate.info.height; y++) {
+    for (let x = 0; x < plate.info.width; x++) {
+      const [r, g, b, a] = at(x, y);
+      if (a > 240 && r < 40 && g < 40 && b < 40) opaqueBlack += 1;
+      if (a === 255 && r > 230 && g > 230 && b > 230) whiteLabel += 1;
+    }
+  }
+  assert.equal(opaqueBlack, 0, 'ghost pill has no opaque black fill');
+  assert.ok(whiteLabel > 40, 'white stroke and label stay on the plate');
 });
 
 test('swipe-left placement is centered and sits above the footer band', () => {
@@ -411,8 +423,8 @@ test('compositing stamps the swipe pill only when requested', async () => {
   const bottom = read(onRaw, 10, height - 4);
   assert.ok(bottom[0] > 245 && bottom[1] > 245 && bottom[2] > 245, 'footer stays the white regulatory bar');
 
-  const fill = read(onRaw, swipe.left + Math.floor(swipe.width / 2), swipe.top + Math.floor(swipe.height / 2));
-  assert.ok(fill[0] < 16 && fill[1] < 16 && fill[2] < 16, 'pill center is the black fill');
+  const fill = read(onRaw, swipe.left + 14, swipe.top + Math.floor(swipe.height / 2));
+  assert.deepEqual(fill, [180, 20, 20, 255], 'scene shows through the transparent pill fill');
 });
 
 test('swipe-left compositing stays centered above the footer on a square canvas', async () => {
@@ -432,8 +444,9 @@ test('swipe-left compositing stays centered above the footer on a square canvas'
   assert.equal(swipe.left, Math.round((width - swipe.width) / 2));
   assert.ok(swipe.top + swipe.height <= height - place.footerHeight, 'pill must not cover the footer');
   assert.deepEqual(at(Math.round(width / 2), Math.round(height / 2)), [8, 16, 32]);
-  const fill = at(swipe.left + Math.floor(swipe.width / 2), swipe.top + Math.floor(swipe.height / 2));
-  assert.ok(fill[0] < 40 && fill[1] < 40 && fill[2] < 40, 'scaled pill fill is still black');
+  const fillX = swipe.left + Math.round((14 + 0.5) * (swipe.width / DUPOIN_IG_SWIPE_BUTTON_WIDTH) - 0.5);
+  const fillY = swipe.top + Math.round((Math.floor(DUPOIN_IG_SWIPE_BUTTON_HEIGHT / 2) + 0.5) * (swipe.height / DUPOIN_IG_SWIPE_BUTTON_HEIGHT) - 0.5);
+  assert.deepEqual(at(fillX, fillY), [8, 16, 32], 'scaled pill fill stays transparent over the scene');
   const bottom = at(12, height - 3);
   assert.ok(bottom[0] > 245 && bottom[1] > 245 && bottom[2] > 245);
 });
