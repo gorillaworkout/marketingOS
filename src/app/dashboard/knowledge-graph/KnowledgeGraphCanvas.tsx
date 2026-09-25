@@ -1,14 +1,13 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { knowledgeFeatureColor, knowledgeFeatureColorWithAlpha, knowledgeFeatureKey } from '@/lib/knowledge-graph-colors';
 
 export type CanvasNode = { id: string; department: string; taskType: string; brief: string; qualityScore: number; styleCluster: string; platform: string | null; audience: string | null; username: string; createdAt: string };
 export type CanvasEdge = { source: string; target: string; weight: number; sourceType: 'stored' | 'derived'; type?: string };
 
 type Point3D = CanvasNode & { x: number; y: number; z: number; color: string };
 type Projected = Point3D & { sx: number; sy: number; scale: number; depth: number };
-
-const palette = ['#8b8cf8', '#55c2b7', '#d5a85d', '#739adf', '#b77bd8', '#d2778a'];
 
 function hash(value: string) {
   let result = 2166136261;
@@ -48,7 +47,7 @@ export default function KnowledgeGraphCanvas({ nodes, edges, selectedId, onSelec
         x: Math.cos(clusterAngle) * clusterRadius + Math.cos(localAngle) * localRadius,
         y: ((localIndex % 7) - 3) * 24 + Math.sin(localAngle) * localRadius * 0.42,
         z: Math.sin(clusterAngle) * clusterRadius + Math.sin(localAngle) * localRadius,
-        color: palette[departmentIndex % palette.length],
+        color: knowledgeFeatureColor(node.taskType),
       };
     });
     const resize = () => {
@@ -101,11 +100,14 @@ export default function KnowledgeGraphCanvas({ nodes, edges, selectedId, onSelec
         const target = projectedById.get(edge.target);
         if (!source || !target) return;
         const alpha = Math.max(edge.sourceType === 'stored' ? 0.34 : 0.26, Math.min(0.58, ((source.scale + target.scale) / 2 - 0.2) * 0.36));
+        const sameFeature = knowledgeFeatureKey(source.taskType) === knowledgeFeatureKey(target.taskType);
         context.beginPath();
         context.moveTo(source.sx, source.sy);
         context.lineTo(target.sx, target.sy);
         context.setLineDash(edge.sourceType === 'derived' ? [4, 5] : []);
-        context.strokeStyle = edge.sourceType === 'stored' ? `rgba(186,190,216,${alpha})` : `rgba(139,137,255,${alpha})`;
+        context.strokeStyle = sameFeature
+          ? knowledgeFeatureColorWithAlpha(source.taskType, Math.min(0.4, alpha * 0.85))
+          : edge.sourceType === 'stored' ? `rgba(186,190,216,${alpha})` : `rgba(139,137,255,${alpha})`;
         context.lineWidth = Math.max(edge.sourceType === 'stored' ? 1.25 : 1.05, edge.weight * 1.35);
         context.stroke();
         context.setLineDash([]);
