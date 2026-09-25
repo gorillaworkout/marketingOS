@@ -183,7 +183,7 @@ export default function KnowledgePage() {
 
   return (
     <PageStack className="max-w-6xl">
-      <PageHeader eyebrow="Library / Learning" title="Knowledge" description="Style insights, selection patterns, and verified examples from approved output." actions={<Button onClick={fetchData}>Refresh</Button>} />
+      <PageHeader eyebrow="Library / Learning" title="Knowledge" description="Style insights, selection patterns, and knowledge saved from approved work and completed research." actions={<Button onClick={fetchData}>Refresh</Button>} />
 
       {/* Tab switcher */}
       <Toolbar className="w-fit"><FilterGroup>

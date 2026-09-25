@@ -58,7 +58,8 @@ import {
   parsePinnedSourceUrls,
 } from '@/lib/ai-research-inspector';
 import { GORILLAWORKOUT_API_BASE, GORILLAWORKOUT_API_KEY } from '@/lib/gateway-config';
-import { AVAILABLE_MODELS } from '@/lib/openai';
+import { AVAILABLE_MODELS, fetchKnowledgeContext } from '@/lib/openai';
+import { persistCompletedResearchAnswer } from '@/lib/knowledge-persist';
 import { logTokenUsage } from '@/lib/token-log';
 import {
   consumeChatCompletionSseLines,
@@ -384,6 +385,7 @@ export async function POST(request: NextRequest) {
         const effectiveMode = compare ? 'fast' : mode;
         emit({ type: 'start', conversationId: convId, model, mode: effectiveMode });
         const query = latestUser?.content || '';
+        const knowledgeContext = await fetchKnowledgeContext(auth.id, query, undefined, 5, 'internal');
         const urlOnly = isUrlOnlyQuery(query);
 
         if (mode === 'deep' && !compare) {
@@ -483,6 +485,7 @@ export async function POST(request: NextRequest) {
           const apiMessages = buildAiResearchChatMessages({
             systemPrompt: [
               AI_RESEARCH_SYSTEM_PROMPT,
+              knowledgeContext,
               AI_RESEARCH_DEEP_SYSTEM_ADDENDUM,
               formatDeepResearchPlanNote(plan, gatherResult),
               projectMemoryBlock,
@@ -523,6 +526,15 @@ export async function POST(request: NextRequest) {
             sources: researchEvent.sources,
           })];
           await persistConversation(convId, auth.id, allMessages, model, true, activeProjectId);
+          await persistCompletedResearchAnswer({
+            userId: auth.id,
+            conversationId: convId,
+            projectId: activeProjectId,
+            query,
+            answer: fullContent,
+            sources: researchEvent.sources,
+            aborted: request.signal.aborted,
+          });
           try {
             await rememberProjectTurn(auth.id, activeProjectId, query, fullContent);
           } catch (error) {
@@ -591,6 +603,7 @@ export async function POST(request: NextRequest) {
         const apiMessages = buildAiResearchChatMessages({
           systemPrompt: [
             AI_RESEARCH_SYSTEM_PROMPT,
+            knowledgeContext,
             projectMemoryBlock,
             compare ? buildCompareSystemAddendum(compare) : '',
           ].filter(Boolean).join('\n\n'),
@@ -617,6 +630,15 @@ export async function POST(request: NextRequest) {
           sources: researchEvent.sources,
         })];
         await persistConversation(convId, auth.id, allMessages, model, true, activeProjectId);
+        await persistCompletedResearchAnswer({
+          userId: auth.id,
+          conversationId: convId,
+          projectId: activeProjectId,
+          query,
+          answer: streamed.content,
+          sources: researchEvent.sources,
+          aborted: request.signal.aborted,
+        });
         try {
           await rememberProjectTurn(auth.id, activeProjectId, query, streamed.content);
         } catch (error) {

@@ -537,6 +537,7 @@ export default function VideoScriptPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           taskType: 'video-script',
+          taskId,
           brief: event,
           selectedOutput: selected,
           rejectedOutputs: rejected,

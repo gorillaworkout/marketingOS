@@ -2,6 +2,7 @@ import { parseGatewayCompletion } from '@/lib/gateway-response';
 import { IMAGE_PROMPT_SYSTEM } from '@/lib/dupoin-image-prompt';
 import { EVENT_PLAN_GROUNDED_BUDGET_RULES } from '@/lib/event-plan-budget';
 import { GORILLAWORKOUT_API_BASE, GORILLAWORKOUT_API_KEY } from '@/lib/gateway-config';
+import { parseStoredSourceUrls } from '@/lib/knowledge-pin';
 import { logTokenUsage } from '@/lib/token-log';
 import {
   mergeGatewayUsage,
@@ -532,7 +533,10 @@ export interface KnowledgeContextEntry {
   audience?: string | null;
   brief?: string | null;
   selected_output?: string | null;
+  source_urls?: string | null;
 }
+
+export const INTERNAL_KNOWLEDGE_GRAPH_HEADER = 'INTERNAL KNOWLEDGE GRAPH';
 
 /**
  * Format retrieved knowledge_entries into a prompt block for RAG injection.
@@ -552,6 +556,24 @@ export function formatKnowledgeContext(entries: KnowledgeContextEntry[]): string
 }
 
 /**
+ * Research and evidence-bound generators cite internal knowledge without treating it as a public source.
+ */
+export function formatInternalKnowledgeContext(entries: KnowledgeContextEntry[]): string {
+  if (!entries.length) return '';
+
+  const lines = entries.map((entry, idx) => {
+    const scope = [entry.task_type, entry.platform, entry.audience].filter(Boolean).join('/');
+    const brief = String(entry.brief || '').replace(/\s+/g, ' ').trim().substring(0, 140);
+    const selected = String(entry.selected_output || '').replace(/\s+/g, ' ').trim().substring(0, 320);
+    const sources = parseStoredSourceUrls(entry.source_urls).slice(0, 3);
+    const sourceLine = sources.length ? `\n   Sources: ${sources.join(', ')}` : '';
+    return `${idx + 1}. [${scope || 'knowledge'}] Brief: "${brief}"\n   Knowledge: "${selected}"${sourceLine}`;
+  });
+
+  return `\n\n${INTERNAL_KNOWLEDGE_GRAPH_HEADER} — Existing approved knowledge for this user:\n${lines.join('\n')}\n\nPrefer this internal approved knowledge when it is relevant, and cite it as internal knowledge rather than as a public web source. Still show grounded public web evidence with citations. Separate official Dupoin or Bappebti facts from other public traces that share a name. Do not invent facts that are absent from this block and the grounded sources. If a stricter evidence contract is present, that contract wins.`;
+}
+
+/**
  * Retrieve user-scoped similar knowledge_entries and return a prompt block.
  * Complements fetchStyleContext (learned profile) and fetchContextMemory (recent tasks).
  */
@@ -560,12 +582,13 @@ export async function fetchKnowledgeContext(
   query: string,
   taskType?: string,
   limit: number = 5,
+  mode: 'selection' | 'internal' = 'selection',
 ): Promise<string> {
   try {
     if (!userId || !String(query || '').trim()) return '';
     const { findSimilarEntries } = await import('@/lib/embeddings');
     const entries = await findSimilarEntries(query, { userId, taskType, limit });
-    return formatKnowledgeContext(entries);
+    return mode === 'internal' ? formatInternalKnowledgeContext(entries) : formatKnowledgeContext(entries);
   } catch (e) {
     console.error('Failed to fetch knowledge context:', e);
     return '';

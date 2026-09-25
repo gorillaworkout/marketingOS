@@ -7,6 +7,7 @@ import {
   prepareResearchKnowledgePin,
   type PreparedResearchPin,
 } from './knowledge-pin';
+import { findStoredKnowledgeDuplicate, knowledgeContentHash } from './knowledge-persist';
 
 type PinBody = {
   taskType?: unknown;
@@ -89,14 +90,38 @@ export async function savePinnedResearchFact(
     console.warn('Embedding generation failed, saving research fact without vector:', error);
   }
 
+  const contentHash = knowledgeContentHash(prepared.fact);
+  try {
+    const existing = await findStoredKnowledgeDuplicate({
+      userId,
+      taskType: AI_RESEARCH_KNOWLEDGE_TASK,
+      selectedOutput: prepared.fact,
+      action: 'pin',
+    });
+    if (existing) {
+      return {
+        status: 200,
+        body: {
+          success: true,
+          knowledgeId: existing.id,
+          connectionsCount: 0,
+          graphUrl: knowledgeGraphFocusUrl(existing.id),
+          deduped: true,
+        },
+      };
+    }
+  } catch (error) {
+    console.warn('Research pin duplicate lookup failed:', error);
+  }
+
   // Research facts are citations, not marketing style selections, so this path
   // does not update user_style_preferences. Rows still live in knowledge_entries.
   const knowledgeId = uuidv4();
   await execute(
     `INSERT INTO knowledge_entries (
       id, user_id, brief, task_type, selected_output, rejected_outputs, platform, audience, embedding,
-      source_urls, conversation_id, project_id, quality_score
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      source_urls, conversation_id, project_id, quality_score, content_hash
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       knowledgeId,
       userId,
@@ -111,6 +136,7 @@ export async function savePinnedResearchFact(
       prepared.conversationId,
       prepared.projectId,
       1,
+      contentHash,
     ],
   );
   const connectionsCount = await linkSimilarEntries(userId, knowledgeId, embedding);

@@ -26,6 +26,25 @@ AI-powered marketing suite untuk **Dupoin Futures**. Generate social media posts
 - **Knowledge Graph** — Visualisasi D3.js hubungan antar konten
 - **Style Analysis** — AI menganalisis pola gaya konten team
 
+### Knowledge graph memory
+
+High-signal work is written to `knowledge_entries` and read back before generation, so the product improves as people use it. Apply `db/migrations/019_knowledge_entry_dedupe.sql` with `npm run db:migrate` before relying on the new task and content-hash columns.
+
+Auto-saved actions:
+
+- Social Post: choosing an option, Approve, and Publish
+- Video Script: choosing an option, and a finished full script
+- Event Plan: a completed plan
+- Market Research: a completed report that contains items
+- Article Market News: a publication-ready article
+- AI Research: up to three grounded claims from a completed answer, or one sourced summary when no claim is pinnable
+
+Not saved: drafts, failed runs, empty market-research reports, and aborted AI Research streams. Manual Pin still saves a cited fact and does not update style preferences.
+
+Read before generation: Social Post, Video Script, Event Plan, Market Research, Article Market News, and AI Research. AI Research places an INTERNAL KNOWLEDGE GRAPH block ahead of public web grounding. Internal knowledge is cited as internal; public evidence still needs its own citations, and official Dupoin or Bappebti facts stay separate from other same-name traces.
+
+Manual check: approve a Social Post and confirm a `knowledge_entries` row, or a higher `quality_score` when that option was already saved. In AI Research, ask a follow-up that matches the saved post and confirm the answer can use that internal knowledge while still citing public sources.
+
 ### Management Tools
 - **Brand Guidelines** — CRUD aturan brand voice
 - **Content Calendar** — Kalender bulanan untuk scheduling

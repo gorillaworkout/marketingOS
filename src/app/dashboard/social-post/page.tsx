@@ -558,6 +558,7 @@ export default function SocialPostPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           taskType: 'social-post',
+          taskId,
           brief,
           selectedOutput: selected,
           rejectedOutputs: rejected,
