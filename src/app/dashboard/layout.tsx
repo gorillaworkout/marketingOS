@@ -24,7 +24,9 @@ type IconName =
   | 'brand' | 'image' | 'calendar' | 'template' | 'knowledge' | 'history'
   | 'graph' | 'tokens' | 'analytics' | 'accounts' | 'models' | 'docs';
 
-const iconPaths: Record<IconName, string> = {
+type IconMark = string | { cx: number; cy: number; r: number };
+
+const iconPaths: Record<IconName, IconMark | readonly IconMark[]> = {
   home: 'M3 10.5 12 3l9 7.5M5 9.5V21h14V9.5M9 21v-7h6v7',
   social: 'M7 8h10M7 12h7M5 4h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2h-7l-5 3v-3H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z',
   video: 'm15 10 4.5-3v10L15 14M5 5h8a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z',
@@ -42,11 +44,26 @@ const iconPaths: Record<IconName, string> = {
   analytics: 'M4 20V10m6 10V4m6 16v-7m4 7H2',
   accounts: 'M16 20v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2m7-10a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm8 2a4 4 0 0 1 4 4v2m-4-10a4 4 0 0 0 0-8',
   models: 'M12 3 4 7v10l8 4 8-4V7l-8-4Zm-8 4 8 4 8-4m-8 4v10',
-  docs: 'M6 3h8l4 4v14H6V3Zm8 0v4h4M9 12h6m-6 4h6',
+  // Lucide circle-help: a question mark, readable at nav size beside the document and book icons.
+  docs: [
+    { cx: 12, cy: 12, r: 10 },
+    'M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3',
+    'M12 17h.01',
+  ],
 };
 
 function NavIcon({ name }: { name: IconName }) {
-  return <svg aria-hidden="true" className="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d={iconPaths[name]} /></svg>;
+  const marks = iconPaths[name];
+  const list = typeof marks === 'string' ? [marks] : marks;
+  return (
+    <svg aria-hidden="true" className="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+      {list.map((mark, index) => (
+        typeof mark === 'string'
+          ? <path key={index} d={mark} />
+          : <circle key={index} cx={mark.cx} cy={mark.cy} r={mark.r} />
+      ))}
+    </svg>
+  );
 }
 
 const generateItems = [
