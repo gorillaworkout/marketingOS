@@ -16,12 +16,14 @@ const ORIGIN_CHIP_LABEL: Record<ResearchOriginChip, string> = {
   official: 'Official',
   indonesia: 'Indonesia',
   international: 'International',
+  internal: 'Internal Docs',
 };
 
 const ORIGIN_CHIP_CLASS: Record<ResearchOriginChip, string> = {
   official: 'border-emerald-400/25 bg-emerald-400/10 text-emerald-300',
   indonesia: 'border-indigo-400/25 bg-indigo-400/10 text-indigo-300',
   international: 'border-white/[0.08] bg-white/[0.04] text-[var(--mos-text-muted)]',
+  internal: 'border-sky-400/25 bg-sky-400/10 text-sky-200',
 };
 
 const TRACE_LABEL: Record<ResearchTraceKind, string> = {

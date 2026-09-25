@@ -14,7 +14,7 @@ export const AI_RESEARCH_MAX_PINNED_URLS = 32;
 
 export type ResearchGatherStatus = 'ok' | 'failed' | 'skipped' | 'empty';
 export type ResearchTraceKind = 'person_fact' | 'other_public_trace';
-export type ResearchOriginChip = 'indonesia' | 'international' | 'official';
+export type ResearchOriginChip = 'indonesia' | 'international' | 'official' | 'internal';
 
 export interface InspectorResearchSource {
   title: string;
@@ -181,7 +181,7 @@ export function normalizeInspectorSource(raw: unknown): InspectorResearchSource 
   const origin: ResearchOrigin = item.origin === 'indonesia' ? 'indonesia' : 'international';
   const official = item.official === true || isOfficialResearchHost(url);
   const originChip: ResearchOriginChip =
-    item.originChip === 'official' || item.originChip === 'indonesia' || item.originChip === 'international'
+    item.originChip === 'official' || item.originChip === 'indonesia' || item.originChip === 'international' || item.originChip === 'internal'
       ? item.originChip
       : official ? 'official' : origin;
   const traceKind: ResearchTraceKind | null =

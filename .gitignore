@@ -8,6 +8,7 @@ node_modules/
 out/
 
 # Database
+data/internal-docs/
 data/*.db
 data/*.db-journal
 data/*.db-wal
