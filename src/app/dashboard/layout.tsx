@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/dashboard';
 import {
   isDashboardNavItemVisible,
   shouldBlockDashboardGenerationPath,
-  type GenerationFeature,
+  type AccountFeature,
 } from '@/lib/authorization';
 
 interface User {
@@ -56,17 +56,17 @@ const generateItems = [
   { href: '/dashboard/sop', label: 'Article Market News', icon: 'article', feature: 'article-market-news' },
   { href: '/dashboard/market-research', label: 'Market research', icon: 'research', feature: 'market-research' },
   { href: '/dashboard/ai-research', label: 'AI Research', icon: 'research', feature: 'ai-research' },
-] satisfies Array<{ href: string; label: string; icon: IconName; adminOnly?: boolean; feature?: GenerationFeature }>;
+] satisfies Array<{ href: string; label: string; icon: IconName; adminOnly?: boolean; feature?: AccountFeature }>;
 
 const resourceItems = [
   { href: '/dashboard/brand-guidelines', label: 'Brand guidelines', icon: 'brand', adminOnly: true },
   { href: '/dashboard/images', label: 'Image Gallery', icon: 'image' },
   { href: '/dashboard/calendar', label: 'Calendar', icon: 'calendar', adminOnly: true },
   { href: '/dashboard/templates', label: 'Templates', icon: 'template', adminOnly: true },
-  { href: '/dashboard/internal-docs', label: 'Internal Docs', icon: 'docs' },
+  { href: '/dashboard/internal-docs', label: 'Internal Docs', icon: 'docs', feature: 'internal-docs' },
   { href: '/dashboard/knowledge', label: 'Knowledge', icon: 'knowledge', adminOnly: true },
   { href: '/dashboard/history', label: 'History', icon: 'history', adminOnly: true },
-] satisfies Array<{ href: string; label: string; icon: IconName; adminOnly?: boolean }>;
+] satisfies Array<{ href: string; label: string; icon: IconName; adminOnly?: boolean; feature?: AccountFeature }>;
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
@@ -113,7 +113,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   const principal = user ? { role: user.role, features: user.enabledFeatures || [] } : null;
 
-  const sections: Array<{ label?: string; items: Array<{ href: string; label: string; icon: IconName; adminOnly?: boolean; feature?: GenerationFeature }> }> = [
+  const sections: Array<{ label?: string; items: Array<{ href: string; label: string; icon: IconName; adminOnly?: boolean; feature?: AccountFeature }> }> = [
     { items: [{ href: '/dashboard', label: 'Overview', icon: 'home' }] },
     {
       label: 'Create',

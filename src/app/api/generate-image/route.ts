@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAuthorizedUser, getSession } from '@/lib/auth';
+import { hasGenerationFeature } from '@/lib/authorization';
 import { queryOne, execute } from '@/lib/database';
 import { rateLimit } from '@/lib/rate-limit';
 import { createImageJobStore, type ImageJob, type ImageJobResult } from '@/lib/image-job-status';
@@ -33,8 +34,9 @@ export async function POST(request: NextRequest) {
 
   const auth = await getAuthorizedUser(request);
   if ('error' in auth) return jsonError(auth.error, auth.status);
-  // Any user with at least one generation feature may render images for it.
-  if (auth.features.length === 0) return jsonError('Forbidden: no generation feature enabled for your department', 403);
+  // Any user with at least one generation workflow may render images for it.
+  // Internal Docs alone does not grant image generation.
+  if (!hasGenerationFeature(auth)) return jsonError('Forbidden: no generation feature enabled for your department', 403);
   const userId = auth.id;
   if (!userId) return jsonError('Unauthorized', 401);
 

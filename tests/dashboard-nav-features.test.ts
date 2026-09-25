@@ -63,10 +63,29 @@ test('visiting /dashboard/sop is blocked for members without article-market-news
 test('dashboard layout uses explicit feature keys instead of last path segment', () => {
   assert.match(layout, /href: '\/dashboard\/sop', label: 'Article Market News', icon: 'article', feature: 'article-market-news'/);
   assert.match(layout, /href: '\/dashboard\/ai-research', label: 'AI Research', icon: 'research', feature: 'ai-research'/);
+  assert.match(layout, /href: '\/dashboard\/internal-docs', label: 'Internal Docs', icon: 'docs', feature: 'internal-docs'/);
   assert.match(layout, /isDashboardNavItemVisible\(item, principal\)/);
   assert.match(layout, /shouldBlockDashboardGenerationPath\(principal, pathname\)/);
   assert.doesNotMatch(layout, /href\.split\('\/'\)\.pop\(\)/);
   assert.doesNotMatch(layout, /pathname\.split\('\/'\)\.pop\(\)/);
+});
+
+test('Internal Docs nav and nested document routes follow the department feature', () => {
+  const item = { href: '/dashboard/internal-docs', label: 'Internal Docs', feature: 'internal-docs' as const };
+  const memberWithout = { role: 'member', features: ['social-post'] };
+  const memberWith = { role: 'member', features: ['internal-docs'] };
+  const admin = { role: 'admin', features: [] as string[] };
+
+  assert.equal(isDashboardNavItemVisible(item, memberWithout), false);
+  assert.equal(isDashboardNavItemVisible(item, memberWith), true);
+  assert.equal(isDashboardNavItemVisible(item, admin), true);
+  assert.equal(shouldBlockDashboardGenerationPath(memberWithout, '/dashboard/internal-docs'), true);
+  assert.equal(shouldBlockDashboardGenerationPath(memberWithout, '/dashboard/internal-docs/'), true);
+  assert.equal(shouldBlockDashboardGenerationPath(memberWithout, '/dashboard/internal-docs/doc-1'), true);
+  assert.equal(shouldBlockDashboardGenerationPath(memberWith, '/dashboard/internal-docs/doc-1'), false);
+  assert.equal(shouldBlockDashboardGenerationPath(admin, '/dashboard/internal-docs/doc-1'), false);
+  assert.equal(generationFeatureFromPath('/dashboard/internal-docs'), undefined);
+  assert.equal(DASHBOARD_FEATURE_HREFS['internal-docs'], '/dashboard/internal-docs');
 });
 
 test('article-market-news API still requires the article-market-news feature', () => {
