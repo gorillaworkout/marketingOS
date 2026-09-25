@@ -1,8 +1,9 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Button, Select, StatusBadge } from '@/components/ui/dashboard';
 import {
+  guideHighlightNeedle,
   internalDocFilePath,
   parseMarkdownDocument,
   parsePlainDocument,
@@ -29,8 +30,8 @@ export interface GuideDocument {
 
 const controlLink = 'inline-flex h-8 items-center rounded-[var(--mos-radius-control)] border border-[var(--mos-border)] bg-[var(--mos-raised)] px-3 text-xs font-medium text-[var(--mos-text)] hover:border-[var(--mos-border-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--mos-accent-ring)]';
 
-const pageClass = 'max-h-[min(78vh,960px)] min-h-[20rem] overflow-y-auto bg-[#f4f1ea] px-5 py-8 text-[#1c1b17] sm:px-10 sm:py-10';
-const proseClass = 'mx-auto max-w-[44rem] break-words text-[15px] leading-7 [&_a]:font-medium [&_a]:text-[#312e81] [&_a]:underline [&_a]:underline-offset-2 [&_h1]:mb-4 [&_h1]:text-[1.7rem] [&_h1]:font-semibold [&_h1]:leading-tight [&_h2]:mb-3 [&_h2]:mt-8 [&_h2]:text-xl [&_h2]:font-semibold [&_h3]:mb-2 [&_h3]:mt-6 [&_h3]:text-lg [&_h3]:font-semibold [&_h4]:mb-2 [&_h4]:mt-5 [&_h4]:font-semibold [&_p]:mb-4 [&_ul]:mb-4 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:mb-4 [&_ol]:list-decimal [&_ol]:pl-5 [&_li]:mb-1 [&_blockquote]:my-4 [&_blockquote]:border-l-2 [&_blockquote]:border-[#d9d3c5] [&_blockquote]:pl-4 [&_pre]:mb-4 [&_pre]:overflow-x-auto [&_pre]:rounded [&_pre]:bg-[#ebe6dc] [&_pre]:p-3 [&_code]:rounded [&_code]:bg-[#ebe6dc] [&_code]:px-1 [&_table]:mb-4 [&_table]:w-full [&_table]:border-collapse [&_td]:border [&_td]:border-[#e3ddd0] [&_td]:px-2 [&_td]:py-1 [&_th]:border [&_th]:border-[#e3ddd0] [&_th]:px-2 [&_th]:py-1 [&_th]:text-left';
+const pageClass = 'max-h-[min(78vh,960px)] overflow-y-auto bg-[#f4f1ea] px-5 py-8 text-[#1c1b17] sm:px-10 sm:py-10';
+const proseClass = 'mx-auto max-w-[44rem] break-words text-[15px] leading-7 [&_a]:font-medium [&_a]:text-[#312e81] [&_a]:underline [&_a]:underline-offset-2 [&_h1]:mb-4 [&_h1]:text-[1.7rem] [&_h1]:font-semibold [&_h1]:leading-tight [&_h2]:mb-3 [&_h2]:mt-8 [&_h2]:text-xl [&_h2]:font-semibold [&_h3]:mb-2 [&_h3]:mt-6 [&_h3]:text-lg [&_h3]:font-semibold [&_h4]:mb-2 [&_h4]:mt-5 [&_h4]:font-semibold [&_img]:my-4 [&_img]:h-auto [&_img]:max-w-full [&_img]:rounded [&_p]:mb-4 [&_ul]:mb-4 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:mb-4 [&_ol]:list-decimal [&_ol]:pl-5 [&_li]:mb-1 [&_blockquote]:my-4 [&_blockquote]:border-l-2 [&_blockquote]:border-[#d9d3c5] [&_blockquote]:pl-4 [&_pre]:mb-4 [&_pre]:overflow-x-auto [&_pre]:rounded [&_pre]:bg-[#ebe6dc] [&_pre]:p-3 [&_code]:rounded [&_code]:bg-[#ebe6dc] [&_code]:px-1 [&_table]:mb-4 [&_table]:w-full [&_table]:border-collapse [&_td]:border [&_td]:border-[#e3ddd0] [&_td]:px-2 [&_td]:py-1 [&_th]:border [&_th]:border-[#e3ddd0] [&_th]:px-2 [&_th]:py-1 [&_th]:text-left';
 
 function accessLabel(level: AccessLevel): string {
   return level === 'it-only' ? 'IT-only' : 'Company';
@@ -87,6 +88,43 @@ function Blocks({ blocks }: { blocks: DocumentBlock[] }) {
   });
 }
 
+function markGuideHighlight(root: HTMLElement, highlight: string): boolean {
+  const needle = guideHighlightNeedle(highlight).slice(0, 48);
+  if (needle.length < 12) return false;
+  const pattern = needle.split(/\s+/).filter(Boolean).map(part => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('\\s+');
+  let matcher: RegExp;
+  try {
+    matcher = new RegExp(pattern, 'i');
+  } catch {
+    return false;
+  }
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  let node = walker.nextNode();
+  while (node) {
+    const text = node.textContent || '';
+    const match = matcher.exec(text);
+    const parent = node.parentElement;
+    if (match && match.index !== undefined && !parent?.closest('mark[data-guide-hit]')) {
+      try {
+        const range = document.createRange();
+        range.setStart(node, match.index);
+        range.setEnd(node, match.index + match[0].length);
+        const mark = document.createElement('mark');
+        mark.dataset.guideHit = 'true';
+        mark.className = 'rounded-sm bg-[#f6e7a1] px-0.5 text-inherit';
+        range.surroundContents(mark);
+        mark.scrollIntoView({ block: 'center' });
+        return true;
+      } catch {
+        parent?.scrollIntoView({ block: 'center' });
+        return true;
+      }
+    }
+    node = walker.nextNode();
+  }
+  return false;
+}
+
 function ReadingPane({ document, showText }: { document: GuideDocument; showText: boolean }) {
   const extension = document.extension.toLowerCase();
   const isPdf = extension === '.pdf';
@@ -103,7 +141,7 @@ function ReadingPane({ document, showText }: { document: GuideDocument; showText
   }
 
   const preview = extension === '.docx' && !showText ? sanitizeDocumentHtml(document.previewHtml || '') : '';
-  const previewHasText = preview.replace(/<[^>]+>/g, '').trim().length > 0;
+  const previewHasText = preview.replace(/<[^>]+>/g, '').trim().length > 0 || /<img\b/i.test(preview);
   if (preview && previewHasText) {
     return (
       <div className={pageClass}>
@@ -136,17 +174,33 @@ function ReadingPane({ document, showText }: { document: GuideDocument; showText
 export function GuideReader({
   document,
   canManage,
+  highlight = '',
   onAccessChange,
   onReindex,
   onDelete,
 }: {
   document: GuideDocument;
   canManage: boolean;
+  highlight?: string;
   onAccessChange: (level: AccessLevel) => void;
   onReindex: () => void;
   onDelete: () => void;
 }) {
   const [showText, setShowText] = useState(false);
+  const bodyRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const root = bodyRef.current;
+    if (!root) return;
+    root.querySelectorAll('mark[data-guide-hit]').forEach(mark => {
+      mark.replaceWith(window.document.createTextNode(mark.textContent || ''));
+    });
+    const needle = guideHighlightNeedle(highlight);
+    if (!needle) return;
+    if (!markGuideHighlight(root, needle)) {
+      root.querySelector('iframe')?.scrollIntoView({ block: 'nearest' });
+    }
+  }, [highlight, document.id, document.extractedText, document.previewHtml, showText]);
 
   const isPdf = document.extension.toLowerCase() === '.pdf';
   const openHref = internalDocFilePath(document.id, isPdf);
@@ -155,7 +209,7 @@ export function GuideReader({
   const extensionLabel = document.extension.replace('.', '').toUpperCase() || 'FILE';
 
   return (
-    <div data-testid="guide-reader">
+    <div data-testid="guide-reader" id="guide-reader">
       <header className="flex flex-wrap items-start justify-between gap-3 border-b border-[var(--mos-border-subtle)] px-4 py-3 sm:px-5">
         <div className="min-w-0">
           <h2 className="text-lg font-[560] tracking-[-0.03em] text-[var(--mos-text)]">{document.title}</h2>
@@ -170,11 +224,11 @@ export function GuideReader({
               {document.originalName}
             </a>
             <span className="text-xs text-[var(--mos-text-faint)]">{extensionLabel} · {formatSize(document.fileSize)}</span>
+            <StatusBadge tone={document.accessLevel === 'it-only' ? 'info' : 'neutral'}>{accessLabel(document.accessLevel)}</StatusBadge>
+            <StatusBadge tone={statusTone(document.status)}>{statusLabel(document.status)}</StatusBadge>
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <StatusBadge tone={document.accessLevel === 'it-only' ? 'info' : 'neutral'}>{accessLabel(document.accessLevel)}</StatusBadge>
-          <StatusBadge tone={statusTone(document.status)}>{statusLabel(document.status)}</StatusBadge>
           {isPdf && (
             <Button size="sm" onClick={() => setShowText(current => !current)}>
               {showText ? 'Show PDF' : 'Show text'}
@@ -185,7 +239,8 @@ export function GuideReader({
         </div>
       </header>
       {canManage && (
-        <div className="flex flex-wrap items-center gap-2 border-b border-[var(--mos-border-subtle)] px-4 py-2 sm:px-5">
+        <div className="flex flex-wrap items-center gap-2 border-b border-[var(--mos-border-subtle)] bg-[var(--mos-raised)] px-4 py-2 sm:px-5">
+          <span className="text-[11px] font-medium uppercase tracking-[0.14em] text-[var(--mos-text-faint)]">Manage</span>
           <label className="text-xs text-[var(--mos-text-muted)]">
             Access
             <Select
@@ -203,7 +258,9 @@ export function GuideReader({
         </div>
       )}
       {document.errorMessage && <p className="px-4 py-2 text-sm text-red-300 sm:px-5">{document.errorMessage}</p>}
-      <ReadingPane document={document} showText={showText} />
+      <div ref={bodyRef}>
+        <ReadingPane document={document} showText={showText} />
+      </div>
     </div>
   );
 }

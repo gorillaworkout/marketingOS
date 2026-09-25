@@ -18,6 +18,7 @@ export const KNOWLEDGE_TASK_TYPES = [
   'market-research',
   'article-market-news',
   'ai-research',
+  'internal-docs',
 ] as const;
 
 export type KnowledgeTaskType = (typeof KNOWLEDGE_TASK_TYPES)[number];
@@ -56,6 +57,11 @@ export type PersistKnowledgeInput = {
   projectId?: string | null;
   /** Defaults to the marketing-selection policy. Research pins stay opted out. */
   updateStylePreferences?: boolean;
+  /**
+   * Replace the row already stored for this user, task type, and task id.
+   * Used when a guide is reindexed so the body updates instead of deduping away.
+   */
+  upsertTask?: boolean;
   nowMs?: number;
 };
 
@@ -95,7 +101,7 @@ export function qualityScoreForAction(action: KnowledgePersistAction): number {
 /** Style learning follows explicit marketing choices, not research citations or auto-saved reports. */
 export function shouldUpdateStylePreferences(taskType: string, action: KnowledgePersistAction): boolean {
   if (action !== 'select' && action !== 'approve' && action !== 'publish') return false;
-  if (taskType === AI_RESEARCH_KNOWLEDGE_TASK || taskType === 'market-research') return false;
+  if (taskType === AI_RESEARCH_KNOWLEDGE_TASK || taskType === 'market-research' || taskType === 'internal-docs') return false;
   return true;
 }
 
@@ -334,7 +340,50 @@ export async function persistKnowledgeEntry(input: PersistKnowledgeInput): Promi
   const contentHash = knowledgeContentHash(input.selectedOutput);
   const taskId = input.taskId?.trim() || null;
   const nowMs = input.nowMs ?? Date.now();
-  const duplicate = await findStoredKnowledgeDuplicate({
+  const brief = (textValue(input.brief) || fingerprint).slice(0, 2_000);
+  const audience = textValue(input.audience) || null;
+  if (input.upsertTask && taskId) {
+    const current = await queryOne<{ id: string }>(
+      `SELECT id FROM knowledge_entries
+       WHERE user_id = ? AND task_type = ? AND task_id = ?
+       ORDER BY created_at DESC
+       LIMIT 1`,
+      [input.userId, input.taskType, taskId],
+    );
+    if (current) {
+      let nextEmbedding: number[] = [];
+      try {
+        nextEmbedding = await getEmbedding(selectedOutput);
+      } catch (error) {
+        console.warn('Embedding generation failed, keeping the previous vector:', error);
+      }
+      await execute(
+        `UPDATE knowledge_entries
+         SET brief = ?, selected_output = ?, audience = ?, content_hash = ?,
+             quality_score = GREATEST(quality_score, ?),
+             embedding = COALESCE(?, embedding)
+         WHERE id = ? AND user_id = ?`,
+        [
+          brief,
+          selectedOutput,
+          audience,
+          contentHash,
+          qualityScore,
+          nextEmbedding.length ? JSON.stringify(nextEmbedding) : null,
+          current.id,
+          input.userId,
+        ],
+      );
+      return {
+        knowledgeId: current.id,
+        connectionsCount: 0,
+        deduped: true,
+        skipped: false,
+        qualityScore,
+      };
+    }
+  }
+  const duplicate = input.upsertTask ? null : await findStoredKnowledgeDuplicate({
     userId: input.userId,
     taskType: input.taskType,
     taskId,
@@ -369,7 +418,6 @@ export async function persistKnowledgeEntry(input: PersistKnowledgeInput): Promi
   }
 
   const knowledgeId = uuidv4();
-  const brief = (textValue(input.brief) || fingerprint).slice(0, 2_000);
   await execute(
     `INSERT INTO knowledge_entries (
       id, user_id, brief, task_type, selected_output, rejected_outputs, platform, audience, embedding,
@@ -383,7 +431,7 @@ export async function persistKnowledgeEntry(input: PersistKnowledgeInput): Promi
       selectedOutput,
       JSON.stringify(Array.isArray(input.rejectedOutputs) ? input.rejectedOutputs : []),
       textValue(input.platform) || null,
-      textValue(input.audience) || null,
+      audience,
       embedding.length ? JSON.stringify(embedding) : null,
       serializeSourceUrls(input.sourceUrls),
       optionalRecordId(input.conversationId),

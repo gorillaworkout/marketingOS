@@ -8,6 +8,7 @@ import {
   INTERNAL_DOCS_ASK_SYSTEM,
   INTERNAL_DOCS_NO_MATCH_ANSWER,
   retrieveInternalDocHits,
+  withCitationMedia,
 } from '@/lib/internal-docs';
 import { generateContent } from '@/lib/openai';
 
@@ -43,7 +44,7 @@ export async function POST(request: NextRequest) {
   if (!question) return NextResponse.json({ error: 'Question is required.' }, { status: 400 });
 
   const hits = await retrieveInternalDocHits(actor.principal, question);
-  const citations = citationsFromHits(hits, request.nextUrl.origin);
+  const citations = await withCitationMedia(citationsFromHits(hits, request.nextUrl.origin), actor.principal);
   if (!hits.length) {
     return NextResponse.json({ answer: INTERNAL_DOCS_NO_MATCH_ANSWER, citations: [] });
   }

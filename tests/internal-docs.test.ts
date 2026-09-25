@@ -23,6 +23,7 @@ import {
   type InternalDocHit,
 } from '../src/lib/internal-docs';
 import { extractPlainText } from '../src/lib/internal-docs-extract';
+import { internalDocKnowledgePayload } from '../src/lib/internal-docs-knowledge';
 import { internalDocKind, resolveStoredInternalDoc, titleFromFilename } from '../src/lib/internal-docs-storage';
 
 const read = (file: string) => readFileSync(path.join(process.cwd(), file), 'utf8');
@@ -39,8 +40,10 @@ test('IT department members and admins can read IT-only docs; other employees ca
   assert.equal(canReadItOnlyInternalDocs(itMember), true);
   assert.equal(canReadItOnlyInternalDocs({ role: 'member', departmentName: ' it ' }), true);
   assert.equal(canReadItOnlyInternalDocs(admin), true);
-  assert.equal(canManageInternalDocs(itMember), true);
+  assert.equal(canManageInternalDocs(itMember), false);
+  assert.equal(canManageInternalDocs({ role: 'member', departmentName: ' it ' }), false);
   assert.equal(canManageInternalDocs(company), false);
+  assert.equal(canManageInternalDocs(admin), true);
   assert.deepEqual(allowedAccessLevels(company), ['company']);
   assert.deepEqual(allowedAccessLevels(itMember), ['company', 'it-only']);
   assert.equal(isInternalDocVisible('it-only', company), false);
@@ -117,6 +120,30 @@ test('prompt and research citations include only the hits passed in, with docume
   assert.equal(citations.length, 1);
   assert.match(citations[0].url, /\/dashboard\/internal-docs\//);
 
+  const payload = internalDocKnowledgePayload({
+    documentId: hits[0].documentId,
+    title: hits[0].title,
+    accessLevel: 'it-only',
+    text: hits[0].excerpt,
+  });
+  assert.equal(payload?.taskType, 'internal-docs');
+  assert.equal(payload?.taskId, hits[0].documentId);
+  assert.equal(payload?.audience, 'it-only');
+  assert.equal(payload?.updateStylePreferences, false);
+  assert.match(payload?.brief || '', /Visitor wifi/);
+  assert.equal(internalDocKnowledgePayload({
+    documentId: 'short',
+    title: 'Visitor wifi',
+    accessLevel: 'company',
+    text: hits[0].excerpt,
+  }), null);
+  assert.equal(internalDocKnowledgePayload({
+    documentId: hits[0].documentId,
+    title: 'Visitor wifi',
+    accessLevel: 'secret',
+    text: hits[0].excerpt,
+  }), null);
+
   const merged = mergeInternalDocSources({
     type: 'research',
     sourceCount: 0,
@@ -176,12 +203,22 @@ test('sidebar, routes, migration, and AI Research keep Internal Docs ACL separat
   assert.ok(chat.indexOf('const knowledgeContext') < chat.indexOf('buildAiResearchChatMessages({'));
 
   assert.match(ask, /retrieveInternalDocHits\(actor\.principal, question\)/);
+  assert.match(ask, /withCitationMedia/);
+  assert.match(read('src/lib/internal-docs.ts'), /persistInternalDocKnowledge/);
+  assert.match(read('src/app/api/internal-docs/[id]/reindex/route.ts'), /persistInternalDocKnowledge/);
+  assert.match(read('src/app/api/internal-docs/[id]/route.ts'), /deleteInternalDocKnowledge/);
+  assert.match(read('src/app/api/internal-docs/[id]/route.ts'), /syncInternalDocKnowledgeMeta/);
+  const knowledge = read('src/lib/internal-docs-knowledge.ts');
+  assert.match(knowledge, /DELETE FROM knowledge_edges/);
+  assert.match(knowledge, /upsertTask: true/);
+  assert.match(knowledge, /updateStylePreferences: false/);
   assert.match(listRoute, /listInternalDocuments\(actor\.principal/);
   assert.match(listRoute, /requireInternalDocsManager/);
 
   const access = read('src/lib/internal-docs-access.ts');
   assert.match(access, /requireFeature\(request, INTERNAL_DOCS_FEATURE\)/);
-  assert.match(access, /FAQ & Guides/);
+  assert.match(access, /only admins can manage FAQ & Guides/);
+  assert.doesNotMatch(access, /only IT and admins/);
   assert.match(read('src/lib/auth.ts'), /ACCOUNT_FEATURE_LABELS\[feature\]/);
   assert.match(read('src/components/AiResearchSourcesPanel.tsx'), /internal: 'FAQ & Guides'/);
   const workspace = read('src/app/dashboard/internal-docs/InternalDocsWorkspace.tsx');

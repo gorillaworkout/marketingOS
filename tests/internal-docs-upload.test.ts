@@ -59,6 +59,7 @@ test('FAQ upload UI drops many files and posts them one at a time with one acces
   const workspace = read('src/app/dashboard/internal-docs/InternalDocsWorkspace.tsx');
   const route = read('src/app/api/internal-docs/route.ts');
   assert.match(workspace, /data-testid="internal-docs-dropzone"/);
+  assert.ok(workspace.indexOf('<FaqAskPanel') < workspace.indexOf('data-testid="internal-docs-dropzone"'));
   assert.match(workspace, /onDrop=\{onDrop\}/);
   assert.match(workspace, /type="file"/);
   assert.match(workspace, /multiple/);

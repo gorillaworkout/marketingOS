@@ -1,7 +1,9 @@
 import { readFile } from 'node:fs/promises';
 import { NextRequest, NextResponse } from 'next/server';
+import { queryOne } from '@/lib/database';
 import { requireInternalDocsManager } from '@/lib/internal-docs-access';
 import { findVisibleDocument, reindexStoredDocument } from '@/lib/internal-docs';
+import { persistInternalDocKnowledge } from '@/lib/internal-docs-knowledge';
 import { resolveStoredInternalDoc } from '@/lib/internal-docs-storage';
 
 type RouteContext = { params: Promise<{ id: string }> };
@@ -21,6 +23,21 @@ export async function POST(request: NextRequest, context: RouteContext) {
   try {
     const bytes = await readFile(stored);
     const indexed = await reindexStoredDocument(id, bytes, row.file_ext);
+    if (indexed.status === 'indexed') {
+      const fresh = await queryOne<{ title: string; access_level: string; extracted_text: string }>(
+        `SELECT title, access_level, extracted_text FROM internal_documents WHERE id = ?`,
+        [id],
+      );
+      if (fresh?.extracted_text) {
+        await persistInternalDocKnowledge({
+          userId: actor.user.id,
+          documentId: id,
+          title: fresh.title,
+          accessLevel: fresh.access_level,
+          text: fresh.extracted_text,
+        });
+      }
+    }
     return NextResponse.json({ id, status: indexed.status, errorMessage: indexed.errorMessage });
   } catch (error) {
     console.error('Internal doc reindex failed:', error);

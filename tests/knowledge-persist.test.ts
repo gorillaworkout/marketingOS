@@ -118,6 +118,8 @@ test('style preferences follow marketing choices and skip research citations', (
   assert.equal(shouldUpdateStylePreferences('article-market-news', 'complete'), false);
   assert.equal(shouldUpdateStylePreferences('market-research', 'complete'), false);
   assert.equal(shouldUpdateStylePreferences('ai-research', 'pin'), false);
+  assert.equal(shouldUpdateStylePreferences('internal-docs', 'select'), false);
+  assert.equal(shouldUpdateStylePreferences('internal-docs', 'complete'), false);
   assert.equal(qualityScoreForAction('select') < qualityScoreForAction('approve'), true);
   assert.equal(qualityScoreForAction('publish'), 1);
   assert.equal(qualityScoreForAction('pin'), 1);
@@ -269,5 +271,6 @@ test('approve, research, and generator routes persist and read knowledge', () =>
   assert.match(migration, /ADD COLUMN IF NOT EXISTS content_hash/);
   assert.match(migration, /BEGIN;[\s\S]*COMMIT;/);
   assert.ok(KNOWLEDGE_TASK_TYPES.includes('ai-research'));
+  assert.ok(KNOWLEDGE_TASK_TYPES.includes('internal-docs'));
   assert.ok(KNOWLEDGE_TASK_TYPES.includes('market-research'));
 });

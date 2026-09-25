@@ -21,8 +21,10 @@ export type DocumentBlock =
 const ALLOWED_TAGS = new Set([
   'p', 'br', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
   'ul', 'ol', 'li', 'strong', 'em', 'b', 'i', 'a', 'blockquote',
-  'table', 'thead', 'tbody', 'tr', 'th', 'td', 'code', 'pre', 'sup', 'sub',
+  'table', 'thead', 'tbody', 'tr', 'th', 'td', 'code', 'pre', 'sup', 'sub', 'img',
 ]);
+
+const INTERNAL_DOC_IMAGE_PATH = /^\/api\/internal-docs\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/images\/\d{1,2}$/i;
 
 const TAG_RE = /<\/([a-zA-Z][a-zA-Z0-9]*)\s*>|<([a-zA-Z][a-zA-Z0-9]*)((?:\s+[a-zA-Z_:][-a-zA-Z0-9_:.]*(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'=<>`]+))?)*)\s*(\/?)>/g;
 
@@ -159,6 +161,13 @@ export function sanitizeDocumentHtml(html: string): string {
       if (!href) continue;
       out += `<a href="${escapeAttr(href)}" target="_blank" rel="noopener noreferrer">`;
       if (!selfClosing) stack.push('a');
+      continue;
+    }
+    if (tag === 'img') {
+      const src = readAttr(attrs, 'src') || '';
+      if (!isInternalDocImagePath(src)) continue;
+      const alt = (readAttr(attrs, 'alt') || '').slice(0, 200);
+      out += `<img src="${escapeAttr(src)}" alt="${escapeAttr(alt)}">`;
       continue;
     }
     out += `<${tag}>`;
@@ -310,4 +319,16 @@ export function parsePlainDocument(source: string): DocumentBlock[] {
 export function internalDocFilePath(id: string, inline: boolean): string {
   const base = `/api/internal-docs/${encodeURIComponent(id)}/file`;
   return inline ? `${base}?inline=1` : base;
+}
+
+export function isInternalDocImagePath(value: string): boolean {
+  return INTERNAL_DOC_IMAGE_PATH.test(value);
+}
+
+export function internalDocImagePath(documentId: string, index: number): string {
+  return `/api/internal-docs/${documentId}/images/${index}`;
+}
+
+export function guideHighlightNeedle(excerpt: string): string {
+  return excerpt.replace(/\s+/g, ' ').trim().slice(0, 160);
 }

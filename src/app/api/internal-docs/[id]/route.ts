@@ -5,6 +5,7 @@ import { requireInternalDocsManager, requireInternalDocsUser } from '@/lib/inter
 import { canManageInternalDocs, isInternalDocAccessLevel } from '@/lib/internal-docs-acl';
 import { findVisibleDocument, publicDocument, type InternalDocListRow } from '@/lib/internal-docs';
 import { docxPreviewHtml } from '@/lib/internal-docs-extract';
+import { deleteInternalDocKnowledge, persistInternalDocKnowledge, syncInternalDocKnowledgeMeta } from '@/lib/internal-docs-knowledge';
 import { resolveStoredInternalDoc, sanitizeDocumentTitle } from '@/lib/internal-docs-storage';
 
 export const runtime = 'nodejs';
@@ -24,7 +25,7 @@ async function presentDocument(row: DocumentRow) {
     const stored = resolveStoredInternalDoc(row.storage_key);
     if (stored) {
       try {
-        const html = await docxPreviewHtml(await readFile(stored));
+        const html = await docxPreviewHtml(await readFile(stored), row.id);
         previewHtml = html.trim() && html.length <= PREVIEW_HTML_LIMIT ? html : null;
       } catch (error) {
         console.error('Internal doc preview failed:', error);
@@ -82,6 +83,26 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
   params.push(id);
   await execute(`UPDATE internal_documents SET ${updates.join(', ')} WHERE id = ?`, params);
   const row = await findVisibleDocument<DocumentRow>(actor.principal, id, true);
+  if (row && (body.accessLevel !== undefined || body.title !== undefined)) {
+    try {
+      await syncInternalDocKnowledgeMeta({
+        documentId: id,
+        title: row.title,
+        accessLevel: row.access_level,
+      });
+      if (row.status === 'indexed' && row.extracted_text) {
+        await persistInternalDocKnowledge({
+          userId: actor.user.id,
+          documentId: id,
+          title: row.title,
+          accessLevel: row.access_level,
+          text: row.extracted_text,
+        });
+      }
+    } catch (error) {
+      console.warn('FAQ guide knowledge update failed:', error);
+    }
+  }
   return NextResponse.json({ document: row ? await presentDocument(row) : null });
 }
 
@@ -91,6 +112,11 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
   const { id } = await context.params;
   const existing = await findVisibleDocument<DocumentRow>(actor.principal, id, true);
   if (!existing) return NextResponse.json({ error: 'Document not found' }, { status: 404 });
+  try {
+    await deleteInternalDocKnowledge(id);
+  } catch (error) {
+    console.warn('FAQ guide knowledge delete failed:', error);
+  }
   await execute('DELETE FROM internal_documents WHERE id = ?', [id]);
   const stored = resolveStoredInternalDoc(existing.storage_key);
   if (stored) await unlink(stored).catch(() => undefined);

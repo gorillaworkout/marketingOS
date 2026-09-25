@@ -5,8 +5,9 @@
  * members belong to a department (Marketing, Settlement, Finance, …).
  * Migration 020 seeds a department named `IT`.
  *
- * - Admins can read and manage Company and IT-only documents.
- * - Members of the IT department can read and manage Company and IT-only documents.
+ * - Admins can read Company and IT-only documents, and they are the only people
+ *   who can upload, reindex, delete, or change access.
+ * - Members of the IT department can read Company and IT-only documents.
  * - Every other signed-in employee can read Company documents only.
  *
  * Assign IT access by putting the person in the IT department. Do not invent
@@ -31,9 +32,9 @@ export function canReadItOnlyInternalDocs(principal: InternalDocsPrincipal): boo
   return principal.role === 'admin' || isItDepartment(principal.departmentName);
 }
 
-/** Upload, reindex, access changes, and delete. Same gate as IT-only read. */
+/** Upload, reindex, access changes, and delete. Admins only. */
 export function canManageInternalDocs(principal: InternalDocsPrincipal): boolean {
-  return canReadItOnlyInternalDocs(principal);
+  return principal.role === 'admin';
 }
 
 export function allowedAccessLevels(principal: InternalDocsPrincipal): InternalDocAccessLevel[] {

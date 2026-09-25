@@ -10,6 +10,7 @@ import {
   retrieveInternalDocHits,
   createIndexedDocument,
 } from '../src/lib/internal-docs';
+import { deleteInternalDocKnowledge } from '../src/lib/internal-docs-knowledge';
 import { internalDocsDirectory, resolveStoredInternalDoc, storageKeyFor } from '../src/lib/internal-docs-storage';
 
 const enabled = Boolean(process.env.DATABASE_URL);
@@ -74,6 +75,8 @@ test('database ACL hides IT-only documents from company employees', { skip: !ena
     const prompt = formatInternalDocsPrompt(companyHits, 'https://marketing.example');
     assert.doesNotMatch(prompt, /orchid|vault|IT-only/i);
   } finally {
+    await deleteInternalDocKnowledge(companyId).catch(() => undefined);
+    await deleteInternalDocKnowledge(secretId).catch(() => undefined);
     await execute('DELETE FROM internal_documents WHERE id IN (?, ?)', [companyId, secretId]);
     for (const key of [companyKey, secretKey]) {
       const stored = resolveStoredInternalDoc(key);

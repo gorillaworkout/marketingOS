@@ -25,7 +25,7 @@ export async function requireInternalDocsManager(request: NextRequest): Promise<
   const actor = await requireInternalDocsUser(request);
   if (actor instanceof NextResponse) return actor;
   if (!canManageInternalDocs(actor.principal)) {
-    return NextResponse.json({ error: 'Forbidden: only IT and admins can manage FAQ & Guides' }, { status: 403 });
+    return NextResponse.json({ error: 'Forbidden: only admins can manage FAQ & Guides' }, { status: 403 });
   }
   return actor;
 }

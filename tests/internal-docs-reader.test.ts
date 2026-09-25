@@ -7,8 +7,12 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { GuideReader } from '../src/app/dashboard/internal-docs/GuideReader';
 import { docxPreviewHtml, extractInternalDocText } from '../src/lib/internal-docs-extract';
+import { citationDocumentHref } from '../src/app/dashboard/internal-docs/FaqAskPanel';
 import {
+  guideHighlightNeedle,
   internalDocFilePath,
+  internalDocImagePath,
+  isInternalDocImagePath,
   parseMarkdownDocument,
   parsePlainDocument,
   safeDocumentUrl,
@@ -129,6 +133,14 @@ test('word html keeps safe links and drops scripts and event handlers', () => {
   assert.match(html, /bad/);
   assert.match(html, /&lt;svg\/onload=alert\(1\)&gt;/);
   assert.doesNotMatch(html, /<script|onclick=|onerror=|<img|<svg|href="javascript:/i);
+
+  const image = sanitizeDocumentHtml(`<p><img src="${internalDocImagePath(documentId, 0)}" alt="LED diagram" onerror="alert(1)"></p>`);
+  assert.equal(isInternalDocImagePath(internalDocImagePath(documentId, 0)), true);
+  assert.match(image, new RegExp(`src="${internalDocImagePath(documentId, 0)}"`));
+  assert.match(image, /alt="LED diagram"/);
+  assert.doesNotMatch(image, /onerror/);
+  assert.doesNotMatch(sanitizeDocumentHtml('<img src="https://evil.example/a.png" alt="x">'), /<img/);
+  assert.doesNotMatch(sanitizeDocumentHtml('<img src="data:image/png;base64,aaaa" alt="x">'), /<img/);
 });
 
 test('docx preview keeps the manual hyperlink and indexed text keeps the url', async () => {
@@ -197,12 +209,33 @@ test('reader shows a document page, a clickable filename, and keeps manage actio
   assert.doesNotMatch(markdown, /<script|alert\(1\)/);
 
   const workspace = read('src/app/dashboard/internal-docs/InternalDocsWorkspace.tsx');
+  const askPanel = read('src/app/dashboard/internal-docs/FaqAskPanel.tsx');
   const fileRoute = read('src/app/api/internal-docs/[id]/file/route.ts');
   const detailRoute = read('src/app/api/internal-docs/[id]/route.ts');
+  const imageRoute = read('src/app/api/internal-docs/[id]/images/[index]/route.ts');
   assert.match(workspace, /<GuideReader/);
-  assert.match(workspace, /aria-label="Ask FAQ & Guides"/);
+  assert.match(workspace, /<FaqAskPanel/);
+  assert.match(askPanel, /aria-label="Ask FAQ & Guides"/);
+  assert.match(askPanel, /Ask anything about company guides/);
+  assert.match(askPanel, /data-testid="faq-answer-pdf"/);
+  assert.match(askPanel, /data-testid="faq-answer-image"/);
+  assert.match(askPanel, /Open PDF/);
+  assert.ok(workspace.indexOf('<FaqAskPanel') < workspace.indexOf('data-testid="internal-docs-dropzone"'));
+  assert.ok(workspace.indexOf('data-testid="internal-docs-dropzone"') < workspace.indexOf('<GuideReader'));
   assert.match(workspace, /data-testid="internal-docs-dropzone"/);
   assert.match(workspace, /multiple/);
+  assert.match(workspace, /highlight=\{highlight\}/);
+  const href = citationDocumentHref({
+    documentId,
+    excerpt: 'The visitor wifi password is printed at reception.',
+  });
+  assert.match(href, /highlight=/);
+  assert.match(decodeURIComponent(href), /visitor wifi password/);
+  assert.equal(guideHighlightNeedle('  wifi   password  '), 'wifi password');
+  assert.match(imageRoute, /collectDocxImages/);
+  assert.match(imageRoute, /requireInternalDocsUser/);
+  assert.match(imageRoute, /nosniff/);
+  assert.match(detailRoute, /docxPreviewHtml\(await readFile\(stored\), row\.id\)/);
   assert.match(fileRoute, /contentDispositionFor/);
   assert.match(fileRoute, /inlineDocumentRequested/);
   assert.doesNotMatch(fileRoute, /public\//);

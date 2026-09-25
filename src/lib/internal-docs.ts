@@ -1,3 +1,4 @@
+import { readFile } from 'node:fs/promises';
 import { v4 as uuidv4 } from 'uuid';
 import { execute, executeTransaction, queryAll, queryOne } from './database';
 import { cosineSimilarity, getEmbedding } from './embeddings';
@@ -9,10 +10,14 @@ import {
   type InternalDocsPrincipal,
 } from './internal-docs-acl';
 import {
+  collectDocxImages,
   extractedTextIsUsable,
   extractInternalDocText,
   INTERNAL_DOC_NO_TEXT_ERROR,
 } from './internal-docs-extract';
+import { persistInternalDocKnowledge } from './internal-docs-knowledge';
+import { internalDocImagePath } from './internal-docs-reader';
+import { resolveStoredInternalDoc } from './internal-docs-storage';
 import type { InspectorResearchSource, ResearchSsePayload } from './ai-research-inspector';
 
 export const INTERNAL_DOCS_CHUNK_SIZE = 1200;
@@ -71,6 +76,8 @@ export interface InternalDocCitation {
   title: string;
   url: string;
   excerpt: string;
+  extension?: string;
+  images?: string[];
 }
 
 export function ilikeContains(value: string): string {
@@ -246,6 +253,43 @@ export function citationsFromHits(hits: InternalDocHit[], origin: string): Inter
   return citations;
 }
 
+const CITATION_IMAGE_LIMIT = 4;
+
+/** Attach the file type and, for Word guides, authenticated image URLs. Failures leave the citation text-only. */
+export async function withCitationMedia(
+  citations: InternalDocCitation[],
+  principal: InternalDocsPrincipal,
+): Promise<InternalDocCitation[]> {
+  const enriched: InternalDocCitation[] = [];
+  for (const citation of citations) {
+    try {
+      const row = await findVisibleDocument<{
+        access_level: string;
+        file_ext: string;
+        storage_key: string;
+        status: string;
+      }>(principal, citation.documentId, false);
+      if (!row) {
+        enriched.push(citation);
+        continue;
+      }
+      let images: string[] = [];
+      if (row.file_ext === '.docx') {
+        const stored = resolveStoredInternalDoc(row.storage_key);
+        if (stored) {
+          const found = await collectDocxImages(await readFile(stored));
+          images = found.slice(0, CITATION_IMAGE_LIMIT).map((_, index) => internalDocImagePath(citation.documentId, index));
+        }
+      }
+      enriched.push({ ...citation, extension: row.file_ext, images });
+    } catch (error) {
+      console.warn('FAQ citation media failed:', error);
+      enriched.push(citation);
+    }
+  }
+  return enriched;
+}
+
 export function formatInternalDocsPrompt(hits: InternalDocHit[], origin: string): string {
   const visible = hits.filter(hit => hit.accessLevel === 'company' || hit.accessLevel === 'it-only');
   if (!visible.length) return '';
@@ -419,6 +463,15 @@ export async function createIndexedDocument(input: {
     return { status: 'failed', errorMessage: message };
   }
   const indexed = await indexDocumentText(input.id, extracted);
+  if (indexed.status === 'indexed') {
+    await persistInternalDocKnowledge({
+      userId: input.uploadedBy,
+      documentId: input.id,
+      title: input.title,
+      accessLevel: input.accessLevel,
+      text: extracted,
+    });
+  }
   return { status: indexed.status, errorMessage: indexed.errorMessage };
 }
 
