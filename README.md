@@ -45,6 +45,18 @@ Read before generation: Social Post, Video Script, Event Plan, Market Research, 
 
 Manual check: approve a Social Post and confirm a `knowledge_entries` row, or a higher `quality_score` when that option was already saved. In AI Research, ask a follow-up that matches the saved post and confirm the answer can use that internal knowledge while still citing public sources.
 
+### Internal Docs
+
+Company documentation lives in `internal_documents` and `internal_document_chunks`, not in `knowledge_entries`. Apply `db/migrations/020_internal_documents.sql` with `npm run db:migrate`. Uploaded files are stored under `data/internal-docs/` and are not served from `public/`.
+
+Access uses the existing account model:
+
+- **Company** documents are visible to every signed-in employee.
+- **IT-only** documents are visible to admins and to members of the department named **IT** (seeded by the migration). Other employees never receive those titles, excerpts, files, Ask answers, or AI Research citations.
+- Admins and IT-department members upload files, set the access level, and reindex. Put a person in the IT department from Accounts to grant that access. There is no separate IT role.
+
+AI Research still grounds on the web and the knowledge graph, and also retrieves Internal Docs with the same ACL as the person asking.
+
 ### Management Tools
 - **Brand Guidelines** — CRUD aturan brand voice
 - **Content Calendar** — Kalender bulanan untuk scheduling

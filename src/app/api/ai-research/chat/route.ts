@@ -59,6 +59,12 @@ import {
 } from '@/lib/ai-research-inspector';
 import { GORILLAWORKOUT_API_BASE, GORILLAWORKOUT_API_KEY } from '@/lib/gateway-config';
 import { AVAILABLE_MODELS, fetchKnowledgeContext } from '@/lib/openai';
+import {
+  formatInternalDocsPrompt,
+  mergeInternalDocSources,
+  retrieveInternalDocHits,
+  type InternalDocHit,
+} from '@/lib/internal-docs';
 import { persistCompletedResearchAnswer } from '@/lib/knowledge-persist';
 import {
   isAbortError,
@@ -429,6 +435,15 @@ export async function POST(request: NextRequest) {
         const query = latestUser?.content || '';
         const knowledgeContext = await fetchKnowledgeContext(auth.id, query, undefined, 5, 'internal');
         throwIfResearchAborted(signal);
+        const internalDocsPrincipal = { role: auth.role, departmentName: auth.departmentName };
+        let internalDocHits: InternalDocHit[] = [];
+        try {
+          internalDocHits = await retrieveInternalDocHits(internalDocsPrincipal, query);
+        } catch (error) {
+          console.error('[ai-research] internal docs retrieval failed:', error);
+        }
+        const internalDocsContext = formatInternalDocsPrompt(internalDocHits, request.nextUrl.origin);
+        throwIfResearchAborted(signal);
         const urlOnly = isUrlOnlyQuery(query);
 
         if (mode === 'deep' && !compare) {
@@ -517,11 +532,12 @@ export async function POST(request: NextRequest) {
             research: displayResearch,
             failed: gatherFailed && urlContext.sources.length === 0,
           });
+          const citedResearchEvent = mergeInternalDocSources(researchEvent, internalDocHits, request.nextUrl.origin);
           emit({
             type: 'research',
-            sourceCount: researchEvent.sourceCount,
-            grounding: researchEvent.grounding,
-            sources: researchEvent.sources,
+            sourceCount: citedResearchEvent.sourceCount,
+            grounding: citedResearchEvent.grounding,
+            sources: citedResearchEvent.sources,
           });
 
           const pinnedResearch = pinnedSourceUrls.length
@@ -537,6 +553,7 @@ export async function POST(request: NextRequest) {
             systemPrompt: [
               AI_RESEARCH_SYSTEM_PROMPT,
               knowledgeContext,
+              internalDocsContext,
               AI_RESEARCH_DEEP_SYSTEM_ADDENDUM,
               formatDeepResearchPlanNote(plan, gatherResult),
               projectMemoryBlock,
@@ -577,7 +594,7 @@ export async function POST(request: NextRequest) {
           const allMessages = [...pendingMessages, buildStoredAssistantMessage({
             content: fullContent,
             mode: 'deep',
-            sources: researchEvent.sources,
+            sources: citedResearchEvent.sources,
           })];
           await persistConversation(convId, auth.id, allMessages, model, true, activeProjectId);
           throwIfResearchAborted(signal);
@@ -644,11 +661,12 @@ export async function POST(request: NextRequest) {
           research: displayResearch,
           failed: gatherOutcome.failed && urlContext.sources.length === 0,
         });
+        const citedResearchEvent = mergeInternalDocSources(researchEvent, internalDocHits, request.nextUrl.origin);
         emit({
           type: 'research',
-          sourceCount: researchEvent.sourceCount,
-          grounding: researchEvent.grounding,
-          sources: researchEvent.sources,
+          sourceCount: citedResearchEvent.sourceCount,
+          grounding: citedResearchEvent.grounding,
+          sources: citedResearchEvent.sources,
         });
 
         const pinnedResearch = gatherOutcome.research && pinnedSourceUrls.length
@@ -660,6 +678,7 @@ export async function POST(request: NextRequest) {
           systemPrompt: [
             AI_RESEARCH_SYSTEM_PROMPT,
             knowledgeContext,
+            internalDocsContext,
             projectMemoryBlock,
             compare ? buildCompareSystemAddendum(compare) : '',
           ].filter(Boolean).join('\n\n'),
@@ -686,7 +705,7 @@ export async function POST(request: NextRequest) {
         const allMessages = [...pendingMessages, buildStoredAssistantMessage({
           content: streamed.content,
           mode: 'fast',
-          sources: researchEvent.sources,
+          sources: citedResearchEvent.sources,
         })];
         await persistConversation(convId, auth.id, allMessages, model, true, activeProjectId);
         throwIfResearchAborted(signal);

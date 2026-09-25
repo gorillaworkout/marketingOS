@@ -22,7 +22,7 @@ interface User {
 type IconName =
   | 'home' | 'social' | 'video' | 'event' | 'article' | 'research'
   | 'brand' | 'image' | 'calendar' | 'template' | 'knowledge' | 'history'
-  | 'graph' | 'tokens' | 'analytics' | 'accounts' | 'models';
+  | 'graph' | 'tokens' | 'analytics' | 'accounts' | 'models' | 'docs';
 
 const iconPaths: Record<IconName, string> = {
   home: 'M3 10.5 12 3l9 7.5M5 9.5V21h14V9.5M9 21v-7h6v7',
@@ -42,6 +42,7 @@ const iconPaths: Record<IconName, string> = {
   analytics: 'M4 20V10m6 10V4m6 16v-7m4 7H2',
   accounts: 'M16 20v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2m7-10a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm8 2a4 4 0 0 1 4 4v2m-4-10a4 4 0 0 0 0-8',
   models: 'M12 3 4 7v10l8 4 8-4V7l-8-4Zm-8 4 8 4 8-4m-8 4v10',
+  docs: 'M6 3h8l4 4v14H6V3Zm8 0v4h4M9 12h6m-6 4h6',
 };
 
 function NavIcon({ name }: { name: IconName }) {
@@ -62,6 +63,7 @@ const resourceItems = [
   { href: '/dashboard/images', label: 'Image Gallery', icon: 'image' },
   { href: '/dashboard/calendar', label: 'Calendar', icon: 'calendar', adminOnly: true },
   { href: '/dashboard/templates', label: 'Templates', icon: 'template', adminOnly: true },
+  { href: '/dashboard/internal-docs', label: 'Internal Docs', icon: 'docs' },
   { href: '/dashboard/knowledge', label: 'Knowledge', icon: 'knowledge', adminOnly: true },
   { href: '/dashboard/history', label: 'History', icon: 'history', adminOnly: true },
 ] satisfies Array<{ href: string; label: string; icon: IconName; adminOnly?: boolean }>;

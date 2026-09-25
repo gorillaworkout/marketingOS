@@ -17,7 +17,7 @@ export async function migrate(seed = true) {
   }
   const count = await queryOne<{ count: string }>('SELECT COUNT(*)::text AS count FROM users');
   if (seed && Number(count?.count ?? 0) === 0) {
-    const general = await queryOne<{ id: string }>('SELECT id FROM departments WHERE name = ?', ['General']);
+    const general = await queryOne<{ id: string }>('SELECT id FROM departments WHERE name = ?', ['Marketing']);
     for (const user of [
       ['admin', 'Admin Marketing', 'admin'], ['bayu', 'Bayu Darmawan', 'admin'],
       ['rina', 'Rina Marketing', 'member'], ['doni', 'Doni Creative', 'member'], ['sari', 'Sari Content', 'member'],
