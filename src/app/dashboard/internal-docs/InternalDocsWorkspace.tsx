@@ -11,9 +11,10 @@ import {
   Panel,
   Select,
   StatusBadge,
-  TextArea,
   TextInput,
 } from '@/components/ui/dashboard';
+import { FaqAskPanel, type FaqAskMessage } from './FaqAskPanel';
+import { GuideReader } from './GuideReader';
 import {
   INTERNAL_DOC_FILE_ACCEPT,
   internalDocUploadIssue,
@@ -38,19 +39,7 @@ interface DocSummary {
 
 interface DocDetail extends DocSummary {
   extractedText: string;
-}
-
-interface Citation {
-  documentId: string;
-  title: string;
-  url: string;
-  excerpt: string;
-}
-
-interface AskMessage {
-  role: 'user' | 'assistant';
-  content: string;
-  citations?: Citation[];
+  previewHtml?: string | null;
 }
 
 function accessLabel(level: AccessLevel): string {
@@ -109,7 +98,7 @@ function uploadStatusTone(status: UploadStatus): 'success' | 'warning' | 'danger
   return 'neutral';
 }
 
-export function InternalDocsWorkspace({ documentId }: { documentId?: string }) {
+export function InternalDocsWorkspace({ documentId, highlight = '' }: { documentId?: string; highlight?: string }) {
   const router = useRouter();
   const [documents, setDocuments] = useState<DocSummary[]>([]);
   const [canManage, setCanManage] = useState(false);
@@ -132,7 +121,7 @@ export function InternalDocsWorkspace({ documentId }: { documentId?: string }) {
   const [askInput, setAskInput] = useState('');
   const [asking, setAsking] = useState(false);
   const [askError, setAskError] = useState('');
-  const [messages, setMessages] = useState<AskMessage[]>([]);
+  const [messages, setMessages] = useState<FaqAskMessage[]>([]);
 
   const loadList = useCallback(async (query: string) => {
     setLoadingList(true);
@@ -398,20 +387,19 @@ export function InternalDocsWorkspace({ documentId }: { documentId?: string }) {
     await loadList(search);
   };
 
-  const ask = async (event: FormEvent) => {
-    event.preventDefault();
-    const question = askInput.trim();
-    if (!question || asking) return;
+  const submitQuestion = async (question: string) => {
+    const trimmed = question.trim();
+    if (!trimmed || asking) return;
     const history = messages.map(message => ({ role: message.role, content: message.content }));
-    setMessages(current => [...current, { role: 'user', content: question }]);
-    setAskInput('');
+    setMessages(current => [...current, { role: 'user', content: trimmed }]);
+    if (trimmed === askInput.trim()) setAskInput('');
     setAsking(true);
     setAskError('');
     try {
       const response = await fetch('/api/internal-docs/ask', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ question, history }),
+        body: JSON.stringify({ question: trimmed, history }),
       });
       const data = await response.json();
       if (!response.ok) {
@@ -437,7 +425,16 @@ export function InternalDocsWorkspace({ documentId }: { documentId?: string }) {
       <PageHeader
         eyebrow="Guidance"
         title="FAQ & Guides"
-        description="Browse company guidance you are allowed to read. Ask questions grounded in those guides."
+        description="Ask a question first. Open a citation to read the guide it came from."
+      />
+
+      <FaqAskPanel
+        messages={messages}
+        input={askInput}
+        asking={asking}
+        error={askError}
+        onInputChange={setAskInput}
+        onSubmit={question => { void submitQuestion(question); }}
       />
 
       {canManage && (
@@ -546,7 +543,7 @@ export function InternalDocsWorkspace({ documentId }: { documentId?: string }) {
       )}
 
       <div className="grid gap-4 lg:grid-cols-[340px_minmax(0,1fr)]">
-        <Panel padding="none" className="min-h-[28rem]">
+        <Panel padding="none">
           <div className="border-b border-[var(--mos-border-subtle)] p-4">
             <label className="block text-xs text-[var(--mos-text-muted)]" htmlFor="internal-docs-search">Search documents</label>
             <TextInput
@@ -563,7 +560,7 @@ export function InternalDocsWorkspace({ documentId }: { documentId?: string }) {
             {!loadingList && !listError && documents.length === 0 && (
               <EmptyState
                 title={search.trim() ? 'No matching guides' : 'No guides yet'}
-                description={search.trim() ? 'Try another title or phrase.' : 'FAQ and guides you can read will appear here.'}
+                description={search.trim() ? 'Try another title or phrase.' : 'Guides you can read will appear here.'}
               />
             )}
             <ul>
@@ -594,84 +591,25 @@ export function InternalDocsWorkspace({ documentId }: { documentId?: string }) {
         </Panel>
 
         <div className="flex min-w-0 flex-col gap-4">
-          <Panel className="min-h-64">
+          <Panel padding="none">
             {!documentId && (
-              <EmptyState title="Select a guide" description="Open an item from the list to read it." />
-            )}
-            {documentId && !openDocument && !openError && <p className="text-xs text-[var(--mos-text-muted)]">Opening document</p>}
-            {openError && <p className="text-sm text-red-300">{openError}</p>}
-            {openDocument && (
-              <article>
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div>
-                    <h2 className="text-xl font-[560] tracking-[-0.03em] text-[var(--mos-text)]">{openDocument.title}</h2>
-                    <p className="mt-1 text-xs text-[var(--mos-text-faint)]">{openDocument.originalName}</p>
-                  </div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <StatusBadge tone={openDocument.accessLevel === 'it-only' ? 'info' : 'neutral'}>{accessLabel(openDocument.accessLevel)}</StatusBadge>
-                    <StatusBadge tone={statusTone(openDocument.status)}>{openDocument.status === 'indexed' ? 'Indexed' : openDocument.status === 'failed' ? 'Failed' : 'Indexing'}</StatusBadge>
-                    <a href={`/api/internal-docs/${openDocument.id}/file`} className="inline-flex h-8 items-center rounded-[var(--mos-radius-control)] border border-[var(--mos-border)] bg-[var(--mos-raised)] px-3 text-xs text-[var(--mos-text-secondary)]">Download</a>
-                  </div>
-                </div>
-                {canManage && (
-                  <div className="mt-4 flex flex-wrap items-center gap-2">
-                    <label className="text-xs text-[var(--mos-text-muted)]">
-                      Access
-                      <Select
-                        aria-label="Change access level"
-                        value={openDocument.accessLevel}
-                        onChange={event => { void changeAccess(event.target.value as AccessLevel); }}
-                        className="ml-2"
-                      >
-                        <option value="company">Company</option>
-                        <option value="it-only">IT-only</option>
-                      </Select>
-                    </label>
-                    <Button size="sm" onClick={() => { void reindex(); }}>Reindex</Button>
-                    <Button size="sm" variant="danger" onClick={() => { void removeDocument(); }}>Delete</Button>
-                  </div>
-                )}
-                {openDocument.errorMessage && <p className="mt-4 text-sm text-red-300">{openDocument.errorMessage}</p>}
-                <div className="mt-5 max-h-[32rem] overflow-y-auto whitespace-pre-wrap border-t border-[var(--mos-border-subtle)] pt-4 text-sm leading-6 text-[var(--mos-text-secondary)]">
-                  {openDocument.extractedText || 'This document has no indexed text yet.'}
-                </div>
-              </article>
-            )}
-          </Panel>
-
-          <Panel>
-            <h2 className="text-sm font-[560] text-[var(--mos-text)]">Ask</h2>
-            <p className="mt-1 text-xs leading-5 text-[var(--mos-text-muted)]">Answers use only the documents you are allowed to read, with links back to the source.</p>
-            <div className="mt-4 space-y-3">
-              {messages.map((message, index) => (
-                <div key={`${message.role}-${index}`} className={message.role === 'user' ? 'text-sm text-[var(--mos-text)]' : 'rounded-[var(--mos-radius-control)] border border-[var(--mos-border)] bg-[var(--mos-raised)] p-3 text-sm leading-6 text-[var(--mos-text-secondary)]'}>
-                  <p className="whitespace-pre-wrap">{message.content}</p>
-                  {message.citations && message.citations.length > 0 && (
-                    <ul className="mt-2 space-y-1 text-xs">
-                      {message.citations.map(citation => (
-                        <li key={citation.documentId}>
-                          <Link href={`/dashboard/internal-docs/${citation.documentId}`} className="text-[var(--mos-accent-soft)] hover:underline">{citation.title}</Link>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
-              ))}
-              {asking && <p className="text-xs text-[var(--mos-text-muted)]">Looking through documents</p>}
-              {askError && <p className="text-xs text-red-300">{askError}</p>}
-            </div>
-            <form onSubmit={ask} className="mt-4 flex flex-col gap-2">
-              <TextArea
-                value={askInput}
-                onChange={event => setAskInput(event.target.value)}
-                placeholder="Ask a question about the documents you can read"
-                aria-label="Ask FAQ & Guides"
-                className="min-h-20"
-              />
-              <div className="flex justify-end">
-                <Button type="submit" variant="primary" disabled={asking || !askInput.trim()}>Ask</Button>
+              <div className="p-5 md:p-6">
+                <EmptyState title="Select a guide" description="Open an item from the list, or ask a question above." />
               </div>
-            </form>
+            )}
+            {documentId && !openDocument && !openError && <p className="p-5 text-xs text-[var(--mos-text-muted)] md:p-6">Opening document</p>}
+            {openError && <p className="p-5 text-sm text-red-300 md:p-6">{openError}</p>}
+            {openDocument && (
+              <GuideReader
+                key={openDocument.id}
+                document={openDocument}
+                canManage={canManage}
+                highlight={highlight}
+                onAccessChange={level => { void changeAccess(level); }}
+                onReindex={() => { void reindex(); }}
+                onDelete={() => { void removeDocument(); }}
+              />
+            )}
           </Panel>
         </div>
       </div>

@@ -1,8 +1,34 @@
 import mammoth from 'mammoth';
 import { extractText, getDocumentProxy } from 'unpdf';
+import { internalDocImagePath, safeDocumentUrl, sanitizeDocumentHtml } from './internal-docs-reader';
+
+const docxHtmlOptions = {
+  ignoreEmptyParagraphs: true,
+  externalFileAccess: false,
+  convertImage: mammoth.images.imgElement(async () => ({ src: '' })),
+};
 
 const MAX_EXTRACTED_CHARS = 400_000;
+const MAX_DOCX_IMAGE_BYTES = 2_000_000;
 const NO_TEXT = 'No extractable text. Scanned or image-only PDFs are not supported.';
+const DOCX_IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp']);
+
+export interface DocxImage {
+  contentType: string;
+  bytes: Uint8Array;
+}
+
+async function acceptedDocxImage(image: { contentType: string; read: () => Promise<Buffer> }): Promise<DocxImage | null> {
+  try {
+    const contentType = (image.contentType || '').toLowerCase();
+    if (!DOCX_IMAGE_TYPES.has(contentType)) return null;
+    const bytes = await image.read();
+    if (!bytes?.byteLength || bytes.byteLength > MAX_DOCX_IMAGE_BYTES) return null;
+    return { contentType, bytes: new Uint8Array(bytes) };
+  } catch {
+    return null;
+  }
+}
 
 function normalizeWhitespace(text: string): string {
   return text
@@ -35,10 +61,59 @@ async function extractPdfText(bytes: Uint8Array): Promise<string> {
   return capText(sections.join('\n\n'));
 }
 
+function hyperlinkUrls(html: string): string[] {
+  const found: string[] = [];
+  for (const match of html.matchAll(/href\s*=\s*(?:"([^"]+)"|'([^']+)')/gi)) {
+    const href = safeDocumentUrl(match[1] || match[2] || '');
+    if (href && !found.includes(href)) found.push(href);
+  }
+  return found;
+}
+
 async function extractDocxText(bytes: Uint8Array): Promise<string> {
   const buffer = Buffer.from(bytes);
   const raw = await mammoth.extractRawText({ buffer });
-  return capText(raw.value || '');
+  let links: string[] = [];
+  try {
+    const html = await mammoth.convertToHtml({ buffer }, docxHtmlOptions);
+    links = hyperlinkUrls(html.value || '').filter(href => !(raw.value || '').includes(href));
+  } catch {
+    links = [];
+  }
+  const combined = links.length ? `${raw.value || ''}\n\n${links.join('\n')}` : (raw.value || '');
+  return capText(combined);
+}
+
+/** Images in the same order the reader and the image route will request them. */
+export async function collectDocxImages(bytes: Uint8Array): Promise<DocxImage[]> {
+  const images: DocxImage[] = [];
+  await mammoth.convertToHtml({ buffer: Buffer.from(bytes) }, {
+    externalFileAccess: false,
+    convertImage: mammoth.images.imgElement(async image => {
+      const accepted = await acceptedDocxImage(image);
+      if (accepted) images.push(accepted);
+      return { src: '' };
+    }),
+  });
+  return images;
+}
+
+/** Word HTML for the reader. Hyperlinks stay; images point at the authenticated image route. */
+export async function docxPreviewHtml(bytes: Uint8Array, documentId = ''): Promise<string> {
+  const canLink = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(documentId);
+  let index = 0;
+  const result = await mammoth.convertToHtml({ buffer: Buffer.from(bytes) }, {
+    ignoreEmptyParagraphs: true,
+    externalFileAccess: false,
+    convertImage: mammoth.images.imgElement(async image => {
+      const accepted = await acceptedDocxImage(image);
+      if (!accepted || !canLink) return { src: '' };
+      const src = internalDocImagePath(documentId, index);
+      index += 1;
+      return { src };
+    }),
+  });
+  return sanitizeDocumentHtml(result.value || '');
 }
 
 export async function extractInternalDocText(bytes: Uint8Array, ext: string): Promise<string> {
