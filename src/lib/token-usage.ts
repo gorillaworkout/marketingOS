@@ -126,6 +126,7 @@ export function parseImageGenerationUsage(payload: unknown): ImageGenerationUsag
 /** Analytics labels for task_type values that are not generation-feature keys. */
 export const EXTRA_TASK_TYPE_LABELS: Record<string, string> = {
   'image-gen': 'Image Generation',
+  'internal-docs': 'FAQ & Guides',
 };
 
 function contentText(content: GatewayMessage['content']): string {

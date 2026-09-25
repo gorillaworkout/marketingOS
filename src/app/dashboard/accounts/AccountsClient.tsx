@@ -2,13 +2,9 @@
 import { useEffect, useState, useCallback } from 'react';
 import { passwordInputType } from '@/lib/password-visibility';
 import { Button, DataTableFrame, EmptyState, LoadingState, MetricCard, Panel, PageHeader, PageStack, SectionHeader, StatusBadge, TextInput } from '@/components/ui/dashboard';
-import { GENERATION_FEATURES } from '@/lib/authorization';
+import { ACCOUNT_FEATURES, ACCOUNT_FEATURE_LABELS, type AccountFeature } from '@/lib/authorization';
 
-const ASSIGNABLE_FEATURES = ['social-post', 'video-script', 'event-plan', 'article-market-news', 'market-research', 'ai-research'] as const;
-// Sanity assertion; keeps the array above and the authorization source of truth in sync.
-if (process.env.NODE_ENV !== 'production' && ASSIGNABLE_FEATURES.length !== GENERATION_FEATURES.length) {
-  console.warn('ASSIGNABLE_FEATURES drift vs GENERATION_FEATURES', { ASSIGNABLE_FEATURES, GENERATION_FEATURES });
-}
+const ASSIGNABLE_FEATURES: readonly AccountFeature[] = ACCOUNT_FEATURES;
 
 interface User {
   id: string;
@@ -37,7 +33,7 @@ export default function AccountsClient() {
   const [users, setUsers] = useState<User[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
   const [departmentName, setDepartmentName] = useState('');
-  const [departmentFeatures, setDepartmentFeatures] = useState<string[]>([...ASSIGNABLE_FEATURES]);
+  const [departmentFeatures, setDepartmentFeatures] = useState<AccountFeature[]>([...ASSIGNABLE_FEATURES]);
   const [loading, setLoading] = useState(true);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [showAddModal, setShowAddModal] = useState(false);
@@ -323,13 +319,13 @@ export default function AccountsClient() {
       </DataTableFrame>
 
       <Panel>
-        <SectionHeader title="Departments" description="Choose which generation modules each department can use." />
+        <SectionHeader title="Departments" description="Choose which modules each department can use." />
         <div className="flex flex-wrap gap-3 mt-4">
           <TextInput value={departmentName} onChange={e => setDepartmentName(e.target.value)} placeholder="Department name" className="max-w-xs" />
-          {ASSIGNABLE_FEATURES.map(feature => <label key={feature} className="text-sm text-[var(--mos-text-secondary)] flex items-center gap-1"><input type="checkbox" checked={departmentFeatures.includes(feature)} onChange={() => setDepartmentFeatures(current => current.includes(feature) ? current.filter(value => value !== feature) : [...current, feature])} /> {feature}</label>)}
+          {ASSIGNABLE_FEATURES.map(feature => <label key={feature} className="text-sm text-[var(--mos-text-secondary)] flex items-center gap-1"><input type="checkbox" checked={departmentFeatures.includes(feature)} onChange={() => setDepartmentFeatures(current => current.includes(feature) ? current.filter(value => value !== feature) : [...current, feature])} /> {ACCOUNT_FEATURE_LABELS[feature]}</label>)}
           <Button variant="primary" onClick={createDepartment}>Create department</Button>
         </div>
-        <div className="mt-4 text-sm text-[var(--mos-text-secondary)] space-y-3">{departments.map(department => <div key={department.id} className="flex flex-wrap items-center gap-3"><span className="font-medium min-w-28">{department.name}</span>{ASSIGNABLE_FEATURES.map(feature => <label key={feature} className="flex items-center gap-1 text-[var(--mos-text-muted)]"><input type="checkbox" checked={department.permitted_features.includes(feature)} onChange={() => toggleDepartmentFeature(department, feature)} /> {feature}</label>)}</div>)}</div>
+        <div className="mt-4 text-sm text-[var(--mos-text-secondary)] space-y-3">{departments.map(department => <div key={department.id} className="flex flex-wrap items-center gap-3"><span className="font-medium min-w-28">{department.name}</span>{ASSIGNABLE_FEATURES.map(feature => <label key={feature} className="flex items-center gap-1 text-[var(--mos-text-muted)]"><input type="checkbox" checked={department.permitted_features.includes(feature)} onChange={() => toggleDepartmentFeature(department, feature)} /> {ACCOUNT_FEATURE_LABELS[feature]}</label>)}</div>)}</div>
       </Panel>
 
       {/* Add User Modal */}

@@ -108,7 +108,7 @@ test('prompt and research citations include only the hits passed in, with docume
     score: 0.8,
   }];
   const prompt = formatInternalDocsPrompt(hits, 'https://marketing.example');
-  assert.match(prompt, /INTERNAL DOCUMENTS/);
+  assert.match(prompt, /FAQ & GUIDES/);
   assert.match(prompt, /Visitor wifi/);
   assert.match(prompt, /https:\/\/marketing\.example\/dashboard\/internal-docs\/11111111-1111-1111-1111-111111111111/);
   assert.equal(formatInternalDocsPrompt([], 'https://marketing.example'), '');
@@ -125,7 +125,7 @@ test('prompt and research citations include only the hits passed in, with docume
   }, hits, 'https://marketing.example');
   assert.equal(merged.grounding, 'ok');
   assert.equal(merged.sources[0].originChip, 'internal');
-  assert.match(merged.sources[0].title, /Visitor wifi/);
+  assert.equal(merged.sources[0].title, 'FAQ & Guides: Visitor wifi');
   assert.equal(normalizeInspectorSource(merged.sources[0])?.originChip, 'internal');
   assert.equal(INTERNAL_DOCS_NO_MATCH_ANSWER.includes('you can access'), true);
 });
@@ -152,8 +152,11 @@ test('sidebar, routes, migration, and AI Research keep Internal Docs ACL separat
   const ask = read('src/app/api/internal-docs/ask/route.ts');
   const listRoute = read('src/app/api/internal-docs/route.ts');
 
-  assert.match(layout, /href: '\/dashboard\/internal-docs', label: 'Internal Docs'/);
-  assert.doesNotMatch(layout, /internal-docs'[\s\S]{0,80}adminOnly: true/);
+  assert.match(layout, /href: '\/dashboard\/internal-docs', label: 'FAQ & Guides', icon: 'docs', feature: 'internal-docs' \}/);
+  const sections = layout.slice(layout.indexOf('const sections'));
+  assert.ok(sections.indexOf("label: 'FAQ & Guides'") < sections.indexOf("label: 'Overview'"));
+  assert.doesNotMatch(layout.slice(layout.indexOf('const resourceItems'), layout.indexOf('export default')), /internal-docs/);
+  assert.doesNotMatch(layout, /href: '\/dashboard\/internal-docs'[^}\n]*adminOnly/);
   assert.match(migration, /CREATE TABLE IF NOT EXISTS internal_documents/);
   assert.match(migration, /CREATE TABLE IF NOT EXISTS internal_document_chunks/);
   assert.match(migration, /'IT'/);
@@ -163,6 +166,7 @@ test('sidebar, routes, migration, and AI Research keep Internal Docs ACL separat
   assert.doesNotMatch(executable, /\bDELETE FROM\b|\bDROP TABLE\b|\bTRUNCATE\b/i);
   assert.match(executable, /ON DELETE CASCADE/);
 
+  assert.match(chat, /canAccessFeature\(auth, 'internal-docs'\)/);
   assert.match(chat, /retrieveInternalDocHits\(internalDocsPrincipal, query\)/);
   assert.match(chat, /departmentName: auth\.departmentName/);
   assert.match(chat, /formatInternalDocsPrompt\(internalDocHits/);
@@ -174,4 +178,31 @@ test('sidebar, routes, migration, and AI Research keep Internal Docs ACL separat
   assert.match(ask, /retrieveInternalDocHits\(actor\.principal, question\)/);
   assert.match(listRoute, /listInternalDocuments\(actor\.principal/);
   assert.match(listRoute, /requireInternalDocsManager/);
+
+  const access = read('src/lib/internal-docs-access.ts');
+  assert.match(access, /requireFeature\(request, INTERNAL_DOCS_FEATURE\)/);
+  assert.match(access, /FAQ & Guides/);
+  assert.match(read('src/lib/auth.ts'), /ACCOUNT_FEATURE_LABELS\[feature\]/);
+  assert.match(read('src/components/AiResearchSourcesPanel.tsx'), /internal: 'FAQ & Guides'/);
+  const workspace = read('src/app/dashboard/internal-docs/InternalDocsWorkspace.tsx');
+  assert.match(workspace, /title="FAQ & Guides"/);
+  assert.match(workspace, /No guides yet/);
+  assert.doesNotMatch(workspace, /Internal Docs/);
+  assert.equal(read('src/lib/authorization.ts').includes("'internal-docs': 'FAQ & Guides'"), true);
+  const accounts = read('src/app/dashboard/accounts/AccountsClient.tsx');
+  assert.match(accounts, /ACCOUNT_FEATURE_LABELS\[feature\]/);
+  assert.match(accounts, /ACCOUNT_FEATURES/);
+  const departmentsApi = read('src/app/api/admin/departments/route.ts');
+  assert.match(departmentsApi, /isAccountFeature/);
+  const imageRoute = read('src/app/api/generate-image/route.ts');
+  assert.match(imageRoute, /hasGenerationFeature\(auth\)/);
+  assert.doesNotMatch(imageRoute, /features\.length === 0/);
+
+  const featureMigration = read('db/migrations/021_internal_docs_feature.sql');
+  const featureSql = featureMigration.replace(/--.*$/gm, '');
+  assert.match(featureMigration, /DROP CONSTRAINT IF EXISTS departments_permitted_features_valid/);
+  assert.match(featureMigration, /'internal-docs'/);
+  assert.match(featureMigration, /WHERE NOT \(permitted_features @> ARRAY\['internal-docs'\]::text\[\]\)/);
+  assert.doesNotMatch(featureSql, /\bDELETE FROM\b|\bDROP TABLE\b|\bTRUNCATE\b/i);
+  assert.doesNotMatch(featureSql, /knowledge_entries/);
 });

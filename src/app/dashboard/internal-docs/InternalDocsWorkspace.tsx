@@ -254,9 +254,9 @@ export function InternalDocsWorkspace({ documentId }: { documentId?: string }) {
   return (
     <PageStack>
       <PageHeader
-        eyebrow="Library"
-        title="Internal Docs"
-        description="Browse company documentation you are allowed to read. Ask questions grounded in those documents."
+        eyebrow="Guidance"
+        title="FAQ & Guides"
+        description="Browse company guidance you are allowed to read. Ask questions grounded in those guides."
       />
 
       {canManage && (
@@ -308,8 +308,8 @@ export function InternalDocsWorkspace({ documentId }: { documentId?: string }) {
             {!loadingList && listError && <p className="px-4 py-6 text-xs text-red-300">{listError}</p>}
             {!loadingList && !listError && documents.length === 0 && (
               <EmptyState
-                title={search.trim() ? 'No matching documents' : 'No documents yet'}
-                description={search.trim() ? 'Try another title or phrase.' : 'Documents you can read will appear here.'}
+                title={search.trim() ? 'No matching guides' : 'No guides yet'}
+                description={search.trim() ? 'Try another title or phrase.' : 'FAQ and guides you can read will appear here.'}
               />
             )}
             <ul>
@@ -342,7 +342,7 @@ export function InternalDocsWorkspace({ documentId }: { documentId?: string }) {
         <div className="flex min-w-0 flex-col gap-4">
           <Panel className="min-h-64">
             {!documentId && (
-              <EmptyState title="Select a document" description="Open an item from the list to read it." />
+              <EmptyState title="Select a guide" description="Open an item from the list to read it." />
             )}
             {documentId && !openDocument && !openError && <p className="text-xs text-[var(--mos-text-muted)]">Opening document</p>}
             {openError && <p className="text-sm text-red-300">{openError}</p>}
@@ -411,7 +411,7 @@ export function InternalDocsWorkspace({ documentId }: { documentId?: string }) {
                 value={askInput}
                 onChange={event => setAskInput(event.target.value)}
                 placeholder="Ask a question about the documents you can read"
-                aria-label="Ask internal documents"
+                aria-label="Ask FAQ & Guides"
                 className="min-h-20"
               />
               <div className="flex justify-end">

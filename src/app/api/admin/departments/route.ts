@@ -2,10 +2,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import { v4 as uuidv4 } from 'uuid';
 import { execute, queryAll, queryOne } from '@/lib/database';
 import { requireAdmin } from '@/lib/auth';
-import { GENERATION_FEATURES } from '@/lib/authorization';
+import { isAccountFeature } from '@/lib/authorization';
 
 function validFeatures(features: unknown): features is string[] {
-  return Array.isArray(features) && features.every(feature => GENERATION_FEATURES.includes(feature));
+  return Array.isArray(features) && features.every(feature => typeof feature === 'string' && isAccountFeature(feature));
 }
 
 export async function GET(request: NextRequest) {

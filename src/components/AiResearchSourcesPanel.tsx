@@ -16,7 +16,7 @@ const ORIGIN_CHIP_LABEL: Record<ResearchOriginChip, string> = {
   official: 'Official',
   indonesia: 'Indonesia',
   international: 'International',
-  internal: 'Internal Docs',
+  internal: 'FAQ & Guides',
 };
 
 const ORIGIN_CHIP_CLASS: Record<ResearchOriginChip, string> = {

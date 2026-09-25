@@ -1,5 +1,6 @@
 import { NextRequest } from 'next/server';
 import { requireFeature } from '@/lib/auth';
+import { canAccessFeature } from '@/lib/authorization';
 import { resolveFeatureModel } from '@/lib/model-routing';
 import { rateLimit } from '@/lib/rate-limit';
 import {
@@ -437,10 +438,12 @@ export async function POST(request: NextRequest) {
         throwIfResearchAborted(signal);
         const internalDocsPrincipal = { role: auth.role, departmentName: auth.departmentName };
         let internalDocHits: InternalDocHit[] = [];
-        try {
-          internalDocHits = await retrieveInternalDocHits(internalDocsPrincipal, query);
-        } catch (error) {
-          console.error('[ai-research] internal docs retrieval failed:', error);
+        if (canAccessFeature(auth, 'internal-docs')) {
+          try {
+            internalDocHits = await retrieveInternalDocHits(internalDocsPrincipal, query);
+          } catch (error) {
+            console.error('[ai-research] internal docs retrieval failed:', error);
+          }
         }
         const internalDocsContext = formatInternalDocsPrompt(internalDocHits, request.nextUrl.origin);
         throwIfResearchAborted(signal);
