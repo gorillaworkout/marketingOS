@@ -5,6 +5,7 @@ import {
   type GatewayContentPart,
   type GatewayMessage,
 } from './ai-research';
+import { fetchWithAbortSignal, throwIfResearchAborted } from './ai-research-abort';
 
 export type ResearchOrigin = 'indonesia' | 'international';
 
@@ -38,6 +39,8 @@ export interface GatherResearchOptions {
   searchApiKeys?: SearchApiKeys;
   logger?: { warn: (...args: unknown[]) => void };
   enableJinaFallback?: boolean;
+  /** When aborted, in-flight source fetches are cancelled and gather stops. */
+  signal?: AbortSignal;
 }
 
 export const AI_RESEARCH_CONTEXT_HEADER = 'GROUNDING_SOURCES';
@@ -1692,6 +1695,14 @@ async function fetchBounded(
 ): Promise<{ url: string; text: string; contentType: string; status: number }> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), Math.max(500, timeoutMs));
+  const parent = init.signal;
+  const onParentAbort = () => {
+    if (!controller.signal.aborted) controller.abort(parent?.reason);
+  };
+  if (parent) {
+    if (parent.aborted) controller.abort(parent.reason);
+    else parent.addEventListener('abort', onParentAbort, { once: true });
+  }
   try {
     const response = await fetchImpl(url, { ...init, signal: controller.signal, cache: 'no-store' });
     const finalUrl = response.url || url;
@@ -1730,6 +1741,7 @@ async function fetchBounded(
     return { url: finalUrl, text: new TextDecoder().decode(bytes), contentType, status: response.status };
   } finally {
     clearTimeout(timer);
+    parent?.removeEventListener('abort', onParentAbort);
   }
 }
 
@@ -2187,9 +2199,14 @@ export async function gatherAiResearchContext(
 ): Promise<ResearchContext> {
   const indonesiaPreferred = prefersIndonesiaSources(query);
   const empty: ResearchContext = { query, sources: [], indonesiaPreferred };
+  if (options.signal) throwIfResearchAborted(options.signal);
   if (!shouldResearchQuery(query)) return empty;
 
-  const fetchImpl = options.fetchImpl || fetch;
+  const baseFetch = options.fetchImpl || fetch;
+  const fetchImpl = options.signal ? fetchWithAbortSignal(baseFetch, options.signal) : baseFetch;
+  const stopIfAborted = () => {
+    if (options.signal) throwIfResearchAborted(options.signal);
+  };
   const maxBytes = options.maxBytes || DEFAULT_MAX_BYTES;
   const timeoutMs = options.timeoutMs || DEFAULT_TIMEOUT_MS;
   const now = options.now || Date.now;
@@ -2237,6 +2254,7 @@ export async function gatherAiResearchContext(
     serperExhausted = quotaHit || serperHits === 0;
     if (serperExhausted) logger.warn(SERPER_EXHAUSTED_WARNING);
   }
+  stopIfAborted();
 
   const needHtmlSearch = !serperKey || serperHits < 3;
   const searchBudget = Math.max(1_500, Math.floor(remainingMs(deadline, now) * 0.4));
@@ -2274,6 +2292,7 @@ export async function gatherAiResearchContext(
   for (const result of newsSettled) {
     if (result.status === 'fulfilled') found.push(...result.value);
   }
+  stopIfAborted();
 
   if (needHtmlSearch && !htmlSearchBlocked && serperHits < 3 && queries.length > 1) {
     const rest = await Promise.allSettled(
@@ -2312,7 +2331,11 @@ export async function gatherAiResearchContext(
     indonesiaPreferred,
     MAX_PAGE_FETCHES,
   );
-  if (ranked.length === 0) return empty;
+  if (ranked.length === 0) {
+    stopIfAborted();
+    return empty;
+  }
+  stopIfAborted();
 
   const fetchBudget = Math.max(1_200, remainingMs(deadline, now));
   const fetched = await Promise.all(ranked.map(source => fetchPageSource(
@@ -2332,6 +2355,7 @@ export async function gatherAiResearchContext(
   ));
   const usable = cleaned.filter(source => isUsableResearchSource(source, query));
   const selected = withText.length >= 3 ? withText : usable.length ? usable : cleaned;
+  stopIfAborted();
   return {
     query,
     indonesiaPreferred,

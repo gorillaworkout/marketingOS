@@ -60,6 +60,12 @@ import {
 import { GORILLAWORKOUT_API_BASE, GORILLAWORKOUT_API_KEY } from '@/lib/gateway-config';
 import { AVAILABLE_MODELS, fetchKnowledgeContext } from '@/lib/openai';
 import { persistCompletedResearchAnswer } from '@/lib/knowledge-persist';
+import {
+  isAbortError,
+  linkAbortSignal,
+  mergeAbortSignals,
+  throwIfResearchAborted,
+} from '@/lib/ai-research-abort';
 import { logTokenUsage } from '@/lib/token-log';
 import {
   consumeChatCompletionSseLines,
@@ -86,24 +92,36 @@ async function streamChatCompletion(options: {
   apiMessages: GatewayMessage[];
   temperature: number;
   maxTokens?: number;
-}): Promise<{ ok: true; content: string; usage: GatewayTokenUsage | null } | { ok: false }> {
-  const response = await fetch(`${GORILLAWORKOUT_API_BASE}/chat/completions`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${GORILLAWORKOUT_API_KEY}`,
-      'HTTP-Referer': 'https://marketing-aws.gorillaworkout.id',
-      'X-Title': 'Dupoin AI Research',
-    },
-    body: JSON.stringify({
-      model: options.model,
-      messages: options.apiMessages,
-      stream: true,
-      stream_options: { include_usage: true },
-      temperature: options.temperature,
-      max_tokens: options.maxTokens ?? AI_RESEARCH_MAX_OUTPUT_TOKENS,
-    }),
-  });
+  signal: AbortSignal;
+}): Promise<{ ok: true; content: string; usage: GatewayTokenUsage | null } | { ok: false; aborted?: boolean }> {
+  if (options.signal.aborted) return { ok: false, aborted: true };
+  let response: Response;
+  try {
+    response = await fetch(`${GORILLAWORKOUT_API_BASE}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${GORILLAWORKOUT_API_KEY}`,
+        'HTTP-Referer': 'https://marketing-aws.gorillaworkout.id',
+        'X-Title': 'Dupoin AI Research',
+      },
+      body: JSON.stringify({
+        model: options.model,
+        messages: options.apiMessages,
+        stream: true,
+        stream_options: { include_usage: true },
+        temperature: options.temperature,
+        max_tokens: options.maxTokens ?? AI_RESEARCH_MAX_OUTPUT_TOKENS,
+      }),
+      signal: options.signal,
+    });
+  } catch (error) {
+    if (options.signal.aborted || isAbortError(error)) return { ok: false, aborted: true };
+    options.emit({ type: 'error', error: error instanceof Error ? error.message : 'Stream request failed' });
+    return { ok: false };
+  }
+
+  if (options.signal.aborted) return { ok: false, aborted: true };
 
   if (!response.ok) {
     const errText = await response.text();
@@ -122,8 +140,13 @@ async function streamChatCompletion(options: {
   let fullContent = '';
   let reportedUsage: GatewayTokenUsage | null = null;
   let done = false;
+  let aborted = false;
 
   while (!done) {
+    if (options.signal.aborted) {
+      aborted = true;
+      break;
+    }
     try {
       const { value, done: streamDone } = await reader.read();
       if (streamDone) break;
@@ -137,9 +160,15 @@ async function streamChatCompletion(options: {
       }
       if (parsed.usage) reportedUsage = parsed.usage;
       if (parsed.reachedDone) done = true;
-    } catch {
+    } catch (error) {
+      if (options.signal.aborted || isAbortError(error)) aborted = true;
       done = true;
     }
+  }
+
+  if (aborted || options.signal.aborted) {
+    await reader.cancel().catch(() => {});
+    return { ok: false, aborted: true };
   }
 
   buffer += decoder.decode();
@@ -158,6 +187,7 @@ async function streamChatCompletion(options: {
 async function requestDeepResearchPlan(
   model: string,
   query: string,
+  signal: AbortSignal,
 ): Promise<{ text: string; usage: GatewayTokenUsage | null }> {
   const response = await fetch(`${GORILLAWORKOUT_API_BASE}/chat/completions`, {
     method: 'POST',
@@ -177,7 +207,7 @@ async function requestDeepResearchPlan(
       temperature: 0.2,
       max_tokens: AI_RESEARCH_DEEP_PLAN_MAX_TOKENS,
     }),
-    signal: AbortSignal.timeout(AI_RESEARCH_DEEP_PLAN_TIMEOUT_MS),
+    signal: mergeAbortSignals(AbortSignal.timeout(AI_RESEARCH_DEEP_PLAN_TIMEOUT_MS), signal),
   });
   const body = await response.text();
   if (!response.ok) throw new Error(`Deep plan failed (${response.status})`);
@@ -253,10 +283,15 @@ async function rememberProjectTurn(
   );
 }
 
-async function gatherResearchSide(query: string): Promise<{ research: ResearchContext | null; failed: boolean }> {
+async function gatherResearchSide(
+  query: string,
+  signal: AbortSignal,
+): Promise<{ research: ResearchContext | null; failed: boolean }> {
   try {
-    return { research: await gatherAiResearchContext(query), failed: false };
+    throwIfResearchAborted(signal);
+    return { research: await gatherAiResearchContext(query, { signal }), failed: false };
   } catch (error) {
+    if (signal.aborted) throw error;
     console.error('[ai-research] gatherAiResearchContext failed:', error);
     return { research: null, failed: true };
   }
@@ -368,24 +403,32 @@ export async function POST(request: NextRequest) {
     return jsonError(error instanceof Error ? error.message : 'Failed to save conversation', 500);
   }
 
+  const clientAbort = linkAbortSignal(request.signal);
+  const signal = clientAbort.signal;
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
     async start(controller) {
       let closed = false;
       const emit = (data: unknown) => {
-        if (closed) return;
-        controller.enqueue(encoder.encode(sseFrame(data)));
+        if (closed || signal.aborted) return;
+        try {
+          controller.enqueue(encoder.encode(sseFrame(data)));
+        } catch {
+          closed = true;
+        }
       };
       const close = () => {
         if (closed) return;
         closed = true;
-        controller.close();
+        try { controller.close(); } catch { /* client already cancelled the stream */ }
       };
       try {
+        throwIfResearchAborted(signal);
         const effectiveMode = compare ? 'fast' : mode;
         emit({ type: 'start', conversationId: convId, model, mode: effectiveMode });
         const query = latestUser?.content || '';
         const knowledgeContext = await fetchKnowledgeContext(auth.id, query, undefined, 5, 'internal');
+        throwIfResearchAborted(signal);
         const urlOnly = isUrlOnlyQuery(query);
 
         if (mode === 'deep' && !compare) {
@@ -395,16 +438,21 @@ export async function POST(request: NextRequest) {
           let planUsage: GatewayTokenUsage | null = null;
           if (!skipped) {
             try {
-              const planned = await requestDeepResearchPlan(model, query);
+              const planned = await requestDeepResearchPlan(model, query, signal);
               planUsage = planned.usage;
               const parsedPlan = parseDeepResearchPlan(planned.text, query);
               if (parsedPlan) plan = parsedPlan;
             } catch (error) {
+              if (signal.aborted) throw error;
               console.error('[ai-research] deep plan failed:', error);
             }
           }
+          throwIfResearchAborted(signal);
 
-          const urlContextPromise = fetchAiResearchContextUrls(query);
+          const urlContextPromise = fetchAiResearchContextUrls(query, { signal }).catch(error => {
+            if (signal.aborted || isAbortError(error)) return { sources: [], failures: [] };
+            throw error;
+          });
           let gatherResult: {
             research: ResearchContext;
             roundsRun: number;
@@ -420,7 +468,8 @@ export async function POST(request: NextRequest) {
             gatherResult = await runDeepResearchGather({
               query,
               plan,
-              gather: (searchQuery, timeoutMs) => gatherAiResearchContext(searchQuery, { timeoutMs }),
+              signal,
+              gather: (searchQuery, timeoutMs) => gatherAiResearchContext(searchQuery, { timeoutMs, signal }),
               onProgress: event => {
                 emit(buildDeepStatusEvent({
                   phase: event.phase,
@@ -446,8 +495,10 @@ export async function POST(request: NextRequest) {
               },
             });
           }
+          throwIfResearchAborted(signal);
 
           const urlContext = await urlContextPromise;
+          throwIfResearchAborted(signal);
           if (urlContext.sources.length || urlContext.failures.length) {
             emit({
               type: 'context-urls',
@@ -495,13 +546,15 @@ export async function POST(request: NextRequest) {
             maxHistory: MAX_HISTORY,
             research: modelResearch,
           });
+          throwIfResearchAborted(signal);
           const streamed = await streamChatCompletion({
             emit,
             model,
             apiMessages,
             temperature: resolveAiResearchTemperature(modelResearch),
+            signal,
           });
-          if (!streamed.ok) {
+          if (!streamed.ok || signal.aborted) {
             close();
             return;
           }
@@ -520,12 +573,14 @@ export async function POST(request: NextRequest) {
             fullContent = withLimits;
           }
 
+          throwIfResearchAborted(signal);
           const allMessages = [...pendingMessages, buildStoredAssistantMessage({
             content: fullContent,
             mode: 'deep',
             sources: researchEvent.sources,
           })];
           await persistConversation(convId, auth.id, allMessages, model, true, activeProjectId);
+          throwIfResearchAborted(signal);
           await persistCompletedResearchAnswer({
             userId: auth.id,
             conversationId: convId,
@@ -533,7 +588,7 @@ export async function POST(request: NextRequest) {
             query,
             answer: fullContent,
             sources: researchEvent.sources,
-            aborted: request.signal.aborted,
+            aborted: signal.aborted || request.signal.aborted,
           });
           try {
             await rememberProjectTurn(auth.id, activeProjectId, query, fullContent);
@@ -555,8 +610,8 @@ export async function POST(request: NextRequest) {
         const gatherTask = (async (): Promise<{ research: ResearchContext | null; failed: boolean }> => {
           if (compare) {
             const [sideA, sideB] = await Promise.all([
-              gatherResearchSide(buildCompareSearchQuery(compare.a)),
-              gatherResearchSide(buildCompareSearchQuery(compare.b)),
+              gatherResearchSide(buildCompareSearchQuery(compare.a), signal),
+              gatherResearchSide(buildCompareSearchQuery(compare.b), signal),
             ]);
             const research = mergeCompareResearch({
               aLabel: compare.a,
@@ -568,12 +623,13 @@ export async function POST(request: NextRequest) {
             return { research, failed };
           }
           if (urlOnly) return { research: null, failed: false };
-          return gatherResearchSide(query);
+          return gatherResearchSide(query, signal);
         })();
         const [gatherOutcome, urlContext] = await Promise.all([
           gatherTask,
-          fetchAiResearchContextUrls(query),
+          fetchAiResearchContextUrls(query, { signal }),
         ]);
+        throwIfResearchAborted(signal);
         if (urlContext.sources.length || urlContext.failures.length) {
           emit({
             type: 'context-urls',
@@ -613,23 +669,27 @@ export async function POST(request: NextRequest) {
           research: modelResearch,
         });
 
+        throwIfResearchAborted(signal);
         const streamed = await streamChatCompletion({
           emit,
           model,
           apiMessages,
           temperature: resolveAiResearchTemperature(modelResearch),
+          signal,
         });
-        if (!streamed.ok) {
+        if (!streamed.ok || signal.aborted) {
           close();
           return;
         }
 
+        throwIfResearchAborted(signal);
         const allMessages = [...pendingMessages, buildStoredAssistantMessage({
           content: streamed.content,
           mode: 'fast',
           sources: researchEvent.sources,
         })];
         await persistConversation(convId, auth.id, allMessages, model, true, activeProjectId);
+        throwIfResearchAborted(signal);
         await persistCompletedResearchAnswer({
           userId: auth.id,
           conversationId: convId,
@@ -637,7 +697,7 @@ export async function POST(request: NextRequest) {
           query,
           answer: streamed.content,
           sources: researchEvent.sources,
-          aborted: request.signal.aborted,
+          aborted: signal.aborted || request.signal.aborted,
         });
         try {
           await rememberProjectTurn(auth.id, activeProjectId, query, streamed.content);
@@ -655,9 +715,16 @@ export async function POST(request: NextRequest) {
         emit({ type: 'done', conversationId: convId, model });
         close();
       } catch (error) {
+        if (signal.aborted || isAbortError(error)) {
+          close();
+          return;
+        }
         emit({ type: 'error', error: error instanceof Error ? error.message : 'Unknown error' });
         close();
       }
+    },
+    cancel() {
+      clientAbort.abort();
     },
   });
 
