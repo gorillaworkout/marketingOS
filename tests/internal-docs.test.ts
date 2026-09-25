@@ -101,6 +101,103 @@ test('ranking drops IT-only chunks for a company employee even if they were load
   assert.ok(itHits.some(hit => hit.documentId === 'doc-company'));
 });
 
+test('auditorium LED questions prefer the auditorium guide over LED running text', async () => {
+  const queryVector = [1, 0];
+  const ledHeavy = JSON.stringify(queryVector);
+  const unrelated = JSON.stringify([0, 0]);
+  const chunks: InternalDocChunkRow[] = [
+    {
+      chunk_id: 'run',
+      document_id: 'doc-running',
+      title: 'Cara menyalakan LED running text',
+      access_level: 'company',
+      content: 'Cara menyalakan LED running text di lobi. Hidupkan saklar LED running text, buka LED Studio, pilih program running text, lalu klik Send. The LED running text power switch is under reception. Restart the LED running text if the scroll freezes.',
+      embedding: ledHeavy,
+    },
+    {
+      chunk_id: 'hall',
+      document_id: 'doc-hallway',
+      title: 'Cara menyalakan LED sign',
+      access_level: 'company',
+      content: 'Cara menyalakan LED sign di lorong. The hallway LED sign shows the company name. Hidupkan saklar LED. Cara menyalakan LED sign ini berbeda dari layar video.',
+      embedding: ledHeavy,
+    },
+    {
+      chunk_id: 'clock',
+      document_id: 'doc-clock',
+      title: 'Cara menyalakan LED clock',
+      access_level: 'company',
+      content: 'Cara menyalakan LED clock di ruang rapat. The meeting room LED clock shows hours and minutes. Replace the LED clock battery yearly.',
+      embedding: ledHeavy,
+    },
+    {
+      chunk_id: 'aud',
+      document_id: 'doc-auditorium',
+      title: 'Auditorium LED power on',
+      access_level: 'company',
+      content: 'Power on the auditorium LED wall from the control room. Switch on the breaker labeled Auditorium LED, wait for a steady green status, then press Power on the controller. The auditorium LED wall should show the standby image. Shut down by pressing Power and waiting for the fans to stop. Do not use the lobby display controls for this screen.',
+      embedding: unrelated,
+    },
+    {
+      chunk_id: 'installed',
+      document_id: 'doc-installed',
+      title: 'Display maintenance',
+      access_level: 'company',
+      content: 'The panel was installed and scheduled. Controllers were enabled after the visit.',
+      embedding: ledHeavy,
+    },
+    {
+      chunk_id: 'it-aud',
+      document_id: 'doc-it-auditorium',
+      title: 'IT auditorium LED controller password',
+      access_level: 'it-only',
+      content: 'The auditorium LED controller root password is for IT only. Reset that auditorium LED password from the rack.',
+      embedding: unrelated,
+    },
+  ];
+
+  const expectAuditorium = (query: string) => {
+    const hits = rankInternalDocChunks(query, queryVector, chunks, company, 6);
+    assert.equal(hits[0]?.documentId, 'doc-auditorium', query);
+    assert.equal(hits.some(hit => hit.documentId === 'doc-running'), false, query);
+    assert.equal(hits.some(hit => hit.documentId === 'doc-installed'), false, query);
+    assert.equal(hits.some(hit => hit.documentId === 'doc-it-auditorium'), false, query);
+    assert.match(`${hits[0].title} ${hits[0].excerpt}`, /auditorium/i);
+    const prompt = formatInternalDocsPrompt(hits, 'https://marketing.example');
+    assert.match(prompt, /Auditorium LED power on/);
+    assert.doesNotMatch(prompt, /running text/i);
+    const citations = citationsFromHits(hits, 'https://marketing.example');
+    assert.equal(citations[0]?.title, 'Auditorium LED power on');
+    assert.match(citations[0].url, /\/dashboard\/internal-docs\/doc-auditorium$/);
+  };
+
+  expectAuditorium('cara menyalakan LED auditorium');
+  expectAuditorium('how to turn on the auditorium LED');
+  expectAuditorium('how do I power on the auditorium LED');
+
+  const runningHits = rankInternalDocChunks('update the LED running text', queryVector, chunks, company, 6);
+  assert.equal(runningHits[0]?.documentId, 'doc-running');
+  assert.equal(runningHits.some(hit => hit.documentId === 'doc-auditorium'), false);
+
+  const ledHits = rankInternalDocChunks('LED', queryVector, chunks, company, 6);
+  assert.ok(ledHits.some(hit => hit.documentId === 'doc-running'));
+  assert.equal(ledHits.some(hit => hit.documentId === 'doc-it-auditorium'), false);
+
+  const itHits = rankInternalDocChunks('cara menyalakan LED auditorium', queryVector, chunks, itMember, 6);
+  assert.ok(itHits.some(hit => hit.documentId === 'doc-auditorium'));
+  assert.ok(itHits.some(hit => hit.documentId === 'doc-it-auditorium'));
+  assert.equal(itHits.some(hit => hit.documentId === 'doc-running'), false);
+
+  const embeddedQuery = 'cara menyalakan LED auditorium';
+  const embedded = await Promise.all(chunks.map(async chunk => ({
+    ...chunk,
+    embedding: JSON.stringify(await getEmbedding(`${chunk.title}\n${chunk.content}`)),
+  })));
+  const embeddedHits = rankInternalDocChunks(embeddedQuery, await getEmbedding(embeddedQuery), embedded, company, 6);
+  assert.equal(embeddedHits[0]?.documentId, 'doc-auditorium');
+  assert.equal(embeddedHits.some(hit => hit.documentId === 'doc-running'), false);
+});
+
 test('prompt and research citations include only the hits passed in, with document links', () => {
   const hits: InternalDocHit[] = [{
     documentId: '11111111-1111-1111-1111-111111111111',

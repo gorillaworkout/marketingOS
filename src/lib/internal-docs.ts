@@ -36,7 +36,22 @@ const QUERY_STOPWORDS = new Set([
   'the', 'and', 'for', 'with', 'that', 'this', 'from', 'what', 'when', 'where',
   'how', 'who', 'why', 'are', 'was', 'were', 'have', 'has', 'does', 'did',
   'about', 'into', 'your', 'our', 'can', 'not', 'but', 'you',
+  // Indonesian question words. "cara menyalakan X" is "how to turn on X";
+  // the object of the question should outrank the question frame.
+  'ada', 'adalah', 'agar', 'akan', 'anda', 'apa', 'apakah', 'atau', 'bagi',
+  'bagaimana', 'belum', 'bisa', 'cara', 'dan', 'dalam', 'dapat', 'dari',
+  'dengan', 'dimana', 'gimana', 'hanya', 'ini', 'ingin', 'itu', 'jika', 'juga',
+  'kalau', 'kami', 'kapan', 'karena', 'lebih', 'mana', 'masih', 'mohon', 'nya',
+  'oleh', 'pada', 'perlu', 'saya', 'sangat', 'sebagai', 'sudah', 'supaya',
+  'telah', 'tetapi', 'tidak', 'tolong', 'untuk', 'yang',
 ]);
+
+const BM25_K1 = 1.2;
+const BM25_B = 0.75;
+const TITLE_TF_BOOST = 3;
+const COSINE_WEIGHT = 0.2;
+const DISTINCTIVE_IDF_GAP = 0.45;
+const DISTINCTIVE_IDF_RATIO = 0.8;
 
 export interface InternalDocListRow {
   id: string;
@@ -174,10 +189,36 @@ export function chunkDocumentText(
   return chunks;
 }
 
+function tokensOf(text: string): string[] {
+  return text
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .split(/\s+/)
+    .filter(token => token.length > 2 && !QUERY_STOPWORDS.has(token));
+}
+
 function queryTokens(query: string): string[] {
-  return [...new Set(
-    query.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(token => token.length > 2 && !QUERY_STOPWORDS.has(token)),
-  )].slice(0, 12);
+  return [...new Set(tokensOf(query))].slice(0, 12);
+}
+
+function termIdf(df: number, total: number): number {
+  return Math.log(1 + (total - df + 0.5) / (df + 0.5));
+}
+
+function bm25Weight(tf: number, docLen: number, avgdl: number, idf: number): number {
+  const lengthNorm = 1 - BM25_B + BM25_B * (docLen / Math.max(avgdl, 1));
+  return idf * ((tf * (BM25_K1 + 1)) / (tf + BM25_K1 * lengthNorm));
+}
+
+function chunkCosine(embedding: string | null, queryEmbedding: number[]): number {
+  if (!embedding) return 0;
+  try {
+    const vector = JSON.parse(embedding) as number[];
+    if (!Array.isArray(vector)) return 0;
+    return cosineSimilarity(queryEmbedding, vector);
+  } catch {
+    return 0;
+  }
 }
 
 export function rankInternalDocChunks(
@@ -188,24 +229,67 @@ export function rankInternalDocChunks(
   limit = INTERNAL_DOCS_ASK_LIMIT,
 ): InternalDocHit[] {
   const tokens = queryTokens(query);
-  const scored = chunks.flatMap(chunk => {
+  if (!tokens.length) return [];
+  const visible = chunks.flatMap(chunk => {
     if (!isInternalDocVisible(chunk.access_level, principal)) return [];
     if (chunk.access_level !== 'company' && chunk.access_level !== 'it-only') return [];
-    let cosine = 0;
-    if (chunk.embedding) {
-      try {
-        const vector = JSON.parse(chunk.embedding) as number[];
-        if (Array.isArray(vector)) cosine = cosineSimilarity(queryEmbedding, vector);
-      } catch {
-        cosine = 0;
-      }
+    const titleTokens = tokensOf(chunk.title);
+    const bodyTokens = tokensOf(chunk.content);
+    const tf = new Map<string, number>();
+    for (const token of bodyTokens) tf.set(token, (tf.get(token) || 0) + 1);
+    for (const token of titleTokens) tf.set(token, (tf.get(token) || 0) + TITLE_TF_BOOST);
+    return [{
+      chunk,
+      tf,
+      docLen: bodyTokens.length + titleTokens.length * TITLE_TF_BOOST,
+      cosine: chunkCosine(chunk.embedding, queryEmbedding),
+    }];
+  });
+  if (!visible.length) return [];
+
+  const total = visible.length;
+  const df = new Map<string, number>();
+  for (const token of tokens) {
+    df.set(token, visible.reduce((count, row) => count + ((row.tf.get(token) || 0) > 0 ? 1 : 0), 0));
+  }
+  const avgdl = visible.reduce((sum, row) => sum + row.docLen, 0) / total;
+  const idfOf = new Map(tokens.map(token => [token, termIdf(df.get(token) || 0, total)]));
+
+  let scored = visible.flatMap(row => {
+    const matched: string[] = [];
+    let lexical = 0;
+    for (const token of tokens) {
+      const freq = row.tf.get(token) || 0;
+      if (!freq) continue;
+      matched.push(token);
+      lexical += bm25Weight(freq, row.docLen, avgdl, idfOf.get(token) || 0);
     }
-    const haystack = `${chunk.title}\n${chunk.content}`.toLowerCase();
-    const lexical = Math.min(0.54, tokens.reduce((sum, token) => sum + (haystack.includes(token) ? 0.18 : 0), 0));
-    const score = cosine + lexical;
-    if (score < 0.2) return [];
-    return [{ chunk, score }];
-  }).sort((left, right) => right.score - left.score || left.chunk.chunk_id.localeCompare(right.chunk.chunk_id));
+    // Hashed TF cosine only breaks ties. A chunk with no real query term is a
+    // bucket collision, not a paraphrase, because these vectors are not semantic.
+    if (!matched.length) return [];
+    return [{
+      chunk: row.chunk,
+      matched,
+      score: lexical + COSINE_WEIGHT * Math.max(0, row.cosine),
+    }];
+  });
+
+  // A repeated common token such as "LED" used to outrank a rare term such as
+  // "auditorium". When the query mixes both, keep chunks that contain the rare
+  // terms so a how-to guide sharing only the common token cannot fill the answer.
+  const present = tokens.filter(token => (df.get(token) || 0) > 0);
+  if (present.length >= 2) {
+    const weights = present.map(token => idfOf.get(token) || 0);
+    const maxIdf = Math.max(...weights);
+    const minIdf = Math.min(...weights);
+    if (maxIdf >= minIdf + DISTINCTIVE_IDF_GAP) {
+      const distinctive = new Set(present.filter(token => (idfOf.get(token) || 0) >= maxIdf * DISTINCTIVE_IDF_RATIO));
+      const gated = scored.filter(row => row.matched.some(token => distinctive.has(token)));
+      if (gated.length) scored = gated;
+    }
+  }
+
+  scored.sort((left, right) => right.score - left.score || left.chunk.chunk_id.localeCompare(right.chunk.chunk_id));
 
   const hits: InternalDocHit[] = [];
   for (const row of scored) {
