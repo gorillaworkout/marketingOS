@@ -4,7 +4,10 @@ import sharp from 'sharp';
 import {
   DUPOIN_IG_CHROME_HEIGHT,
   DUPOIN_IG_CHROME_WIDTH,
+  DUPOIN_IG_SWIPE_BUTTON_HEIGHT,
+  DUPOIN_IG_SWIPE_BUTTON_WIDTH,
   chromePlacement,
+  swipeButtonPlacement,
 } from '@/lib/dupoin-ig-chrome-layout';
 
 export {
@@ -16,9 +19,16 @@ export {
   DUPOIN_IG_LOCKUP_LEFT,
   DUPOIN_IG_LOCKUP_TOP,
   DUPOIN_IG_LOCKUP_WIDTH,
+  DUPOIN_IG_SWIPE_BUTTON_HEIGHT,
+  DUPOIN_IG_SWIPE_BUTTON_WIDTH,
+  DUPOIN_IG_SWIPE_GAP_ABOVE_FOOTER_PX,
+  DUPOIN_IG_SWIPE_PROMPT_PADDING_PX,
   chromeClearancePercents,
   chromePlacement,
+  swipeButtonPlacement,
+  swipePromptClearancePercent,
   type ChromePlacement,
+  type SwipeButtonPlacement,
 } from '@/lib/dupoin-ig-chrome-layout';
 
 /**
@@ -37,11 +47,17 @@ export {
  * the white footer is kept. The image model never paints the logo, the badge,
  * or the disclaimer.
  *
+ * When includeSwipeLeft is set, the fixed "Swipe left →" pill is stamped
+ * after the footer, centered, with its bottom edge above the white bar.
+ * The pill plate is already transparent outside the capsule, so its black
+ * fill is kept (unlike the header and footer fields).
+ *
  * On any other canvas the plates scale with width and pin to the top and
  * bottom edges. The middle stays the generated scene.
  */
 export const DUPOIN_SOCIAL_HEADER_PNG_PATH = path.join(process.cwd(), 'public', 'brand', 'dupoin-social-header.png');
 export const DUPOIN_SOCIAL_FOOTER_PNG_PATH = path.join(process.cwd(), 'public', 'brand', 'dupoin-social-footer.png');
+export const DUPOIN_SOCIAL_SWIPE_LEFT_PNG_PATH = path.join(process.cwd(), 'public', 'brand', 'dupoin-social-swipe-left.png');
 
 /** Exact disclaimer on the official footer plate. Spelling "resiko" is intentional. */
 export const DUPOIN_IG_FOOTER_LINE_1 =
@@ -152,6 +168,7 @@ interface KeyedPlate {
 
 let headerPlate: KeyedPlate | null = null;
 let footerPlate: KeyedPlate | null = null;
+let swipeButtonPng: { png: Buffer; width: number; height: number } | null = null;
 
 async function readPlate(filePath: string, label: string): Promise<RgbaImage> {
   if (!fs.existsSync(filePath)) {
@@ -194,6 +211,22 @@ async function keyedFooter(): Promise<KeyedPlate> {
   return footerPlate;
 }
 
+async function loadSwipeButton(): Promise<{ png: Buffer; width: number; height: number }> {
+  if (swipeButtonPng) return swipeButtonPng;
+  if (!fs.existsSync(DUPOIN_SOCIAL_SWIPE_LEFT_PNG_PATH)) {
+    throw new Error(`Dupoin Instagram swipe button missing at ${DUPOIN_SOCIAL_SWIPE_LEFT_PNG_PATH}; cannot brand the image.`);
+  }
+  const png = fs.readFileSync(DUPOIN_SOCIAL_SWIPE_LEFT_PNG_PATH);
+  const meta = await sharp(png).metadata();
+  if (meta.width !== DUPOIN_IG_SWIPE_BUTTON_WIDTH || meta.height !== DUPOIN_IG_SWIPE_BUTTON_HEIGHT) {
+    throw new Error(
+      `Dupoin Instagram swipe button must be ${DUPOIN_IG_SWIPE_BUTTON_WIDTH}×${DUPOIN_IG_SWIPE_BUTTON_HEIGHT}, got ${meta.width}×${meta.height}.`,
+    );
+  }
+  swipeButtonPng = { png, width: meta.width, height: meta.height };
+  return swipeButtonPng;
+}
+
 /** Content span of the committed plates. Tests lock the prompt bands to these. */
 export async function measureOfficialChromeBands(): Promise<{ headerPx: number; footerPx: number }> {
   const [header, footer] = await Promise.all([keyedHeader(), keyedFooter()]);
@@ -209,6 +242,11 @@ async function stripPng(plate: KeyedPlate, top: number, height: number, targetWi
   return pipeline.png().toBuffer();
 }
 
+export interface InstagramChromeOptions {
+  /** Stamp the fixed "Swipe left →" pill above the footer. Default off. */
+  includeSwipeLeft?: boolean;
+}
+
 /**
  * Stamp Bayu's header plate, then the footer plate, onto a generated image.
  *
@@ -216,8 +254,13 @@ async function stripPng(plate: KeyedPlate, top: number, height: number, targetWi
  * The footer bar covers the bottom edge. The middle of the generated image
  * is left untouched. Throws on failure: a creative missing the regulatory
  * footer must surface as an error rather than pass silently.
+ *
+ * With includeSwipeLeft, the pill plate is added last, centered, above the footer.
  */
-export async function compositeDupoinInstagramChrome(imageBytes: Buffer): Promise<Buffer> {
+export async function compositeDupoinInstagramChrome(
+  imageBytes: Buffer,
+  options?: InstagramChromeOptions,
+): Promise<Buffer> {
   const [header, footer] = await Promise.all([keyedHeader(), keyedFooter()]);
   const base = sharp(imageBytes);
   const baseMeta = await base.metadata();
@@ -238,11 +281,19 @@ export async function compositeDupoinInstagramChrome(imageBytes: Buffer): Promis
     place.footerHeight,
   );
 
-  return base
-    .composite([
-      { input: headerStrip, left: place.left, top: 0 },
-      { input: footerStrip, left: place.left, top: baseMeta.height - place.footerHeight },
-    ])
-    .png()
-    .toBuffer();
+  const layers: { input: Buffer; left: number; top: number }[] = [
+    { input: headerStrip, left: place.left, top: 0 },
+    { input: footerStrip, left: place.left, top: baseMeta.height - place.footerHeight },
+  ];
+
+  if (options?.includeSwipeLeft) {
+    const button = await loadSwipeButton();
+    const swipe = swipeButtonPlacement(baseMeta.width, baseMeta.height, place.footerHeight, place.headerHeight);
+    const input = swipe.width === button.width && swipe.height === button.height
+      ? button.png
+      : await sharp(button.png).resize(swipe.width, swipe.height, { fit: 'fill' }).png().toBuffer();
+    layers.push({ input, left: swipe.left, top: swipe.top });
+  }
+
+  return base.composite(layers).png().toBuffer();
 }

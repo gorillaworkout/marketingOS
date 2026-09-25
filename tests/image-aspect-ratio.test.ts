@@ -54,13 +54,13 @@ test('withImageAspectPrompt bakes dropdown size into prompt text without stackin
 test('Social Post chooser precedes Generate image and submits selected ratio plus prompt locks', () => {
   const page = read('src/app/dashboard/social-post/page.tsx');
   assert.match(page, /useState<ImageAspectRatio>\(DEFAULT_IMAGE_ASPECT_RATIO\)/);
-  assert.match(page, /applyDupoinImagePromptLocks\(editableImagePrompt, imageAspectRatio\)/);
-  assert.match(page, /JSON\.stringify\(\{[\s\S]*prompt: imagePrompt[\s\S]*aspectRatio: imageAspectRatio/);
+  assert.match(page, /applyDupoinImagePromptLocks\(editableImagePrompt, imageAspectRatio, \{ includeSwipeLeft \}\)/);
+  assert.match(page, /JSON\.stringify\(\{[\s\S]*prompt: imagePrompt[\s\S]*aspectRatio: imageAspectRatio[\s\S]*includeSwipeLeft/);
   const chooser = page.indexOf('Image aspect ratio');
   const generate = page.indexOf("generatingImage ? 'Generating image…' : 'Generate image'");
   assert.ok(chooser >= 0 && chooser < generate, 'ratio chooser must render before Generate image');
   assert.match(page, /IMAGE_ASPECT_RATIOS\.map\(ratio => <option key=\{ratio\} value=\{ratio\}>\{ratio\}<\/option>\)/);
-  assert.match(page, /applyDupoinImagePromptLocks\(prev, ratio\)/);
+  assert.match(page, /applyDupoinImagePromptLocks\(prev, ratio, \{ includeSwipeLeft \}\)/);
 });
 
 test('route threads ratio through gateway request, job result, and task history', () => {
@@ -68,7 +68,7 @@ test('route threads ratio through gateway request, job result, and task history'
   const status = read('src/lib/image-job-status.ts');
   assert.match(route, /parseImageAspectRatio\(body\.aspectRatio\)/);
   assert.match(route, /runImageJob\([\s\S]*aspectRatio/);
-  assert.match(route, /applyDupoinImagePromptLocks\(prompt, aspectRatio\)/);
+  assert.match(route, /applyDupoinImagePromptLocks\(prompt, aspectRatio, \{ includeSwipeLeft: swipeLeft \}\)/);
   assert.match(route, /prompt: gatewayPrompt/);
   assert.match(route, /size: generationSpec\.size/);
   assert.match(route, /result: ImageJobResult = \{[\s\S]*aspectRatio/);

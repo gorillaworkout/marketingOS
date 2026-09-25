@@ -5,7 +5,7 @@ import {
   withImageAspectPrompt,
   type ImageAspectRatio,
 } from '@/lib/image-aspect-ratio';
-import { chromeClearancePercents } from '@/lib/dupoin-ig-chrome-layout';
+import { chromeClearancePercents, swipePromptClearancePercent } from '@/lib/dupoin-ig-chrome-layout';
 
 /** Official Dupoin Brand Guidelines 2026 primary (Hex resmi). */
 export const DUPOIN_BLUE_HEX = '#2EB5C4';
@@ -34,7 +34,17 @@ export const DUPOIN_IG_STYLE_LOCK =
   + 'Large bold sans headlines, with key promo words in Dupoin Blue and supporting copy in white; alignment may follow the scene. '
   + 'CTA is one filled Dupoin Blue pill with white lettering, placed just above the footer band. '
   + 'When the brief is a carousel or story, the pill reads "Swipe left →"; otherwise use the brief\'s own short CTA inside that same filled pill. '
-  + 'Subject may be a person, a physical award, or a laptop with charts.'
+  + 'Subject may be a person, a physical award, or a laptop with charts.';
+
+/**
+ * Style lock used only when the fixed Swipe left pill will be composited.
+ * The model must not paint a second button into the reserved band.
+ */
+export const DUPOIN_IG_STYLE_LOCK_SWIPE_COMPOSITED =
+  `Dupoin Instagram shell: dark navy or black field with atmospheric glow in Dupoin Blue ${DUPOIN_BLUE_HEX}. `
+  + 'Large bold sans headlines, with key promo words in Dupoin Blue and supporting copy in white; alignment may follow the scene. '
+  + 'Do not draw a CTA pill, swipe button, arrow, or the words "Swipe left"; that pill is composited above the footer and the area just above the footer must stay empty of type. '
+  + 'Subject may be a person, a physical award, or a laptop with charts.';
 
 /** @deprecated Use DUPOIN_LOGO_REQUIRED_LINE — image prompts must include the official mark. */
 export const DUPOIN_LOGO_IN_PROMPT_LINE = DUPOIN_LOGO_REQUIRED_LINE;
@@ -128,17 +138,17 @@ export interface SocialPostImagePromptInput {
   aspectRatio?: ImageAspectRatio;
 }
 
-const CHROME_LOCK_RE = /\n\nLeave the top \d+% of the frame empty of type, faces, and logos \(background and texture may continue\) for the composited Dupoin header lockup, and the bottom \d+% empty for the composited white regulatory footer\. Draw no logo, no wordmark, no CNN badge, no laurel, no regulatory footer, and no "Dupoin" lettering anywhere in the image\. Primary accent Dupoin Blue #2EB5C4 as real light inside the scene\./g;
+const CHROME_LOCK_RE = /\n\nLeave the top \d+% of the frame empty of type, faces, and logos \(background and texture may continue\) for the composited Dupoin header lockup, and the bottom \d+% empty for the composited white regulatory footer\.(?: Leave an additional \d+% directly above that footer empty of type, faces, and logos for the composited centered Swipe left button\. Do not draw a swipe button, pill, arrow, or the words "Swipe left"\.)? Draw no logo, no wordmark, no CNN badge, no laurel, no regulatory footer, and no "Dupoin" lettering anywhere in the image\. Primary accent Dupoin Blue #2EB5C4 as real light inside the scene\./g;
 
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-const STYLE_LOCK_RE = new RegExp(`\\n\\n${escapeRegExp(DUPOIN_IG_STYLE_LOCK)}`, 'g');
+const STYLE_LOCKS = [DUPOIN_IG_STYLE_LOCK, DUPOIN_IG_STYLE_LOCK_SWIPE_COMPOSITED];
 
 /** Drop a previously baked Instagram style lock so re-applying it cannot stack. */
 export function stripDupoinStyleLock(prompt: string): string {
-  return String(prompt || '').replace(STYLE_LOCK_RE, '');
+  let text = String(prompt || '');
+  for (const lock of STYLE_LOCKS) {
+    text = text.split(`\n\n${lock}`).join('');
+  }
+  return text;
 }
 
 /** Drop a previously baked chrome reservation so a new aspect ratio can replace the percentages. */
@@ -146,21 +156,33 @@ export function stripDupoinChromeLock(prompt: string): string {
   return String(prompt || '').replace(CHROME_LOCK_RE, '');
 }
 
+export interface DupoinImagePromptLockOptions {
+  /** Reserve the composited Swipe left pill and tell the model not to draw it. */
+  includeSwipeLeft?: boolean;
+}
+
 /** English reservation appended to every image prompt. Percentages follow the selected canvas. */
-export function dupoinChromeLockLine(aspectRatio: ImageAspectRatio): string {
+export function dupoinChromeLockLine(
+  aspectRatio: ImageAspectRatio,
+  options?: DupoinImagePromptLockOptions,
+): string {
   const spec = getImageGenerationSpec(aspectRatio);
   const [width, height] = spec.size.split('x').map(Number);
   const { headerPercent, footerPercent } = chromeClearancePercents(width, height);
-  return `Leave the top ${headerPercent}% of the frame empty of type, faces, and logos (background and texture may continue) for the composited Dupoin header lockup, and the bottom ${footerPercent}% empty for the composited white regulatory footer. ${DUPOIN_LOGO_REQUIRED_LINE} anywhere in the image. Primary accent Dupoin Blue ${DUPOIN_BLUE_HEX} as real light inside the scene.`;
+  const swipeSentence = options?.includeSwipeLeft
+    ? ` Leave an additional ${swipePromptClearancePercent(width, height)}% directly above that footer empty of type, faces, and logos for the composited centered Swipe left button. Do not draw a swipe button, pill, arrow, or the words "Swipe left".`
+    : '';
+  return `Leave the top ${headerPercent}% of the frame empty of type, faces, and logos (background and texture may continue) for the composited Dupoin header lockup, and the bottom ${footerPercent}% empty for the composited white regulatory footer.${swipeSentence} ${DUPOIN_LOGO_REQUIRED_LINE} anywhere in the image. Primary accent Dupoin Blue ${DUPOIN_BLUE_HEX} as real light inside the scene.`;
 }
 
 /** Guarantee the Instagram chrome reservation is present, replacing any stale percentages. */
 export function ensureOfficialDupoinLogo(
   prompt: string,
   aspectRatio: ImageAspectRatio = DEFAULT_IMAGE_ASPECT_RATIO,
+  options?: DupoinImagePromptLockOptions,
 ): string {
   const trimmed = stripDupoinChromeLock(prompt).trim();
-  const logoLine = dupoinChromeLockLine(aspectRatio);
+  const logoLine = dupoinChromeLockLine(aspectRatio, options);
   return trimmed ? `${trimmed}\n\n${logoLine}` : logoLine;
 }
 
@@ -226,17 +248,20 @@ const SCENE_INTEGRITY_NEGATIVES =
 export function applyDupoinImagePromptLocks(
   prompt: string,
   aspectRatio: ImageAspectRatio = DEFAULT_IMAGE_ASPECT_RATIO,
+  options?: DupoinImagePromptLockOptions,
 ): string {
+  const includeSwipeLeft = options?.includeSwipeLeft === true;
   const cleaned = stripDupoinStyleLock(
     stripDupoinChromeLock(stripImageAspectPrompt(stripFlatOverlayLanguage(prompt))),
   ).trim();
   const guarded = cleaned.includes(SCENE_INTEGRITY_NEGATIVES)
     ? cleaned
     : `${cleaned}\n\n${SCENE_INTEGRITY_NEGATIVES}`.trim();
-  const withStyle = guarded.includes(DUPOIN_IG_STYLE_LOCK)
+  const styleLock = includeSwipeLeft ? DUPOIN_IG_STYLE_LOCK_SWIPE_COMPOSITED : DUPOIN_IG_STYLE_LOCK;
+  const withStyle = guarded.includes(styleLock)
     ? guarded
-    : `${guarded}\n\n${DUPOIN_IG_STYLE_LOCK}`.trim();
-  return withImageAspectPrompt(ensureOfficialDupoinLogo(withStyle, aspectRatio), aspectRatio);
+    : `${guarded}\n\n${styleLock}`.trim();
+  return withImageAspectPrompt(ensureOfficialDupoinLogo(withStyle, aspectRatio, { includeSwipeLeft }), aspectRatio);
 }
 
 /** User message that drives Social Post image-prompt generation from a selected caption. */
