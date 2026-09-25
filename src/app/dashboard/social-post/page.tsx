@@ -364,7 +364,7 @@ export default function SocialPostPage() {
       if (Array.isArray(data.tasks)) {
         const confirmed = confirmedStatusRef.current;
         setRecentPosts(mergeConfirmedSocialPostStatus(data.tasks, confirmed));
-        setViewingPost((current) => viewingPostWithConfirmedStatus(current, confirmed));
+        setViewingPost((current: { id?: string; status?: string | null } | null) => viewingPostWithConfirmedStatus(current, confirmed));
       }
       setRecentPostsError('');
     } catch (err) {
@@ -614,7 +614,7 @@ export default function SocialPostPage() {
         const confirmed = confirmedStatusRef.current;
         setPostStatus(appliedStatus);
         setRecentPosts((posts) => mergeConfirmedSocialPostStatus(posts, confirmed));
-        setViewingPost((post) => viewingPostWithConfirmedStatus(post, confirmed));
+        setViewingPost((post: { id?: string; status?: string | null } | null) => viewingPostWithConfirmedStatus(post, confirmed));
         setStatusMessage(data.message || `Status updated to ${appliedStatus}`);
         setTimeout(() => setStatusMessage(''), 5000);
       } else {
