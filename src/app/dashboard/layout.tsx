@@ -24,26 +24,27 @@ type IconName =
   | 'brand' | 'image' | 'calendar' | 'template' | 'knowledge' | 'history'
   | 'graph' | 'tokens' | 'analytics' | 'accounts' | 'models' | 'docs';
 
-type IconMark = string | { cx: number; cy: number; r: number };
+type IconCircle = { cx: number; cy: number; r: number };
+type IconMark = string | IconCircle;
 
-const iconPaths: Record<IconName, IconMark | readonly IconMark[]> = {
-  home: 'M3 10.5 12 3l9 7.5M5 9.5V21h14V9.5M9 21v-7h6v7',
-  social: 'M7 8h10M7 12h7M5 4h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2h-7l-5 3v-3H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z',
-  video: 'm15 10 4.5-3v10L15 14M5 5h8a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z',
-  event: 'M5 4h14a2 2 0 0 1 2 2v14H3V6a2 2 0 0 1 2-2Zm3-2v4m8-4v4M3 9h18M7 13h4m-4 4h8',
-  article: 'M6 3h9l4 4v14H6V3Zm9 0v5h4M9 12h7m-7 4h7',
-  research: 'm20 20-4.5-4.5M18 10a8 8 0 1 1-16 0 8 8 0 0 1 16 0Z',
-  brand: 'm3 12 9-9 9 9-9 9-9-9Zm6 0h6',
-  image: 'M4 4h16v16H4V4Zm0 12 4-4 3 3 3-4 6 6M8 8h.01',
-  calendar: 'M4 5h16v16H4V5Zm4-3v6m8-6v6M4 10h16',
-  template: 'M5 3h14v18H5V3Zm4 4h6m-6 4h6m-6 4h4',
-  knowledge: 'M4 5a3 3 0 0 1 3-3h5v18H7a3 3 0 0 0-3 3V5Zm16 0a3 3 0 0 0-3-3h-5v18h5a3 3 0 0 1 3 3V5Z',
-  history: 'M3 12a9 9 0 1 0 3-6.7L3 8m0-5v5h5m4-2v6l4 2',
-  graph: 'M12 4v6m0 4v6M6 7l6 3 6-3M6 17l6-3 6 3M6 7v10m12-10v10',
-  tokens: 'M12 3c4.4 0 8 1.3 8 3s-3.6 3-8 3-8-1.3-8-3 3.6-3 8-3Zm-8 3v6c0 1.7 3.6 3 8 3s8-1.3 8-3V6M4 12v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6',
-  analytics: 'M4 20V10m6 10V4m6 16v-7m4 7H2',
-  accounts: 'M16 20v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2m7-10a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm8 2a4 4 0 0 1 4 4v2m-4-10a4 4 0 0 0 0-8',
-  models: 'M12 3 4 7v10l8 4 8-4V7l-8-4Zm-8 4 8 4 8-4m-8 4v10',
+const iconPaths: Record<IconName, readonly IconMark[]> = {
+  home: ['M3 10.5 12 3l9 7.5M5 9.5V21h14V9.5M9 21v-7h6v7'],
+  social: ['M7 8h10M7 12h7M5 4h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2h-7l-5 3v-3H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z'],
+  video: ['m15 10 4.5-3v10L15 14M5 5h8a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z'],
+  event: ['M5 4h14a2 2 0 0 1 2 2v14H3V6a2 2 0 0 1 2-2Zm3-2v4m8-4v4M3 9h18M7 13h4m-4 4h8'],
+  article: ['M6 3h9l4 4v14H6V3Zm9 0v5h4M9 12h7m-7 4h7'],
+  research: ['m20 20-4.5-4.5M18 10a8 8 0 1 1-16 0 8 8 0 0 1 16 0Z'],
+  brand: ['m3 12 9-9 9 9-9 9-9-9Zm6 0h6'],
+  image: ['M4 4h16v16H4V4Zm0 12 4-4 3 3 3-4 6 6M8 8h.01'],
+  calendar: ['M4 5h16v16H4V5Zm4-3v6m8-6v6M4 10h16'],
+  template: ['M5 3h14v18H5V3Zm4 4h6m-6 4h6m-6 4h4'],
+  knowledge: ['M4 5a3 3 0 0 1 3-3h5v18H7a3 3 0 0 0-3 3V5Zm16 0a3 3 0 0 0-3-3h-5v18h5a3 3 0 0 1 3 3V5Z'],
+  history: ['M3 12a9 9 0 1 0 3-6.7L3 8m0-5v5h5m4-2v6l4 2'],
+  graph: ['M12 4v6m0 4v6M6 7l6 3 6-3M6 17l6-3 6 3M6 7v10m12-10v10'],
+  tokens: ['M12 3c4.4 0 8 1.3 8 3s-3.6 3-8 3-8-1.3-8-3 3.6-3 8-3Zm-8 3v6c0 1.7 3.6 3 8 3s8-1.3 8-3V6M4 12v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6'],
+  analytics: ['M4 20V10m6 10V4m6 16v-7m4 7H2'],
+  accounts: ['M16 20v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2m7-10a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm8 2a4 4 0 0 1 4 4v2m-4-10a4 4 0 0 0 0-8'],
+  models: ['M12 3 4 7v10l8 4 8-4V7l-8-4Zm-8 4 8 4 8-4m-8 4v10'],
   // Lucide circle-help: a question mark, readable at nav size beside the document and book icons.
   docs: [
     { cx: 12, cy: 12, r: 10 },
@@ -53,11 +54,9 @@ const iconPaths: Record<IconName, IconMark | readonly IconMark[]> = {
 };
 
 function NavIcon({ name }: { name: IconName }) {
-  const marks = iconPaths[name];
-  const list = typeof marks === 'string' ? [marks] : marks;
   return (
     <svg aria-hidden="true" className="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
-      {list.map((mark, index) => (
+      {iconPaths[name].map((mark, index) => (
         typeof mark === 'string'
           ? <path key={index} d={mark} />
           : <circle key={index} cx={mark.cx} cy={mark.cy} r={mark.r} />
