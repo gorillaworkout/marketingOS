@@ -16,6 +16,8 @@ export interface ImageJobResult {
   /** Toast-friendly notice when capacity fallback ran. */
   fallbackMessage?: string;
   aspectRatio?: ImageAspectRatio;
+  /** Social Post only: the fixed Swipe left pill was composited onto this image. */
+  includeSwipeLeft?: boolean;
 }
 
 export interface ImageJob {

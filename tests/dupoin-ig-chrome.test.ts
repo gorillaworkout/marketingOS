@@ -14,10 +14,15 @@ import {
   DUPOIN_IG_LOCKUP_LEFT,
   DUPOIN_IG_LOCKUP_TOP,
   DUPOIN_IG_LOCKUP_WIDTH,
+  DUPOIN_IG_SWIPE_BUTTON_HEIGHT,
+  DUPOIN_IG_SWIPE_BUTTON_WIDTH,
+  DUPOIN_IG_SWIPE_GAP_ABOVE_FOOTER_PX,
   DUPOIN_SOCIAL_FOOTER_PNG_PATH,
   DUPOIN_SOCIAL_HEADER_PNG_PATH,
+  DUPOIN_SOCIAL_SWIPE_LEFT_PNG_PATH,
   chromePlacement,
   compositeDupoinInstagramChrome,
+  swipeButtonPlacement,
   firstContentRow,
   knockOutBlackBackground,
   lastContentRow,
@@ -326,4 +331,109 @@ test('compositing fails loudly rather than silently returning an unbranded image
     () => compositeDupoinInstagramChrome(Buffer.from('not an image')),
     /composite|chrome|input|header|footer/i,
   );
+});
+
+test('the swipe-left plate is a tight transparent capsule at the template size', async () => {
+  assert.ok(fs.existsSync(DUPOIN_SOCIAL_SWIPE_LEFT_PNG_PATH));
+  assert.equal(path.basename(DUPOIN_SOCIAL_SWIPE_LEFT_PNG_PATH), 'dupoin-social-swipe-left.png');
+  assert.ok(DUPOIN_SOCIAL_SWIPE_LEFT_PNG_PATH.includes(path.join('public', 'brand')));
+  const plate = await raw(DUPOIN_SOCIAL_SWIPE_LEFT_PNG_PATH);
+  assert.equal(plate.info.width, DUPOIN_IG_SWIPE_BUTTON_WIDTH);
+  assert.equal(plate.info.height, DUPOIN_IG_SWIPE_BUTTON_HEIGHT);
+  const at = (x: number, y: number) => {
+    const i = (y * plate.info.width + x) * 4;
+    return [plate.data[i], plate.data[i + 1], plate.data[i + 2], plate.data[i + 3]];
+  };
+  assert.equal(at(0, 0)[3], 0, 'capsule corners stay transparent so the scene shows through');
+  const center = at(Math.floor(plate.info.width / 2), Math.floor(plate.info.height / 2));
+  assert.ok(center[0] < 16 && center[1] < 16 && center[2] < 16 && center[3] === 255, 'pill fill is opaque black');
+  const rim = at(Math.floor(plate.info.width / 2), 0);
+  assert.ok(rim[0] > 200 && rim[1] > 200 && rim[2] > 200 && rim[3] > 200, 'top edge is the thin white border');
+});
+
+test('swipe-left placement is centered and sits above the footer band', () => {
+  const width = DUPOIN_IG_CHROME_WIDTH;
+  const height = DUPOIN_IG_CHROME_HEIGHT;
+  const place = chromePlacement(width, height);
+  const swipe = swipeButtonPlacement(width, height, place.footerHeight, place.headerHeight);
+  assert.equal(swipe.width, DUPOIN_IG_SWIPE_BUTTON_WIDTH);
+  assert.equal(swipe.height, DUPOIN_IG_SWIPE_BUTTON_HEIGHT);
+  assert.equal(swipe.gapAboveFooter, DUPOIN_IG_SWIPE_GAP_ABOVE_FOOTER_PX);
+  assert.equal(swipe.left, Math.round((width - swipe.width) / 2));
+  assert.equal(width - (swipe.left + swipe.width), swipe.left, 'left and right margins match');
+  assert.equal(swipe.top + swipe.height + swipe.gapAboveFooter, height - place.footerHeight);
+  assert.ok(swipe.top > place.headerHeight, 'pill stays below the header lockup on the template canvas');
+});
+
+test('compositing stamps the swipe pill only when requested', async () => {
+  const width = DUPOIN_IG_CHROME_WIDTH;
+  const height = DUPOIN_IG_CHROME_HEIGHT;
+  const canvas = await sharp({
+    create: { width, height, channels: 4, background: { r: 180, g: 20, b: 20, alpha: 1 } },
+  }).png().toBuffer();
+
+  const place = chromePlacement(width, height);
+  const swipe = swipeButtonPlacement(width, height, place.footerHeight, place.headerHeight);
+  const off = await compositeDupoinInstagramChrome(canvas);
+  const on = await compositeDupoinInstagramChrome(canvas, { includeSwipeLeft: true });
+
+  const offRaw = await raw(off);
+  const onRaw = await raw(on);
+  const read = (image: { data: Buffer; info: { width: number } }, x: number, y: number) => {
+    const i = (y * image.info.width + x) * 4;
+    return [image.data[i], image.data[i + 1], image.data[i + 2], image.data[i + 3]];
+  };
+  const plate = await raw(DUPOIN_SOCIAL_SWIPE_LEFT_PNG_PATH);
+  const plateAt = (x: number, y: number) => {
+    const i = (y * plate.info.width + x) * 4;
+    return [plate.data[i], plate.data[i + 1], plate.data[i + 2], plate.data[i + 3]];
+  };
+
+  let sample: { x: number; y: number; rgba: number[] } | null = null;
+  for (let y = 8; y < plate.info.height - 8 && !sample; y++) {
+    for (let x = 16; x < plate.info.width - 16; x++) {
+      const rgba = plateAt(x, y);
+      if (rgba[3] === 255 && rgba[0] > 230 && rgba[1] > 230 && rgba[2] > 230) {
+        sample = { x, y, rgba };
+        break;
+      }
+    }
+  }
+  assert.ok(sample, 'expected a white label pixel on the swipe plate');
+
+  const sceneX = swipe.left + sample.x;
+  const sceneY = swipe.top + sample.y;
+  assert.deepEqual(read(offRaw, sceneX, sceneY).slice(0, 3), [180, 20, 20], 'swipe off leaves the pill area as the generated scene');
+  assert.deepEqual(read(onRaw, sceneX, sceneY), sample.rgba, 'swipe on copies the plate pixel, not a redraw');
+
+  const above = read(onRaw, Math.round(width / 2), swipe.top - 6);
+  assert.deepEqual(above.slice(0, 3), [180, 20, 20], 'scene immediately above the pill stays clear');
+  const bottom = read(onRaw, 10, height - 4);
+  assert.ok(bottom[0] > 245 && bottom[1] > 245 && bottom[2] > 245, 'footer stays the white regulatory bar');
+
+  const fill = read(onRaw, swipe.left + Math.floor(swipe.width / 2), swipe.top + Math.floor(swipe.height / 2));
+  assert.ok(fill[0] < 16 && fill[1] < 16 && fill[2] < 16, 'pill center is the black fill');
+});
+
+test('swipe-left compositing stays centered above the footer on a square canvas', async () => {
+  const width = 1024;
+  const height = 1024;
+  const canvas = await sharp({
+    create: { width, height, channels: 4, background: { r: 8, g: 16, b: 32, alpha: 1 } },
+  }).png().toBuffer();
+  const stamped = await compositeDupoinInstagramChrome(canvas, { includeSwipeLeft: true });
+  const { data, info } = await raw(stamped);
+  const at = (x: number, y: number) => {
+    const i = (y * info.width + x) * 4;
+    return [data[i], data[i + 1], data[i + 2]];
+  };
+  const place = chromePlacement(width, height);
+  const swipe = swipeButtonPlacement(width, height, place.footerHeight, place.headerHeight);
+  assert.equal(swipe.left, Math.round((width - swipe.width) / 2));
+  assert.ok(swipe.top + swipe.height <= height - place.footerHeight, 'pill must not cover the footer');
+  assert.deepEqual(at(Math.round(width / 2), Math.round(height / 2)), [8, 16, 32]);
+  const fill = at(swipe.left + Math.floor(swipe.width / 2), swipe.top + Math.floor(swipe.height / 2));
+  assert.ok(fill[0] < 40 && fill[1] < 40 && fill[2] < 40, 'scaled pill fill is still black');
+  const bottom = at(12, height - 3);
+  assert.ok(bottom[0] > 245 && bottom[1] > 245 && bottom[2] > 245);
 });

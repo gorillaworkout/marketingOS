@@ -38,7 +38,7 @@ export async function POST(request: NextRequest) {
   const userId = auth.id;
   if (!userId) return jsonError('Unauthorized', 401);
 
-  let body: { prompt?: unknown; type?: unknown; brief?: unknown; model?: unknown; taskId?: unknown; aspectRatio?: unknown };
+  let body: { prompt?: unknown; type?: unknown; brief?: unknown; model?: unknown; taskId?: unknown; aspectRatio?: unknown; includeSwipeLeft?: unknown };
   try {
     body = await request.json();
   } catch {
@@ -60,10 +60,11 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     return jsonError(error instanceof Error ? error.message : 'Invalid image aspect ratio', 400);
   }
+  const includeSwipeLeft = body.includeSwipeLeft === true;
   const job = imageJobs.create(userId);
 
   // Deliberately detached from the HTTP request: tunnel/browser disconnects must not stop the job.
-  void runImageJob(job, prompt, brief, type, model, taskId, aspectRatio);
+  void runImageJob(job, prompt, brief, type, model, taskId, aspectRatio, includeSwipeLeft);
 
   return NextResponse.json({ jobId: job.id, status: job.status }, { status: 202 });
 }
@@ -85,7 +86,7 @@ export async function GET(request: NextRequest) {
   });
 }
 
-async function runImageJob(job: ImageJob, prompt: string, brief: string, type: string, model: string, taskId: string | null, aspectRatio: ImageAspectRatio) {
+async function runImageJob(job: ImageJob, prompt: string, brief: string, type: string, model: string, taskId: string | null, aspectRatio: ImageAspectRatio, includeSwipeLeft: boolean) {
   const cwd = process.cwd() || '/Users/bayudarmawan/marketingos';
   const sopName = generateSOPFileName(brief || prompt, type);
 
@@ -101,7 +102,8 @@ async function runImageJob(job: ImageJob, prompt: string, brief: string, type: s
     // Fall back to the gateway's default image model when an unknown one is requested.
     const safeModel = resolveImageModel(model);
     const generationSpec = getImageGenerationSpec(aspectRatio);
-    const gatewayPrompt = applyDupoinImagePromptLocks(prompt, aspectRatio);
+    const swipeLeft = type === 'social-post' && includeSwipeLeft;
+    const gatewayPrompt = applyDupoinImagePromptLocks(prompt, aspectRatio, { includeSwipeLeft: swipeLeft });
 
     const { payload, usedModel, fallbackFrom, fallbackMessage } = await generateWithAntigravityCapacityFallback(
       safeModel,
@@ -139,7 +141,7 @@ async function runImageJob(job: ImageJob, prompt: string, brief: string, type: s
     // wordmark on the same image would double-brand it. Other image types
     // still get the wordmark-only stamp.
     imageBytes = type === 'social-post'
-      ? await compositeDupoinInstagramChrome(imageBytes)
+      ? await compositeDupoinInstagramChrome(imageBytes, { includeSwipeLeft: swipeLeft })
       : await compositeDupoinLogo(imageBytes);
 
     const directory = path.join(cwd, 'public', 'outputs', 'images');
@@ -156,6 +158,7 @@ async function runImageJob(job: ImageJob, prompt: string, brief: string, type: s
       model: imageModelLabel(usedModel),
       usedModel,
       aspectRatio,
+      includeSwipeLeft: swipeLeft,
       ...(fallbackFrom ? { fallbackFrom, fallbackMessage } : {}),
     };
     imageJobs.update(job.id, job.ownerId, {
@@ -171,6 +174,7 @@ async function runImageJob(job: ImageJob, prompt: string, brief: string, type: s
     }
     void recordImageOnTask(taskId, job.ownerId, {
       imageUrl, fileName, sopName, model: usedModel, prompt, aspectRatio,
+      includeSwipeLeft: swipeLeft,
       ...(fallbackFrom ? { fallbackFrom, fallbackMessage } : {}),
     });
   } catch (error) {
@@ -289,6 +293,7 @@ async function recordImageOnTask(
     model: string;
     prompt: string;
     aspectRatio: ImageAspectRatio;
+    includeSwipeLeft?: boolean;
     fallbackFrom?: string;
     fallbackMessage?: string;
   },
@@ -308,7 +313,11 @@ async function recordImageOnTask(
     }
 
     const existing = Array.isArray(data.images) ? data.images : [];
-    const record = { ...entry, generatedAt: new Date().toISOString() };
+    const record = {
+      ...entry,
+      includeSwipeLeft: entry.includeSwipeLeft === true,
+      generatedAt: new Date().toISOString(),
+    };
 
     await execute('UPDATE tasks SET output_data = ? WHERE id = ? AND user_id = ?', [
       JSON.stringify({ ...data, images: [...existing, record], imageUrl: entry.imageUrl }),

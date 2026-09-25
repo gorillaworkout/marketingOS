@@ -93,6 +93,7 @@ interface ImageJobResponse {
     fallbackFrom?: string;
     fallbackMessage?: string;
     aspectRatio?: ImageAspectRatio;
+    includeSwipeLeft?: boolean;
   };
 }
 
@@ -278,9 +279,12 @@ export default function SocialPostPage() {
   const [taskId, setTaskId] = useState<string | null>(null);
   const [generatingImage, setGeneratingImage] = useState(false);
   const [generatedImage, setGeneratedImage] = useState<string | null>(null);
+  const [previewImage, setPreviewImage] = useState<{ src: string; alt: string } | null>(null);
   const [editableImagePrompt, setEditableImagePrompt] = useState('');
   const [imageModel, setImageModel] = useState(DEFAULT_IMAGE_MODEL);
   const [imageAspectRatio, setImageAspectRatio] = useState<ImageAspectRatio>(DEFAULT_IMAGE_ASPECT_RATIO);
+  // Off by default: header and footer chrome only, matching posts from before this option.
+  const [includeSwipeLeft, setIncludeSwipeLeft] = useState(false);
   const [availableImageModels, setAvailableImageModels] = useState(AVAILABLE_IMAGE_MODELS);
   const [imageProgress, setImageProgress] = useState<ImageProgressState | null>(null);
   const [imageNotice, setImageNotice] = useState('');
@@ -393,6 +397,15 @@ export default function SocialPostPage() {
     };
   }, [stopElapsedTimer, stopImageTracking]);
 
+  useEffect(() => {
+    if (!previewImage) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setPreviewImage(null);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [previewImage]);
+
   const handleGenerate = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
@@ -400,6 +413,7 @@ export default function SocialPostPage() {
     setOptions(null);
     setResult(null);
     setGeneratedImage(null);
+    setPreviewImage(null);
     setImageHistory([]);
     setImageNotice('');
     setGeneratedImageModel(null);
@@ -472,7 +486,7 @@ export default function SocialPostPage() {
                 setTaskId(r.taskId);
                 setTokenUsage(r.usage);
                 if (r.options?.[0]) {
-                  setEditableImagePrompt(applyDupoinImagePromptLocks(r.options[0].imagePrompt || r.imagePrompt || '', imageAspectRatio));
+                  setEditableImagePrompt(applyDupoinImagePromptLocks(r.options[0].imagePrompt || r.imagePrompt || '', imageAspectRatio, { includeSwipeLeft }));
                 }
                 if (r.qcResults) setQcResults(r.qcResults);
                 if (r.dupoinFileName) setDupoinFileName(r.dupoinFileName);
@@ -543,7 +557,7 @@ export default function SocialPostPage() {
       }
 
       setKnowledgeSaved(true);
-      setEditableImagePrompt(applyDupoinImagePromptLocks(selected.imagePrompt || '', imageAspectRatio));
+      setEditableImagePrompt(applyDupoinImagePromptLocks(selected.imagePrompt || '', imageAspectRatio, { includeSwipeLeft }));
       setTimeout(() => setKnowledgeSaved(false), 5000);
     } catch (e) {
       const message = e instanceof Error ? e.message : 'Unknown error';
@@ -613,6 +627,7 @@ export default function SocialPostPage() {
     setGeneratingImage(true);
     setError('');
     setGeneratedImage(null);
+    setPreviewImage(null);
     setImageNotice('');
     setGeneratedImageModel(null);
     setImageProgress({ step: 'trying', progress: 5, message: 'Starting image generation...', elapsed: 0 });
@@ -623,12 +638,12 @@ export default function SocialPostPage() {
     }, 1000);
 
     try {
-      const imagePrompt = applyDupoinImagePromptLocks(editableImagePrompt, imageAspectRatio);
+      const imagePrompt = applyDupoinImagePromptLocks(editableImagePrompt, imageAspectRatio, { includeSwipeLeft });
       setEditableImagePrompt(imagePrompt);
       const res = await fetch('/api/generate-image', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt: imagePrompt, taskId, type: 'social-post', brief: brief || imagePrompt.substring(0, 100), model: imageModel, aspectRatio: imageAspectRatio }),
+        body: JSON.stringify({ prompt: imagePrompt, taskId, type: 'social-post', brief: brief || imagePrompt.substring(0, 100), model: imageModel, aspectRatio: imageAspectRatio, includeSwipeLeft }),
       });
 
       const startup = await readImageJobResponse(res);
@@ -672,6 +687,7 @@ export default function SocialPostPage() {
                 fallbackFrom: status.result!.fallbackFrom,
                 fallbackMessage: status.result!.fallbackMessage,
                 aspectRatio: status.result!.aspectRatio || imageAspectRatio,
+                includeSwipeLeft: status.result!.includeSwipeLeft === true,
                 prompt: imagePrompt,
                 generatedAt: new Date().toISOString(),
               }]);
@@ -719,6 +735,7 @@ export default function SocialPostPage() {
     setResult(null);
     setSelectedIndex(null);
     setGeneratedImage(null);
+    setPreviewImage(null);
     setImageNotice('');
     setGeneratedImageModel(null);
     setKnowledgeSaved(false);
@@ -734,20 +751,22 @@ export default function SocialPostPage() {
       const history = Array.isArray(data.images) ? data.images : [];
       const latest = history[history.length - 1];
       const restoredRatio = IMAGE_ASPECT_RATIOS.includes(latest?.aspectRatio) ? latest.aspectRatio : DEFAULT_IMAGE_ASPECT_RATIO;
+      const restoredSwipe = latest?.includeSwipeLeft === true;
       setImageAspectRatio(restoredRatio);
+      setIncludeSwipeLeft(restoredSwipe);
       // Handle both old format (single result) and new format (3 options)
       if (data.options && Array.isArray(data.options)) {
         setOptions(data.options);
         setTaskId(post.id);
         if (data.options[0]) {
-          setEditableImagePrompt(applyDupoinImagePromptLocks(data.options[0].imagePrompt || data.imagePrompt || '', restoredRatio));
+          setEditableImagePrompt(applyDupoinImagePromptLocks(data.options[0].imagePrompt || data.imagePrompt || '', restoredRatio, { includeSwipeLeft: restoredSwipe }));
         }
       } else {
         // Old format - convert to single option
         const imagePrompt = data.imagePrompt || '';
         setResult({ caption: data.captionData || data, imagePrompt, taskId: post.id });
         setTaskId(post.id);
-        setEditableImagePrompt(applyDupoinImagePromptLocks(imagePrompt, restoredRatio));
+        setEditableImagePrompt(applyDupoinImagePromptLocks(imagePrompt, restoredRatio, { includeSwipeLeft: restoredSwipe }));
       }
       // Load SOP data if available
       if (data.qcResults) setQcResults(data.qcResults);
@@ -1184,11 +1203,31 @@ export default function SocialPostPage() {
                   <Select value={imageAspectRatio} onChange={(e) => {
                     const ratio = e.target.value as ImageAspectRatio;
                     setImageAspectRatio(ratio);
-                    setEditableImagePrompt(prev => prev.trim() ? applyDupoinImagePromptLocks(prev, ratio) : prev);
+                    setEditableImagePrompt(prev => prev.trim() ? applyDupoinImagePromptLocks(prev, ratio, { includeSwipeLeft }) : prev);
                   }}>
                     {IMAGE_ASPECT_RATIOS.map(ratio => <option key={ratio} value={ratio}>{ratio}</option>)}
                   </Select>
                 </FormField>
+
+                <label className="flex cursor-pointer items-start gap-3 rounded-[var(--mos-radius-control)] border border-[var(--mos-border)] bg-[var(--mos-surface)] px-3 py-2.5">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5 h-4 w-4 accent-cyan-500"
+                    checked={includeSwipeLeft}
+                    data-testid="social-post-swipe-left"
+                    onChange={(event) => {
+                      const next = event.target.checked;
+                      setIncludeSwipeLeft(next);
+                      setEditableImagePrompt(prev => prev.trim()
+                        ? applyDupoinImagePromptLocks(prev, imageAspectRatio, { includeSwipeLeft: next })
+                        : prev);
+                    }}
+                  />
+                  <span>
+                    <span className="block text-sm font-medium text-[var(--mos-text-secondary)]">Swipe left button</span>
+                    <span className="mt-0.5 block text-xs leading-5 text-[var(--mos-text-faint)]">When on, a centered pill sits just above the footer.</span>
+                  </span>
+                </label>
 
                 {/* Generate button */}
                 <Button variant="primary" className="w-full" onClick={generateImage} disabled={generatingImage || !editableImagePrompt.trim()}>
@@ -1237,8 +1276,17 @@ export default function SocialPostPage() {
                   {imageNotice}
                 </div>
               )}
-              <div className="bg-[var(--mos-surface)] rounded-lg p-2 flex items-center justify-center">
-                <img src={generatedImage} alt="Generated" className="max-w-full max-h-[500px] rounded-lg" />
+              <div className="bg-[var(--mos-surface)] rounded-lg p-2 flex flex-col items-center justify-center gap-2">
+                <button
+                  type="button"
+                  data-testid="social-post-generated-image"
+                  aria-label="Enlarge image"
+                  className="cursor-zoom-in rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--mos-accent-ring)]"
+                  onClick={() => setPreviewImage({ src: generatedImage, alt: 'Generated social post' })}
+                >
+                  <img src={generatedImage} alt="Generated" className="max-w-full max-h-[500px] rounded-lg" />
+                </button>
+                <p className="text-xs text-[var(--mos-text-faint)]">Click the image to enlarge.</p>
               </div>
             </Panel>
           )}
@@ -1248,21 +1296,34 @@ export default function SocialPostPage() {
             <Panel>
               <SectionHeader title="Image history" description={`${imageHistory.length} image(s) generated for this post.`} />
               <div className="mt-4 space-y-2">
-                {imageHistory.slice().reverse().map((img: any, i: number) => (
+                {imageHistory.slice().reverse().map((img: any, i: number) => {
+                  const previewAlt = img.sopName || img.fileName || 'Generated social post';
+                  const openHistoryPreview = () => setPreviewImage({ src: img.imageUrl, alt: previewAlt });
+                  return (
                   <div key={`${img.fileName || img.imageUrl}-${i}`} className="flex items-center gap-3 rounded-[var(--mos-radius-control)] border border-[var(--mos-border)] bg-[var(--mos-surface)] p-2">
-                    <img src={img.imageUrl} alt={img.sopName || 'Generated'} className="h-14 w-14 rounded object-cover shrink-0" />
+                    <button type="button" onClick={openHistoryPreview} aria-label={`Enlarge ${previewAlt}`} className="shrink-0 cursor-zoom-in rounded">
+                      <img src={img.imageUrl} alt="" className="pointer-events-none h-14 w-14 rounded object-cover" />
+                    </button>
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-xs text-[var(--mos-text-secondary)]">{img.sopName || img.fileName}</p>
-                      <p className="text-[10px] text-[var(--mos-text-faint)]">
+                      <p className="truncate text-[10px] text-[var(--mos-text-faint)]">
                         {availableImageModels.find(item => item.id === img.model)?.name || img.model || 'unknown model'}
                         {img.fallbackFrom ? ` · fallback from ${availableImageModels.find(item => item.id === img.fallbackFrom)?.name || img.fallbackFrom}` : ''}
                         {img.aspectRatio ? ` · ${img.aspectRatio}` : ''}
                         {img.generatedAt ? ` · ${new Date(img.generatedAt).toLocaleString('id-ID')}` : ''}
                       </p>
                     </div>
-                    <button type="button" onClick={() => setGeneratedImage(img.imageUrl)} className="shrink-0 text-[10px] text-[var(--mos-text-secondary)] underline">View</button>
+                    <button
+                      type="button"
+                      data-testid="social-post-image-history-view"
+                      onClick={openHistoryPreview}
+                      className="relative z-10 shrink-0 rounded-[var(--mos-radius-control)] px-2 py-1.5 text-xs font-medium text-[var(--mos-accent-soft)] underline-offset-2 hover:underline"
+                    >
+                      View
+                    </button>
                   </div>
-                ))}
+                  );
+                })}
               </div>
             </Panel>
           )}
@@ -1406,6 +1467,33 @@ export default function SocialPostPage() {
           </Panel>
         </div>
       </div>
+
+      {previewImage && (
+        <div
+          className="fixed inset-0 z-[70] flex items-center justify-center bg-black/85 p-4 sm:p-8"
+          role="presentation"
+          onClick={() => setPreviewImage(null)}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label="Image preview"
+            data-testid="social-post-image-preview"
+            className="relative flex max-h-full w-full max-w-5xl flex-col items-center"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <button
+              type="button"
+              autoFocus
+              className="mb-3 self-end rounded-[var(--mos-radius-control)] border border-white/20 bg-black/50 px-3 py-1.5 text-xs font-medium text-white"
+              onClick={() => setPreviewImage(null)}
+            >
+              Close
+            </button>
+            <img src={previewImage.src} alt={previewImage.alt} className="max-h-[85vh] max-w-full rounded-lg object-contain" />
+          </div>
+        </div>
+      )}
 
       {/* Shimmer animation keyframes */}
       <style jsx global>{`

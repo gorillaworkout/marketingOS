@@ -10,7 +10,7 @@ import {
   applyDupoinImagePromptLocks,
   buildSocialPostImagePromptUserMessage,
 } from '../src/lib/dupoin-image-prompt';
-import { chromeClearancePercents } from '../src/lib/dupoin-ig-chrome';
+import { chromeClearancePercents, swipePromptClearancePercent } from '../src/lib/dupoin-ig-chrome';
 import { getImageGenerationSpec } from '../src/lib/image-aspect-ratio';
 import { getSmartSystemPrompt, getSystemPrompt } from '../src/lib/openai';
 
@@ -138,7 +138,7 @@ test('applyDupoinImagePromptLocks reserves chrome bands and locks the selected s
   assert.equal(locked.includes(spec.promptSuffix), true);
   assert.equal(applyDupoinImagePromptLocks(locked, '4:3'), locked, 'locks must be idempotent for the same ratio');
 
-  const switched = applyDupoinImagePromptLocks(locked, '1:1');
+  const switched = applyDupoinImagePromptLocks(locked, '1:1', { includeSwipeLeft: false });
   const square = getImageGenerationSpec('1:1');
   const [squareWidth, squareHeight] = square.size.split('x').map(Number);
   const squareClearance = chromeClearancePercents(squareWidth, squareHeight);
@@ -166,8 +166,64 @@ test('Social Post generate route uses the Brand Guidelines 2026 image-prompt bui
 test('Social Post image route composites Instagram chrome instead of the lower-right wordmark', () => {
   const imageRoute = read('src/app/api/generate-image/route.ts');
   assert.match(imageRoute, /compositeDupoinInstagramChrome/);
-  assert.match(imageRoute, /type === 'social-post'\s*\?\s*await compositeDupoinInstagramChrome\(imageBytes\)\s*:\s*await compositeDupoinLogo\(imageBytes\)/);
+  assert.match(imageRoute, /body\.includeSwipeLeft === true/);
+  assert.match(imageRoute, /const swipeLeft = type === 'social-post' && includeSwipeLeft/);
+  assert.match(imageRoute, /applyDupoinImagePromptLocks\(prompt, aspectRatio, \{ includeSwipeLeft: swipeLeft \}\)/);
+  assert.match(imageRoute, /type === 'social-post'\s*\?\s*await compositeDupoinInstagramChrome\(imageBytes, \{ includeSwipeLeft: swipeLeft \}\)\s*:\s*await compositeDupoinLogo\(imageBytes\)/);
   assert.doesNotMatch(imageRoute, /imageBytes = await compositeDupoinLogo\(imageBytes\)/);
+});
+
+test('swipe-left prompt reservation is optional and does not stack', () => {
+  const off = applyDupoinImagePromptLocks('Premium Instagram advertising poster', '3:4');
+  assert.doesNotMatch(off, /additional \d+%/);
+  assert.doesNotMatch(off, /composited centered Swipe left button/);
+  assert.match(off, /filled Dupoin Blue pill/);
+  assert.match(off, /Swipe left →/);
+
+  const on = applyDupoinImagePromptLocks('Premium Instagram advertising poster', '3:4', { includeSwipeLeft: true });
+  const spec = getImageGenerationSpec('3:4');
+  const [width, height] = spec.size.split('x').map(Number);
+  const swipePercent = swipePromptClearancePercent(width, height);
+  assert.match(on, new RegExp(`additional ${swipePercent}%`));
+  assert.match(on, /composited centered Swipe left button/);
+  assert.match(on, /Do not draw a swipe button, pill, arrow/);
+  assert.doesNotMatch(on, /filled Dupoin Blue pill/);
+  assert.doesNotMatch(on, /Swipe left →/);
+  assert.equal(applyDupoinImagePromptLocks(on, '3:4', { includeSwipeLeft: true }), on, 'swipe-on locks stay idempotent');
+  assert.equal(applyDupoinImagePromptLocks(on, '3:4'), off, 'turning the pill off removes its reservation');
+});
+
+test('Social Post page offers the swipe button before Generate image', () => {
+  const page = read('src/app/dashboard/social-post/page.tsx');
+  assert.match(page, /const \[includeSwipeLeft, setIncludeSwipeLeft\] = useState\(false\)/);
+  assert.match(page, /data-testid="social-post-swipe-left"/);
+  assert.match(page, /Swipe left button/);
+  assert.match(page, /When on, a centered pill sits just above the footer\./);
+  assert.match(page, /aspectRatio: imageAspectRatio, includeSwipeLeft \}/);
+  const aspect = page.indexOf('Image aspect ratio');
+  const swipe = page.indexOf('>Swipe left button<');
+  const generate = page.indexOf("generatingImage ? 'Generating image…' : 'Generate image'");
+  assert.ok(aspect >= 0 && swipe > aspect && generate > swipe, 'swipe option sits after aspect ratio and before Generate image');
+});
+
+test('Social Post result image and history View open the same preview', () => {
+  const page = read('src/app/dashboard/social-post/page.tsx');
+  assert.match(page, /data-testid="social-post-generated-image"/);
+  assert.match(page, /aria-label="Enlarge image"/);
+  assert.match(page, /setPreviewImage\(\{ src: generatedImage, alt: 'Generated social post' \}\)/);
+  assert.match(page, /data-testid="social-post-image-history-view"/);
+  assert.match(page, /const openHistoryPreview = \(\) => setPreviewImage\(\{ src: img\.imageUrl, alt: previewAlt \}\)/);
+  assert.match(page, /onClick=\{openHistoryPreview\}/);
+  assert.doesNotMatch(page, /setGeneratedImage\(img\.imageUrl\)/);
+  assert.match(page, /data-testid="social-post-image-preview"/);
+  assert.match(page, /role="dialog"/);
+  assert.match(page, /aria-modal="true"/);
+  assert.match(page, /aria-label="Image preview"/);
+  assert.match(page, /Click the image to enlarge\./);
+  const generated = page.indexOf('data-testid="social-post-generated-image"');
+  const view = page.indexOf('data-testid="social-post-image-history-view"');
+  const dialog = page.indexOf('data-testid="social-post-image-preview"');
+  assert.ok(generated > 0 && view > generated && dialog > view);
 });
 
 test('Social Post client prompt helpers do not import the sharp compositor', () => {
