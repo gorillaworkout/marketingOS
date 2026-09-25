@@ -1,10 +1,15 @@
-import { unlink } from 'node:fs/promises';
+import { readFile, unlink } from 'node:fs/promises';
 import { NextRequest, NextResponse } from 'next/server';
 import { execute } from '@/lib/database';
 import { requireInternalDocsManager, requireInternalDocsUser } from '@/lib/internal-docs-access';
 import { canManageInternalDocs, isInternalDocAccessLevel } from '@/lib/internal-docs-acl';
 import { findVisibleDocument, publicDocument, type InternalDocListRow } from '@/lib/internal-docs';
+import { docxPreviewHtml } from '@/lib/internal-docs-extract';
 import { resolveStoredInternalDoc, sanitizeDocumentTitle } from '@/lib/internal-docs-storage';
+
+export const runtime = 'nodejs';
+
+const PREVIEW_HTML_LIMIT = 400_000;
 
 type RouteContext = { params: Promise<{ id: string }> };
 
@@ -13,18 +18,33 @@ interface DocumentRow extends InternalDocListRow {
   extracted_text: string;
 }
 
+async function presentDocument(row: DocumentRow) {
+  let previewHtml: string | null = null;
+  if (row.file_ext === '.docx') {
+    const stored = resolveStoredInternalDoc(row.storage_key);
+    if (stored) {
+      try {
+        const html = await docxPreviewHtml(await readFile(stored));
+        previewHtml = html.trim() && html.length <= PREVIEW_HTML_LIMIT ? html : null;
+      } catch (error) {
+        console.error('Internal doc preview failed:', error);
+      }
+    }
+  }
+  return {
+    ...publicDocument(row),
+    extractedText: row.extracted_text || '',
+    previewHtml,
+  };
+}
+
 export async function GET(request: NextRequest, context: RouteContext) {
   const actor = await requireInternalDocsUser(request);
   if (actor instanceof NextResponse) return actor;
   const { id } = await context.params;
   const row = await findVisibleDocument<DocumentRow>(actor.principal, id, canManageInternalDocs(actor.principal));
   if (!row) return NextResponse.json({ error: 'Document not found' }, { status: 404 });
-  return NextResponse.json({
-    document: {
-      ...publicDocument(row),
-      extractedText: row.extracted_text || '',
-    },
-  });
+  return NextResponse.json({ document: await presentDocument(row) });
 }
 
 export async function PATCH(request: NextRequest, context: RouteContext) {
@@ -62,7 +82,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
   params.push(id);
   await execute(`UPDATE internal_documents SET ${updates.join(', ')} WHERE id = ?`, params);
   const row = await findVisibleDocument<DocumentRow>(actor.principal, id, true);
-  return NextResponse.json({ document: row ? { ...publicDocument(row), extractedText: row.extracted_text || '' } : null });
+  return NextResponse.json({ document: row ? await presentDocument(row) : null });
 }
 
 export async function DELETE(request: NextRequest, context: RouteContext) {

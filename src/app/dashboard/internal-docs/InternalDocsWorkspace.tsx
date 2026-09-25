@@ -14,6 +14,7 @@ import {
   TextArea,
   TextInput,
 } from '@/components/ui/dashboard';
+import { GuideReader } from './GuideReader';
 import {
   INTERNAL_DOC_FILE_ACCEPT,
   internalDocUploadIssue,
@@ -38,6 +39,7 @@ interface DocSummary {
 
 interface DocDetail extends DocSummary {
   extractedText: string;
+  previewHtml?: string | null;
 }
 
 interface Citation {
@@ -594,48 +596,23 @@ export function InternalDocsWorkspace({ documentId }: { documentId?: string }) {
         </Panel>
 
         <div className="flex min-w-0 flex-col gap-4">
-          <Panel className="min-h-64">
+          <Panel padding="none" className="min-h-64">
             {!documentId && (
-              <EmptyState title="Select a guide" description="Open an item from the list to read it." />
+              <div className="p-5 md:p-6">
+                <EmptyState title="Select a guide" description="Open an item from the list to read it." />
+              </div>
             )}
-            {documentId && !openDocument && !openError && <p className="text-xs text-[var(--mos-text-muted)]">Opening document</p>}
-            {openError && <p className="text-sm text-red-300">{openError}</p>}
+            {documentId && !openDocument && !openError && <p className="p-5 text-xs text-[var(--mos-text-muted)] md:p-6">Opening document</p>}
+            {openError && <p className="p-5 text-sm text-red-300 md:p-6">{openError}</p>}
             {openDocument && (
-              <article>
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div>
-                    <h2 className="text-xl font-[560] tracking-[-0.03em] text-[var(--mos-text)]">{openDocument.title}</h2>
-                    <p className="mt-1 text-xs text-[var(--mos-text-faint)]">{openDocument.originalName}</p>
-                  </div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <StatusBadge tone={openDocument.accessLevel === 'it-only' ? 'info' : 'neutral'}>{accessLabel(openDocument.accessLevel)}</StatusBadge>
-                    <StatusBadge tone={statusTone(openDocument.status)}>{openDocument.status === 'indexed' ? 'Indexed' : openDocument.status === 'failed' ? 'Failed' : 'Indexing'}</StatusBadge>
-                    <a href={`/api/internal-docs/${openDocument.id}/file`} className="inline-flex h-8 items-center rounded-[var(--mos-radius-control)] border border-[var(--mos-border)] bg-[var(--mos-raised)] px-3 text-xs text-[var(--mos-text-secondary)]">Download</a>
-                  </div>
-                </div>
-                {canManage && (
-                  <div className="mt-4 flex flex-wrap items-center gap-2">
-                    <label className="text-xs text-[var(--mos-text-muted)]">
-                      Access
-                      <Select
-                        aria-label="Change access level"
-                        value={openDocument.accessLevel}
-                        onChange={event => { void changeAccess(event.target.value as AccessLevel); }}
-                        className="ml-2"
-                      >
-                        <option value="company">Company</option>
-                        <option value="it-only">IT-only</option>
-                      </Select>
-                    </label>
-                    <Button size="sm" onClick={() => { void reindex(); }}>Reindex</Button>
-                    <Button size="sm" variant="danger" onClick={() => { void removeDocument(); }}>Delete</Button>
-                  </div>
-                )}
-                {openDocument.errorMessage && <p className="mt-4 text-sm text-red-300">{openDocument.errorMessage}</p>}
-                <div className="mt-5 max-h-[32rem] overflow-y-auto whitespace-pre-wrap border-t border-[var(--mos-border-subtle)] pt-4 text-sm leading-6 text-[var(--mos-text-secondary)]">
-                  {openDocument.extractedText || 'This document has no indexed text yet.'}
-                </div>
-              </article>
+              <GuideReader
+                key={openDocument.id}
+                document={openDocument}
+                canManage={canManage}
+                onAccessChange={level => { void changeAccess(level); }}
+                onReindex={() => { void reindex(); }}
+                onDelete={() => { void removeDocument(); }}
+              />
             )}
           </Panel>
 

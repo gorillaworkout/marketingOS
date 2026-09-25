@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireInternalDocsUser } from '@/lib/internal-docs-access';
 import { canManageInternalDocs } from '@/lib/internal-docs-acl';
 import { findVisibleDocument } from '@/lib/internal-docs';
-import { resolveStoredInternalDoc, safeDownloadName } from '@/lib/internal-docs-storage';
+import { contentDispositionFor, inlineDocumentRequested, resolveStoredInternalDoc, safeDownloadName } from '@/lib/internal-docs-storage';
 
 type RouteContext = { params: Promise<{ id: string }> };
 
@@ -27,10 +27,14 @@ export async function GET(request: NextRequest, context: RouteContext) {
   try {
     const bytes = await readFile(stored);
     const filename = safeDownloadName(row.original_name, row.file_ext);
+    const inline = inlineDocumentRequested(request.nextUrl.searchParams.get('inline'));
     return new NextResponse(bytes, {
       headers: {
         'Content-Type': row.mime_type || 'application/octet-stream',
-        'Content-Disposition': `attachment; filename="${filename}"`,
+        'Content-Disposition': contentDispositionFor(filename, inline),
+        'Content-Length': String(bytes.byteLength),
+        'X-Content-Type-Options': 'nosniff',
+        'Content-Security-Policy': "frame-ancestors 'self'",
         'Cache-Control': 'private, no-store',
       },
     });

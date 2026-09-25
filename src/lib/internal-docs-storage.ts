@@ -44,3 +44,13 @@ export function safeDownloadName(originalName: string, ext: string): string {
     .slice(0, 180);
   return base.toLowerCase().endsWith(ext) ? base : `${base}${ext}`;
 }
+
+/** `inline` lets the browser show a PDF in the reader. Download stays an attachment. */
+export function contentDispositionFor(filename: string, inline: boolean): string {
+  const safe = filename.replace(/["\r\n\\]/g, '').slice(0, 180) || 'document';
+  return `${inline ? 'inline' : 'attachment'}; filename="${safe}"`;
+}
+
+export function inlineDocumentRequested(value: string | null): boolean {
+  return value === '1' || value === 'true';
+}

@@ -1,5 +1,12 @@
 import mammoth from 'mammoth';
 import { extractText, getDocumentProxy } from 'unpdf';
+import { safeDocumentUrl, sanitizeDocumentHtml } from './internal-docs-reader';
+
+const docxHtmlOptions = {
+  ignoreEmptyParagraphs: true,
+  externalFileAccess: false,
+  convertImage: mammoth.images.imgElement(async () => ({ src: '' })),
+};
 
 const MAX_EXTRACTED_CHARS = 400_000;
 const NO_TEXT = 'No extractable text. Scanned or image-only PDFs are not supported.';
@@ -35,10 +42,34 @@ async function extractPdfText(bytes: Uint8Array): Promise<string> {
   return capText(sections.join('\n\n'));
 }
 
+function hyperlinkUrls(html: string): string[] {
+  const found: string[] = [];
+  for (const match of html.matchAll(/href\s*=\s*(?:"([^"]+)"|'([^']+)')/gi)) {
+    const href = safeDocumentUrl(match[1] || match[2] || '');
+    if (href && !found.includes(href)) found.push(href);
+  }
+  return found;
+}
+
 async function extractDocxText(bytes: Uint8Array): Promise<string> {
   const buffer = Buffer.from(bytes);
   const raw = await mammoth.extractRawText({ buffer });
-  return capText(raw.value || '');
+  let links: string[] = [];
+  try {
+    const html = await mammoth.convertToHtml({ buffer }, docxHtmlOptions);
+    links = hyperlinkUrls(html.value || '').filter(href => !(raw.value || '').includes(href));
+  } catch {
+    links = [];
+  }
+  const combined = links.length ? `${raw.value || ''}\n\n${links.join('\n')}` : (raw.value || '');
+  return capText(combined);
+}
+
+/** Word HTML for the reader, with hyperlinks kept and scripts stripped. */
+export async function docxPreviewHtml(bytes: Uint8Array): Promise<string> {
+  const buffer = Buffer.from(bytes);
+  const result = await mammoth.convertToHtml({ buffer }, docxHtmlOptions);
+  return sanitizeDocumentHtml(result.value || '');
 }
 
 export async function extractInternalDocText(bytes: Uint8Array, ext: string): Promise<string> {
