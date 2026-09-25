@@ -4,10 +4,10 @@ import { v4 as uuidv4 } from 'uuid';
 import { requireInternalDocsManager, requireInternalDocsUser } from '@/lib/internal-docs-access';
 import { canManageInternalDocs, isInternalDocAccessLevel } from '@/lib/internal-docs-acl';
 import { createIndexedDocument, listInternalDocuments, publicDocument } from '@/lib/internal-docs';
+import { internalDocUploadIssue } from '@/lib/internal-docs-upload';
 import {
   internalDocKind,
   internalDocsDirectory,
-  MAX_INTERNAL_DOC_BYTES,
   resolveStoredInternalDoc,
   sanitizeDocumentTitle,
   storageKeyFor,
@@ -40,10 +40,8 @@ export async function POST(request: NextRequest) {
 
   const file = form.get('file');
   if (!(file instanceof File)) return NextResponse.json({ error: 'File is required.' }, { status: 400 });
-  if (file.size <= 0) return NextResponse.json({ error: 'The file is empty.' }, { status: 400 });
-  if (file.size > MAX_INTERNAL_DOC_BYTES) {
-    return NextResponse.json({ error: 'File is larger than 15 MB.' }, { status: 400 });
-  }
+  const issue = internalDocUploadIssue(file);
+  if (issue) return NextResponse.json({ error: issue }, { status: 400 });
 
   const kind = internalDocKind(file.name || '', file.type || '');
   if (!kind) return NextResponse.json({ error: 'Unsupported file type. Use PDF, DOCX, MD, or TXT.' }, { status: 400 });
