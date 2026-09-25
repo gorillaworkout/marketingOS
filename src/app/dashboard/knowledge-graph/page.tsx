@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Button, EmptyState, LoadingState, MetricCard, PageHeader, PageStack, Panel, Select, StatusBadge, Toolbar } from '@/components/ui/dashboard';
 import { knowledgeFeatureColor, knowledgeFeatureLabel } from '@/lib/knowledge-graph-colors';
+import { knowledgeAudienceLabel } from '@/lib/knowledge-graph-entry';
+import KnowledgeEntryActions from './KnowledgeEntryActions';
 import KnowledgeFeatureLegend from './KnowledgeFeatureLegend';
 import KnowledgeGraphCanvas from './KnowledgeGraphCanvas';
 
@@ -37,18 +39,21 @@ export default function AdminKnowledgeGraphPage() {
   const [selected, setSelected] = useState<GraphNode | null>(null);
   const [focusId, setFocusId] = useState('');
 
-  const load = async () => {
-    setLoading(true);
-    setError('');
+  const load = async (quiet = false) => {
+    if (!quiet) {
+      setLoading(true);
+      setError('');
+    }
     try {
       const response = await fetch('/api/admin/knowledge-graph?limit=350', { cache: 'no-store' });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || 'Knowledge graph could not be loaded.');
       setData(payload);
+      setSelected(current => current ? (payload.nodes || []).find((node: GraphNode) => node.id === current.id) || null : null);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Knowledge graph could not be loaded.');
+      if (!quiet) setError(cause instanceof Error ? cause.message : 'Knowledge graph could not be loaded.');
     } finally {
-      setLoading(false);
+      if (!quiet) setLoading(false);
     }
   };
   useEffect(() => {
@@ -82,7 +87,7 @@ export default function AdminKnowledgeGraphPage() {
   const selectedConnections = useMemo(() => selected ? filteredEdges.filter(edge => edge.source === selected.id || edge.target === selected.id) : [], [filteredEdges, selected]);
 
   if (loading) return <LoadingState label="Loading organization graph" />;
-  if (error || !data) return <Panel className="text-sm text-red-300">{error}<Button className="ml-4" onClick={load}>Retry</Button></Panel>;
+  if (error || !data) return <Panel className="text-sm text-red-300">{error}<Button className="ml-4" onClick={() => { void load(); }}>Retry</Button></Panel>;
   const state = health[data.learningHealth.status];
 
   return (
@@ -91,7 +96,7 @@ export default function AdminKnowledgeGraphPage() {
         eyebrow="Organization intelligence / Knowledge"
         title="Knowledge graph"
         description="A current view of what the organization has learned, where it came from, and whether that knowledge is improving output quality."
-        actions={<><span className="hidden text-[11px] text-[var(--mos-text-faint)] sm:block">Updated {new Date(data.generatedAt).toLocaleString('id-ID')}</span><Button onClick={load}>Refresh</Button></>}
+        actions={<><span className="hidden text-[11px] text-[var(--mos-text-faint)] sm:block">Updated {new Date(data.generatedAt).toLocaleString('id-ID')}</span><Button onClick={() => { void load(); }}>Refresh</Button></>}
       />
 
       <Panel padding="none">
@@ -151,12 +156,31 @@ export default function AdminKnowledgeGraphPage() {
                   </div>}
                 </div>
                 <dl className="grid grid-cols-2 gap-4 border-t border-[var(--mos-border-subtle)] pt-4">
-                  <Meta label="Department" value={selected.department} /><Meta label="Contributor" value={selected.username} /><FeatureMeta taskType={selected.taskType} /><Meta label="Style" value={selected.styleCluster} /><Meta label="Platform" value={selected.platform || 'Not set'} /><Meta label="Quality" value={selected.qualityScore.toFixed(2)} />
+                  <Meta label="Department" value={selected.department} /><Meta label="Contributor" value={selected.username} /><FeatureMeta taskType={selected.taskType} /><Meta label="Style" value={selected.styleCluster} /><Meta label="Platform" value={selected.platform || 'Not set'} /><Meta label="Quality" value={selected.qualityScore.toFixed(2)} />{selected.audience && <Meta label="Audience" value={knowledgeAudienceLabel(selected.audience)} />}
                 </dl>
                 <div className="border-t border-[var(--mos-border-subtle)] pt-4">
                   <p className="text-[10px] text-[var(--mos-text-faint)]">Connection provenance</p>
                   <p className="mt-1 text-xs text-[var(--mos-text-muted)]">{selectedConnections.filter(edge => edge.sourceType === 'stored').length} stored · {selectedConnections.filter(edge => edge.sourceType === 'derived').length} derived</p>
                 </div>
+                <KnowledgeEntryActions
+                  entryId={selected.id}
+                  title={selected.brief}
+                  onTitleSaved={(id, title) => {
+                    setData(current => current && ({ ...current, nodes: current.nodes.map(node => node.id === id ? { ...node, brief: title } : node) }));
+                    setSelected(current => current && current.id === id ? { ...current, brief: title } : current);
+                    void load(true);
+                  }}
+                  onDeleted={id => {
+                    setFocusId(current => current === id ? '' : current);
+                    setSelected(current => current?.id === id ? null : current);
+                    setData(current => current && ({
+                      ...current,
+                      nodes: current.nodes.filter(node => node.id !== id),
+                      edges: current.edges.filter(edge => edge.source !== id && edge.target !== id),
+                    }));
+                    void load(true);
+                  }}
+                />
               </div> : <p className="mt-4 text-sm leading-6 text-[var(--mos-text-muted)]">Select a node to inspect its source, owner, feature, quality score, and connection provenance.</p>}
             </div>
             <div className="p-5">
