@@ -18,6 +18,11 @@ import { DEFAULT_IMAGE_ASPECT_RATIO, IMAGE_ASPECT_RATIOS, type ImageAspectRatio 
 import { applyDupoinImagePromptLocks } from '@/lib/dupoin-image-prompt';
 import { AVAILABLE_IMAGE_MODELS, DEFAULT_IMAGE_MODEL } from '@/lib/image-models';
 import { AI_RESEARCH_HANDOFF_QUERY, AI_RESEARCH_HANDOFF_VALUE, readAiResearchHandoff } from '@/lib/ai-research-handoff';
+import {
+  mergeConfirmedSocialPostStatus,
+  socialPostStatusFromResponse,
+  viewingPostWithConfirmedStatus,
+} from '@/lib/social-post-status';
 
 interface QCCheck {
   name: string;
@@ -292,6 +297,8 @@ export default function SocialPostPage() {
   const imageProgressTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const imagePollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const imageRunRef = useRef(0);
+  // Statuses already saved this session. History reloads must not paint the previous value back.
+  const confirmedStatusRef = useRef<Record<string, string>>({});
   const [ratingMessage, setRatingMessage] = useState('');
   const [recentPosts, setRecentPosts] = useState<any[]>([]);
   const [imageHistory, setImageHistory] = useState<any[]>([]);
@@ -351,10 +358,14 @@ export default function SocialPostPage() {
 
   const fetchPosts = async () => {
     try {
-      const res = await fetch('/api/dashboard/history?type=social-post');
+      const res = await fetch('/api/dashboard/history?type=social-post', { cache: 'no-store' });
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error || `History request failed (${res.status})`);
-      if (data.tasks) setRecentPosts(data.tasks);
+      if (Array.isArray(data.tasks)) {
+        const confirmed = confirmedStatusRef.current;
+        setRecentPosts(mergeConfirmedSocialPostStatus(data.tasks, confirmed));
+        setViewingPost((current) => viewingPostWithConfirmedStatus(current, confirmed));
+      }
       setRecentPostsError('');
     } catch (err) {
       setRecentPostsError(err instanceof Error ? err.message : 'Unable to load recent posts');
@@ -596,13 +607,17 @@ export default function SocialPostPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ taskId, status: newStatus }),
       });
-      if (res.ok) {
-        const data = await res.json();
-        setPostStatus(newStatus);
-        setStatusMessage(data.message || `Status updated to ${newStatus}`);
+      const data = await res.json().catch(() => ({}));
+      const appliedStatus = res.ok ? socialPostStatusFromResponse(data, newStatus) : null;
+      if (appliedStatus) {
+        confirmedStatusRef.current = { ...confirmedStatusRef.current, [taskId]: appliedStatus };
+        const confirmed = confirmedStatusRef.current;
+        setPostStatus(appliedStatus);
+        setRecentPosts((posts) => mergeConfirmedSocialPostStatus(posts, confirmed));
+        setViewingPost((post) => viewingPostWithConfirmedStatus(post, confirmed));
+        setStatusMessage(data.message || `Status updated to ${appliedStatus}`);
         setTimeout(() => setStatusMessage(''), 5000);
       } else {
-        const data = await res.json();
         setStatusMessage(data.error || 'Failed to update status');
       }
     } catch {
@@ -1450,7 +1465,7 @@ export default function SocialPostPage() {
                   className={`p-3 border-b border-[var(--mos-border)] cursor-pointer hover:bg-[var(--mos-raised)] transition-colors ${viewingPost?.id === post.id ? 'bg-blue-600/10 border-l-2 border-l-blue-500' : ''}`}>
                   <div className="flex items-center justify-between">
                     <p className="text-sm text-[var(--mos-text-secondary)] truncate flex-1">{post.title}</p>
-                    <span className={`text-[10px] px-1.5 py-0.5 rounded-full ml-2 shrink-0 ${
+                    <span data-testid="social-post-list-status" className={`text-[10px] px-1.5 py-0.5 rounded-full ml-2 shrink-0 ${
                       post.status === 'published' ? 'bg-blue-500/20 text-blue-400' :
                       post.status === 'approved' ? 'bg-green-500/20 text-green-400' :
                       post.status === 'review' ? 'bg-yellow-500/20 text-yellow-400' :
