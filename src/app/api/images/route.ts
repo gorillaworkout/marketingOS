@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { queryOne, queryAll, execute } from '@/lib/database';
+import { queryAll } from '@/lib/database';
 import { getSession } from '@/lib/auth';
+import { linkedGeneratedImages } from '@/lib/image-remix';
 import fs from 'fs';
 import path from 'path';
 
@@ -29,59 +30,48 @@ export async function GET(request: NextRequest) {
 
   // 2. Get task-linked images from the database (all users, not just current user)
   const tasks = await queryAll(`
-    SELECT t.id, t.title, t.brief, t.output_data, t.created_at, t.user_id, u.username, u.name
+    SELECT t.id, t.type, t.title, t.brief, t.output_data, t.created_at, t.user_id, u.username, u.name
     FROM tasks t
     LEFT JOIN users u ON u.id = t.user_id
     WHERE t.output_data IS NOT NULL
     ORDER BY t.created_at DESC
   `) as Record<string, unknown>[];
 
-  // Map task images: filename -> task info
-  const taskImageMap = new Map<string, { taskId: string; title: string; brief: string; userId: string; username: string; name: string }>();
+  // Map task images: filename -> task info. Same org-wide task scan the gallery
+  // already uses; prompt fields come from that stored output and nowhere else.
+  const taskImageMap = new Map<string, {
+    taskId: string;
+    title: string;
+    brief: string;
+    userId: string;
+    username: string;
+    name: string;
+    type: string | null;
+    prompt: string | null;
+    aspectRatio: string | null;
+    model: string | null;
+    includeSwipeLeft: boolean | null;
+  }>();
   for (const task of tasks) {
     try {
       const outputData = typeof task.output_data === 'string' ? JSON.parse(task.output_data as string) : task.output_data;
-      if (outputData && typeof outputData === 'object') {
-        // Check for imageUrl field
-        const imageUrl = (outputData as Record<string, unknown>).imageUrl as string | undefined;
-        if (imageUrl) {
-          const fn = imageUrl.split('/').pop();
-          if (fn) taskImageMap.set(fn, { 
-            taskId: task.id as string, 
-            title: (task.title as string) || '', 
-            brief: (task.brief as string) || '', 
-            userId: task.user_id as string,
-            username: (task.username as string) || '',
-            name: (task.name as string) || ''
-          });
-        }
-        // Check for images array
-        const images = (outputData as Record<string, unknown>).images;
-        if (Array.isArray(images)) {
-          for (const img of images) {
-            if (typeof img === 'string') {
-              const fn = img.split('/').pop();
-              if (fn) taskImageMap.set(fn, { 
-                taskId: task.id as string, 
-                title: (task.title as string) || '', 
-                brief: (task.brief as string) || '', 
-                userId: task.user_id as string,
-                username: (task.username as string) || '',
-                name: (task.name as string) || ''
-              });
-            } else if (img && typeof img === 'object' && (img as Record<string, unknown>).url) {
-              const fn = ((img as Record<string, unknown>).url as string).split('/').pop();
-              if (fn) taskImageMap.set(fn, { 
-                taskId: task.id as string, 
-                title: (task.title as string) || '', 
-                brief: (task.brief as string) || '', 
-                userId: task.user_id as string,
-                username: (task.username as string) || '',
-                name: (task.name as string) || ''
-              });
-            }
-          }
-        }
+      const info = {
+        taskId: task.id as string,
+        title: (task.title as string) || '',
+        brief: (task.brief as string) || '',
+        userId: task.user_id as string,
+        username: (task.username as string) || '',
+        name: (task.name as string) || '',
+        type: typeof task.type === 'string' ? task.type : null,
+      };
+      for (const linked of linkedGeneratedImages(outputData)) {
+        taskImageMap.set(linked.filename, {
+          ...info,
+          prompt: linked.prompt,
+          aspectRatio: linked.aspectRatio,
+          model: linked.model,
+          includeSwipeLeft: linked.includeSwipeLeft,
+        });
       }
     } catch {
       // skip invalid JSON
@@ -101,6 +91,11 @@ export async function GET(request: NextRequest) {
       userId: taskInfo?.userId || null,
       username: taskInfo?.username || null,
       name: taskInfo?.name || null,
+      type: taskInfo?.type || null,
+      prompt: taskInfo?.prompt || null,
+      aspectRatio: taskInfo?.aspectRatio || null,
+      model: taskInfo?.model || null,
+      includeSwipeLeft: taskInfo?.includeSwipeLeft ?? null,
       linked: !!taskInfo,
     };
   });

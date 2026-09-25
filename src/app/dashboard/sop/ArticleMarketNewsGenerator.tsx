@@ -17,6 +17,7 @@ import {
   examplePaaText,
 } from '@/lib/article-market-news-example';
 import { AI_RESEARCH_HANDOFF_QUERY, AI_RESEARCH_HANDOFF_VALUE, readAiResearchHandoff } from '@/lib/ai-research-handoff';
+import { TASK_EDITOR_QUERY, fetchOwnHistoryTask } from '@/lib/history-editor';
 
 interface SourceForm {
   outlet: string;
@@ -141,6 +142,18 @@ export default function ArticleMarketNewsGenerator() {
       setError(cause instanceof Error ? cause.message : 'Could not open the saved article.');
     }
   };
+
+  useEffect(() => {
+    const taskId = new URLSearchParams(window.location.search).get(TASK_EDITOR_QUERY);
+    if (!taskId) return;
+    let active = true;
+    void fetchOwnHistoryTask(ARTICLE_MARKET_NEWS_HISTORY_TYPE, taskId).then(task => {
+      if (active && task) restoreHistory(task as ArticleMarketNewsHistoryTask);
+    });
+    return () => { active = false; };
+    // Open the history deep link once. restoreHistory closes over stable setters.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const paaQuestions = useMemo(() => paaText.split('\n').map(value => value.trim()).filter(Boolean), [paaText]);
   const competitorResearchCount = useMemo(() => new Set([...competitorHeadings.matchAll(/(?:competitor|artikel)\s*([1-5])\s*:/gi)].map(match => match[1])).size, [competitorHeadings]);
