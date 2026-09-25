@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { queryOne } from '@/lib/database';
-import { canAccessFeature, enabledFeaturesForUser, type AccountFeature } from '@/lib/authorization';
+import { ACCOUNT_FEATURE_LABELS, canAccessFeature, enabledFeaturesForUser, type AccountFeature } from '@/lib/authorization';
 
 export interface AuthResult {
   userId: string;
@@ -83,6 +83,6 @@ export async function requireAdmin(request: NextRequest): Promise<AuthorizedUser
 export async function requireFeature(request: NextRequest, feature: AccountFeature): Promise<AuthorizedUser | AuthError> {
   const user = await getAuthorizedUser(request);
   if ('error' in user) return user;
-  if (!canAccessFeature(user, feature)) return { error: `Forbidden: your department does not allow ${feature}`, status: 403 };
+  if (!canAccessFeature(user, feature)) return { error: `Forbidden: your department does not allow ${ACCOUNT_FEATURE_LABELS[feature]}`, status: 403 };
   return user;
 }

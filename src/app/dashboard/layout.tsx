@@ -63,7 +63,6 @@ const resourceItems = [
   { href: '/dashboard/images', label: 'Image Gallery', icon: 'image' },
   { href: '/dashboard/calendar', label: 'Calendar', icon: 'calendar', adminOnly: true },
   { href: '/dashboard/templates', label: 'Templates', icon: 'template', adminOnly: true },
-  { href: '/dashboard/internal-docs', label: 'Internal Docs', icon: 'docs', feature: 'internal-docs' },
   { href: '/dashboard/knowledge', label: 'Knowledge', icon: 'knowledge', adminOnly: true },
   { href: '/dashboard/history', label: 'History', icon: 'history', adminOnly: true },
 ] satisfies Array<{ href: string; label: string; icon: IconName; adminOnly?: boolean; feature?: AccountFeature }>;
@@ -114,6 +113,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const principal = user ? { role: user.role, features: user.enabledFeatures || [] } : null;
 
   const sections: Array<{ label?: string; items: Array<{ href: string; label: string; icon: IconName; adminOnly?: boolean; feature?: AccountFeature }> }> = [
+    { items: [{ href: '/dashboard/internal-docs', label: 'FAQ & Guides', icon: 'docs', feature: 'internal-docs' }] },
     { items: [{ href: '/dashboard', label: 'Overview', icon: 'home' }] },
     {
       label: 'Create',

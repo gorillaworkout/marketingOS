@@ -67,6 +67,6 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ answer: result.content.trim(), citations });
   } catch (error) {
     console.error('Internal docs ask failed:', error);
-    return NextResponse.json({ error: 'Could not answer from internal documents right now.' }, { status: 502 });
+    return NextResponse.json({ error: 'Could not answer from FAQ & Guides right now.' }, { status: 502 });
   }
 }

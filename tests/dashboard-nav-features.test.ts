@@ -63,7 +63,10 @@ test('visiting /dashboard/sop is blocked for members without article-market-news
 test('dashboard layout uses explicit feature keys instead of last path segment', () => {
   assert.match(layout, /href: '\/dashboard\/sop', label: 'Article Market News', icon: 'article', feature: 'article-market-news'/);
   assert.match(layout, /href: '\/dashboard\/ai-research', label: 'AI Research', icon: 'research', feature: 'ai-research'/);
-  assert.match(layout, /href: '\/dashboard\/internal-docs', label: 'Internal Docs', icon: 'docs', feature: 'internal-docs'/);
+  assert.match(layout, /href: '\/dashboard\/internal-docs', label: 'FAQ & Guides', icon: 'docs', feature: 'internal-docs'/);
+  const sections = layout.slice(layout.indexOf('const sections'));
+  assert.ok(sections.indexOf("label: 'FAQ & Guides'") < sections.indexOf("label: 'Overview'"));
+  assert.ok(sections.indexOf("label: 'FAQ & Guides'") < sections.indexOf("label: 'Create'"));
   assert.match(layout, /isDashboardNavItemVisible\(item, principal\)/);
   assert.match(layout, /shouldBlockDashboardGenerationPath\(principal, pathname\)/);
   assert.doesNotMatch(layout, /href\.split\('\/'\)\.pop\(\)/);
@@ -71,7 +74,7 @@ test('dashboard layout uses explicit feature keys instead of last path segment',
 });
 
 test('Internal Docs nav and nested document routes follow the department feature', () => {
-  const item = { href: '/dashboard/internal-docs', label: 'Internal Docs', feature: 'internal-docs' as const };
+  const item = { href: '/dashboard/internal-docs', label: 'FAQ & Guides', feature: 'internal-docs' as const };
   const memberWithout = { role: 'member', features: ['social-post'] };
   const memberWith = { role: 'member', features: ['internal-docs'] };
   const admin = { role: 'admin', features: [] as string[] };

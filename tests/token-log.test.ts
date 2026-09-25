@@ -129,6 +129,7 @@ test('labels ai-research and image-gen clearly and logs them from their routes',
   assert.equal(taskTypeLabel('ai-research'), 'AI Research Assistant');
   assert.equal(taskTypeLabel('social-post'), 'Social Post');
   assert.equal(taskTypeLabel('image-gen'), 'Image Generation');
+  assert.equal(taskTypeLabel('internal-docs'), 'FAQ & Guides');
   assert.equal(EXTRA_TASK_TYPE_LABELS['image-gen'], 'Image Generation');
   assert.equal(taskTypeLabel(''), 'Legacy');
   assert.equal(taskTypeLabel(null), 'Legacy');

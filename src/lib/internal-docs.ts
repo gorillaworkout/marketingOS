@@ -19,11 +19,11 @@ export const INTERNAL_DOCS_CHUNK_SIZE = 1200;
 export const INTERNAL_DOCS_CHUNK_OVERLAP = 200;
 export const INTERNAL_DOCS_ASK_LIMIT = 6;
 export const INTERNAL_DOCS_NO_MATCH_ANSWER =
-  'The internal documents you can access do not contain an answer to that question.';
+  'The FAQ & Guides you can access do not contain an answer to that question.';
 
-export const INTERNAL_DOCS_ASK_SYSTEM = `You answer questions for Dupoin employees using only the internal document excerpts provided in the user message.
+export const INTERNAL_DOCS_ASK_SYSTEM = `You answer questions for Dupoin employees using only the FAQ & Guides excerpts provided in the user message.
 Cite the document title for every claim you take from those excerpts.
-If the excerpts do not contain the answer, say the internal documents do not confirm it.
+If the excerpts do not contain the answer, say FAQ & Guides do not confirm it.
 Do not use outside knowledge for company facts, and do not mention documents that are not in the excerpts.
 Write in clear English.`;
 
@@ -253,10 +253,10 @@ export function formatInternalDocsPrompt(hits: InternalDocHit[], origin: string)
     return `${index + 1}. Title: ${hit.title}\n   Document: ${internalDocAbsoluteUrl(hit.documentId, origin)}\n   Excerpt: ${hit.excerpt}`;
   });
   return [
-    'INTERNAL DOCUMENTS — Company documentation this user is allowed to read.',
+    'FAQ & GUIDES — Company guidance this user is allowed to read.',
     'These are an additional grounded source. Keep using public web sources and the internal knowledge graph when they are present.',
-    'Cite an internal document by its title and document link. Do not treat it as a public web source.',
-    'Do not mention, quote, or infer any internal document that is not listed here.',
+    'Cite a guide by its title and document link. Do not treat it as a public web source.',
+    'Do not mention, quote, or infer any guide that is not listed here.',
     lines.join('\n'),
   ].join('\n');
 }
@@ -273,7 +273,7 @@ export function mergeInternalDocSources(
     if (seen.has(key)) continue;
     seen.add(key);
     extra.push({
-      title: `Internal Docs: ${citation.title}`,
+      title: `FAQ & Guides: ${citation.title}`,
       url: citation.url,
       origin: 'international',
       snippet: citation.excerpt.slice(0, 400),

@@ -14,9 +14,9 @@ export const INTERNAL_DOCS_FEATURE = 'internal-docs' as const;
 /**
  * Features an admin can assign per department on Accounts.
  * Generation workflows stay in GENERATION_FEATURES so model routing is unchanged.
- * Internal Docs is included so access can be turned off without a separate system.
+ * FAQ & Guides (`internal-docs`) is first so it sits at the top of the Accounts list.
  */
-export const ACCOUNT_FEATURES = [...GENERATION_FEATURES, INTERNAL_DOCS_FEATURE] as const;
+export const ACCOUNT_FEATURES = [INTERNAL_DOCS_FEATURE, ...GENERATION_FEATURES] as const;
 export type AccountFeature = typeof ACCOUNT_FEATURES[number];
 
 export const ACCOUNT_FEATURE_LABELS: Record<AccountFeature, string> = {
@@ -26,7 +26,7 @@ export const ACCOUNT_FEATURE_LABELS: Record<AccountFeature, string> = {
   'article-market-news': 'Article Market News',
   'market-research': 'Market Research',
   'ai-research': 'AI Research',
-  'internal-docs': 'Internal Docs',
+  'internal-docs': 'FAQ & Guides',
 };
 
 /** Dashboard href for each account feature. Last path segment is not always the feature id. */
