@@ -8,6 +8,7 @@ import {
   knowledgeBriefFromFact,
   normalizeOptionalRecordId,
   normalizePinnedSourceUrls,
+  type PinnableClaim,
 } from './knowledge-pin';
 
 export { KNOWLEDGE_TASK_TYPES, type KnowledgeTaskType } from './knowledge-task-types';
@@ -259,7 +260,33 @@ export function shouldPersistResearchAnswer(answer: string, aborted: boolean): b
   return !aborted && answer.trim().length >= 40;
 }
 
-/** Top grounded claims, or one sourced summary when the answer has no pinnable claim. */
+/** Prefer concrete figures over a bare source line when the cap drops claims. */
+function researchClaimScore(text: string): number {
+  let score = 0;
+  if (/\d/.test(text)) score += 2;
+  if (/(?:%|\$|\b(?:rp|usd|idr)\b)/i.test(text)) score += 1;
+  if (text.length >= 40 && text.length <= 500) score += 1;
+  const urlChars = (text.match(/https?:\/\/\S+/g) || []).join('').length;
+  if (urlChars > text.length * 0.45) score -= 3;
+  return score;
+}
+
+function rankResearchClaims(claims: PinnableClaim[]): PinnableClaim[] {
+  return claims
+    .map((claim, index) => ({ claim, index, score: researchClaimScore(claim.text) }))
+    .sort((left, right) => right.score - left.score || left.index - right.index)
+    .map(item => item.claim);
+}
+
+/**
+ * Important claims are grounded sentences, not every line of the answer.
+ * Grounded means a markdown link, a raw http(s) URL, a [n] citation into the
+ * retrieved sources, or the source title/host named in the sentence.
+ * Fluff (questions, limitations boilerplate, closings) is dropped.
+ * At most AUTO_RESEARCH_CLAIM_LIMIT claims are kept, with numbered facts first.
+ * If nothing sentence-level qualifies but the answer has source URLs, one
+ * sourced summary is stored so a completed research turn still enters the graph.
+ */
 export function selectResearchKnowledgePieces(input: {
   answer: string;
   query: string;
@@ -268,7 +295,7 @@ export function selectResearchKnowledgePieces(input: {
   const answer = input.answer.trim();
   if (answer.length < 40) return [];
   const sources = input.sources || [];
-  const claims = extractPinnableClaims(answer, sources).slice(0, AUTO_RESEARCH_CLAIM_LIMIT);
+  const claims = rankResearchClaims(extractPinnableClaims(answer, sources, 12)).slice(0, AUTO_RESEARCH_CLAIM_LIMIT);
   const queryBrief = textValue(input.query).slice(0, 240);
   if (claims.length) {
     return claims.map(claim => ({
@@ -372,14 +399,21 @@ export async function persistKnowledgeEntry(input: PersistKnowledgeInput): Promi
       };
     }
   }
-  const duplicate = input.upsertTask ? null : await findStoredKnowledgeDuplicate({
-    userId: input.userId,
-    taskType: input.taskType,
-    taskId,
-    selectedOutput: input.selectedOutput,
-    action: input.action,
-    nowMs,
-  });
+  let duplicate: KnowledgeDedupeRow | null = null;
+  if (!input.upsertTask) {
+    try {
+      duplicate = await findStoredKnowledgeDuplicate({
+        userId: input.userId,
+        taskType: input.taskType,
+        taskId,
+        selectedOutput: input.selectedOutput,
+        action: input.action,
+        nowMs,
+      });
+    } catch (error) {
+      console.warn('Knowledge dedupe lookup failed:', error);
+    }
+  }
 
   if (duplicate) {
     await execute(
@@ -453,15 +487,20 @@ export async function persistKnowledgeQuietly(input: PersistKnowledgeInput): Pro
   }
 }
 
-export async function persistCompletedResearchAnswer(input: {
-  userId: string;
-  conversationId?: string | null;
-  projectId?: string | null;
-  query: string;
-  answer: string;
-  sources?: Array<{ title?: string; url: string }>;
-  aborted?: boolean;
-}): Promise<{ saved: number; deduped: number }> {
+export type ResearchKnowledgePersist = (input: PersistKnowledgeInput) => Promise<PersistKnowledgeResult>;
+
+export async function persistCompletedResearchAnswer(
+  input: {
+    userId: string;
+    conversationId?: string | null;
+    projectId?: string | null;
+    query: string;
+    answer: string;
+    sources?: Array<{ title?: string; url: string }>;
+    aborted?: boolean;
+  },
+  persist: ResearchKnowledgePersist = persistKnowledgeEntry,
+): Promise<{ saved: number; deduped: number }> {
   try {
     if (!shouldPersistResearchAnswer(input.answer, Boolean(input.aborted))) return { saved: 0, deduped: 0 };
     const pieces = selectResearchKnowledgePieces({
@@ -473,7 +512,7 @@ export async function persistCompletedResearchAnswer(input: {
     let deduped = 0;
     for (const piece of pieces) {
       try {
-        const result = await persistKnowledgeEntry({
+        const result = await persist({
           userId: input.userId,
           taskType: AI_RESEARCH_KNOWLEDGE_TASK,
           brief: piece.brief,

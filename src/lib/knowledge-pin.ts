@@ -158,9 +158,73 @@ function rawUrls(text: string): string[] {
   return text.match(/https?:\/\/[^\s)>\]]+/g) || [];
 }
 
+const GENERIC_SOURCE_HOSTS = new Set([
+  'blog', 'com', 'daily', 'data', 'docs', 'google', 'help', 'info', 'mail', 'media',
+  'news', 'post', 'press', 'site', 'support', 'times', 'www', 'yahoo',
+]);
+
+/** Boilerplate and closings are not facts worth storing or pinning. */
+export function isLowValueResearchClaim(text: string): boolean {
+  const normalized = collapseWhitespace(text);
+  if (/^(sources|references|source|gaps and limitations|kesenjangan dan keterbatasan)\b/i.test(normalized)) return true;
+  if (/\b(not verified|unconfirmed|do not confirm|could not be fetched|web search was not run|search rounds:|let me know|happy to help|as an ai)\b/i.test(normalized)) {
+    return true;
+  }
+  if (normalized.endsWith('?') && !/\d/.test(normalized)) return true;
+  return false;
+}
+
+function sourceHostLabel(url: string): string {
+  try {
+    const label = new URL(url).hostname.toLowerCase().replace(/^www\./, '').split('.')[0] || '';
+    if (label.length < 4 || GENERIC_SOURCE_HOSTS.has(label)) return '';
+    return label;
+  } catch {
+    return '';
+  }
+}
+
+/** Map [1] / [1, 2] citations onto the retrieved source list. Grounding prompts number sources this way. */
+function urlsFromNumericCitations(
+  text: string,
+  sources: Array<{ title?: string; url: string }>,
+): string[] {
+  const urls: string[] = [];
+  const pattern = /\[(\d{1,2}(?:\s*[,–-]\s*\d{1,2})*)\]/g;
+  for (const match of text.matchAll(pattern)) {
+    const nums = match[1].match(/\d{1,2}/g) || [];
+    for (const raw of nums) {
+      const source = sources[Number(raw) - 1];
+      if (!source?.url) continue;
+      const canonical = canonicalSourceUrl(source.url);
+      if (canonical && !urls.includes(canonical)) urls.push(canonical);
+    }
+  }
+  return urls;
+}
+
+function urlsFromSourceNames(
+  text: string,
+  sources: Array<{ title?: string; url: string }>,
+): string[] {
+  const fact = text.toLowerCase();
+  const urls: string[] = [];
+  for (const source of sources) {
+    const canonical = canonicalSourceUrl(source.url);
+    if (!canonical || urls.includes(canonical)) continue;
+    const title = collapseWhitespace(source.title || '');
+    const titleHit = title.length >= 8 && fact.includes(title.toLowerCase());
+    const host = sourceHostLabel(source.url);
+    const hostHit = Boolean(host) && fact.includes(host);
+    if (titleHit || hostHit) urls.push(canonical);
+  }
+  return urls;
+}
+
 export function extractPinnableClaims(
   markdown: string,
   sources: Array<{ title?: string; url: string }> = [],
+  limit = 5,
 ): PinnableClaim[] {
   const sourceUrls = sources.flatMap(source => {
     const canonical = canonicalSourceUrl(source.url);
@@ -168,28 +232,42 @@ export function extractPinnableClaims(
   });
   const claims: PinnableClaim[] = [];
   const seen = new Set<string>();
+  const cap = Number.isFinite(limit) && limit > 0 ? Math.floor(limit) : 5;
 
   const push = (text: string, urls: string[]) => {
     const fact = collapseWhitespace(text);
     if (fact.length < 24 || fact.length > PINNED_FACT_MAX_CHARS) return;
+    if (isLowValueResearchClaim(fact)) return;
     const key = fact.toLowerCase();
     if (seen.has(key)) return;
-    const attached = normalizeLooseUrls([...urls, ...rawUrls(fact), ...sourceUrls.filter(url => fact.includes(url))]);
-    const citesSource = attached.length > 0 || sources.some(source => {
-      const title = collapseWhitespace(source.title || '');
-      return title.length >= 8 && fact.toLowerCase().includes(title.toLowerCase());
-    });
-    if (!citesSource) return;
+    const attached = normalizeLooseUrls([
+      ...urls,
+      ...rawUrls(fact),
+      ...urlsFromNumericCitations(fact, sources),
+      ...urlsFromSourceNames(fact, sources),
+      ...sourceUrls.filter(url => fact.includes(url)),
+    ]);
+    if (!attached.length) return;
     seen.add(key);
-    claims.push({ text: fact, sourceUrls: attached.length ? attached : sourceUrls.slice(0, PINNED_SOURCE_URL_MAX) });
+    claims.push({ text: fact, sourceUrls: attached });
   };
 
   for (const block of parseMarkdown(markdown)) {
-    if (claims.length >= 5) break;
+    if (claims.length >= cap) break;
     if (block.type === 'list') {
       for (const item of block.items) {
         push(inlineText(item), inlineUrls(item));
-        if (claims.length >= 5) break;
+        if (claims.length >= cap) break;
+      }
+      continue;
+    }
+    if (block.type === 'table') {
+      for (const row of block.rows) {
+        for (const cell of row) {
+          push(inlineText(cell), inlineUrls(cell));
+          if (claims.length >= cap) break;
+        }
+        if (claims.length >= cap) break;
       }
       continue;
     }

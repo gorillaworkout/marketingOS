@@ -240,8 +240,12 @@ test('approve, research, and generator routes persist and read knowledge', () =>
   assert.doesNotMatch(status, /persistKnowledgeQuietly\([\s\S]{0,200}draft/);
 
   assert.match(chat, /const knowledgeContext = await fetchKnowledgeContext\(auth\.id, query, undefined, 5, 'internal'\)/);
-  assert.match(chat, /persistCompletedResearchAnswer/);
-  assert.match(chat, /request\.signal\.aborted/);
+  assert.equal((chat.match(/persistCompletedResearchAnswer\(/g) || []).length, 2);
+  assert.match(chat, /sources: researchEvent\.sources/);
+  assert.match(chat, /aborted: false/);
+  assert.doesNotMatch(chat, /aborted: signal\.aborted \|\| request\.signal\.aborted/);
+  assert.match(chat, /if \(!streamed\.ok\)/);
+  assert.match(chat, /linkAbortSignal\(request\.signal\)/);
   assert.ok(chat.indexOf('const knowledgeContext') < chat.indexOf('buildAiResearchChatMessages({'));
 
   assert.match(eventPlan, /fetchKnowledgeContext\(/);
