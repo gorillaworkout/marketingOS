@@ -68,6 +68,24 @@ test('cited claims can be pinned while uncited bullets stay out', () => {
   assert.deepEqual(claims[0].sourceUrls, ['https://www.reuters.com/markets/gold']);
 });
 
+test('numbered citations and named sources are pinnable while limitations are not', () => {
+  const claims = extractPinnableClaims([
+    'Gold rose to $2,650 per ounce on 25 September 2026 [1].',
+    '',
+    'Reuters also described the move as the largest daily gain this month.',
+    '',
+    '## Gaps and limitations',
+    '',
+    'Search rounds: 1 of 1. Claims outside the source excerpts are not verified [1].',
+  ].join('\n'), [
+    { title: 'Gold market wrap', url: 'https://www.reuters.com/markets/gold' },
+  ]);
+  assert.equal(claims.length, 2);
+  assert.deepEqual(claims[0].sourceUrls, ['https://www.reuters.com/markets/gold']);
+  assert.match(claims[1].text, /Reuters also described/);
+  assert.equal(claims.some(claim => /not verified/i.test(claim.text)), false);
+});
+
 test('watch topics, diffs, and digests stay bounded', () => {
   assert.equal(normalizeWatchTopic('  emas   Antam  '), 'emas Antam');
   assert.throws(() => normalizeWatchTopic(' '), /Topic is required/);

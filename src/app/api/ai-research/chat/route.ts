@@ -417,7 +417,10 @@ export async function POST(request: NextRequest) {
     async start(controller) {
       let closed = false;
       const emit = (data: unknown) => {
-        if (closed || signal.aborted) return;
+        if (closed) return;
+        const type = data && typeof data === 'object' && 'type' in data ? (data as { type?: unknown }).type : undefined;
+        // A finished `done` frame still goes out if the abort flipped after the model completed.
+        if (signal.aborted && type !== 'done') return;
         try {
           controller.enqueue(encoder.encode(sseFrame(data)));
         } catch {
@@ -574,7 +577,7 @@ export async function POST(request: NextRequest) {
             temperature: resolveAiResearchTemperature(modelResearch),
             signal,
           });
-          if (!streamed.ok || signal.aborted) {
+          if (!streamed.ok) {
             close();
             return;
           }
@@ -593,14 +596,11 @@ export async function POST(request: NextRequest) {
             fullContent = withLimits;
           }
 
-          throwIfResearchAborted(signal);
           const allMessages = [...pendingMessages, buildStoredAssistantMessage({
             content: fullContent,
             mode: 'deep',
             sources: citedResearchEvent.sources,
           })];
-          await persistConversation(convId, auth.id, allMessages, model, true, activeProjectId);
-          throwIfResearchAborted(signal);
           await persistCompletedResearchAnswer({
             userId: auth.id,
             conversationId: convId,
@@ -608,8 +608,9 @@ export async function POST(request: NextRequest) {
             query,
             answer: fullContent,
             sources: researchEvent.sources,
-            aborted: signal.aborted || request.signal.aborted,
+            aborted: false,
           });
+          await persistConversation(convId, auth.id, allMessages, model, true, activeProjectId);
           try {
             await rememberProjectTurn(auth.id, activeProjectId, query, fullContent);
           } catch (error) {
@@ -699,19 +700,16 @@ export async function POST(request: NextRequest) {
           temperature: resolveAiResearchTemperature(modelResearch),
           signal,
         });
-        if (!streamed.ok || signal.aborted) {
+        if (!streamed.ok) {
           close();
           return;
         }
 
-        throwIfResearchAborted(signal);
         const allMessages = [...pendingMessages, buildStoredAssistantMessage({
           content: streamed.content,
           mode: 'fast',
           sources: citedResearchEvent.sources,
         })];
-        await persistConversation(convId, auth.id, allMessages, model, true, activeProjectId);
-        throwIfResearchAborted(signal);
         await persistCompletedResearchAnswer({
           userId: auth.id,
           conversationId: convId,
@@ -719,8 +717,9 @@ export async function POST(request: NextRequest) {
           query,
           answer: streamed.content,
           sources: researchEvent.sources,
-          aborted: signal.aborted || request.signal.aborted,
+          aborted: false,
         });
+        await persistConversation(convId, auth.id, allMessages, model, true, activeProjectId);
         try {
           await rememberProjectTurn(auth.id, activeProjectId, query, streamed.content);
         } catch (error) {
