@@ -1,9 +1,9 @@
 'use client';
 
 import Link from 'next/link';
-import { FormEvent, useState } from 'react';
+import { FormEvent } from 'react';
 import { Button, Panel, StatusBadge, TextArea } from '@/components/ui/dashboard';
-import { guideHighlightNeedle, internalDocFilePath, isInternalDocImagePath } from '@/lib/internal-docs-reader';
+import { guideHighlightNeedle, internalDocFilePath } from '@/lib/internal-docs-reader';
 import { FaqWorking } from './FaqFeedback';
 
 export const ASK_EXAMPLES = [
@@ -28,61 +28,49 @@ export interface FaqAskMessage {
   confidence?: 'high' | 'low' | 'none';
 }
 
+const sourceLinkClass = 'inline-flex h-8 items-center rounded-[var(--mos-radius-control)] border border-[var(--mos-border)] bg-[var(--mos-raised)] px-3 text-xs font-medium text-[var(--mos-text)] hover:border-[var(--mos-border-strong)]';
+
 export function citationDocumentHref(citation: Pick<FaqCitation, 'documentId' | 'excerpt'>): string {
   const highlight = guideHighlightNeedle(citation.excerpt);
   if (!highlight) return `/dashboard/internal-docs/${citation.documentId}`;
   return `/dashboard/internal-docs/${citation.documentId}?highlight=${encodeURIComponent(highlight)}`;
 }
 
-function CitationFigure({ src, alt }: { src: string; alt: string }) {
-  const [broken, setBroken] = useState(false);
-  if (broken) return null;
-  return (
-    <a href={src} target="_blank" rel="noopener noreferrer" className="mt-3 block">
-      <img
-        data-testid="faq-answer-image"
-        src={src}
-        alt={alt}
-        onError={() => setBroken(true)}
-        className="h-auto max-h-[48rem] w-full rounded-[var(--mos-radius-control)] border border-[var(--mos-border)] bg-white object-contain"
-      />
-    </a>
-  );
+export function citationFileLink(citation: Pick<FaqCitation, 'documentId' | 'extension'>): { href: string; label: string; testId: 'faq-open-pdf' | 'faq-open-file' } | null {
+  const extension = (citation.extension || '').trim().toLowerCase();
+  if (!citation.documentId || !extension) return null;
+  if (extension === '.pdf') {
+    return { href: internalDocFilePath(citation.documentId, true), label: 'Open PDF', testId: 'faq-open-pdf' };
+  }
+  return { href: internalDocFilePath(citation.documentId, false), label: 'Open file', testId: 'faq-open-file' };
 }
 
 function CitationCard({ citation }: { citation: FaqCitation }) {
-  const isPdf = (citation.extension || '').toLowerCase() === '.pdf';
-  const images = (citation.images || []).filter(isInternalDocImagePath).slice(0, 4);
+  const file = citationFileLink(citation);
   return (
-    <li className="rounded-[var(--mos-radius-control)] border border-[var(--mos-border)] bg-[var(--mos-panel)] p-3">
-      <Link href={citationDocumentHref(citation)} className="text-sm font-medium text-[var(--mos-accent-soft)] hover:underline">
+    <li data-testid="faq-citation" className="rounded-[var(--mos-radius-control)] border border-[var(--mos-border)] bg-[var(--mos-panel)] p-3">
+      <Link
+        data-testid="faq-citation-link"
+        href={citationDocumentHref(citation)}
+        scroll={false}
+        className="text-sm font-medium text-[var(--mos-accent-soft)] underline decoration-[var(--mos-accent-border)] underline-offset-2 hover:text-white"
+      >
         {citation.title}
       </Link>
       {citation.excerpt && (
-        <p data-testid="faq-answer-excerpt" className="mt-2 text-sm leading-6 text-[var(--mos-text)]">{citation.excerpt}</p>
+        <p data-testid="faq-answer-excerpt" className="mt-2 text-sm leading-6 text-[var(--mos-text-secondary)]">{citation.excerpt}</p>
       )}
-      {isPdf && (
-        <div className="mt-3">
-          <iframe
-            data-testid="faq-answer-pdf"
-            title={`${citation.title} PDF`}
-            src={internalDocFilePath(citation.documentId, true)}
-            className="h-[32rem] w-full rounded-[var(--mos-radius-control)] border border-[var(--mos-border)] bg-white"
-          />
-          <a
-            data-testid="faq-open-pdf"
-            href={internalDocFilePath(citation.documentId, true)}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="mt-2 inline-flex h-8 items-center rounded-[var(--mos-radius-control)] border border-[var(--mos-border)] bg-[var(--mos-raised)] px-3 text-xs font-medium text-[var(--mos-text)] hover:border-[var(--mos-border-strong)]"
-          >
-            Open PDF
-          </a>
-        </div>
+      {file && (
+        <a
+          data-testid={file.testId}
+          href={file.href}
+          target="_blank"
+          rel="noopener noreferrer"
+          className={`mt-3 ${sourceLinkClass}`}
+        >
+          {file.label}
+        </a>
       )}
-      {images.length > 0 && images.map(src => (
-        <CitationFigure key={src} src={src} alt={citation.title} />
-      ))}
     </li>
   );
 }
@@ -114,7 +102,7 @@ export function FaqAskPanel({
         <div className="mt-3">
           <p className="text-lg font-[560] tracking-[-0.03em] text-[var(--mos-text)]">Ask anything about company guides</p>
           <p className="mt-1 max-w-2xl text-sm leading-6 text-[var(--mos-text-muted)]">
-            Answers use only the documents you are allowed to read. Open a citation to see the guide.
+            Answers use only the documents you are allowed to read. Open a source link to read the guide or PDF.
           </p>
           <div data-testid="faq-ask-examples" className="mt-3 flex flex-wrap gap-2">
             {ASK_EXAMPLES.map(example => (
@@ -142,11 +130,14 @@ export function FaqAskPanel({
             )}
             <p className="whitespace-pre-wrap">{message.content}</p>
             {message.citations && message.citations.length > 0 && (
-              <ul className="mt-3 space-y-2">
-                {message.citations.map(citation => (
-                  <CitationCard key={`${citation.documentId}-${citation.extension || ''}`} citation={citation} />
-                ))}
-              </ul>
+              <div className="mt-3">
+                <p className="text-[11px] font-medium uppercase tracking-[0.14em] text-[var(--mos-text-faint)]">Sources</p>
+                <ul className="mt-2 space-y-2">
+                  {message.citations.map(citation => (
+                    <CitationCard key={`${citation.documentId}-${citation.extension || ''}`} citation={citation} />
+                  ))}
+                </ul>
+              </div>
             )}
           </div>
         ))}

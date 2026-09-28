@@ -6,7 +6,7 @@ export function InternalDocsLoading() {
       <PageHeader
         eyebrow="Guidance"
         title="FAQ & Guides"
-        description="Ask a question first. Open a citation to read the guide it came from."
+        description="Ask a question first. Open a source link to read the guide or PDF."
       />
       <LoadingState label="Loading FAQ & Guides" />
     </PageStack>

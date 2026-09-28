@@ -1,4 +1,4 @@
-import { InternalDocsWorkspace } from '../InternalDocsWorkspace';
+import { InternalDocsRoute } from '../InternalDocsRoute';
 
 export default async function InternalDocPage({
   params,
@@ -11,5 +11,5 @@ export default async function InternalDocPage({
   const query = await searchParams;
   const raw = query.highlight;
   const highlight = (Array.isArray(raw) ? raw[0] : raw || '').slice(0, 180);
-  return <InternalDocsWorkspace documentId={id} highlight={highlight} />;
+  return <InternalDocsRoute documentId={id} highlight={highlight} />;
 }
