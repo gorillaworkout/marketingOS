@@ -177,6 +177,7 @@ test('reader shows a document page, a clickable filename, and keeps manage actio
   assert.doesNotMatch(docx, /file\?inline=1/);
   assert.match(docx, /Open file/);
   assert.match(docx, /Download/);
+  assert.doesNotMatch(docx, /guide-extracted-text/);
   assert.match(docx, /href="https:\/\/manual\.example\/led"/);
   assert.match(docx, /rel="noopener noreferrer"/);
   assert.match(docx, /target="_blank"/);
@@ -220,6 +221,9 @@ test('reader shows a document page, a clickable filename, and keeps manage actio
   assert.match(askPanel, /Ask anything about company guides/);
   assert.match(askPanel, /data-testid="faq-answer-pdf"/);
   assert.match(askPanel, /data-testid="faq-answer-image"/);
+  assert.match(askPanel, /data-testid="faq-answer-excerpt"/);
+  assert.match(askPanel, /max-h-\[48rem\]/);
+  assert.doesNotMatch(askPanel, /max-h-80/);
   assert.match(askPanel, /Open PDF/);
   assert.ok(workspace.indexOf('<FaqAskPanel') < workspace.indexOf('data-testid="internal-docs-dropzone"'));
   assert.ok(workspace.indexOf('data-testid="internal-docs-dropzone"') < workspace.indexOf('<GuideReader'));
@@ -278,6 +282,44 @@ test('FAQ loading states show a spinner, and low-confidence answers are labeled'
   }));
   assert.match(low, /Low confidence/);
   assert.match(low, /do not contain a confident match/);
+
+  const grounded = renderToStaticMarkup(createElement(FaqAskPanel, {
+    messages: [{
+      role: 'assistant',
+      content: 'Switch on the breaker labeled LED Auditorium, then press Power on the controller.',
+      confidence: 'high',
+      citations: [{
+        documentId,
+        title: 'LED Auditorium',
+        url: `/dashboard/internal-docs/${documentId}`,
+        excerpt: 'Switch on the breaker labeled LED Auditorium, wait for a steady green status, then press Power on the controller.',
+        extension: '.docx',
+        images: [internalDocImagePath(documentId, 0)],
+      }],
+    }],
+    input: '',
+    asking: false,
+    error: '',
+    onInputChange: () => undefined,
+    onSubmit: () => undefined,
+  }));
+  assert.match(grounded, /Switch on the breaker labeled LED Auditorium, then press Power/);
+  assert.match(grounded, /data-testid="faq-answer-excerpt"/);
+  assert.match(grounded, /wait for a steady green status/);
+  assert.match(grounded, /data-testid="faq-answer-image"/);
+  assert.match(grounded, new RegExp(`src="${internalDocImagePath(documentId, 0)}"`));
+  assert.match(grounded, /max-h-\[48rem\]/);
+  assert.doesNotMatch(grounded, /max-h-80/);
+
+  const imageOnly = renderGuide(guide({
+    previewHtml: `<p><img src="${internalDocImagePath(documentId, 0)}" alt="Auditorium LED wall"></p>`,
+    extractedText: 'Switch on the breaker labeled LED Auditorium. Wait for a steady green status, then press Power on the controller.',
+  }), false);
+  assert.match(imageOnly, /data-testid="guide-body"/);
+  assert.match(imageOnly, new RegExp(`src="${internalDocImagePath(documentId, 0)}"`));
+  assert.match(imageOnly, /data-testid="guide-extracted-text"/);
+  assert.match(imageOnly, /Switch on the breaker labeled LED Auditorium/);
+  assert.match(imageOnly, /max-h-\[48rem\]/);
 
   const indexing = renderGuide(guide(), true).includes('Indexing this guide');
   assert.equal(indexing, false);

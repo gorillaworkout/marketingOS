@@ -6,6 +6,7 @@ import { internalDocKind as storedKind } from '../src/lib/internal-docs-storage'
 import {
   INTERNAL_DOC_FILE_ACCEPT,
   MAX_INTERNAL_DOC_BYTES,
+  MAX_INTERNAL_DOC_MB,
   internalDocKind,
   internalDocUploadIssue,
   titleForInternalDocUpload,
@@ -13,7 +14,7 @@ import {
 
 const read = (file: string) => readFileSync(path.join(process.cwd(), file), 'utf8');
 
-test('upload checks match stored kind detection and the 15 MB limit', () => {
+test('upload checks match stored kind detection and the 100 MB limit', () => {
   const samples: Array<[string, string]> = [
     ['guide.pdf', 'application/pdf'],
     ['Guide.PDF', ''],
@@ -32,7 +33,8 @@ test('upload checks match stored kind detection and the 15 MB limit', () => {
   for (const [name, type] of samples) {
     assert.deepEqual(internalDocKind(name, type), storedKind(name, type), `${name} ${type}`);
   }
-  assert.equal(MAX_INTERNAL_DOC_BYTES, 15 * 1024 * 1024);
+  assert.equal(MAX_INTERNAL_DOC_MB, 100);
+  assert.equal(MAX_INTERNAL_DOC_BYTES, 100 * 1024 * 1024);
   assert.match(INTERNAL_DOC_FILE_ACCEPT, /\.pdf/);
   assert.match(INTERNAL_DOC_FILE_ACCEPT, /\.docx/);
   assert.match(INTERNAL_DOC_FILE_ACCEPT, /\.md/);
@@ -41,7 +43,7 @@ test('upload checks match stored kind detection and the 15 MB limit', () => {
 
 test('rejected files explain empty, oversize, and unsupported types', () => {
   assert.equal(internalDocUploadIssue({ name: 'empty.txt', size: 0, type: 'text/plain' }), 'The file is empty.');
-  assert.equal(internalDocUploadIssue({ name: 'big.pdf', size: MAX_INTERNAL_DOC_BYTES + 1, type: 'application/pdf' }), 'File is larger than 15 MB.');
+  assert.equal(internalDocUploadIssue({ name: 'big.pdf', size: MAX_INTERNAL_DOC_BYTES + 1, type: 'application/pdf' }), 'File is larger than 100 MB.');
   assert.equal(internalDocUploadIssue({ name: 'photo.png', size: 1200, type: 'image/png' }), 'Unsupported file type. Use PDF, DOCX, MD, or TXT.');
   assert.equal(internalDocUploadIssue({ name: 'ok.txt', size: 12, type: 'text/plain' }), null);
   assert.equal(internalDocUploadIssue({ name: 'limit.pdf', size: MAX_INTERNAL_DOC_BYTES, type: 'application/pdf' }), null);
@@ -71,6 +73,9 @@ test('FAQ upload UI drops many files and posts them one at a time with one acces
   assert.doesNotMatch(workspace, /Promise\.all/);
   assert.match(workspace, /Uploading \{uploadProgress\.current\} of \{uploadProgress\.total\}/);
   assert.match(workspace, /Choose a PDF, DOCX, MD, or TXT file\./);
+  assert.match(workspace, /MAX_INTERNAL_DOC_MB/);
+  assert.match(workspace, /up to \{MAX_INTERNAL_DOC_MB\} MB/);
+  assert.match(read('next.config.ts'), /proxyClientMaxBodySize: '120mb'/);
   assert.match(workspace, /title="FAQ & Guides"/);
   assert.match(route, /requireInternalDocsManager/);
   assert.match(route, /form\.get\('file'\)/);

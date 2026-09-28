@@ -9,7 +9,9 @@ const docxHtmlOptions = {
 };
 
 const MAX_EXTRACTED_CHARS = 400_000;
-const MAX_DOCX_IMAGE_BYTES = 2_000_000;
+// Diagrams in a guide are often multi-megabyte screenshots. Skipping them
+// left Ask and the reader with a tiny thumbnail or no picture at all.
+const MAX_DOCX_IMAGE_BYTES = 8 * 1024 * 1024;
 const NO_TEXT = 'No extractable text. Scanned or image-only PDFs are not supported.';
 const DOCX_IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp']);
 

@@ -31,9 +31,10 @@ export const INTERNAL_DOCS_LOW_CONFIDENCE_ANSWER =
 
 export const INTERNAL_DOCS_ASK_SYSTEM = `You answer questions for Dupoin employees using only the FAQ & Guides excerpts provided in the user message.
 Cite the document title for every claim you take from those excerpts.
+Answer from the guide whose title matches the subject of the question. Do not mix steps from a different guide that only shares a broad word such as LED.
+Write the steps or facts in clear English sentences so the answer is useful without opening an image. Do not reply with only a title, a file name, or an instruction to look at a picture.
 If the excerpts do not contain the answer, say FAQ & Guides do not confirm it.
-Do not use outside knowledge for company facts, and do not mention documents that are not in the excerpts.
-Write in clear English.`;
+Do not use outside knowledge for company facts, and do not mention documents that are not in the excerpts.`;
 
 const QUERY_STOPWORDS = new Set([
   'the', 'and', 'for', 'with', 'that', 'this', 'from', 'what', 'when', 'where',
@@ -101,6 +102,8 @@ export interface InternalDocHit {
   score: number;
   /** Query terms that actually occur in this chunk's title or body. */
   matchedTerms?: string[];
+  /** False when the question names a multi-word subject this chunk does not contain. */
+  subjectMatched?: boolean;
 }
 
 export type InternalDocsRetrievalConfidence = 'high' | 'low' | 'none';
@@ -172,15 +175,18 @@ export function buildInternalDocChunkQuery(tokens: readonly string[] = []): { sq
   const overlap = terms.length
     ? terms.map(() => `(CASE WHEN d.title ILIKE ? ESCAPE '\\' OR c.content ILIKE ? ESCAPE '\\' THEN 1 ELSE 0 END)`).join(' + ')
     : '0';
+  // A shared token such as "LED" must not fill the candidate window ahead of a
+  // guide whose title or body contains the question's subject phrase.
+  const phrases = phraseOrderSql(subjectBigrams(terms));
   return {
     sql: `
       SELECT c.id AS chunk_id, c.document_id, c.content, c.embedding, d.title, d.access_level
       FROM internal_document_chunks c
       JOIN internal_documents d ON d.id = c.document_id
       WHERE d.status = 'indexed' AND d.access_level = ANY(?::text[])
-      ORDER BY (${overlap}) DESC, d.updated_at DESC, c.chunk_index ASC
+      ORDER BY (${phrases.sql}) + (${overlap}) DESC, d.updated_at DESC, c.chunk_index ASC
       LIMIT 1500`,
-    params,
+    params: [...phrases.params, ...params],
   };
 }
 
@@ -244,6 +250,76 @@ function countFocusMatches(matched: readonly string[], focus: readonly string[])
   return focus.filter(token => found.has(token)).length;
 }
 
+function contentWords(text: string): string[] {
+  return text
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .split(/\s+/)
+    .filter(Boolean);
+}
+
+/** Adjacent subject words, in question order. "LED auditorium" stays one phrase. */
+function subjectBigrams(tokens: readonly string[]): string[][] {
+  const focus = focusTokens([...tokens]);
+  const bigrams: string[][] = [];
+  for (let index = 0; index < focus.length - 1; index += 1) {
+    bigrams.push([focus[index], focus[index + 1]]);
+  }
+  return bigrams.slice(0, 6);
+}
+
+function containsWordPhrase(words: readonly string[], phrase: readonly string[]): boolean {
+  if (phrase.length < 2 || words.length < phrase.length) return false;
+  const orders = phrase.length === 2 ? [phrase, [phrase[1], phrase[0]]] : [phrase];
+  for (const order of orders) {
+    for (let start = 0; start <= words.length - order.length; start += 1) {
+      let matched = true;
+      for (let offset = 0; offset < order.length; offset += 1) {
+        if (words[start + offset] !== order[offset]) {
+          matched = false;
+          break;
+        }
+      }
+      if (matched) return true;
+    }
+  }
+  return false;
+}
+
+function phraseOrderSql(bigrams: readonly (readonly string[])[]): { sql: string; params: string[] } {
+  if (!bigrams.length) return { sql: '0', params: [] };
+  const params: string[] = [];
+  const parts = bigrams.map(bigram => {
+    const forward = ilikeContains(`${bigram[0]} ${bigram[1]}`);
+    const reverse = ilikeContains(`${bigram[1]} ${bigram[0]}`);
+    params.push(forward, forward, reverse, reverse);
+    return `(CASE WHEN d.title ILIKE ? ESCAPE '\\' OR c.content ILIKE ? ESCAPE '\\' OR d.title ILIKE ? ESCAPE '\\' OR c.content ILIKE ? ESCAPE '\\' THEN 3 ELSE 0 END)`;
+  });
+  return { sql: parts.join(' + '), params };
+}
+
+const EXCERPT_CHARS = 900;
+
+function excerptAroundPhrases(content: string, bigrams: readonly (readonly string[])[]): string {
+  const normalized = content.replace(/\s+/g, ' ').trim();
+  if (!normalized) return '';
+  if (!bigrams.length || normalized.length <= EXCERPT_CHARS) return normalized.slice(0, EXCERPT_CHARS);
+  const lower = normalized.toLowerCase();
+  let at = -1;
+  for (const bigram of bigrams) {
+    const forward = lower.indexOf(`${bigram[0]} ${bigram[1]}`);
+    const reverse = bigram.length === 2 ? lower.indexOf(`${bigram[1]} ${bigram[0]}`) : -1;
+    at = forward === -1 ? reverse : (reverse === -1 ? forward : Math.min(forward, reverse));
+    if (at !== -1) break;
+  }
+  if (at === -1 || at < 180) return normalized.slice(0, EXCERPT_CHARS);
+  // Keep a real slice of the guide so the citation highlight can find it.
+  let start = at - 180;
+  const space = normalized.lastIndexOf(' ', start + 24);
+  if (space >= start - 24 && space < at) start = space + 1;
+  return normalized.slice(start, start + EXCERPT_CHARS).trim();
+}
+
 function termIdf(df: number, total: number): number {
   return Math.log(1 + (total - df + 0.5) / (df + 0.5));
 }
@@ -299,6 +375,7 @@ export function rankInternalDocChunks(
   const idfOf = new Map(tokens.map(token => [token, termIdf(df.get(token) || 0, total)]));
 
   const focus = focusTokens(tokens);
+  const bigrams = subjectBigrams(tokens);
   let scored = visible.flatMap(row => {
     const matched: string[] = [];
     let lexical = 0;
@@ -311,33 +388,52 @@ export function rankInternalDocChunks(
     // Hashed TF cosine only breaks ties. A chunk with no real query term is a
     // bucket collision, not a paraphrase, because these vectors are not semantic.
     if (!matched.length) return [];
+    const titleWords = contentWords(row.chunk.title);
+    const bodyWords = contentWords(row.chunk.content);
+    let titleHits = 0;
+    let bodyHits = 0;
+    for (const bigram of bigrams) {
+      if (containsWordPhrase(titleWords, bigram)) titleHits += 1;
+      else if (containsWordPhrase(bodyWords, bigram)) bodyHits += 1;
+    }
     return [{
       chunk: row.chunk,
       matched,
       focusMatches: countFocusMatches(matched, focus),
-      score: lexical + COSINE_WEIGHT * Math.max(0, row.cosine),
+      titleHits,
+      bodyHits,
+      score: lexical + titleHits * 8 + bodyHits * 4 + COSINE_WEIGHT * Math.max(0, row.cosine),
     }];
   });
 
-  // A repeated common token such as "LED" used to outrank a rare term such as
-  // "auditorium". When the query mixes both, keep chunks that contain the rare
-  // terms so a how-to guide sharing only the common token cannot fill the answer.
-  const present = tokens.filter(token => (df.get(token) || 0) > 0);
-  if (present.length >= 2) {
-    const weights = present.map(token => idfOf.get(token) || 0);
-    const maxIdf = Math.max(...weights);
-    const minIdf = Math.min(...weights);
-    if (maxIdf >= minIdf + DISTINCTIVE_IDF_GAP) {
-      const distinctive = new Set(present.filter(token => (idfOf.get(token) || 0) >= maxIdf * DISTINCTIVE_IDF_RATIO));
-      const gated = scored.filter(row => row.matched.some(token => distinctive.has(token)));
-      if (gated.length) scored = gated;
+  // "LED auditorium" must not pull in every manual that says LED. When a guide
+  // title or passage contains that phrase, drop chunks that only share a token.
+  const phraseMatched = scored.filter(row => row.titleHits + row.bodyHits > 0);
+  if (phraseMatched.length) {
+    scored = phraseMatched;
+  } else {
+    // A repeated common token such as "LED" used to outrank a rare term such as
+    // "auditorium". When the query mixes both, keep chunks that contain the rare
+    // terms so a how-to guide sharing only the common token cannot fill the answer.
+    const present = tokens.filter(token => (df.get(token) || 0) > 0);
+    if (present.length >= 2) {
+      const weights = present.map(token => idfOf.get(token) || 0);
+      const maxIdf = Math.max(...weights);
+      const minIdf = Math.min(...weights);
+      if (maxIdf >= minIdf + DISTINCTIVE_IDF_GAP) {
+        const distinctive = new Set(present.filter(token => (idfOf.get(token) || 0) >= maxIdf * DISTINCTIVE_IDF_RATIO));
+        const gated = scored.filter(row => row.matched.some(token => distinctive.has(token)));
+        if (gated.length) scored = gated;
+      }
     }
   }
 
-  // Covering the question's subject ("lark" and "password") outranks a short,
-  // recently popular guide that only repeats a shared verb or one noun.
+  // A title that contains the subject phrase outranks a body mention, which
+  // outranks a guide that only repeats a shared verb or one broad noun.
   scored.sort((left, right) =>
-    right.focusMatches - left.focusMatches
+    right.titleHits - left.titleHits
+    || right.bodyHits - left.bodyHits
+    || right.focusMatches - left.focusMatches
     || right.score - left.score
     || left.chunk.chunk_id.localeCompare(right.chunk.chunk_id));
 
@@ -350,9 +446,10 @@ export function rankInternalDocChunks(
       title: row.chunk.title,
       accessLevel: row.chunk.access_level === 'it-only' ? 'it-only' : 'company',
       chunkId: row.chunk.chunk_id,
-      excerpt: row.chunk.content.replace(/\s+/g, ' ').trim().slice(0, 500),
+      excerpt: excerptAroundPhrases(row.chunk.content, bigrams),
       score: row.score,
       matchedTerms: row.matched,
+      subjectMatched: bigrams.length === 0 || row.titleHits + row.bodyHits > 0,
     });
     if (hits.length >= limit) break;
   }
@@ -364,7 +461,11 @@ export function internalDocsRetrievalConfidence(query: string, hits: InternalDoc
   const focus = focusTokens(queryTokens(query));
   if (!focus.length) return 'low';
   const covered = countFocusMatches(hits[0].matchedTerms || [], focus);
-  return covered === focus.length ? 'high' : 'low';
+  if (covered !== focus.length) return 'low';
+  // Running Text can mention both "LED" and "auditorium" without being the
+  // auditorium guide. That is not a confident answer.
+  if (subjectBigrams(focus).length > 0 && hits[0].subjectMatched === false) return 'low';
+  return 'high';
 }
 
 /** Deterministic Ask reply when retrieval is missing or only weakly related. */
@@ -376,6 +477,27 @@ export function internalDocsAskFallback(
   if (confidence === 'none') return { answer: INTERNAL_DOCS_NO_MATCH_ANSWER, confidence };
   if (confidence === 'low') return { answer: INTERNAL_DOCS_LOW_CONFIDENCE_ANSWER, confidence };
   return null;
+}
+
+/** Keep a short model reply from becoming an image-only citation. Quote the best guide. */
+export function presentInternalDocsAnswer(generated: string, hits: InternalDocHit[]): string {
+  const written = generated.trim();
+  const top = hits[0];
+  if (!top) return written;
+  const seen = new Set<string>();
+  const excerpts: string[] = [];
+  for (const hit of hits) {
+    if (hit.documentId !== top.documentId) continue;
+    const excerpt = hit.excerpt.trim();
+    if (!excerpt || seen.has(excerpt)) continue;
+    seen.add(excerpt);
+    excerpts.push(excerpt);
+  }
+  if (!excerpts.length) return written;
+  const detail = `${top.title}\n${excerpts.join('\n\n')}`;
+  if (written.length >= 180) return written;
+  if (!written) return detail;
+  return `${written}\n\n${detail}`;
 }
 
 export function internalDocPagePath(documentId: string): string {

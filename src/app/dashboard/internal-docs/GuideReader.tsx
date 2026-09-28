@@ -32,7 +32,7 @@ export interface GuideDocument {
 const controlLink = 'inline-flex h-8 items-center rounded-[var(--mos-radius-control)] border border-[var(--mos-border)] bg-[var(--mos-raised)] px-3 text-xs font-medium text-[var(--mos-text)] hover:border-[var(--mos-border-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--mos-accent-ring)]';
 
 const pageClass = 'max-h-[min(78vh,960px)] overflow-y-auto bg-[#f4f1ea] px-5 py-8 text-[#1c1b17] sm:px-10 sm:py-10';
-const proseClass = 'mx-auto max-w-[44rem] break-words text-[15px] leading-7 [&_a]:font-medium [&_a]:text-[#312e81] [&_a]:underline [&_a]:underline-offset-2 [&_h1]:mb-4 [&_h1]:text-[1.7rem] [&_h1]:font-semibold [&_h1]:leading-tight [&_h2]:mb-3 [&_h2]:mt-8 [&_h2]:text-xl [&_h2]:font-semibold [&_h3]:mb-2 [&_h3]:mt-6 [&_h3]:text-lg [&_h3]:font-semibold [&_h4]:mb-2 [&_h4]:mt-5 [&_h4]:font-semibold [&_img]:my-4 [&_img]:h-auto [&_img]:max-w-full [&_img]:rounded [&_p]:mb-4 [&_ul]:mb-4 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:mb-4 [&_ol]:list-decimal [&_ol]:pl-5 [&_li]:mb-1 [&_blockquote]:my-4 [&_blockquote]:border-l-2 [&_blockquote]:border-[#d9d3c5] [&_blockquote]:pl-4 [&_pre]:mb-4 [&_pre]:overflow-x-auto [&_pre]:rounded [&_pre]:bg-[#ebe6dc] [&_pre]:p-3 [&_code]:rounded [&_code]:bg-[#ebe6dc] [&_code]:px-1 [&_table]:mb-4 [&_table]:w-full [&_table]:border-collapse [&_td]:border [&_td]:border-[#e3ddd0] [&_td]:px-2 [&_td]:py-1 [&_th]:border [&_th]:border-[#e3ddd0] [&_th]:px-2 [&_th]:py-1 [&_th]:text-left';
+const proseClass = 'mx-auto max-w-[44rem] break-words text-[15px] leading-7 [&_a]:font-medium [&_a]:text-[#312e81] [&_a]:underline [&_a]:underline-offset-2 [&_h1]:mb-4 [&_h1]:text-[1.7rem] [&_h1]:font-semibold [&_h1]:leading-tight [&_h2]:mb-3 [&_h2]:mt-8 [&_h2]:text-xl [&_h2]:font-semibold [&_h3]:mb-2 [&_h3]:mt-6 [&_h3]:text-lg [&_h3]:font-semibold [&_h4]:mb-2 [&_h4]:mt-5 [&_h4]:font-semibold [&_img]:my-4 [&_img]:h-auto [&_img]:max-h-[48rem] [&_img]:w-full [&_img]:max-w-full [&_img]:rounded [&_img]:bg-white [&_img]:object-contain [&_p]:mb-4 [&_ul]:mb-4 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:mb-4 [&_ol]:list-decimal [&_ol]:pl-5 [&_li]:mb-1 [&_blockquote]:my-4 [&_blockquote]:border-l-2 [&_blockquote]:border-[#d9d3c5] [&_blockquote]:pl-4 [&_pre]:mb-4 [&_pre]:overflow-x-auto [&_pre]:rounded [&_pre]:bg-[#ebe6dc] [&_pre]:p-3 [&_code]:rounded [&_code]:bg-[#ebe6dc] [&_code]:px-1 [&_table]:mb-4 [&_table]:w-full [&_table]:border-collapse [&_td]:border [&_td]:border-[#e3ddd0] [&_td]:px-2 [&_td]:py-1 [&_th]:border [&_th]:border-[#e3ddd0] [&_th]:px-2 [&_th]:py-1 [&_th]:text-left';
 
 function accessLabel(level: AccessLevel): string {
   return level === 'it-only' ? 'IT-only' : 'Company';
@@ -142,11 +142,20 @@ function ReadingPane({ document, showText }: { document: GuideDocument; showText
   }
 
   const preview = extension === '.docx' && !showText ? sanitizeDocumentHtml(document.previewHtml || '') : '';
-  const previewHasText = preview.replace(/<[^>]+>/g, '').trim().length > 0 || /<img\b/i.test(preview);
-  if (preview && previewHasText) {
+  const previewText = preview.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+  const hasImage = /<img\b/i.test(preview);
+  if (preview && (previewText.length > 0 || hasImage)) {
+    // Word HTML sometimes keeps the pictures and drops the instructions.
+    // Show the indexed text under an image-only preview so the guide is readable.
+    const extracted = hasImage && previewText.length < 40 ? parsePlainDocument(document.extractedText) : [];
     return (
       <div className={pageClass}>
         <div data-testid="guide-body" className={proseClass} dangerouslySetInnerHTML={{ __html: preview }} />
+        {extracted.length > 0 && (
+          <article data-testid="guide-extracted-text" className={`${proseClass} mt-8 border-t border-[#d9d3c5] pt-6`}>
+            <Blocks blocks={extracted} />
+          </article>
+        )}
       </div>
     );
   }
