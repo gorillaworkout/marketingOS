@@ -6,7 +6,7 @@ import {
   citationsFromHits,
   formatInternalDocsPrompt,
   INTERNAL_DOCS_ASK_SYSTEM,
-  INTERNAL_DOCS_NO_MATCH_ANSWER,
+  internalDocsAskFallback,
   retrieveInternalDocHits,
   withCitationMedia,
 } from '@/lib/internal-docs';
@@ -44,9 +44,13 @@ export async function POST(request: NextRequest) {
   if (!question) return NextResponse.json({ error: 'Question is required.' }, { status: 400 });
 
   const hits = await retrieveInternalDocHits(actor.principal, question);
+  const fallback = internalDocsAskFallback(question, hits);
+  if (fallback?.confidence === 'none') {
+    return NextResponse.json({ answer: fallback.answer, citations: [], confidence: fallback.confidence });
+  }
   const citations = await withCitationMedia(citationsFromHits(hits, request.nextUrl.origin), actor.principal);
-  if (!hits.length) {
-    return NextResponse.json({ answer: INTERNAL_DOCS_NO_MATCH_ANSWER, citations: [] });
+  if (fallback) {
+    return NextResponse.json({ answer: fallback.answer, citations, confidence: fallback.confidence });
   }
 
   let model = ASK_MODEL_FALLBACK;
@@ -65,7 +69,7 @@ export async function POST(request: NextRequest) {
       undefined,
       { model, temperature: 0.2, maxTokens: 900, taskType: 'internal-docs' },
     );
-    return NextResponse.json({ answer: result.content.trim(), citations });
+    return NextResponse.json({ answer: result.content.trim(), citations, confidence: 'high' });
   } catch (error) {
     console.error('Internal docs ask failed:', error);
     return NextResponse.json({ error: 'Could not answer from FAQ & Guides right now.' }, { status: 502 });

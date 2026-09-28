@@ -1,6 +1,6 @@
 import { readFile, unlink } from 'node:fs/promises';
 import { NextRequest, NextResponse } from 'next/server';
-import { execute } from '@/lib/database';
+import { execute, executeTransaction } from '@/lib/database';
 import { requireInternalDocsManager, requireInternalDocsUser } from '@/lib/internal-docs-access';
 import { canManageInternalDocs, isInternalDocAccessLevel } from '@/lib/internal-docs-acl';
 import { findVisibleDocument, publicDocument, type InternalDocListRow } from '@/lib/internal-docs';
@@ -117,7 +117,10 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
   } catch (error) {
     console.warn('FAQ guide knowledge delete failed:', error);
   }
-  await execute('DELETE FROM internal_documents WHERE id = ?', [id]);
+  await executeTransaction(async transaction => {
+    await transaction.execute('DELETE FROM internal_document_chunks WHERE document_id = ?', [id]);
+    await transaction.execute('DELETE FROM internal_documents WHERE id = ?', [id]);
+  });
   const stored = resolveStoredInternalDoc(existing.storage_key);
   if (stored) await unlink(stored).catch(() => undefined);
   return NextResponse.json({ ok: true });

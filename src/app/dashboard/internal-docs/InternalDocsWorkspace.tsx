@@ -14,6 +14,7 @@ import {
   TextInput,
 } from '@/components/ui/dashboard';
 import { FaqAskPanel, type FaqAskMessage } from './FaqAskPanel';
+import { FaqListSkeleton, FaqWorking } from './FaqFeedback';
 import { GuideReader } from './GuideReader';
 import {
   INTERNAL_DOC_FILE_ACCEPT,
@@ -122,6 +123,7 @@ export function InternalDocsWorkspace({ documentId, highlight = '' }: { document
   const [asking, setAsking] = useState(false);
   const [askError, setAskError] = useState('');
   const [messages, setMessages] = useState<FaqAskMessage[]>([]);
+  const [detailBusy, setDetailBusy] = useState<'' | 'access' | 'reindex' | 'delete'>('');
 
   const loadList = useCallback(async (query: string) => {
     setLoadingList(true);
@@ -342,49 +344,68 @@ export function InternalDocsWorkspace({ documentId, highlight = '' }: { document
   };
 
   const changeAccess = async (next: AccessLevel) => {
-    if (!openDocument) return;
-    const response = await fetch(`/api/internal-docs/${openDocument.id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ accessLevel: next }),
-    });
-    const data = await response.json();
-    if (!response.ok) {
-      setDocError({ id: openDocument.id, message: data.error || 'Could not update access.' });
-      return;
+    if (!openDocument || detailBusy) return;
+    setDetailBusy('access');
+    setDocError(null);
+    try {
+      const response = await fetch(`/api/internal-docs/${openDocument.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ accessLevel: next }),
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        setDocError({ id: openDocument.id, message: data.error || 'Could not update access.' });
+        return;
+      }
+      setActive(data.document);
+      setLoadedId(openDocument.id);
+      await loadList(search);
+    } finally {
+      setDetailBusy('');
     }
-    setActive(data.document);
-    setLoadedId(openDocument.id);
-    await loadList(search);
   };
 
   const removeDocument = async () => {
-    if (!openDocument) return;
-    if (!window.confirm(`Delete “${openDocument.title}”?`)) return;
-    const response = await fetch(`/api/internal-docs/${openDocument.id}`, { method: 'DELETE' });
-    if (!response.ok) {
-      const data = await response.json().catch(() => ({}));
-      setDocError({ id: openDocument.id, message: data.error || 'Could not delete this document.' });
-      return;
+    if (!openDocument || detailBusy) return;
+    const removedId = openDocument.id;
+    setDetailBusy('delete');
+    setDocError(null);
+    try {
+      const response = await fetch(`/api/internal-docs/${removedId}`, { method: 'DELETE' });
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        setDocError({ id: removedId, message: data.error || 'Could not delete this document.' });
+        return;
+      }
+      setDocuments(current => current.filter(document => document.id !== removedId));
+      setActive(null);
+      setLoadedId(null);
+      await loadList(search);
+      router.push('/dashboard/internal-docs');
+    } finally {
+      setDetailBusy('');
     }
-    setActive(null);
-    setLoadedId(null);
-    await loadList(search);
-    router.push('/dashboard/internal-docs');
   };
 
   const reindex = async () => {
-    if (!openDocument) return;
-    const response = await fetch(`/api/internal-docs/${openDocument.id}/reindex`, { method: 'POST' });
-    const data = await response.json();
-    if (!response.ok) {
-      setDocError({ id: openDocument.id, message: data.error || 'Could not index this document.' });
-      return;
+    if (!openDocument || detailBusy) return;
+    setDetailBusy('reindex');
+    setDocError(null);
+    try {
+      const response = await fetch(`/api/internal-docs/${openDocument.id}/reindex`, { method: 'POST' });
+      const data = await response.json();
+      if (!response.ok) {
+        setDocError({ id: openDocument.id, message: data.error || 'Could not index this document.' });
+        return;
+      }
+      const refreshed = await fetch(`/api/internal-docs/${openDocument.id}`);
+      const body = await refreshed.json();
+      if (refreshed.ok) setActive(body.document);
+      await loadList(search);
+    } finally {
+      setDetailBusy('');
     }
-    const refreshed = await fetch(`/api/internal-docs/${openDocument.id}`);
-    const body = await refreshed.json();
-    if (refreshed.ok) setActive(body.document);
-    await loadList(search);
   };
 
   const submitQuestion = async (question: string) => {
@@ -406,10 +427,14 @@ export function InternalDocsWorkspace({ documentId, highlight = '' }: { document
         setAskError(data.error || 'Could not answer that question.');
         return;
       }
+      const confidence = data.confidence === 'low' || data.confidence === 'high' || data.confidence === 'none'
+        ? data.confidence
+        : undefined;
       setMessages(current => [...current, {
         role: 'assistant',
         content: data.answer || '',
         citations: Array.isArray(data.citations) ? data.citations : [],
+        confidence,
       }]);
     } catch {
       setAskError('Could not answer that question.');
@@ -529,8 +554,9 @@ export function InternalDocsWorkspace({ documentId, highlight = '' }: { document
                 : 'Leave the title blank to use the file name. The access level applies to this upload.'}
             </p>
             {uploadProgress && (
-              <p className="text-xs text-[var(--mos-text-muted)]" aria-live="polite">
-                Uploading {uploadProgress.current} of {uploadProgress.total}: {uploadProgress.name}
+              <p className="flex items-center gap-2 text-xs text-[var(--mos-text-muted)]" aria-live="polite" data-testid="internal-docs-upload-loading">
+                <span aria-hidden="true" className="inline-block h-4 w-4 shrink-0 animate-spin rounded-full border-2 border-[var(--mos-border-strong)] border-t-[var(--mos-accent)]" />
+                <span>Uploading {uploadProgress.current} of {uploadProgress.total}: {uploadProgress.name}</span>
               </p>
             )}
             {uploadNote && (
@@ -545,7 +571,12 @@ export function InternalDocsWorkspace({ documentId, highlight = '' }: { document
       <div className="grid gap-4 lg:grid-cols-[340px_minmax(0,1fr)]">
         <Panel padding="none">
           <div className="border-b border-[var(--mos-border-subtle)] p-4">
-            <label className="block text-xs text-[var(--mos-text-muted)]" htmlFor="internal-docs-search">Search documents</label>
+            <div className="flex items-center justify-between gap-3">
+              <label className="block text-xs text-[var(--mos-text-muted)]" htmlFor="internal-docs-search">Search documents</label>
+              {loadingList && documents.length > 0 && (
+                <FaqWorking compact label="Updating the list" testId="internal-docs-list-refresh" />
+              )}
+            </div>
             <TextInput
               id="internal-docs-search"
               value={search}
@@ -555,7 +586,7 @@ export function InternalDocsWorkspace({ documentId, highlight = '' }: { document
             />
           </div>
           <div className="max-h-[40rem] overflow-y-auto">
-            {loadingList && <p className="px-4 py-6 text-xs text-[var(--mos-text-muted)]">Loading documents</p>}
+            {loadingList && documents.length === 0 && !listError && <FaqListSkeleton />}
             {!loadingList && listError && <p className="px-4 py-6 text-xs text-red-300">{listError}</p>}
             {!loadingList && !listError && documents.length === 0 && (
               <EmptyState
@@ -597,7 +628,17 @@ export function InternalDocsWorkspace({ documentId, highlight = '' }: { document
                 <EmptyState title="Select a guide" description="Open an item from the list, or ask a question above." />
               </div>
             )}
-            {documentId && !openDocument && !openError && <p className="p-5 text-xs text-[var(--mos-text-muted)] md:p-6">Opening document</p>}
+            {documentId && !openDocument && !openError && (
+              <div className="p-5 md:p-6">
+                <FaqWorking label="Opening document" testId="internal-docs-detail-loading" />
+                <div className="mt-4 animate-pulse space-y-3" aria-hidden="true">
+                  <div className="h-4 w-2/5 rounded bg-white/10" />
+                  <div className="h-3 w-full rounded bg-white/[0.06]" />
+                  <div className="h-3 w-11/12 rounded bg-white/[0.06]" />
+                  <div className="h-3 w-4/5 rounded bg-white/[0.06]" />
+                </div>
+              </div>
+            )}
             {openError && <p className="p-5 text-sm text-red-300 md:p-6">{openError}</p>}
             {openDocument && (
               <GuideReader
@@ -605,6 +646,7 @@ export function InternalDocsWorkspace({ documentId, highlight = '' }: { document
                 document={openDocument}
                 canManage={canManage}
                 highlight={highlight}
+                busy={detailBusy}
                 onAccessChange={level => { void changeAccess(level); }}
                 onReindex={() => { void reindex(); }}
                 onDelete={() => { void removeDocument(); }}

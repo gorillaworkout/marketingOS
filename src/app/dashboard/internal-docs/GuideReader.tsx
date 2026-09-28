@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { Button, Select, StatusBadge } from '@/components/ui/dashboard';
+import { FaqWorking } from './FaqFeedback';
 import {
   guideHighlightNeedle,
   internalDocFilePath,
@@ -175,6 +176,7 @@ export function GuideReader({
   document,
   canManage,
   highlight = '',
+  busy = '',
   onAccessChange,
   onReindex,
   onDelete,
@@ -182,12 +184,19 @@ export function GuideReader({
   document: GuideDocument;
   canManage: boolean;
   highlight?: string;
+  busy?: '' | 'access' | 'reindex' | 'delete';
   onAccessChange: (level: AccessLevel) => void;
   onReindex: () => void;
   onDelete: () => void;
 }) {
   const [showText, setShowText] = useState(false);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
   const bodyRef = useRef<HTMLDivElement>(null);
+  const working = busy !== '';
+
+  useEffect(() => {
+    setConfirmingDelete(false);
+  }, [document.id]);
 
   useEffect(() => {
     const root = bodyRef.current;
@@ -247,16 +256,29 @@ export function GuideReader({
               aria-label="Change access level"
               value={document.accessLevel}
               onChange={event => onAccessChange(event.target.value as AccessLevel)}
+              disabled={working}
               className="ml-2"
             >
               <option value="company">Company</option>
               <option value="it-only">IT-only</option>
             </Select>
           </label>
-          <Button size="sm" onClick={onReindex}>Reindex</Button>
-          <Button size="sm" variant="danger" onClick={onDelete}>Delete</Button>
+          <Button size="sm" onClick={onReindex} disabled={working}>Reindex</Button>
+          <Button size="sm" variant="danger" onClick={() => setConfirmingDelete(true)} disabled={working}>Delete</Button>
         </div>
       )}
+      {canManage && confirmingDelete && (
+        <div data-testid="internal-docs-delete-confirm" role="alertdialog" aria-label="Delete guide" className="border-b border-red-400/25 bg-red-400/10 px-4 py-3 sm:px-5">
+          <p className="text-sm leading-6 text-red-100">Delete “{document.title}”? This removes the guide, its indexed passages, and its knowledge graph entry. Ask will no longer use it.</p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <Button size="sm" variant="danger" disabled={working} onClick={onDelete}>{busy === 'delete' ? 'Deleting…' : 'Delete guide'}</Button>
+            <Button size="sm" disabled={working} onClick={() => setConfirmingDelete(false)}>Cancel</Button>
+          </div>
+          {busy === 'delete' && <FaqWorking compact label="Deleting this guide" testId="internal-docs-delete-loading" />}
+        </div>
+      )}
+      {busy === 'reindex' && <FaqWorking label="Indexing this guide" testId="internal-docs-reindex-loading" />}
+      {busy === 'access' && <FaqWorking label="Updating access" testId="internal-docs-access-loading" />}
       {document.errorMessage && <p className="px-4 py-2 text-sm text-red-300 sm:px-5">{document.errorMessage}</p>}
       <div ref={bodyRef}>
         <ReadingPane document={document} showText={showText} />
