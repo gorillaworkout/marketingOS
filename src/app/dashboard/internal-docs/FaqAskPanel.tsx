@@ -2,8 +2,9 @@
 
 import Link from 'next/link';
 import { FormEvent } from 'react';
-import { Button, Panel, TextArea } from '@/components/ui/dashboard';
+import { Button, Panel, StatusBadge, TextArea } from '@/components/ui/dashboard';
 import { guideHighlightNeedle, internalDocFilePath, isInternalDocImagePath } from '@/lib/internal-docs-reader';
+import { FaqWorking } from './FaqFeedback';
 
 export const ASK_EXAMPLES = [
   'Where is the visitor wifi password?',
@@ -24,6 +25,7 @@ export interface FaqAskMessage {
   role: 'user' | 'assistant';
   content: string;
   citations?: FaqCitation[];
+  confidence?: 'high' | 'low' | 'none';
 }
 
 export function citationDocumentHref(citation: Pick<FaqCitation, 'documentId' | 'excerpt'>): string {
@@ -125,6 +127,11 @@ export function FaqAskPanel({
               ? 'text-sm text-[var(--mos-text)]'
               : 'rounded-[var(--mos-radius-control)] border border-[var(--mos-border)] bg-[var(--mos-raised)] p-3 text-sm leading-6 text-[var(--mos-text-secondary)]'}
           >
+            {message.confidence === 'low' && (
+              <p className="mb-2">
+                <StatusBadge tone="warning">Low confidence</StatusBadge>
+              </p>
+            )}
             <p className="whitespace-pre-wrap">{message.content}</p>
             {message.citations && message.citations.length > 0 && (
               <ul className="mt-3 space-y-2">
@@ -135,7 +142,15 @@ export function FaqAskPanel({
             )}
           </div>
         ))}
-        {asking && <p className="text-xs text-[var(--mos-text-muted)]">Looking through documents</p>}
+        {asking && (
+          <div data-testid="faq-ask-loading" className="rounded-[var(--mos-radius-control)] border border-[var(--mos-border)] bg-[var(--mos-raised)] p-3">
+            <FaqWorking compact label="Looking through documents" />
+            <div className="mt-3 animate-pulse space-y-2" aria-hidden="true">
+              <div className="h-2 w-full rounded bg-white/10" />
+              <div className="h-2 w-4/5 rounded bg-white/[0.06]" />
+            </div>
+          </div>
+        )}
         {error && <p className="text-xs text-red-300" role="alert">{error}</p>}
       </div>
       <form onSubmit={submit} className="mt-4 flex flex-col gap-2">

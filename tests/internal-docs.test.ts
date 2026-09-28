@@ -16,7 +16,10 @@ import {
   chunkDocumentText,
   citationsFromHits,
   formatInternalDocsPrompt,
+  INTERNAL_DOCS_LOW_CONFIDENCE_ANSWER,
   INTERNAL_DOCS_NO_MATCH_ANSWER,
+  internalDocsAskFallback,
+  internalDocsRetrievalConfidence,
   mergeInternalDocSources,
   rankInternalDocChunks,
   type InternalDocChunkRow,
@@ -198,6 +201,87 @@ test('auditorium LED questions prefer the auditorium guide over LED running text
   assert.equal(embeddedHits.some(hit => hit.documentId === 'doc-running'), false);
 });
 
+test('Lark password questions prefer the Lark guide over auditorium docs that only share a word', async () => {
+  const queryVector = [1, 0, 0];
+  const dominant = JSON.stringify(queryVector);
+  const larkVector = JSON.stringify([0, 1, 0]);
+  const fillers: InternalDocChunkRow[] = Array.from({ length: 8 }, (_, index) => ({
+    chunk_id: `lark-note-${index}`,
+    document_id: `doc-lark-note-${index}`,
+    title: 'Lark standup notes',
+    access_level: 'company',
+    content: 'The team posted the daily update on Lark. Follow up in the Lark group after the standup.',
+    embedding: dominant,
+  }));
+  const chunks: InternalDocChunkRow[] = [
+    ...fillers,
+    {
+      chunk_id: 'aud',
+      document_id: 'doc-auditorium',
+      title: 'Auditorium LED password change',
+      access_level: 'company',
+      content: 'Change the auditorium LED controller password from the rack. Password change for the auditorium LED. Do not use the lobby display controls.',
+      embedding: dominant,
+    },
+    {
+      chunk_id: 'run',
+      document_id: 'doc-running',
+      title: 'LED running text',
+      access_level: 'company',
+      content: `${'Change the LED running text schedule. '.repeat(12)}The lobby LED does not use a password.`,
+      embedding: dominant,
+    },
+    {
+      chunk_id: 'lark',
+      document_id: 'doc-lark',
+      title: 'How to change your Lark password',
+      access_level: 'company',
+      content: `${'This handbook covers account security for everyday tools. '.repeat(30)}To change your Lark password, open Lark, choose Settings, then Account, and reset the Lark password. Confirm the new Lark password before you sign in again.`,
+      embedding: larkVector,
+    },
+  ];
+
+  const query = 'how to change Lark password';
+  const hits = rankInternalDocChunks(query, queryVector, chunks, company, 6);
+  assert.equal(hits[0]?.documentId, 'doc-lark');
+  assert.equal(hits.some(hit => hit.documentId === 'doc-auditorium' && hits[0]?.documentId !== 'doc-lark'), false);
+  assert.equal(internalDocsRetrievalConfidence(query, hits), 'high');
+  assert.equal(internalDocsAskFallback(query, hits), null);
+  const prompt = formatInternalDocsPrompt(hits, 'https://marketing.example');
+  assert.match(prompt, /How to change your Lark password/);
+
+  const weak = rankInternalDocChunks(query, queryVector, chunks.filter(chunk => chunk.document_id !== 'doc-lark'), company, 6);
+  assert.notEqual(weak[0]?.documentId, 'doc-lark');
+  assert.equal(internalDocsRetrievalConfidence(query, weak), 'low');
+  const fallback = internalDocsAskFallback(query, weak);
+  assert.equal(fallback?.confidence, 'low');
+  assert.equal(fallback?.answer, INTERNAL_DOCS_LOW_CONFIDENCE_ANSWER);
+  assert.match(fallback?.answer || '', /not contain a confident match/);
+  assert.doesNotMatch(fallback?.answer || '', /auditorium/i);
+
+  const resetHits = rankInternalDocChunks('how do I reset my Lark password?', queryVector, chunks, company, 6);
+  assert.equal(resetHits[0]?.documentId, 'doc-lark');
+  assert.equal(internalDocsRetrievalConfidence('how do I reset my Lark password?', resetHits), 'high');
+
+  assert.equal(internalDocsAskFallback(query, [])?.confidence, 'none');
+  assert.equal(internalDocsAskFallback(query, [])?.answer, INTERNAL_DOCS_NO_MATCH_ANSWER);
+});
+
+test('chunk retrieval orders lexical overlap ahead of recency', () => {
+  const ranked = buildInternalDocChunkQuery(['lark', 'password', 'change']);
+  assert.match(ranked.sql, /d\.title ILIKE \? ESCAPE/);
+  assert.match(ranked.sql, /c\.content ILIKE \? ESCAPE/);
+  assert.match(ranked.sql, /ORDER BY \(/);
+  assert.match(ranked.sql, /DESC, d\.updated_at DESC/);
+  assert.equal(ranked.params.length, 6);
+  assert.ok(ranked.params.every(param => typeof param === 'string' && (param.includes('lark') || param.includes('password') || param.includes('change'))));
+
+  const plain = buildInternalDocChunkQuery();
+  assert.match(plain.sql, /access_level = ANY\(\?::text\[\]\)/);
+  assert.match(plain.sql, /status = 'indexed'/);
+  assert.equal(plain.params.length, 0);
+});
+
 test('prompt and research citations include only the hits passed in, with document links', () => {
   const hits: InternalDocHit[] = [{
     documentId: '11111111-1111-1111-1111-111111111111',
@@ -300,10 +384,14 @@ test('sidebar, routes, migration, and AI Research keep Internal Docs ACL separat
   assert.ok(chat.indexOf('const knowledgeContext') < chat.indexOf('buildAiResearchChatMessages({'));
 
   assert.match(ask, /retrieveInternalDocHits\(actor\.principal, question\)/);
+  assert.match(ask, /internalDocsAskFallback/);
+  assert.ok(ask.indexOf('internalDocsAskFallback') < ask.indexOf('generateContent'));
   assert.match(ask, /withCitationMedia/);
   assert.match(read('src/lib/internal-docs.ts'), /persistInternalDocKnowledge/);
   assert.match(read('src/app/api/internal-docs/[id]/reindex/route.ts'), /persistInternalDocKnowledge/);
   assert.match(read('src/app/api/internal-docs/[id]/route.ts'), /deleteInternalDocKnowledge/);
+  assert.match(read('src/app/api/internal-docs/[id]/route.ts'), /DELETE FROM internal_document_chunks WHERE document_id = \?/);
+  assert.match(read('src/app/api/internal-docs/[id]/route.ts'), /executeTransaction/);
   assert.match(read('src/app/api/internal-docs/[id]/route.ts'), /syncInternalDocKnowledgeMeta/);
   const knowledge = read('src/lib/internal-docs-knowledge.ts');
   assert.match(knowledge, /DELETE FROM knowledge_edges/);
@@ -321,7 +409,26 @@ test('sidebar, routes, migration, and AI Research keep Internal Docs ACL separat
   const workspace = read('src/app/dashboard/internal-docs/InternalDocsWorkspace.tsx');
   assert.match(workspace, /title="FAQ & Guides"/);
   assert.match(workspace, /No guides yet/);
+  assert.match(workspace, /FaqListSkeleton/);
+  assert.match(workspace, /internal-docs-detail-loading/);
+  assert.match(workspace, /internal-docs-upload-loading/);
+  assert.match(workspace, /Opening document/);
+  const feedback = read('src/app/dashboard/internal-docs/FaqFeedback.tsx');
+  assert.match(feedback, /animate-spin/);
+  assert.match(feedback, /internal-docs-list-loading/);
+  assert.match(feedback, /Loading documents/);
+  assert.doesNotMatch(workspace, /window\.confirm/);
   assert.doesNotMatch(workspace, /Internal Docs/);
+  const reader = read('src/app/dashboard/internal-docs/GuideReader.tsx');
+  assert.match(reader, /Delete “\{document\.title\}”\?/);
+  assert.match(reader, /removes the guide, its indexed passages/);
+  assert.match(reader, /canManage && confirmingDelete/);
+  assert.match(reader, /Ask will no longer use it/);
+  const askPanel = read('src/app/dashboard/internal-docs/FaqAskPanel.tsx');
+  assert.match(askPanel, /data-testid="faq-ask-loading"/);
+  assert.match(askPanel, /Looking through documents/);
+  assert.match(askPanel, /Low confidence/);
+  assert.match(read('src/app/dashboard/internal-docs/loading.tsx'), /InternalDocsLoading/);
   assert.equal(read('src/lib/authorization.ts').includes("'internal-docs': 'FAQ & Guides'"), true);
   const accounts = read('src/app/dashboard/accounts/AccountsClient.tsx');
   assert.match(accounts, /ACCOUNT_FEATURE_LABELS\[feature\]/);

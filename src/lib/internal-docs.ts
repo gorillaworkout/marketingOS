@@ -26,6 +26,9 @@ export const INTERNAL_DOCS_ASK_LIMIT = 6;
 export const INTERNAL_DOCS_NO_MATCH_ANSWER =
   'The FAQ & Guides you can access do not contain an answer to that question.';
 
+export const INTERNAL_DOCS_LOW_CONFIDENCE_ANSWER =
+  'FAQ & Guides do not contain a confident match for that question. The closest guides are listed below, but they may not answer it.';
+
 export const INTERNAL_DOCS_ASK_SYSTEM = `You answer questions for Dupoin employees using only the FAQ & Guides excerpts provided in the user message.
 Cite the document title for every claim you take from those excerpts.
 If the excerpts do not contain the answer, say FAQ & Guides do not confirm it.
@@ -52,6 +55,18 @@ const TITLE_TF_BOOST = 3;
 const COSINE_WEIGHT = 0.2;
 const DISTINCTIVE_IDF_GAP = 0.45;
 const DISTINCTIVE_IDF_RATIO = 0.8;
+
+// How-to verbs show up in unrelated guides ("change the input", "password change").
+// They must not count as the subject of the question when deciding which guide fits.
+const GENERIC_ASK_TERMS = new Set([
+  'add', 'change', 'changes', 'changing', 'check', 'click', 'create', 'delete',
+  'disable', 'edit', 'enable', 'find', 'ganti', 'get', 'help', 'hidupkan',
+  'login', 'make', 'matikan', 'mematikan', 'mengganti', 'mengubah', 'menyalakan',
+  'need', 'nyalakan', 'open', 'please', 'power', 'remove', 'replace', 'reset',
+  'save', 'select', 'set', 'show', 'start', 'stop', 'switch', 'switching',
+  'turn', 'ubah', 'update', 'updated', 'updating', 'use', 'used', 'using',
+  'view', 'want',
+]);
 
 export interface InternalDocListRow {
   id: string;
@@ -84,7 +99,11 @@ export interface InternalDocHit {
   chunkId: string;
   excerpt: string;
   score: number;
+  /** Query terms that actually occur in this chunk's title or body. */
+  matchedTerms?: string[];
 }
+
+export type InternalDocsRetrievalConfidence = 'high' | 'low' | 'none';
 
 export interface InternalDocCitation {
   documentId: string;
@@ -139,15 +158,29 @@ export function buildInternalDocByIdQuery(): { sql: string } {
   };
 }
 
-export function buildInternalDocChunkQuery(): { sql: string } {
+export function buildInternalDocChunkQuery(tokens: readonly string[] = []): { sql: string; params: unknown[] } {
+  const terms = [...new Set(
+    tokens.map(token => token.toLowerCase().replace(/[^a-z0-9]/g, '')).filter(token => token.length > 2),
+  )].slice(0, 12);
+  const params = terms.flatMap(token => {
+    const pattern = ilikeContains(token);
+    return [pattern, pattern];
+  });
+  // A recently reindexed auditorium manual can fill the candidate window and
+  // hide an older guide that actually uses the question's words. Count title
+  // and body hits first, then use recency only as a tie-break.
+  const overlap = terms.length
+    ? terms.map(() => `(CASE WHEN d.title ILIKE ? ESCAPE '\\' OR c.content ILIKE ? ESCAPE '\\' THEN 1 ELSE 0 END)`).join(' + ')
+    : '0';
   return {
     sql: `
       SELECT c.id AS chunk_id, c.document_id, c.content, c.embedding, d.title, d.access_level
       FROM internal_document_chunks c
       JOIN internal_documents d ON d.id = c.document_id
       WHERE d.status = 'indexed' AND d.access_level = ANY(?::text[])
-      ORDER BY d.updated_at DESC, c.chunk_index ASC
+      ORDER BY (${overlap}) DESC, d.updated_at DESC, c.chunk_index ASC
       LIMIT 1500`,
+    params,
   };
 }
 
@@ -199,6 +232,16 @@ function tokensOf(text: string): string[] {
 
 function queryTokens(query: string): string[] {
   return [...new Set(tokensOf(query))].slice(0, 12);
+}
+
+function focusTokens(tokens: string[]): string[] {
+  const specific = tokens.filter(token => !GENERIC_ASK_TERMS.has(token));
+  return specific.length ? specific : tokens;
+}
+
+function countFocusMatches(matched: readonly string[], focus: readonly string[]): number {
+  const found = new Set(matched);
+  return focus.filter(token => found.has(token)).length;
 }
 
 function termIdf(df: number, total: number): number {
@@ -255,6 +298,7 @@ export function rankInternalDocChunks(
   const avgdl = visible.reduce((sum, row) => sum + row.docLen, 0) / total;
   const idfOf = new Map(tokens.map(token => [token, termIdf(df.get(token) || 0, total)]));
 
+  const focus = focusTokens(tokens);
   let scored = visible.flatMap(row => {
     const matched: string[] = [];
     let lexical = 0;
@@ -270,6 +314,7 @@ export function rankInternalDocChunks(
     return [{
       chunk: row.chunk,
       matched,
+      focusMatches: countFocusMatches(matched, focus),
       score: lexical + COSINE_WEIGHT * Math.max(0, row.cosine),
     }];
   });
@@ -289,7 +334,12 @@ export function rankInternalDocChunks(
     }
   }
 
-  scored.sort((left, right) => right.score - left.score || left.chunk.chunk_id.localeCompare(right.chunk.chunk_id));
+  // Covering the question's subject ("lark" and "password") outranks a short,
+  // recently popular guide that only repeats a shared verb or one noun.
+  scored.sort((left, right) =>
+    right.focusMatches - left.focusMatches
+    || right.score - left.score
+    || left.chunk.chunk_id.localeCompare(right.chunk.chunk_id));
 
   const hits: InternalDocHit[] = [];
   for (const row of scored) {
@@ -302,10 +352,30 @@ export function rankInternalDocChunks(
       chunkId: row.chunk.chunk_id,
       excerpt: row.chunk.content.replace(/\s+/g, ' ').trim().slice(0, 500),
       score: row.score,
+      matchedTerms: row.matched,
     });
     if (hits.length >= limit) break;
   }
   return hits;
+}
+
+export function internalDocsRetrievalConfidence(query: string, hits: InternalDocHit[]): InternalDocsRetrievalConfidence {
+  if (!hits.length) return 'none';
+  const focus = focusTokens(queryTokens(query));
+  if (!focus.length) return 'low';
+  const covered = countFocusMatches(hits[0].matchedTerms || [], focus);
+  return covered === focus.length ? 'high' : 'low';
+}
+
+/** Deterministic Ask reply when retrieval is missing or only weakly related. */
+export function internalDocsAskFallback(
+  query: string,
+  hits: InternalDocHit[],
+): { answer: string; confidence: 'low' | 'none' } | null {
+  const confidence = internalDocsRetrievalConfidence(query, hits);
+  if (confidence === 'none') return { answer: INTERNAL_DOCS_NO_MATCH_ANSWER, confidence };
+  if (confidence === 'low') return { answer: INTERNAL_DOCS_LOW_CONFIDENCE_ANSWER, confidence };
+  return null;
 }
 
 export function internalDocPagePath(documentId: string): string {
@@ -439,8 +509,9 @@ export async function retrieveInternalDocHits(
 ): Promise<InternalDocHit[]> {
   const trimmed = query.trim();
   if (!trimmed) return [];
-  const { sql } = buildInternalDocChunkQuery();
-  const rows = await queryAll<InternalDocChunkRow>(sql, [allowedAccessLevels(principal)]);
+  const tokens = queryTokens(trimmed);
+  const { sql, params } = buildInternalDocChunkQuery(tokens);
+  const rows = await queryAll<InternalDocChunkRow>(sql, [allowedAccessLevels(principal), ...params]);
   const embedding = await getEmbedding(trimmed);
   return rankInternalDocChunks(trimmed, embedding, rows, principal, limit);
 }

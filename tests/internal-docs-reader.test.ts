@@ -7,7 +7,8 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { GuideReader } from '../src/app/dashboard/internal-docs/GuideReader';
 import { docxPreviewHtml, extractInternalDocText } from '../src/lib/internal-docs-extract';
-import { citationDocumentHref } from '../src/app/dashboard/internal-docs/FaqAskPanel';
+import { FaqAskPanel, citationDocumentHref } from '../src/app/dashboard/internal-docs/FaqAskPanel';
+import { FaqListSkeleton } from '../src/app/dashboard/internal-docs/FaqFeedback';
 import {
   guideHighlightNeedle,
   internalDocFilePath,
@@ -241,4 +242,56 @@ test('reader shows a document page, a clickable filename, and keeps manage actio
   assert.doesNotMatch(fileRoute, /public\//);
   assert.match(detailRoute, /docxPreviewHtml/);
   assert.match(detailRoute, /previewHtml/);
+});
+
+test('FAQ loading states show a spinner, and low-confidence answers are labeled', () => {
+  const list = renderToStaticMarkup(createElement(FaqListSkeleton));
+  assert.match(list, /data-testid="internal-docs-list-loading"/);
+  assert.match(list, /animate-spin/);
+  assert.match(list, /Loading documents/);
+  assert.match(list, /role="status"/);
+
+  const asking = renderToStaticMarkup(createElement(FaqAskPanel, {
+    messages: [{ role: 'user', content: 'How do I change my Lark password?' }],
+    input: '',
+    asking: true,
+    error: '',
+    onInputChange: () => undefined,
+    onSubmit: () => undefined,
+  }));
+  assert.match(asking, /data-testid="faq-ask-loading"/);
+  assert.match(asking, /animate-spin/);
+  assert.match(asking, /Looking through documents/);
+
+  const low = renderToStaticMarkup(createElement(FaqAskPanel, {
+    messages: [{
+      role: 'assistant',
+      content: 'FAQ & Guides do not contain a confident match for that question.',
+      confidence: 'low',
+      citations: [],
+    }],
+    input: '',
+    asking: false,
+    error: '',
+    onInputChange: () => undefined,
+    onSubmit: () => undefined,
+  }));
+  assert.match(low, /Low confidence/);
+  assert.match(low, /do not contain a confident match/);
+
+  const indexing = renderGuide(guide(), true).includes('Indexing this guide');
+  assert.equal(indexing, false);
+  const busy = renderToStaticMarkup(createElement(GuideReader, {
+    document: guide(),
+    canManage: true,
+    busy: 'reindex',
+    onAccessChange: () => undefined,
+    onReindex: () => undefined,
+    onDelete: () => undefined,
+  }));
+  assert.match(busy, /data-testid="internal-docs-reindex-loading"/);
+  assert.match(busy, /Indexing this guide/);
+  assert.match(busy, /animate-spin/);
+  assert.match(busy, />Delete</);
+  assert.doesNotMatch(busy, /Delete this guide/);
 });
