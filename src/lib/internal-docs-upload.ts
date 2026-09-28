@@ -4,7 +4,17 @@
  * shows the same message before and after the request.
  */
 
-export const MAX_INTERNAL_DOC_BYTES = 15 * 1024 * 1024;
+export const MAX_INTERNAL_DOC_MB = 100;
+
+/**
+ * App-enforced FAQ & Guides upload cap. The browser and the upload route
+ * share it and reject larger files with the same error.
+ * A reverse proxy in front of this process must allow at least this many
+ * bytes or it drops the request before that check. That includes nginx
+ * `client_max_body_size`. Next.js `proxyClientMaxBodySize` is set above
+ * this cap in next.config.ts so a proxy does not truncate the multipart body.
+ */
+export const MAX_INTERNAL_DOC_BYTES = MAX_INTERNAL_DOC_MB * 1024 * 1024;
 
 export const INTERNAL_DOC_FILE_ACCEPT =
   '.pdf,.docx,.md,.txt,application/pdf,text/plain,text/markdown,text/x-markdown';
@@ -32,7 +42,7 @@ export function internalDocKind(filename: string, mimeType: string): InternalDoc
 
 export function internalDocUploadIssue(file: { name: string; size: number; type?: string }): string | null {
   if (file.size <= 0) return 'The file is empty.';
-  if (file.size > MAX_INTERNAL_DOC_BYTES) return 'File is larger than 15 MB.';
+  if (file.size > MAX_INTERNAL_DOC_BYTES) return `File is larger than ${MAX_INTERNAL_DOC_MB} MB.`;
   if (!internalDocKind(file.name, file.type || '')) return 'Unsupported file type. Use PDF, DOCX, MD, or TXT.';
   return null;
 }

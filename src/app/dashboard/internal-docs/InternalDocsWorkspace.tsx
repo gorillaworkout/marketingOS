@@ -18,6 +18,7 @@ import { FaqListSkeleton, FaqWorking } from './FaqFeedback';
 import { GuideReader } from './GuideReader';
 import {
   INTERNAL_DOC_FILE_ACCEPT,
+  MAX_INTERNAL_DOC_MB,
   internalDocUploadIssue,
   titleForInternalDocUpload,
 } from '@/lib/internal-docs-upload';
@@ -465,7 +466,7 @@ export function InternalDocsWorkspace({ documentId, highlight = '' }: { document
       {canManage && (
         <Panel>
           <h2 className="text-sm font-[560] text-[var(--mos-text)]">Upload documents</h2>
-          <p className="mt-1 text-xs leading-5 text-[var(--mos-text-muted)]">Drop PDF, DOCX, MD, or TXT files, or choose them. Each file is saved and indexed on its own. Company or IT-only applies to every file in this upload.</p>
+          <p className="mt-1 text-xs leading-5 text-[var(--mos-text-muted)]">Drop PDF, DOCX, MD, or TXT files up to {MAX_INTERNAL_DOC_MB} MB, or choose them. Each file is saved and indexed on its own. Company or IT-only applies to every file in this upload.</p>
           <form onSubmit={upload} className="mt-4 space-y-3">
             <label
               data-testid="internal-docs-dropzone"

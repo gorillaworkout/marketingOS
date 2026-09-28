@@ -7,6 +7,7 @@ import {
   formatInternalDocsPrompt,
   INTERNAL_DOCS_ASK_SYSTEM,
   internalDocsAskFallback,
+  presentInternalDocsAnswer,
   retrieveInternalDocHits,
   withCitationMedia,
 } from '@/lib/internal-docs';
@@ -69,7 +70,11 @@ export async function POST(request: NextRequest) {
       undefined,
       { model, temperature: 0.2, maxTokens: 900, taskType: 'internal-docs' },
     );
-    return NextResponse.json({ answer: result.content.trim(), citations, confidence: 'high' });
+    return NextResponse.json({
+      answer: presentInternalDocsAnswer(result.content, hits),
+      citations,
+      confidence: 'high',
+    });
   } catch (error) {
     console.error('Internal docs ask failed:', error);
     return NextResponse.json({ error: 'Could not answer from FAQ & Guides right now.' }, { status: 502 });

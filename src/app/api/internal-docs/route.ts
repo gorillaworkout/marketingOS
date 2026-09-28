@@ -59,6 +59,8 @@ export async function POST(request: NextRequest) {
   if (!absolute) return NextResponse.json({ error: 'Could not store this file.' }, { status: 400 });
 
   const bytes = new Uint8Array(await file.arrayBuffer());
+  const buffered = internalDocUploadIssue({ name: file.name || '', size: bytes.byteLength, type: file.type || '' });
+  if (buffered) return NextResponse.json({ error: buffered }, { status: 400 });
   await mkdir(internalDocsDirectory(), { recursive: true });
   await writeFile(absolute, bytes);
 

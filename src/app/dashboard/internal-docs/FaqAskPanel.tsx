@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { FormEvent } from 'react';
+import { FormEvent, useState } from 'react';
 import { Button, Panel, StatusBadge, TextArea } from '@/components/ui/dashboard';
 import { guideHighlightNeedle, internalDocFilePath, isInternalDocImagePath } from '@/lib/internal-docs-reader';
 import { FaqWorking } from './FaqFeedback';
@@ -34,6 +34,22 @@ export function citationDocumentHref(citation: Pick<FaqCitation, 'documentId' | 
   return `/dashboard/internal-docs/${citation.documentId}?highlight=${encodeURIComponent(highlight)}`;
 }
 
+function CitationFigure({ src, alt }: { src: string; alt: string }) {
+  const [broken, setBroken] = useState(false);
+  if (broken) return null;
+  return (
+    <a href={src} target="_blank" rel="noopener noreferrer" className="mt-3 block">
+      <img
+        data-testid="faq-answer-image"
+        src={src}
+        alt={alt}
+        onError={() => setBroken(true)}
+        className="h-auto max-h-[48rem] w-full rounded-[var(--mos-radius-control)] border border-[var(--mos-border)] bg-white object-contain"
+      />
+    </a>
+  );
+}
+
 function CitationCard({ citation }: { citation: FaqCitation }) {
   const isPdf = (citation.extension || '').toLowerCase() === '.pdf';
   const images = (citation.images || []).filter(isInternalDocImagePath).slice(0, 4);
@@ -42,14 +58,16 @@ function CitationCard({ citation }: { citation: FaqCitation }) {
       <Link href={citationDocumentHref(citation)} className="text-sm font-medium text-[var(--mos-accent-soft)] hover:underline">
         {citation.title}
       </Link>
-      {citation.excerpt && <p className="mt-1 text-xs leading-5 text-[var(--mos-text-muted)]">{citation.excerpt}</p>}
+      {citation.excerpt && (
+        <p data-testid="faq-answer-excerpt" className="mt-2 text-sm leading-6 text-[var(--mos-text)]">{citation.excerpt}</p>
+      )}
       {isPdf && (
         <div className="mt-3">
           <iframe
             data-testid="faq-answer-pdf"
             title={`${citation.title} PDF`}
             src={internalDocFilePath(citation.documentId, true)}
-            className="h-80 w-full rounded-[var(--mos-radius-control)] border border-[var(--mos-border)] bg-white"
+            className="h-[32rem] w-full rounded-[var(--mos-radius-control)] border border-[var(--mos-border)] bg-white"
           />
           <a
             data-testid="faq-open-pdf"
@@ -62,19 +80,9 @@ function CitationCard({ citation }: { citation: FaqCitation }) {
           </a>
         </div>
       )}
-      {images.length > 0 && (
-        <div className="mt-3 space-y-2">
-          {images.map(src => (
-            <img
-              key={src}
-              data-testid="faq-answer-image"
-              src={src}
-              alt={citation.title}
-              className="max-h-80 w-full rounded-[var(--mos-radius-control)] bg-white object-contain"
-            />
-          ))}
-        </div>
-      )}
+      {images.length > 0 && images.map(src => (
+        <CitationFigure key={src} src={src} alt={citation.title} />
+      ))}
     </li>
   );
 }

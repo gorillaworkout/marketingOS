@@ -21,6 +21,7 @@ import {
   internalDocsAskFallback,
   internalDocsRetrievalConfidence,
   mergeInternalDocSources,
+  presentInternalDocsAnswer,
   rankInternalDocChunks,
   type InternalDocChunkRow,
   type InternalDocHit,
@@ -201,6 +202,92 @@ test('auditorium LED questions prefer the auditorium guide over LED running text
   assert.equal(embeddedHits.some(hit => hit.documentId === 'doc-running'), false);
 });
 
+test('LED Auditorium stays the confident source when Running Text shares the word LED', async () => {
+  const queryVector = [1, 0];
+  const ledHeavy = JSON.stringify(queryVector);
+  const orthogonal = JSON.stringify([0, 1]);
+  const running = (index: number): InternalDocChunkRow => ({
+    chunk_id: `run-${index}`,
+    document_id: 'doc-running',
+    title: 'LED Running Text',
+    access_level: 'company',
+    content: `${'LED running text scroll. '.repeat(8)}The LED running text is not used in the auditorium lobby. Restart the LED running text if the scroll freezes.`,
+    embedding: ledHeavy,
+  });
+  const auditorium = (index: number): InternalDocChunkRow => ({
+    chunk_id: `aud-${index}`,
+    document_id: 'doc-auditorium',
+    title: 'LED Auditorium',
+    access_level: 'company',
+    content: 'Power on the LED Auditorium wall from the control room. Switch on the breaker labeled LED Auditorium, wait for a steady green status, then press Power on the controller. The LED Auditorium wall should show the standby image.',
+    embedding: orthogonal,
+  });
+  const chunks = [
+    ...Array.from({ length: 24 }, (_, index) => running(index)),
+    ...Array.from({ length: 4 }, (_, index) => auditorium(index)),
+  ];
+
+  const expectAuditorium = (query: string) => {
+    const hits = rankInternalDocChunks(query, queryVector, chunks, company, 6);
+    assert.equal(hits[0]?.documentId, 'doc-auditorium', query);
+    assert.equal(hits[0]?.subjectMatched, true, query);
+    assert.equal(hits.every(hit => hit.documentId === 'doc-auditorium'), true, query);
+    assert.equal(internalDocsRetrievalConfidence(query, hits), 'high', query);
+    assert.equal(internalDocsAskFallback(query, hits), null, query);
+    const prompt = formatInternalDocsPrompt(hits, 'https://marketing.example');
+    assert.match(prompt, /LED Auditorium/);
+    assert.doesNotMatch(prompt, /Running Text/i);
+    const citations = citationsFromHits(hits, 'https://marketing.example');
+    assert.equal(citations.length, 1);
+    assert.equal(citations[0]?.title, 'LED Auditorium');
+    assert.match(citations[0]?.excerpt || '', /LED Auditorium/);
+  };
+
+  expectAuditorium('LED Auditorium');
+  expectAuditorium('how do I use the LED auditorium');
+
+  const runningOnly = rankInternalDocChunks('LED Auditorium', queryVector, chunks.filter(chunk => chunk.document_id === 'doc-running'), company, 6);
+  assert.equal(runningOnly[0]?.documentId, 'doc-running');
+  assert.equal(runningOnly[0]?.subjectMatched, false);
+  assert.equal(internalDocsRetrievalConfidence('LED Auditorium', runningOnly), 'low');
+  const fallback = internalDocsAskFallback('LED Auditorium', runningOnly);
+  assert.equal(fallback?.confidence, 'low');
+  assert.equal(fallback?.answer, INTERNAL_DOCS_LOW_CONFIDENCE_ANSWER);
+  assert.doesNotMatch(fallback?.answer || '', /Running Text|auditorium wall/i);
+
+  const short = presentInternalDocsAnswer('See the picture.', [
+    {
+      documentId: 'doc-auditorium',
+      title: 'LED Auditorium',
+      accessLevel: 'company',
+      chunkId: 'aud-0',
+      excerpt: 'Power on the LED Auditorium wall from the control room. Switch on the breaker labeled LED Auditorium.',
+      score: 3,
+      subjectMatched: true,
+    },
+    {
+      documentId: 'doc-running',
+      title: 'LED Running Text',
+      accessLevel: 'company',
+      chunkId: 'run-0',
+      excerpt: 'Restart the LED running text if the scroll freezes.',
+      score: 1,
+      subjectMatched: false,
+    },
+  ]);
+  assert.match(short, /Power on the LED Auditorium wall/);
+  assert.doesNotMatch(short, /running text/i);
+  const longAnswer = `${'Switch on the auditorium breaker and wait for green. '.repeat(6)}Then press Power.`;
+  assert.equal(presentInternalDocsAnswer(longAnswer, [{
+    documentId: 'doc-auditorium',
+    title: 'LED Auditorium',
+    accessLevel: 'company',
+    chunkId: 'aud-0',
+    excerpt: 'Power on the LED Auditorium wall from the control room.',
+    score: 3,
+  }]), longAnswer.trim());
+});
+
 test('Lark password questions prefer the Lark guide over auditorium docs that only share a word', async () => {
   const queryVector = [1, 0, 0];
   const dominant = JSON.stringify(queryVector);
@@ -273,7 +360,10 @@ test('chunk retrieval orders lexical overlap ahead of recency', () => {
   assert.match(ranked.sql, /c\.content ILIKE \? ESCAPE/);
   assert.match(ranked.sql, /ORDER BY \(/);
   assert.match(ranked.sql, /DESC, d\.updated_at DESC/);
-  assert.equal(ranked.params.length, 6);
+  assert.match(ranked.sql, /THEN 3 ELSE 0 END/);
+  assert.equal(ranked.params.length, 10);
+  assert.ok(ranked.params.some(param => typeof param === 'string' && param.includes('lark password')));
+  assert.ok(ranked.params.some(param => typeof param === 'string' && param.includes('password lark')));
   assert.ok(ranked.params.every(param => typeof param === 'string' && (param.includes('lark') || param.includes('password') || param.includes('change'))));
 
   const plain = buildInternalDocChunkQuery();
@@ -387,6 +477,7 @@ test('sidebar, routes, migration, and AI Research keep Internal Docs ACL separat
   assert.match(ask, /internalDocsAskFallback/);
   assert.ok(ask.indexOf('internalDocsAskFallback') < ask.indexOf('generateContent'));
   assert.match(ask, /withCitationMedia/);
+  assert.match(ask, /presentInternalDocsAnswer/);
   assert.match(read('src/lib/internal-docs.ts'), /persistInternalDocKnowledge/);
   assert.match(read('src/app/api/internal-docs/[id]/reindex/route.ts'), /persistInternalDocKnowledge/);
   assert.match(read('src/app/api/internal-docs/[id]/route.ts'), /deleteInternalDocKnowledge/);
