@@ -2,7 +2,7 @@
 
 import { DragEvent, FormEvent, useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import {
   Button,
   EmptyState,
@@ -13,7 +13,9 @@ import {
   StatusBadge,
   TextInput,
 } from '@/components/ui/dashboard';
-import { FaqAskPanel, type FaqAskMessage } from './FaqAskPanel';
+import { FaqAskPanel } from './FaqAskPanel';
+import { useInternalDocsState } from './InternalDocsState';
+import { documentIdFromInternalDocsPath } from './InternalDocsRoute';
 import { FaqListSkeleton, FaqWorking } from './FaqFeedback';
 import { GuideReader } from './GuideReader';
 import {
@@ -100,8 +102,11 @@ function uploadStatusTone(status: UploadStatus): 'success' | 'warning' | 'danger
   return 'neutral';
 }
 
-export function InternalDocsWorkspace({ documentId, highlight = '' }: { documentId?: string; highlight?: string }) {
+export function InternalDocsWorkspace() {
   const router = useRouter();
+  const pathname = usePathname();
+  const documentId = documentIdFromInternalDocsPath(pathname);
+  const { messages, setMessages, highlight } = useInternalDocsState();
   const [documents, setDocuments] = useState<DocSummary[]>([]);
   const [canManage, setCanManage] = useState(false);
   const [search, setSearch] = useState('');
@@ -123,7 +128,6 @@ export function InternalDocsWorkspace({ documentId, highlight = '' }: { document
   const [askInput, setAskInput] = useState('');
   const [asking, setAsking] = useState(false);
   const [askError, setAskError] = useState('');
-  const [messages, setMessages] = useState<FaqAskMessage[]>([]);
   const [detailBusy, setDetailBusy] = useState<'' | 'access' | 'reindex' | 'delete'>('');
 
   const loadList = useCallback(async (query: string) => {
@@ -451,7 +455,7 @@ export function InternalDocsWorkspace({ documentId, highlight = '' }: { document
       <PageHeader
         eyebrow="Guidance"
         title="FAQ & Guides"
-        description="Ask a question first. Open a citation to read the guide it came from."
+        description="Ask a question first. Open a source link to read the guide or PDF."
       />
 
       <FaqAskPanel
@@ -602,6 +606,7 @@ export function InternalDocsWorkspace({ documentId, highlight = '' }: { document
                   <li key={document.id} className="border-b border-[var(--mos-border-subtle)] last:border-b-0">
                     <Link
                       href={`/dashboard/internal-docs/${document.id}`}
+                      scroll={false}
                       className={`block px-4 py-3 transition ${selected ? 'bg-white/[0.05]' : 'hover:bg-white/[0.03]'}`}
                     >
                       <span className="flex items-start justify-between gap-2">

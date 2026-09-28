@@ -7,7 +7,9 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { GuideReader } from '../src/app/dashboard/internal-docs/GuideReader';
 import { docxPreviewHtml, extractInternalDocText } from '../src/lib/internal-docs-extract';
-import { FaqAskPanel, citationDocumentHref } from '../src/app/dashboard/internal-docs/FaqAskPanel';
+import { FaqAskPanel, citationDocumentHref, citationFileLink } from '../src/app/dashboard/internal-docs/FaqAskPanel';
+import { documentIdFromInternalDocsPath } from '../src/app/dashboard/internal-docs/InternalDocsRoute';
+import { FAQ_ASK_SESSION_KEY, parseFaqAskMessages, readFaqAskMessages, writeFaqAskMessages, type FaqAskStorage } from '../src/app/dashboard/internal-docs/faq-ask-session';
 import { FaqListSkeleton } from '../src/app/dashboard/internal-docs/FaqFeedback';
 import {
   guideHighlightNeedle,
@@ -219,12 +221,16 @@ test('reader shows a document page, a clickable filename, and keeps manage actio
   assert.match(workspace, /<FaqAskPanel/);
   assert.match(askPanel, /aria-label="Ask FAQ & Guides"/);
   assert.match(askPanel, /Ask anything about company guides/);
-  assert.match(askPanel, /data-testid="faq-answer-pdf"/);
-  assert.match(askPanel, /data-testid="faq-answer-image"/);
+  assert.match(askPanel, /data-testid="faq-citation-link"/);
   assert.match(askPanel, /data-testid="faq-answer-excerpt"/);
-  assert.match(askPanel, /max-h-\[48rem\]/);
-  assert.doesNotMatch(askPanel, /max-h-80/);
   assert.match(askPanel, /Open PDF/);
+  assert.match(askPanel, /Open file/);
+  assert.doesNotMatch(askPanel, /data-testid="faq-answer-pdf"/);
+  assert.doesNotMatch(askPanel, /data-testid="faq-answer-image"/);
+  assert.doesNotMatch(askPanel, /<iframe|<img/);
+  assert.match(read('src/app/dashboard/internal-docs/layout.tsx'), /<InternalDocsWorkspace/);
+  assert.match(workspace, /useInternalDocsState/);
+  assert.doesNotMatch(read('src/app/dashboard/internal-docs/[id]/page.tsx'), /<InternalDocsWorkspace/);
   assert.ok(workspace.indexOf('<FaqAskPanel') < workspace.indexOf('data-testid="internal-docs-dropzone"'));
   assert.ok(workspace.indexOf('data-testid="internal-docs-dropzone"') < workspace.indexOf('<GuideReader'));
   assert.match(workspace, /data-testid="internal-docs-dropzone"/);
@@ -304,12 +310,17 @@ test('FAQ loading states show a spinner, and low-confidence answers are labeled'
     onSubmit: () => undefined,
   }));
   assert.match(grounded, /Switch on the breaker labeled LED Auditorium, then press Power/);
+  assert.match(grounded, /Sources/);
+  assert.match(grounded, /data-testid="faq-citation-link"/);
   assert.match(grounded, /data-testid="faq-answer-excerpt"/);
   assert.match(grounded, /wait for a steady green status/);
-  assert.match(grounded, /data-testid="faq-answer-image"/);
-  assert.match(grounded, new RegExp(`src="${internalDocImagePath(documentId, 0)}"`));
-  assert.match(grounded, /max-h-\[48rem\]/);
-  assert.doesNotMatch(grounded, /max-h-80/);
+  assert.match(grounded, new RegExp(`href="/dashboard/internal-docs/${documentId}\\?highlight=`));
+  assert.match(grounded, /data-testid="faq-open-file"/);
+  assert.match(grounded, /Open file/);
+  assert.match(grounded, new RegExp(`href="/api/internal-docs/${documentId}/file"`));
+  assert.match(grounded, /target="_blank"/);
+  assert.doesNotMatch(grounded, /<img|<iframe|faq-answer-image|faq-answer-pdf/);
+  assert.doesNotMatch(grounded, new RegExp(internalDocImagePath(documentId, 0).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
 
   const imageOnly = renderGuide(guide({
     previewHtml: `<p><img src="${internalDocImagePath(documentId, 0)}" alt="Auditorium LED wall"></p>`,
@@ -336,4 +347,87 @@ test('FAQ loading states show a spinner, and low-confidence answers are labeled'
   assert.match(busy, /animate-spin/);
   assert.match(busy, />Delete</);
   assert.doesNotMatch(busy, /Delete this guide/);
+});
+
+function memoryStorage(): FaqAskStorage {
+  const data = new Map<string, string>();
+  return {
+    getItem: key => data.get(key) ?? null,
+    setItem: (key, value) => { data.set(key, value); },
+    removeItem: key => { data.delete(key); },
+  };
+}
+
+test('Ask citations are document links, and opening one keeps the question and answer', () => {
+  const pdfId = '22222222-2222-4222-8222-222222222222';
+  const pdf = citationFileLink({ documentId: pdfId, extension: '.pdf' });
+  const docx = citationFileLink({ documentId, extension: '.docx' });
+  assert.equal(pdf?.label, 'Open PDF');
+  assert.equal(pdf?.href, `/api/internal-docs/${pdfId}/file?inline=1`);
+  assert.equal(docx?.label, 'Open file');
+  assert.equal(docx?.testId, 'faq-open-file');
+  assert.equal(citationFileLink({ documentId, extension: '' }), null);
+  assert.equal(documentIdFromInternalDocsPath('/dashboard/internal-docs'), undefined);
+  assert.equal(documentIdFromInternalDocsPath(`/dashboard/internal-docs/${documentId}`), documentId);
+  assert.equal(documentIdFromInternalDocsPath(`/dashboard/internal-docs/${documentId}/`), documentId);
+
+  const asked = renderToStaticMarkup(createElement(FaqAskPanel, {
+    messages: [
+      { role: 'user', content: 'Where is the visitor wifi password?' },
+      {
+        role: 'assistant',
+        content: 'The password is printed at reception.',
+        citations: [{
+          documentId: pdfId,
+          title: 'Visitor wifi',
+          url: `/dashboard/internal-docs/${pdfId}`,
+          excerpt: 'The visitor wifi password is printed at reception.',
+          extension: '.pdf',
+          images: [internalDocImagePath(pdfId, 0), 'https://evil.example/pic.png'],
+        }],
+      },
+    ],
+    input: '',
+    asking: false,
+    error: '',
+    onInputChange: () => undefined,
+    onSubmit: () => undefined,
+  }));
+  assert.match(asked, /Where is the visitor wifi password\?/);
+  assert.match(asked, /The password is printed at reception\./);
+  assert.match(asked, /Visitor wifi/);
+  assert.match(asked, /data-testid="faq-open-pdf"/);
+  assert.match(asked, /Open PDF/);
+  assert.match(asked, new RegExp(`href="/api/internal-docs/${pdfId}/file\\?inline=1"`));
+  assert.match(asked, /target="_blank"/);
+  assert.match(asked, /rel="noopener noreferrer"/);
+  assert.doesNotMatch(asked, /<img|<iframe|faq-answer-image/);
+
+  const storage = memoryStorage();
+  const messages = [
+    { role: 'user' as const, content: 'Where is the visitor wifi password?' },
+    {
+      role: 'assistant' as const,
+      content: 'The password is printed at reception.',
+      citations: [{
+        documentId: pdfId,
+        title: 'Visitor wifi',
+        url: `/dashboard/internal-docs/${pdfId}`,
+        excerpt: 'The visitor wifi password is printed at reception.',
+        extension: '.pdf',
+        images: [internalDocImagePath(pdfId, 0)],
+      }],
+    },
+  ];
+  writeFaqAskMessages(storage, messages);
+  const restored = readFaqAskMessages(storage);
+  assert.equal(restored[0]?.content, 'Where is the visitor wifi password?');
+  assert.equal(restored[1]?.content, 'The password is printed at reception.');
+  assert.equal(restored[1]?.citations?.[0]?.title, 'Visitor wifi');
+  assert.equal(restored[1]?.citations?.[0]?.extension, '.pdf');
+  assert.equal(restored[1]?.citations?.[0]?.images, undefined);
+  assert.deepEqual(parseFaqAskMessages('not-json'), []);
+  assert.deepEqual(parseFaqAskMessages('{"role":"user"}'), []);
+  storage.setItem(FAQ_ASK_SESSION_KEY, '{');
+  assert.deepEqual(readFaqAskMessages(storage), []);
 });

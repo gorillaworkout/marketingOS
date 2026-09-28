@@ -1,7 +1,5 @@
-'use client';
-
-import { InternalDocsWorkspace } from './InternalDocsWorkspace';
+import { InternalDocsRoute } from './InternalDocsRoute';
 
 export default function InternalDocsPage() {
-  return <InternalDocsWorkspace />;
+  return <InternalDocsRoute />;
 }
