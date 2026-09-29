@@ -8,10 +8,6 @@ import {
   DUPOIN_IG_ACADEMY_LOCKUP_WIDTH,
   DUPOIN_IG_CHROME_HEIGHT,
   DUPOIN_IG_CHROME_WIDTH,
-  DUPOIN_IG_LOCKUP_HEIGHT,
-  DUPOIN_IG_LOCKUP_LEFT,
-  DUPOIN_IG_LOCKUP_TOP,
-  DUPOIN_IG_LOCKUP_WIDTH,
   DUPOIN_IG_SWIPE_BUTTON_HEIGHT,
   DUPOIN_IG_SWIPE_BUTTON_WIDTH,
   chromePlacement,
@@ -53,14 +49,14 @@ export {
  * dupoin-image-prompt.ts. It loads sharp, fs, and the plate files.
  * Band sizes and prompt clearance live in dupoin-ig-chrome-layout.ts.
  *
- * The committed plates are 1080×1350. The header plate stores the Dupoin
- * script wordmark plus the white CNN 2025 laurel toward the left. Compositing
- * crops that lockup and centers it on the top edge. The footer is the white
- * regulatory bar. Everywhere else on both plates is solid black.
+ * The committed plates are 1080×1350. The header is the Dupoin script
+ * wordmark plus the white CNN 2025 laurel, left-aligned on the plate. The
+ * footer is the white regulatory bar. Everywhere else on both plates is
+ * solid black. Normal posts stamp that header plate as-is.
  *
- * When dupoinAcademy is set, the header lockup is the Dupoin Academy sticker
- * (public/brand/dupoin-academy-logo.png) instead of the wordmark and laurel.
- * That sticker is also centered. The footer and the optional swipe pill stay.
+ * When dupoinAcademy is set, the header plate is replaced by the Dupoin
+ * Academy sticker (public/brand/dupoin-academy-logo.png), centered at the
+ * top. The footer and the optional swipe pill stay.
  *
  * Black that belongs to the plate background is turned transparent at
  * composite time so it cannot cover the generated scene. Black type inside
@@ -190,7 +186,6 @@ interface KeyedPlate {
 
 let headerPlate: KeyedPlate | null = null;
 let footerPlate: KeyedPlate | null = null;
-let normalLockupPng: Buffer | null = null;
 let academyLogoPng: { png: Buffer; width: number; height: number } | null = null;
 let swipeButtonPng: { png: Buffer; width: number; height: number } | null = null;
 
@@ -233,21 +228,6 @@ async function keyedFooter(): Promise<KeyedPlate> {
     contentTop: first,
   };
   return footerPlate;
-}
-
-/** Crop the wordmark + CNN laurel out of the keyed header so it can be recentered. */
-async function loadNormalLockup(): Promise<Buffer> {
-  if (normalLockupPng) return normalLockupPng;
-  const header = await keyedHeader();
-  const width = DUPOIN_IG_LOCKUP_WIDTH;
-  const height = DUPOIN_IG_LOCKUP_HEIGHT;
-  const out = Buffer.alloc(width * height * 4);
-  for (let y = 0; y < height; y++) {
-    const srcStart = ((DUPOIN_IG_LOCKUP_TOP + y) * header.width + DUPOIN_IG_LOCKUP_LEFT) * 4;
-    header.data.copy(out, y * width * 4, srcStart, srcStart + width * 4);
-  }
-  normalLockupPng = await sharp(out, { raw: { width, height, channels: 4 } }).png().toBuffer();
-  return normalLockupPng;
 }
 
 async function loadAcademyLogo(): Promise<{ png: Buffer; width: number; height: number }> {
@@ -305,14 +285,14 @@ export interface InstagramChromeOptions {
 }
 
 /**
- * Stamp the centered header lockup, then the footer plate, onto a generated image.
+ * Stamp the header, then the footer plate, onto a generated image.
  *
- * The normal lockup is cropped from the header plate and centered. Academy
- * mode swaps in the Academy sticker, also centered. Header artwork keeps its
- * alpha so the scene shows through. The footer bar covers the bottom edge.
- * The middle of the generated image is left untouched. Throws on failure: a
- * creative missing the regulatory footer must surface as an error rather than
- * pass silently.
+ * Normal posts keep Bayu's left-aligned wordmark and CNN laurel from the
+ * header plate. Academy mode replaces that plate with the centered Academy
+ * sticker. Header artwork keeps its alpha so the scene shows through. The
+ * footer bar covers the bottom edge. The middle of the generated image is
+ * left untouched. Throws on failure: a creative missing the regulatory
+ * footer must surface as an error rather than pass silently.
  *
  * With includeSwipeLeft, the ghost pill is added last, centered, above the
  * footer. Its transparent fill is composited with source-over so the scene
@@ -323,8 +303,7 @@ export async function compositeDupoinInstagramChrome(
   options?: InstagramChromeOptions,
 ): Promise<Buffer> {
   const academy = options?.dupoinAcademy === true;
-  const footer = await keyedFooter();
-  const header = academy ? null : await keyedHeader();
+  const [header, footer] = await Promise.all([keyedHeader(), keyedFooter()]);
   const base = sharp(imageBytes);
   const baseMeta = await base.metadata();
   if (!baseMeta.width || !baseMeta.height) {
@@ -333,7 +312,7 @@ export async function compositeDupoinInstagramChrome(
 
   const bands = academy
     ? { headerPx: DUPOIN_IG_ACADEMY_HEADER_BAND_PX, footerPx: footer.contentHeight }
-    : { headerPx: header!.contentHeight, footerPx: footer.contentHeight };
+    : { headerPx: header.contentHeight, footerPx: footer.contentHeight };
   const place = chromePlacement(baseMeta.width, baseMeta.height, bands);
   const footerStrip = await stripPng(
     footer,
@@ -343,22 +322,25 @@ export async function compositeDupoinInstagramChrome(
     place.footerHeight,
   );
 
-  const lockup = academy
-    ? await loadAcademyLogo()
-    : { png: await loadNormalLockup(), width: DUPOIN_IG_LOCKUP_WIDTH, height: DUPOIN_IG_LOCKUP_HEIGHT };
-  const spot = headerLockupPlacement(baseMeta.width, baseMeta.height, {
-    width: lockup.width,
-    height: lockup.height,
-    top: academy ? DUPOIN_IG_ACADEMY_LOCKUP_TOP : DUPOIN_IG_LOCKUP_TOP,
-  }, bands);
-  const lockupPng = spot.width === lockup.width && spot.height === lockup.height
-    ? lockup.png
-    : await sharp(lockup.png).resize(spot.width, spot.height, { fit: 'fill' }).png().toBuffer();
-
   const layers: sharp.OverlayOptions[] = [
-    { input: lockupPng, left: spot.left, top: spot.top },
     { input: footerStrip, left: place.left, top: baseMeta.height - place.footerHeight },
   ];
+
+  if (academy) {
+    const logo = await loadAcademyLogo();
+    const spot = headerLockupPlacement(baseMeta.width, baseMeta.height, {
+      width: logo.width,
+      height: logo.height,
+      top: DUPOIN_IG_ACADEMY_LOCKUP_TOP,
+    }, bands);
+    const lockupPng = spot.width === logo.width && spot.height === logo.height
+      ? logo.png
+      : await sharp(logo.png).resize(spot.width, spot.height, { fit: 'fill' }).png().toBuffer();
+    layers.unshift({ input: lockupPng, left: spot.left, top: spot.top });
+  } else {
+    const headerStrip = await stripPng(header, 0, header.contentHeight, place.scaledWidth, place.headerHeight);
+    layers.unshift({ input: headerStrip, left: place.left, top: 0 });
+  }
 
   if (options?.includeSwipeLeft) {
     const button = await loadSwipeButton();

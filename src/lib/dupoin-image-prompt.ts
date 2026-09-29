@@ -103,7 +103,7 @@ SUBJEK — konkret, bukan abstrak:
 - JANGAN tulis "suasana profesional" atau "nuansa modern" — itu tidak bisa digambar
 
 CHROME — JANGAN DIGAMBAR:
-- Wordmark Dupoin di tengah atas, badge CNN 2025 di sampingnya, dan footer regulasi putih tipis ditempel otomatis dari aset setelah gambar jadi
+- Wordmark Dupoin di kiri atas, badge CNN 2025 di sampingnya, dan footer regulasi putih tipis ditempel otomatis dari aset setelah gambar jadi
 - Jangan gambar logo, wordmark, monogram, laurel, badge, atau footer regulasi; jangan tulis kata "Dupoin" di dalam art
 - Pita atas: kosong dari teks, wajah, dan logo. Background navy/hitam dan glow boleh menyambung di belakang lockup
 - Pita bawah: kosong. Pill CTA duduk tepat di atasnya, bukan di dalamnya
@@ -187,8 +187,8 @@ export function dupoinChromeLockLine(
   const academySentence = academy
     ? ' Do not draw a graduation cap or the word "ACADEMY"; the Dupoin Academy logo is composited in the top center.'
     : '';
-  const lockupName = academy ? 'Dupoin Academy logo' : 'Dupoin header lockup';
-  return `Leave the top ${headerPercent}% of the frame empty of type, faces, and logos (background and texture may continue) for the composited centered ${lockupName}, and the bottom ${footerPercent}% empty for the composited white regulatory footer.${swipeSentence}${academySentence} ${DUPOIN_LOGO_REQUIRED_LINE} anywhere in the image. Primary accent Dupoin Blue ${DUPOIN_BLUE_HEX} as real light inside the scene.`;
+  const lockupName = academy ? 'centered Dupoin Academy logo' : 'Dupoin header lockup';
+  return `Leave the top ${headerPercent}% of the frame empty of type, faces, and logos (background and texture may continue) for the composited ${lockupName}, and the bottom ${footerPercent}% empty for the composited white regulatory footer.${swipeSentence}${academySentence} ${DUPOIN_LOGO_REQUIRED_LINE} anywhere in the image. Primary accent Dupoin Blue ${DUPOIN_BLUE_HEX} as real light inside the scene.`;
 }
 
 /** Guarantee the Instagram chrome reservation is present, replacing any stale percentages. */
@@ -303,7 +303,7 @@ Format: kunci ${spec.size} ${spec.orientation} (${aspectRatio}). ${spec.promptSu
 Adegan: subjek konkret dengan kedalaman nyata di field navy/hitam, glow atmosfer Dupoin Blue, dan permukaan gelap tempat teks bisa duduk di zona tengah. Subjek boleh orang, award fisik, atau laptop dengan chart.
 Copy: Exact headline (≤6 kata) sans tebal — kata promo kunci dalam Dupoin Blue, copy pendukung putih. Subheadline (≤10) putih. CTA (≤4) di dalam pill terisi Dupoin Blue dengan huruf putih, tepat di atas pita bawah. Kalau brief carousel atau story, teks pill "Swipe left →"; selain itu pakai CTA brief di pill yang sama. Semua dalam safe zone 80px dari tepi kiri dan kanan.
 Warna: background navy/hitam. Dupoin Blue ${DUPOIN_BLUE_HEX} muncul sebagai glow atmosfer, kata promo kunci, dan isi pill. Bukan sebagai lapisan.
-Chrome: JANGAN digambar. Wordmark Dupoin di tengah atas, badge CNN 2025 di sampingnya, dan footer regulasi putih tipis ditempel otomatis setelah gambar jadi. Sisakan pita atas kosong dari teks, wajah, dan logo (background boleh menyambung). Sisakan pita bawah kosong.
+Chrome: JANGAN digambar. Wordmark Dupoin kiri atas, badge CNN 2025, dan footer regulasi putih tipis ditempel otomatis setelah gambar jadi. Sisakan pita atas kosong dari teks, wajah, dan logo (background boleh menyambung). Sisakan pita bawah kosong.
 
 DILARANG: overlay, panel, box, scrim, banner, atau bar di belakang teks; nilai opacity/transparansi; gradient sebagai lapisan di atas gambar; hex code untuk background. Kalau teks kurang terbaca, atur ulang cahaya dan komposisi — jangan menambal dengan lapisan.
 Negatif lain: no hashtags, no long captions, no fake claims/numbers not in the brief, no wrong teal, no logo, no wordmark, no CNN badge, no laurel, no regulatory footer, no "Dupoin" lettering drawn into the art, no generic stock look.`;

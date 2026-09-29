@@ -140,9 +140,9 @@ async function runImageJob(job: ImageJob, prompt: string, brief: string, type: s
 
     if (imageBytes.length < 10_000) throw new Error('Image API returned a suspiciously small image.');
 
-    // Social Post wears Bayu's Instagram chrome: a centered header lockup plus
+    // Social Post wears Bayu's Instagram chrome: the left header lockup plus
     // the white regulatory footer, composited from the asset. Academy posts
-    // swap the Dupoin Academy logo into that same centered slot. A lower-right
+    // replace that lockup with the centered Dupoin Academy logo. A lower-right
     // wordmark on the same image would double-brand it. Other image types
     // still get the wordmark-only stamp.
     imageBytes = type === 'social-post'

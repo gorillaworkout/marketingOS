@@ -10,9 +10,9 @@ export const DUPOIN_IG_CHROME_WIDTH = 1080;
 export const DUPOIN_IG_CHROME_HEIGHT = 1350;
 
 /**
- * Artwork box of the Dupoin wordmark + CNN laurel on the source header plate.
- * The plate still stores that lockup toward the left. Compositing crops this
- * box and recenters it on the canvas, so the stamped mark is top-center.
+ * Lockup box on Bayu's 1080×1350 sizing reference.
+ * The normal Dupoin wordmark and CNN laurel stay inside this left-aligned box.
+ * Only the Academy sticker is centered, and it does not use this box.
  */
 export const DUPOIN_IG_LOCKUP_LEFT = 80;
 export const DUPOIN_IG_LOCKUP_TOP = 64;
@@ -84,9 +84,8 @@ export interface HeaderLockupBox {
 }
 
 /**
- * Scale a header lockup with the canvas and center it inside the header band.
- * The normal Dupoin mark and the Academy mark both use this, so neither sits
- * on the left of the plate.
+ * Scale the Dupoin Academy sticker with the canvas and center it.
+ * The normal Dupoin lockup is stamped from the header plate and stays left.
  */
 export function headerLockupPlacement(
   canvasWidth: number,

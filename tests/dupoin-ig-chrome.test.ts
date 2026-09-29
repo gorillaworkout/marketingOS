@@ -253,14 +253,8 @@ test('compositing uses the plate pixels and leaves the middle scene alone', asyn
     const i = (y * info.width + x) * 4;
     return [data[i], data[i + 1], data[i + 2], data[i + 3]];
   };
-  const spot = headerLockupPlacement(width, height);
-  const dx = spot.left - DUPOIN_IG_LOCKUP_LEFT;
-  const dy = spot.top - DUPOIN_IG_LOCKUP_TOP;
-  assert.ok(dx > 40, 'the plate lockup is left of center and must move right');
-  assert.equal(spot.left, Math.round((width - spot.width) / 2));
-  assert.ok(Math.abs((width - (spot.left + spot.width)) - spot.left) <= 1, 'centered lockup margins match');
-  assert.deepEqual(at(sample.x + dx, sample.y + dy), sample.rgba, 'header lockup pixel is copied into the centered slot');
-  assert.deepEqual(at(sample.x, sample.y).slice(0, 3), [180, 20, 20], 'the old left position stays the generated scene');
+  assert.deepEqual(at(sample.x, sample.y), sample.rgba, 'header plate pixel must be copied, not redrawn');
+  assert.ok(sample.x < width / 2, 'the Dupoin wordmark stays on the left of the plate');
 
   const center = at(540, 675);
   assert.deepEqual(center.slice(0, 3), [180, 20, 20], 'middle scene must show through the transparent black field');
@@ -304,7 +298,7 @@ test('compositing scales the same plates onto a square feed canvas', async () =>
       if (isTeal(r, g, b)) topTeal += 1;
     }
   }
-  assert.ok(topTeal > 80, 'square canvas still gets the centered header lockup');
+  assert.ok(topTeal > 80, 'square canvas still gets the upper-left lockup');
 });
 
 test('compositing scales the same plates onto a landscape canvas', async () => {
@@ -493,16 +487,9 @@ test('the Academy logo is a transparent sticker at the template size', async () 
   assert.equal(opaqueBlack, 0, 'the black field from the source art must not survive');
 });
 
-test('header lockup placement centers both the Dupoin mark and the Academy logo', () => {
+test('Academy lockup placement is centered and taller than the left Dupoin mark', () => {
   const width = DUPOIN_IG_CHROME_WIDTH;
   const height = DUPOIN_IG_CHROME_HEIGHT;
-  const normal = headerLockupPlacement(width, height);
-  assert.equal(normal.width, DUPOIN_IG_LOCKUP_WIDTH);
-  assert.equal(normal.height, DUPOIN_IG_LOCKUP_HEIGHT);
-  assert.equal(normal.top, DUPOIN_IG_LOCKUP_TOP);
-  assert.equal(normal.left, Math.round((width - normal.width) / 2));
-  assert.ok(normal.left > DUPOIN_IG_LOCKUP_LEFT);
-
   const academy = headerLockupPlacement(width, height, {
     width: DUPOIN_IG_ACADEMY_LOCKUP_WIDTH,
     height: DUPOIN_IG_ACADEMY_LOCKUP_HEIGHT,
@@ -515,7 +502,8 @@ test('header lockup placement centers both the Dupoin mark and the Academy logo'
   assert.equal(academy.height, DUPOIN_IG_ACADEMY_LOCKUP_HEIGHT);
   assert.equal(academy.top, DUPOIN_IG_ACADEMY_LOCKUP_TOP);
   assert.equal(academy.left, Math.round((width - academy.width) / 2));
-  assert.ok(academy.top + academy.height > normal.top + normal.height);
+  assert.ok(academy.top + academy.height > DUPOIN_IG_LOCKUP_TOP + DUPOIN_IG_LOCKUP_HEIGHT);
+  assert.ok(academy.left > DUPOIN_IG_LOCKUP_LEFT, 'Academy sticker sits to the right of the left Dupoin inset');
 });
 
 test('Academy compositing centers the Academy logo and leaves the Dupoin wordmark off', async () => {
@@ -578,10 +566,9 @@ test('Academy compositing centers the Academy logo and leaves the Dupoin wordmar
   const bottom = read(academyRaw, 10, height - 4);
   assert.ok(bottom[0] > 245 && bottom[1] > 245 && bottom[2] > 245, 'Academy posts keep the regulatory footer');
 
-  const normalSpot = headerLockupPlacement(width, height);
   let normalMinX = width;
   let normalMaxX = 0;
-  for (let y = normalSpot.top; y < normalSpot.top + normalSpot.height; y++) {
+  for (let y = DUPOIN_IG_LOCKUP_TOP; y < DUPOIN_IG_LOCKUP_TOP + DUPOIN_IG_LOCKUP_HEIGHT; y++) {
     for (let x = 0; x < width; x++) {
       const [r, g, b] = read(normalRaw, x, y);
       const scene = r === 180 && g === 20 && b === 20;
@@ -591,7 +578,8 @@ test('Academy compositing centers the Academy logo and leaves the Dupoin wordmar
       }
     }
   }
-  const normalLeft = normalMinX;
+  assert.equal(normalMinX, DUPOIN_IG_LOCKUP_LEFT, 'normal Dupoin lockup stays on the left');
+  assert.ok(normalMaxX < width / 2 + 80, 'normal Dupoin lockup does not cross into a centered placement');
   const normalRight = width - 1 - normalMaxX;
-  assert.ok(Math.abs(normalLeft - normalRight) <= 12, `Dupoin lockup must be centered, margins ${normalLeft} vs ${normalRight}`);
+  assert.ok(normalRight > normalMinX + 200, `left lockup must leave a wide right margin, ${normalMinX} vs ${normalRight}`);
 });

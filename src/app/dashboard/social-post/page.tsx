@@ -294,7 +294,7 @@ export default function SocialPostPage() {
   const [imageAspectRatio, setImageAspectRatio] = useState<ImageAspectRatio>(DEFAULT_IMAGE_ASPECT_RATIO);
   // Off by default: header and footer chrome only, matching posts from before this option.
   const [includeSwipeLeft, setIncludeSwipeLeft] = useState(false);
-  // Off by default: the centered Dupoin wordmark. On uses the Dupoin Academy logo.
+  // Off by default: the left Dupoin wordmark and CNN laurel. On uses the centered Academy logo.
   const [dupoinAcademy, setDupoinAcademy] = useState(false);
   const [availableImageModels, setAvailableImageModels] = useState(AVAILABLE_IMAGE_MODELS);
   const [imageProgress, setImageProgress] = useState<ImageProgressState | null>(null);

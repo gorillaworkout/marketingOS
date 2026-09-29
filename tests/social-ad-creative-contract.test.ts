@@ -127,7 +127,8 @@ test('applyDupoinImagePromptLocks reserves chrome bands and locks the selected s
 
   assert.match(locked, new RegExp(`top ${clearance.headerPercent}%`));
   assert.match(locked, new RegExp(`bottom ${clearance.footerPercent}%`));
-  assert.match(locked, /composited centered Dupoin header lockup/);
+  assert.match(locked, /composited Dupoin header lockup/);
+  assert.doesNotMatch(locked, /composited centered Dupoin header lockup/);
   assert.match(locked, /composited white regulatory footer/);
   assert.match(locked, /#2EB5C4/);
   assert.equal(locked.includes(DUPOIN_LOGO_REQUIRED_LINE), true);
