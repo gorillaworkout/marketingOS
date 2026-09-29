@@ -11,13 +11,23 @@ export const DUPOIN_IG_CHROME_HEIGHT = 1350;
 
 /**
  * Lockup box on Bayu's 1080×1350 sizing reference.
- * The composited mark must stay inside this box: more inset than a
- * full-width stamp, and not taller than the reference.
+ * The normal Dupoin wordmark and CNN laurel stay inside this left-aligned box.
+ * Only the Academy sticker is centered, and it does not use this box.
  */
 export const DUPOIN_IG_LOCKUP_LEFT = 80;
 export const DUPOIN_IG_LOCKUP_TOP = 64;
 export const DUPOIN_IG_LOCKUP_WIDTH = 435;
 export const DUPOIN_IG_LOCKUP_HEIGHT = 72;
+
+/**
+ * Dupoin Academy lockup (public/brand/dupoin-academy-logo.png) on the same
+ * 1080×1350 template. The file is a tight transparent sticker: script Dupoin,
+ * graduation cap, and ACADEMY. It replaces the normal lockup and is centered.
+ */
+export const DUPOIN_IG_ACADEMY_LOCKUP_TOP = 40;
+export const DUPOIN_IG_ACADEMY_LOCKUP_WIDTH = 480;
+export const DUPOIN_IG_ACADEMY_LOCKUP_HEIGHT = 203;
+export const DUPOIN_IG_ACADEMY_HEADER_BAND_PX = DUPOIN_IG_ACADEMY_LOCKUP_TOP + DUPOIN_IG_ACADEMY_LOCKUP_HEIGHT;
 
 /**
  * Content height of each plate after the black background is removed.
@@ -67,12 +77,52 @@ export function chromePlacement(
   return { headerHeight, footerHeight, scaledWidth, left };
 }
 
+export interface HeaderLockupBox {
+  width: number;
+  height: number;
+  top: number;
+}
+
+/**
+ * Scale the Dupoin Academy sticker with the canvas and center it.
+ * The normal Dupoin lockup is stamped from the header plate and stays left.
+ */
+export function headerLockupPlacement(
+  canvasWidth: number,
+  canvasHeight: number,
+  lockup: HeaderLockupBox = {
+    width: DUPOIN_IG_LOCKUP_WIDTH,
+    height: DUPOIN_IG_LOCKUP_HEIGHT,
+    top: DUPOIN_IG_LOCKUP_TOP,
+  },
+  bands?: { headerPx: number; footerPx: number },
+): { left: number; top: number; width: number; height: number } {
+  const place = chromePlacement(canvasWidth, canvasHeight, bands);
+  const scale = place.scaledWidth / DUPOIN_IG_CHROME_WIDTH;
+  let width = Math.max(1, Math.round(lockup.width * scale));
+  let height = Math.max(1, Math.round(lockup.height * scale));
+  let top = Math.max(0, Math.round(lockup.top * scale));
+  if (width > canvasWidth) {
+    const shrink = canvasWidth / width;
+    height = Math.max(1, Math.round(height * shrink));
+    top = Math.max(0, Math.round(top * shrink));
+    width = canvasWidth;
+  }
+  if (top + height > canvasHeight) height = Math.max(1, canvasHeight - top);
+  const left = Math.max(0, Math.round((canvasWidth - width) / 2));
+  return { left, top, width, height };
+}
+
 /** Clearance the image prompt must reserve, as a percentage of the canvas height. */
-export function chromeClearancePercents(canvasWidth: number, canvasHeight: number): {
+export function chromeClearancePercents(
+  canvasWidth: number,
+  canvasHeight: number,
+  bands?: { headerPx: number; footerPx: number },
+): {
   headerPercent: number;
   footerPercent: number;
 } {
-  const place = chromePlacement(canvasWidth, canvasHeight);
+  const place = chromePlacement(canvasWidth, canvasHeight, bands);
   return {
     headerPercent: Math.ceil((place.headerHeight / canvasHeight) * 100),
     footerPercent: Math.ceil((place.footerHeight / canvasHeight) * 100),

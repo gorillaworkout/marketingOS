@@ -19,6 +19,7 @@ interface ImageItem {
   aspectRatio: string | null;
   model: string | null;
   includeSwipeLeft: boolean | null;
+  dupoinAcademy: boolean | null;
   linked: boolean;
 }
 
@@ -126,6 +127,7 @@ export default function ImagesPage() {
       aspectRatio: img.aspectRatio || undefined,
       model: img.model || undefined,
       includeSwipeLeft: typeof img.includeSwipeLeft === 'boolean' ? img.includeSwipeLeft : undefined,
+      dupoinAcademy: typeof img.dupoinAcademy === 'boolean' ? img.dupoinAcademy : undefined,
       taskId: img.taskId || undefined,
       filename: img.filename,
       imageUrl: img.url,
@@ -350,10 +352,11 @@ export default function ImagesPage() {
                 ) : (
                   <p data-testid="gallery-image-prompt" className="mt-1 text-xs text-[var(--mos-text-muted)]">No saved prompt for this image.</p>
                 )}
-                {(lightbox.aspectRatio || typeof lightbox.includeSwipeLeft === 'boolean') && (
+                {(lightbox.aspectRatio || typeof lightbox.includeSwipeLeft === 'boolean' || typeof lightbox.dupoinAcademy === 'boolean') && (
                   <p className="mt-1 text-[11px] text-[var(--mos-text-faint)]">
                     {lightbox.aspectRatio || 'Aspect ratio not saved'}
                     {typeof lightbox.includeSwipeLeft === 'boolean' ? ` · Swipe left button: ${lightbox.includeSwipeLeft ? 'On' : 'Off'}` : ''}
+                    {typeof lightbox.dupoinAcademy === 'boolean' ? ` · Dupoin Academy: ${lightbox.dupoinAcademy ? 'On' : 'Off'}` : ''}
                   </p>
                 )}
               </div>

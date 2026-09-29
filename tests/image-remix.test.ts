@@ -42,9 +42,11 @@ test('linked images keep the prompt and generation inputs stored on that file', 
     aspectRatio: '4:3',
     model: 'gpt-image-2',
     includeSwipeLeft: false,
+    dupoinAcademy: null,
   });
   assert.equal(linked[1]?.prompt, 'Latest scene prompt');
   assert.equal(linked[1]?.includeSwipeLeft, true);
+  assert.equal(linked[1]?.dupoinAcademy, null);
   assert.equal(linked[1]?.aspectRatio, '9:16');
 });
 

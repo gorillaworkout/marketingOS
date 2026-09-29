@@ -51,6 +51,7 @@ export async function GET(request: NextRequest) {
     aspectRatio: string | null;
     model: string | null;
     includeSwipeLeft: boolean | null;
+    dupoinAcademy: boolean | null;
   }>();
   for (const task of tasks) {
     try {
@@ -71,6 +72,7 @@ export async function GET(request: NextRequest) {
           aspectRatio: linked.aspectRatio,
           model: linked.model,
           includeSwipeLeft: linked.includeSwipeLeft,
+          dupoinAcademy: linked.dupoinAcademy,
         });
       }
     } catch {
@@ -96,6 +98,7 @@ export async function GET(request: NextRequest) {
       aspectRatio: taskInfo?.aspectRatio || null,
       model: taskInfo?.model || null,
       includeSwipeLeft: taskInfo?.includeSwipeLeft ?? null,
+      dupoinAcademy: taskInfo?.dupoinAcademy ?? null,
       linked: !!taskInfo,
     };
   });

@@ -5,7 +5,12 @@ import {
   withImageAspectPrompt,
   type ImageAspectRatio,
 } from '@/lib/image-aspect-ratio';
-import { chromeClearancePercents, swipePromptClearancePercent } from '@/lib/dupoin-ig-chrome-layout';
+import {
+  DUPOIN_IG_ACADEMY_HEADER_BAND_PX,
+  DUPOIN_IG_FOOTER_BAND_PX,
+  chromeClearancePercents,
+  swipePromptClearancePercent,
+} from '@/lib/dupoin-ig-chrome-layout';
 
 /** Official Dupoin Brand Guidelines 2026 primary (Hex resmi). */
 export const DUPOIN_BLUE_HEX = '#2EB5C4';
@@ -138,7 +143,7 @@ export interface SocialPostImagePromptInput {
   aspectRatio?: ImageAspectRatio;
 }
 
-const CHROME_LOCK_RE = /\n\nLeave the top \d+% of the frame empty of type, faces, and logos \(background and texture may continue\) for the composited Dupoin header lockup, and the bottom \d+% empty for the composited white regulatory footer\.(?: Leave an additional \d+% directly above that footer empty of type, faces, and logos for the composited centered Swipe left button\. Do not draw a swipe button, pill, arrow, or the words "Swipe left"\.)? Draw no logo, no wordmark, no CNN badge, no laurel, no regulatory footer, and no "Dupoin" lettering anywhere in the image\. Primary accent Dupoin Blue #2EB5C4 as real light inside the scene\./g;
+const CHROME_LOCK_RE = /\n\nLeave the top \d+% of the frame empty of type, faces, and logos \(background and texture may continue\) for the composited (?:centered )?Dupoin (?:header lockup|Academy logo), and the bottom \d+% empty for the composited white regulatory footer\.(?: Leave an additional \d+% directly above that footer empty of type, faces, and logos for the composited centered Swipe left button\. Do not draw a swipe button, pill, arrow, or the words "Swipe left"\.)?(?: Do not draw a graduation cap or the word "ACADEMY"; the Dupoin Academy logo is composited in the top center\.)? Draw no logo, no wordmark, no CNN badge, no laurel, no regulatory footer, and no "Dupoin" lettering anywhere in the image\. Primary accent Dupoin Blue #2EB5C4 as real light inside the scene\./g;
 
 const STYLE_LOCKS = [DUPOIN_IG_STYLE_LOCK, DUPOIN_IG_STYLE_LOCK_SWIPE_COMPOSITED];
 
@@ -159,6 +164,8 @@ export function stripDupoinChromeLock(prompt: string): string {
 export interface DupoinImagePromptLockOptions {
   /** Reserve the composited Swipe left pill and tell the model not to draw it. */
   includeSwipeLeft?: boolean;
+  /** Reserve the taller centered Dupoin Academy logo instead of the Dupoin wordmark. */
+  dupoinAcademy?: boolean;
 }
 
 /** English reservation appended to every image prompt. Percentages follow the selected canvas. */
@@ -168,11 +175,20 @@ export function dupoinChromeLockLine(
 ): string {
   const spec = getImageGenerationSpec(aspectRatio);
   const [width, height] = spec.size.split('x').map(Number);
-  const { headerPercent, footerPercent } = chromeClearancePercents(width, height);
+  const academy = options?.dupoinAcademy === true;
+  const { headerPercent, footerPercent } = chromeClearancePercents(
+    width,
+    height,
+    academy ? { headerPx: DUPOIN_IG_ACADEMY_HEADER_BAND_PX, footerPx: DUPOIN_IG_FOOTER_BAND_PX } : undefined,
+  );
   const swipeSentence = options?.includeSwipeLeft
     ? ` Leave an additional ${swipePromptClearancePercent(width, height)}% directly above that footer empty of type, faces, and logos for the composited centered Swipe left button. Do not draw a swipe button, pill, arrow, or the words "Swipe left".`
     : '';
-  return `Leave the top ${headerPercent}% of the frame empty of type, faces, and logos (background and texture may continue) for the composited Dupoin header lockup, and the bottom ${footerPercent}% empty for the composited white regulatory footer.${swipeSentence} ${DUPOIN_LOGO_REQUIRED_LINE} anywhere in the image. Primary accent Dupoin Blue ${DUPOIN_BLUE_HEX} as real light inside the scene.`;
+  const academySentence = academy
+    ? ' Do not draw a graduation cap or the word "ACADEMY"; the Dupoin Academy logo is composited in the top center.'
+    : '';
+  const lockupName = academy ? 'centered Dupoin Academy logo' : 'Dupoin header lockup';
+  return `Leave the top ${headerPercent}% of the frame empty of type, faces, and logos (background and texture may continue) for the composited ${lockupName}, and the bottom ${footerPercent}% empty for the composited white regulatory footer.${swipeSentence}${academySentence} ${DUPOIN_LOGO_REQUIRED_LINE} anywhere in the image. Primary accent Dupoin Blue ${DUPOIN_BLUE_HEX} as real light inside the scene.`;
 }
 
 /** Guarantee the Instagram chrome reservation is present, replacing any stale percentages. */
@@ -251,6 +267,7 @@ export function applyDupoinImagePromptLocks(
   options?: DupoinImagePromptLockOptions,
 ): string {
   const includeSwipeLeft = options?.includeSwipeLeft === true;
+  const dupoinAcademy = options?.dupoinAcademy === true;
   const cleaned = stripDupoinStyleLock(
     stripDupoinChromeLock(stripImageAspectPrompt(stripFlatOverlayLanguage(prompt))),
   ).trim();
@@ -261,7 +278,10 @@ export function applyDupoinImagePromptLocks(
   const withStyle = guarded.includes(styleLock)
     ? guarded
     : `${guarded}\n\n${styleLock}`.trim();
-  return withImageAspectPrompt(ensureOfficialDupoinLogo(withStyle, aspectRatio, { includeSwipeLeft }), aspectRatio);
+  return withImageAspectPrompt(
+    ensureOfficialDupoinLogo(withStyle, aspectRatio, { includeSwipeLeft, dupoinAcademy }),
+    aspectRatio,
+  );
 }
 
 /** User message that drives Social Post image-prompt generation from a selected caption. */
