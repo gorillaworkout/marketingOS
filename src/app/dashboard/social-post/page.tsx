@@ -101,6 +101,7 @@ interface ImageJobResponse {
     fallbackMessage?: string;
     aspectRatio?: ImageAspectRatio;
     includeSwipeLeft?: boolean;
+    dupoinAcademy?: boolean;
   };
 }
 
@@ -293,6 +294,8 @@ export default function SocialPostPage() {
   const [imageAspectRatio, setImageAspectRatio] = useState<ImageAspectRatio>(DEFAULT_IMAGE_ASPECT_RATIO);
   // Off by default: header and footer chrome only, matching posts from before this option.
   const [includeSwipeLeft, setIncludeSwipeLeft] = useState(false);
+  // Off by default: the centered Dupoin wordmark. On uses the Dupoin Academy logo.
+  const [dupoinAcademy, setDupoinAcademy] = useState(false);
   const [availableImageModels, setAvailableImageModels] = useState(AVAILABLE_IMAGE_MODELS);
   const [imageProgress, setImageProgress] = useState<ImageProgressState | null>(null);
   const [imageNotice, setImageNotice] = useState('');
@@ -502,7 +505,7 @@ export default function SocialPostPage() {
                 setTaskId(r.taskId);
                 setTokenUsage(r.usage);
                 if (r.options?.[0]) {
-                  setEditableImagePrompt(applyDupoinImagePromptLocks(r.options[0].imagePrompt || r.imagePrompt || '', imageAspectRatio, { includeSwipeLeft }));
+                  setEditableImagePrompt(applyDupoinImagePromptLocks(r.options[0].imagePrompt || r.imagePrompt || '', imageAspectRatio, { includeSwipeLeft, dupoinAcademy }));
                 }
                 if (r.qcResults) setQcResults(r.qcResults);
                 if (r.dupoinFileName) setDupoinFileName(r.dupoinFileName);
@@ -574,7 +577,7 @@ export default function SocialPostPage() {
       }
 
       setKnowledgeSaved(true);
-      setEditableImagePrompt(applyDupoinImagePromptLocks(selected.imagePrompt || '', imageAspectRatio, { includeSwipeLeft }));
+      setEditableImagePrompt(applyDupoinImagePromptLocks(selected.imagePrompt || '', imageAspectRatio, { includeSwipeLeft, dupoinAcademy }));
       setTimeout(() => setKnowledgeSaved(false), 5000);
     } catch (e) {
       const message = e instanceof Error ? e.message : 'Unknown error';
@@ -659,12 +662,12 @@ export default function SocialPostPage() {
     }, 1000);
 
     try {
-      const imagePrompt = applyDupoinImagePromptLocks(editableImagePrompt, imageAspectRatio, { includeSwipeLeft });
+      const imagePrompt = applyDupoinImagePromptLocks(editableImagePrompt, imageAspectRatio, { includeSwipeLeft, dupoinAcademy });
       setEditableImagePrompt(imagePrompt);
       const res = await fetch('/api/generate-image', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt: imagePrompt, taskId, type: 'social-post', brief: brief || imagePrompt.substring(0, 100), model: imageModel, aspectRatio: imageAspectRatio, includeSwipeLeft }),
+        body: JSON.stringify({ prompt: imagePrompt, taskId, type: 'social-post', brief: brief || imagePrompt.substring(0, 100), model: imageModel, aspectRatio: imageAspectRatio, includeSwipeLeft, dupoinAcademy }),
       });
 
       const startup = await readImageJobResponse(res);
@@ -709,6 +712,7 @@ export default function SocialPostPage() {
                 fallbackMessage: status.result!.fallbackMessage,
                 aspectRatio: status.result!.aspectRatio || imageAspectRatio,
                 includeSwipeLeft: status.result!.includeSwipeLeft === true,
+                dupoinAcademy: status.result!.dupoinAcademy === true,
                 prompt: imagePrompt,
                 generatedAt: new Date().toISOString(),
               }]);
@@ -773,9 +777,11 @@ export default function SocialPostPage() {
       const latest = history[history.length - 1];
       const restoredRatio = IMAGE_ASPECT_RATIOS.includes(latest?.aspectRatio) ? latest.aspectRatio : DEFAULT_IMAGE_ASPECT_RATIO;
       const restoredSwipe = latest?.includeSwipeLeft === true;
+      const restoredAcademy = latest?.dupoinAcademy === true;
       const generatedPrompt = typeof latest?.prompt === 'string' ? latest.prompt.trim() : '';
       setImageAspectRatio(restoredRatio);
       setIncludeSwipeLeft(restoredSwipe);
+      setDupoinAcademy(restoredAcademy);
       // Handle both old format (single result) and new format (3 options).
       // Prefer the prompt stored on the generated image; fall back to the caption prompt.
       if (data.options && Array.isArray(data.options)) {
@@ -783,13 +789,13 @@ export default function SocialPostPage() {
         setTaskId(post.id);
         const captionPrompt = data.options[0]?.imagePrompt || data.imagePrompt || '';
         const prompt = generatedPrompt || captionPrompt;
-        if (prompt) setEditableImagePrompt(applyDupoinImagePromptLocks(prompt, restoredRatio, { includeSwipeLeft: restoredSwipe }));
+        if (prompt) setEditableImagePrompt(applyDupoinImagePromptLocks(prompt, restoredRatio, { includeSwipeLeft: restoredSwipe, dupoinAcademy: restoredAcademy }));
       } else {
         // Old format - convert to single option
         const imagePrompt = generatedPrompt || data.imagePrompt || '';
         setResult({ caption: data.captionData || data, imagePrompt, taskId: post.id });
         setTaskId(post.id);
-        setEditableImagePrompt(applyDupoinImagePromptLocks(imagePrompt, restoredRatio, { includeSwipeLeft: restoredSwipe }));
+        setEditableImagePrompt(applyDupoinImagePromptLocks(imagePrompt, restoredRatio, { includeSwipeLeft: restoredSwipe, dupoinAcademy: restoredAcademy }));
       }
       // Load SOP data if available
       if (data.qcResults) setQcResults(data.qcResults);
@@ -819,9 +825,11 @@ export default function SocialPostPage() {
       ? remix.aspectRatio as ImageAspectRatio
       : DEFAULT_IMAGE_ASPECT_RATIO;
     const swipe = remix.includeSwipeLeft === true;
+    const academy = remix.dupoinAcademy === true;
     setImageAspectRatio(ratio);
     setIncludeSwipeLeft(swipe);
-    setEditableImagePrompt(applyDupoinImagePromptLocks(remix.prompt, ratio, { includeSwipeLeft: swipe }));
+    setDupoinAcademy(academy);
+    setEditableImagePrompt(applyDupoinImagePromptLocks(remix.prompt, ratio, { includeSwipeLeft: swipe, dupoinAcademy: academy }));
     if (remix.brief) setBrief(remix.brief);
     if (remix.model) {
       imageModelLocked.current = true;
@@ -831,7 +839,7 @@ export default function SocialPostPage() {
     setPromptEditorOpen(true);
   };
 
-  const useImageInEditor = (img: { prompt?: unknown; aspectRatio?: unknown; model?: unknown; usedModel?: unknown; includeSwipeLeft?: unknown }) => {
+  const useImageInEditor = (img: { prompt?: unknown; aspectRatio?: unknown; model?: unknown; usedModel?: unknown; includeSwipeLeft?: unknown; dupoinAcademy?: unknown }) => {
     if (typeof img.prompt !== 'string' || !img.prompt.trim()) return;
     applyImageRemix({
       target: 'social-post',
@@ -839,6 +847,7 @@ export default function SocialPostPage() {
       aspectRatio: typeof img.aspectRatio === 'string' ? img.aspectRatio : undefined,
       model: typeof img.model === 'string' ? img.model : typeof img.usedModel === 'string' ? img.usedModel : undefined,
       includeSwipeLeft: img.includeSwipeLeft === true,
+      dupoinAcademy: img.dupoinAcademy === true,
       savedAt: new Date().toISOString(),
     });
     document.getElementById('image-prompt-editor')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -1282,7 +1291,7 @@ export default function SocialPostPage() {
                   <Select value={imageAspectRatio} onChange={(e) => {
                     const ratio = e.target.value as ImageAspectRatio;
                     setImageAspectRatio(ratio);
-                    setEditableImagePrompt(prev => prev.trim() ? applyDupoinImagePromptLocks(prev, ratio, { includeSwipeLeft }) : prev);
+                    setEditableImagePrompt(prev => prev.trim() ? applyDupoinImagePromptLocks(prev, ratio, { includeSwipeLeft, dupoinAcademy }) : prev);
                   }}>
                     {IMAGE_ASPECT_RATIOS.map(ratio => <option key={ratio} value={ratio}>{ratio}</option>)}
                   </Select>
@@ -1298,13 +1307,33 @@ export default function SocialPostPage() {
                       const next = event.target.checked;
                       setIncludeSwipeLeft(next);
                       setEditableImagePrompt(prev => prev.trim()
-                        ? applyDupoinImagePromptLocks(prev, imageAspectRatio, { includeSwipeLeft: next })
+                        ? applyDupoinImagePromptLocks(prev, imageAspectRatio, { includeSwipeLeft: next, dupoinAcademy })
                         : prev);
                     }}
                   />
                   <span>
                     <span className="block text-sm font-medium text-[var(--mos-text-secondary)]">Swipe left button</span>
                     <span className="mt-0.5 block text-xs leading-5 text-[var(--mos-text-faint)]">When on, a centered pill sits just above the footer.</span>
+                  </span>
+                </label>
+
+                <label className="flex cursor-pointer items-start gap-3 rounded-[var(--mos-radius-control)] border border-[var(--mos-border)] bg-[var(--mos-surface)] px-3 py-2.5">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5 h-4 w-4 accent-cyan-500"
+                    checked={dupoinAcademy}
+                    data-testid="social-post-dupoin-academy"
+                    onChange={(event) => {
+                      const next = event.target.checked;
+                      setDupoinAcademy(next);
+                      setEditableImagePrompt(prev => prev.trim()
+                        ? applyDupoinImagePromptLocks(prev, imageAspectRatio, { includeSwipeLeft, dupoinAcademy: next })
+                        : prev);
+                    }}
+                  />
+                  <span>
+                    <span className="block text-sm font-medium text-[var(--mos-text-secondary)]">Dupoin Academy</span>
+                    <span className="mt-0.5 block text-xs leading-5 text-[var(--mos-text-faint)]">When on, the centered header uses the Dupoin Academy logo.</span>
                   </span>
                 </label>
 
@@ -1389,6 +1418,7 @@ export default function SocialPostPage() {
                         {availableImageModels.find(item => item.id === img.model)?.name || img.model || 'unknown model'}
                         {img.fallbackFrom ? ` · fallback from ${availableImageModels.find(item => item.id === img.fallbackFrom)?.name || img.fallbackFrom}` : ''}
                         {img.aspectRatio ? ` · ${img.aspectRatio}` : ''}
+                        {img.dupoinAcademy ? ' · Dupoin Academy' : ''}
                         {img.generatedAt ? ` · ${new Date(img.generatedAt).toLocaleString('id-ID')}` : ''}
                       </p>
                     </div>

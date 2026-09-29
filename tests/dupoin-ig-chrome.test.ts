@@ -10,6 +10,10 @@ import {
   DUPOIN_IG_FOOTER_LINE_1,
   DUPOIN_IG_FOOTER_LINE_2,
   DUPOIN_IG_HEADER_BAND_PX,
+  DUPOIN_IG_ACADEMY_HEADER_BAND_PX,
+  DUPOIN_IG_ACADEMY_LOCKUP_HEIGHT,
+  DUPOIN_IG_ACADEMY_LOCKUP_TOP,
+  DUPOIN_IG_ACADEMY_LOCKUP_WIDTH,
   DUPOIN_IG_LOCKUP_HEIGHT,
   DUPOIN_IG_LOCKUP_LEFT,
   DUPOIN_IG_LOCKUP_TOP,
@@ -17,11 +21,13 @@ import {
   DUPOIN_IG_SWIPE_BUTTON_HEIGHT,
   DUPOIN_IG_SWIPE_BUTTON_WIDTH,
   DUPOIN_IG_SWIPE_GAP_ABOVE_FOOTER_PX,
+  DUPOIN_ACADEMY_LOGO_PNG_PATH,
   DUPOIN_SOCIAL_FOOTER_PNG_PATH,
   DUPOIN_SOCIAL_HEADER_PNG_PATH,
   DUPOIN_SOCIAL_SWIPE_LEFT_PNG_PATH,
   chromePlacement,
   compositeDupoinInstagramChrome,
+  headerLockupPlacement,
   swipeButtonPlacement,
   firstContentRow,
   knockOutBlackBackground,
@@ -247,7 +253,14 @@ test('compositing uses the plate pixels and leaves the middle scene alone', asyn
     const i = (y * info.width + x) * 4;
     return [data[i], data[i + 1], data[i + 2], data[i + 3]];
   };
-  assert.deepEqual(at(sample.x, sample.y), sample.rgba, 'header plate pixel must be copied, not redrawn');
+  const spot = headerLockupPlacement(width, height);
+  const dx = spot.left - DUPOIN_IG_LOCKUP_LEFT;
+  const dy = spot.top - DUPOIN_IG_LOCKUP_TOP;
+  assert.ok(dx > 40, 'the plate lockup is left of center and must move right');
+  assert.equal(spot.left, Math.round((width - spot.width) / 2));
+  assert.ok(Math.abs((width - (spot.left + spot.width)) - spot.left) <= 1, 'centered lockup margins match');
+  assert.deepEqual(at(sample.x + dx, sample.y + dy), sample.rgba, 'header lockup pixel is copied into the centered slot');
+  assert.deepEqual(at(sample.x, sample.y).slice(0, 3), [180, 20, 20], 'the old left position stays the generated scene');
 
   const center = at(540, 675);
   assert.deepEqual(center.slice(0, 3), [180, 20, 20], 'middle scene must show through the transparent black field');
@@ -291,7 +304,7 @@ test('compositing scales the same plates onto a square feed canvas', async () =>
       if (isTeal(r, g, b)) topTeal += 1;
     }
   }
-  assert.ok(topTeal > 80, 'square canvas still gets the upper-left lockup');
+  assert.ok(topTeal > 80, 'square canvas still gets the centered header lockup');
 });
 
 test('compositing scales the same plates onto a landscape canvas', async () => {
@@ -449,4 +462,136 @@ test('swipe-left compositing stays centered above the footer on a square canvas'
   assert.deepEqual(at(fillX, fillY), [8, 16, 32], 'scaled pill fill stays transparent over the scene');
   const bottom = at(12, height - 3);
   assert.ok(bottom[0] > 245 && bottom[1] > 245 && bottom[2] > 245);
+});
+
+test('the Academy logo is a transparent sticker at the template size', async () => {
+  assert.ok(fs.existsSync(DUPOIN_ACADEMY_LOGO_PNG_PATH));
+  assert.equal(path.basename(DUPOIN_ACADEMY_LOGO_PNG_PATH), 'dupoin-academy-logo.png');
+  assert.ok(DUPOIN_ACADEMY_LOGO_PNG_PATH.includes(path.join('public', 'brand')));
+  const plate = await raw(DUPOIN_ACADEMY_LOGO_PNG_PATH);
+  assert.equal(plate.info.width, DUPOIN_IG_ACADEMY_LOCKUP_WIDTH);
+  assert.equal(plate.info.height, DUPOIN_IG_ACADEMY_LOCKUP_HEIGHT);
+  const at = (x: number, y: number) => {
+    const i = (y * plate.info.width + x) * 4;
+    return [plate.data[i], plate.data[i + 1], plate.data[i + 2], plate.data[i + 3]];
+  };
+  assert.equal(at(0, 0)[3], 0, 'sticker corners stay transparent');
+  assert.equal(at(plate.info.width - 1, plate.info.height - 1)[3], 0);
+  let teal = 0;
+  let white = 0;
+  let opaqueBlack = 0;
+  for (let y = 0; y < plate.info.height; y++) {
+    for (let x = 0; x < plate.info.width; x++) {
+      const [r, g, b, a] = at(x, y);
+      if (a > 200 && isTeal(r, g, b)) teal += 1;
+      if (a > 200 && r > 230 && g > 230 && b > 230) white += 1;
+      if (a > 200 && r < 20 && g < 20 && b < 20) opaqueBlack += 1;
+    }
+  }
+  assert.ok(teal > 2000, 'Academy sticker keeps the teal Dupoin script and ACADEMY letters');
+  assert.ok(white > 2000, 'Academy sticker keeps the white outline');
+  assert.equal(opaqueBlack, 0, 'the black field from the source art must not survive');
+});
+
+test('header lockup placement centers both the Dupoin mark and the Academy logo', () => {
+  const width = DUPOIN_IG_CHROME_WIDTH;
+  const height = DUPOIN_IG_CHROME_HEIGHT;
+  const normal = headerLockupPlacement(width, height);
+  assert.equal(normal.width, DUPOIN_IG_LOCKUP_WIDTH);
+  assert.equal(normal.height, DUPOIN_IG_LOCKUP_HEIGHT);
+  assert.equal(normal.top, DUPOIN_IG_LOCKUP_TOP);
+  assert.equal(normal.left, Math.round((width - normal.width) / 2));
+  assert.ok(normal.left > DUPOIN_IG_LOCKUP_LEFT);
+
+  const academy = headerLockupPlacement(width, height, {
+    width: DUPOIN_IG_ACADEMY_LOCKUP_WIDTH,
+    height: DUPOIN_IG_ACADEMY_LOCKUP_HEIGHT,
+    top: DUPOIN_IG_ACADEMY_LOCKUP_TOP,
+  }, {
+    headerPx: DUPOIN_IG_ACADEMY_HEADER_BAND_PX,
+    footerPx: 64,
+  });
+  assert.equal(academy.width, DUPOIN_IG_ACADEMY_LOCKUP_WIDTH);
+  assert.equal(academy.height, DUPOIN_IG_ACADEMY_LOCKUP_HEIGHT);
+  assert.equal(academy.top, DUPOIN_IG_ACADEMY_LOCKUP_TOP);
+  assert.equal(academy.left, Math.round((width - academy.width) / 2));
+  assert.ok(academy.top + academy.height > normal.top + normal.height);
+});
+
+test('Academy compositing centers the Academy logo and leaves the Dupoin wordmark off', async () => {
+  const width = DUPOIN_IG_CHROME_WIDTH;
+  const height = DUPOIN_IG_CHROME_HEIGHT;
+  const canvas = await sharp({
+    create: { width, height, channels: 4, background: { r: 180, g: 20, b: 20, alpha: 1 } },
+  }).png().toBuffer();
+
+  const normal = await compositeDupoinInstagramChrome(canvas);
+  const academy = await compositeDupoinInstagramChrome(canvas, { dupoinAcademy: true });
+  const normalRaw = await raw(normal);
+  const academyRaw = await raw(academy);
+  const read = (image: { data: Buffer; info: { width: number } }, x: number, y: number) => {
+    const i = (y * image.info.width + x) * 4;
+    return [image.data[i], image.data[i + 1], image.data[i + 2], image.data[i + 3]];
+  };
+
+  const plate = await raw(DUPOIN_ACADEMY_LOGO_PNG_PATH);
+  const spot = headerLockupPlacement(width, height, {
+    width: DUPOIN_IG_ACADEMY_LOCKUP_WIDTH,
+    height: DUPOIN_IG_ACADEMY_LOCKUP_HEIGHT,
+    top: DUPOIN_IG_ACADEMY_LOCKUP_TOP,
+  }, { headerPx: DUPOIN_IG_ACADEMY_HEADER_BAND_PX, footerPx: 64 });
+
+  let sample: { x: number; y: number; rgba: number[] } | null = null;
+  for (let y = Math.floor(plate.info.height * 0.72); y < plate.info.height && !sample; y++) {
+    for (let x = 8; x < plate.info.width - 8; x++) {
+      const i = (y * plate.info.width + x) * 4;
+      const rgba = [plate.data[i], plate.data[i + 1], plate.data[i + 2], plate.data[i + 3]];
+      if (rgba[3] > 240 && isTeal(rgba[0], rgba[1], rgba[2])) {
+        sample = { x, y, rgba };
+        break;
+      }
+    }
+  }
+  assert.ok(sample, 'expected a teal Academy letter pixel below the script');
+  const sceneX = spot.left + sample.x;
+  const sceneY = spot.top + sample.y;
+  assert.deepEqual(read(academyRaw, sceneX, sceneY), sample.rgba, 'Academy on copies the sticker pixel');
+  assert.deepEqual(read(normalRaw, sceneX, sceneY).slice(0, 3), [180, 20, 20], 'Academy off does not paint the Academy word');
+
+  let minX = width;
+  let maxX = 0;
+  for (let y = spot.top; y < spot.top + spot.height; y++) {
+    for (let x = 0; x < width; x++) {
+      const [r, g, b, a] = read(academyRaw, x, y);
+      if (a > 200 && (isTeal(r, g, b) || (r > 230 && g > 230 && b > 230))) {
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+      }
+    }
+  }
+  const leftMargin = minX;
+  const rightMargin = width - 1 - maxX;
+  assert.ok(Math.abs(leftMargin - rightMargin) <= 8, `Academy logo must be centered, margins ${leftMargin} vs ${rightMargin}`);
+
+  const center = read(academyRaw, 540, 675);
+  assert.deepEqual(center.slice(0, 3), [180, 20, 20], 'middle scene stays clear in Academy mode');
+  const bottom = read(academyRaw, 10, height - 4);
+  assert.ok(bottom[0] > 245 && bottom[1] > 245 && bottom[2] > 245, 'Academy posts keep the regulatory footer');
+
+  const normalSpot = headerLockupPlacement(width, height);
+  let normalMinX = width;
+  let normalMaxX = 0;
+  for (let y = normalSpot.top; y < normalSpot.top + normalSpot.height; y++) {
+    for (let x = 0; x < width; x++) {
+      const [r, g, b] = read(normalRaw, x, y);
+      const scene = r === 180 && g === 20 && b === 20;
+      if (!scene) {
+        if (x < normalMinX) normalMinX = x;
+        if (x > normalMaxX) normalMaxX = x;
+      }
+    }
+  }
+  const normalLeft = normalMinX;
+  const normalRight = width - 1 - normalMaxX;
+  assert.ok(Math.abs(normalLeft - normalRight) <= 12, `Dupoin lockup must be centered, margins ${normalLeft} vs ${normalRight}`);
 });

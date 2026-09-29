@@ -3,7 +3,7 @@
  *
  * Prompts are not a separate table. They live on the task row the gallery
  * already reads: `tasks.output_data` JSON, on `images[]` (`prompt`,
- * `aspectRatio`, `model`, `includeSwipeLeft`) with a fallback to `imagePrompt`.
+ * `aspectRatio`, `model`, `includeSwipeLeft`, `dupoinAcademy`) with a fallback to `imagePrompt`.
  * `tasks.type` picks the editor. Only Social Post generates images today.
  */
 
@@ -19,6 +19,7 @@ export interface LinkedGeneratedImage {
   aspectRatio: string | null;
   model: string | null;
   includeSwipeLeft: boolean | null;
+  dupoinAcademy: boolean | null;
 }
 
 export interface ImageRemixRecord {
@@ -28,6 +29,7 @@ export interface ImageRemixRecord {
   aspectRatio?: string;
   model?: string;
   includeSwipeLeft?: boolean;
+  dupoinAcademy?: boolean;
   taskId?: string;
   filename?: string;
   imageUrl?: string;
@@ -90,17 +92,20 @@ export function linkedGeneratedImages(output: unknown): LinkedGeneratedImage[] {
 
   const fallbackPrompt = readPrompt(data.imagePrompt);
   const fallbackSwipe = readBool(data.includeSwipeLeft);
+  const fallbackAcademy = readBool(data.dupoinAcademy);
   const found = new Map<string, LinkedGeneratedImage>();
 
   const remember = (filename: string | null, entry: Record<string, unknown> | null) => {
     if (!filename || found.has(filename)) return;
     const swipe = entry ? readBool(entry.includeSwipeLeft) : null;
+    const academy = entry ? readBool(entry.dupoinAcademy) : null;
     found.set(filename, {
       filename,
       prompt: readPrompt(entry?.prompt) || fallbackPrompt,
       aspectRatio: typeof entry?.aspectRatio === 'string' && entry.aspectRatio.trim() ? entry.aspectRatio.trim() : null,
       model: readModel(entry),
       includeSwipeLeft: swipe ?? fallbackSwipe,
+      dupoinAcademy: academy ?? fallbackAcademy,
     });
   };
 
@@ -143,6 +148,7 @@ export function readImageRemix(target: ImageRemixTarget, now = Date.now()): Imag
       aspectRatio: typeof parsed.aspectRatio === 'string' ? parsed.aspectRatio : undefined,
       model: typeof parsed.model === 'string' ? parsed.model : undefined,
       includeSwipeLeft: typeof parsed.includeSwipeLeft === 'boolean' ? parsed.includeSwipeLeft : undefined,
+      dupoinAcademy: typeof parsed.dupoinAcademy === 'boolean' ? parsed.dupoinAcademy : undefined,
       taskId: typeof parsed.taskId === 'string' ? parsed.taskId : undefined,
       filename: typeof parsed.filename === 'string' ? parsed.filename : undefined,
       imageUrl: typeof parsed.imageUrl === 'string' ? parsed.imageUrl : undefined,

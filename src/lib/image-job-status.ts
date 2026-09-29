@@ -18,6 +18,8 @@ export interface ImageJobResult {
   aspectRatio?: ImageAspectRatio;
   /** Social Post only: the fixed Swipe left pill was composited onto this image. */
   includeSwipeLeft?: boolean;
+  /** Social Post only: the centered header used the Dupoin Academy logo. */
+  dupoinAcademy?: boolean;
 }
 
 export interface ImageJob {
