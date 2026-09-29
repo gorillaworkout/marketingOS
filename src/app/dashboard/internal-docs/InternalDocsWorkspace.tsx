@@ -13,7 +13,9 @@ import {
   StatusBadge,
   TextInput,
 } from '@/components/ui/dashboard';
+import { faqAskRequestBody } from '@/lib/internal-docs-cards';
 import { FaqAskPanel } from './FaqAskPanel';
+import { FaqGuideCards } from './FaqGuideCards';
 import { useInternalDocsState } from './InternalDocsState';
 import { documentIdFromInternalDocsPath } from './InternalDocsRoute';
 import { FaqListSkeleton, FaqWorking } from './FaqFeedback';
@@ -39,6 +41,7 @@ interface DocSummary {
   errorMessage: string | null;
   createdAt: string;
   snippet: string;
+  summary: string;
 }
 
 interface DocDetail extends DocSummary {
@@ -127,6 +130,7 @@ export function InternalDocsWorkspace() {
   const uploadAbortRef = useRef<AbortController | null>(null);
   const [askInput, setAskInput] = useState('');
   const [asking, setAsking] = useState(false);
+  const [askingGuideId, setAskingGuideId] = useState('');
   const [askError, setAskError] = useState('');
   const [detailBusy, setDetailBusy] = useState<'' | 'access' | 'reindex' | 'delete'>('');
 
@@ -413,19 +417,21 @@ export function InternalDocsWorkspace() {
     }
   };
 
-  const submitQuestion = async (question: string) => {
+  const submitQuestion = async (question: string, documentId = '') => {
     const trimmed = question.trim();
     if (!trimmed || asking) return;
     const history = messages.map(message => ({ role: message.role, content: message.content }));
     setMessages(current => [...current, { role: 'user', content: trimmed }]);
-    if (trimmed === askInput.trim()) setAskInput('');
+    if (!documentId && trimmed === askInput.trim()) setAskInput('');
+    if (documentId) document.getElementById('faq-ask')?.scrollIntoView({ block: 'start' });
     setAsking(true);
+    setAskingGuideId(documentId);
     setAskError('');
     try {
       const response = await fetch('/api/internal-docs/ask', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ question: trimmed, history }),
+        body: JSON.stringify(faqAskRequestBody({ question: trimmed, history, documentId })),
       });
       const data = await response.json();
       if (!response.ok) {
@@ -445,6 +451,7 @@ export function InternalDocsWorkspace() {
       setAskError('Could not answer that question.');
     } finally {
       setAsking(false);
+      setAskingGuideId('');
     }
   };
 
@@ -455,7 +462,7 @@ export function InternalDocsWorkspace() {
       <PageHeader
         eyebrow="Guidance"
         title="FAQ & Guides"
-        description="Ask a question first. Open a source link to read the guide or PDF."
+        description="Ask a question, or choose a guide. Open a source link to read the PDF or file."
       />
 
       <FaqAskPanel
@@ -465,6 +472,16 @@ export function InternalDocsWorkspace() {
         error={askError}
         onInputChange={setAskInput}
         onSubmit={question => { void submitQuestion(question); }}
+      />
+
+      <FaqGuideCards
+        documents={documents}
+        loading={loadingList}
+        error={listError}
+        search={search}
+        asking={asking}
+        askingId={askingGuideId}
+        onAsk={request => { void submitQuestion(request.question, request.documentId); }}
       />
 
       {canManage && (

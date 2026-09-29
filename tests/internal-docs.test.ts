@@ -473,9 +473,10 @@ test('sidebar, routes, migration, and AI Research keep Internal Docs ACL separat
   assert.match(chat, /sources: researchEvent\.sources/);
   assert.ok(chat.indexOf('const knowledgeContext') < chat.indexOf('buildAiResearchChatMessages({'));
 
-  assert.match(ask, /retrieveInternalDocHits\(actor\.principal, question\)/);
-  assert.match(ask, /internalDocsAskFallback/);
-  assert.ok(ask.indexOf('internalDocsAskFallback') < ask.indexOf('generateContent'));
+  assert.match(ask, /retrieveInternalDocHits\(actor\.principal, question, INTERNAL_DOCS_ASK_LIMIT, documentId\)/);
+  assert.match(ask, /resolveInternalDocsAskPlan\(question, hits, documentId\)/);
+  assert.ok(ask.indexOf('resolveInternalDocsAskPlan') < ask.indexOf('generateContent'));
+  assert.match(read('src/lib/internal-docs.ts'), /return internalDocsAskFallback\(question, hits\)/);
   assert.match(ask, /withCitationMedia/);
   assert.match(ask, /presentInternalDocsAnswer/);
   assert.match(read('src/lib/internal-docs.ts'), /persistInternalDocKnowledge/);
