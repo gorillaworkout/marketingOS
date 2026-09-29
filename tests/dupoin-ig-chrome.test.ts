@@ -502,8 +502,14 @@ test('Academy lockup placement is centered and taller than the left Dupoin mark'
   assert.equal(academy.height, DUPOIN_IG_ACADEMY_LOCKUP_HEIGHT);
   assert.equal(academy.top, DUPOIN_IG_ACADEMY_LOCKUP_TOP);
   assert.equal(academy.left, Math.round((width - academy.width) / 2));
+  const widthRatio = academy.width / width;
+  assert.ok(widthRatio >= 0.25 && widthRatio <= 0.30, `Academy stamp should be 25–30% of the canvas, got ${widthRatio}`);
+  const bandRatio = DUPOIN_IG_ACADEMY_HEADER_BAND_PX / height;
+  assert.ok(bandRatio <= 0.16, `Academy header band should stay in the top of the portrait, got ${bandRatio}`);
+  assert.ok(academy.top >= 40, 'Academy stamp keeps a clear top margin');
   assert.ok(academy.top + academy.height > DUPOIN_IG_LOCKUP_TOP + DUPOIN_IG_LOCKUP_HEIGHT);
   assert.ok(academy.left > DUPOIN_IG_LOCKUP_LEFT, 'Academy sticker sits to the right of the left Dupoin inset');
+  assert.equal(DUPOIN_IG_LOCKUP_LEFT, 80, 'normal Dupoin lockup stays left-aligned');
 });
 
 test('Academy compositing centers the Academy logo and leaves the Dupoin wordmark off', async () => {
