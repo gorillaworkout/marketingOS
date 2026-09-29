@@ -4,6 +4,7 @@ import { execute, executeTransaction } from '@/lib/database';
 import { requireInternalDocsManager, requireInternalDocsUser } from '@/lib/internal-docs-access';
 import { canManageInternalDocs, isInternalDocAccessLevel } from '@/lib/internal-docs-acl';
 import { findVisibleDocument, publicDocument, type InternalDocListRow } from '@/lib/internal-docs';
+import { guideCardSummary } from '@/lib/internal-docs-cards';
 import { docxPreviewHtml } from '@/lib/internal-docs-extract';
 import { deleteInternalDocKnowledge, persistInternalDocKnowledge, syncInternalDocKnowledgeMeta } from '@/lib/internal-docs-knowledge';
 import { resolveStoredInternalDoc, sanitizeDocumentTitle } from '@/lib/internal-docs-storage';
@@ -69,6 +70,8 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     if (!title) return NextResponse.json({ error: 'Title is required.' }, { status: 400 });
     updates.push('title = ?');
     params.push(title);
+    updates.push('card_summary = ?');
+    params.push(guideCardSummary(title, existing.extracted_text || ''));
   }
   if (body.accessLevel !== undefined) {
     const accessLevel = String(body.accessLevel);

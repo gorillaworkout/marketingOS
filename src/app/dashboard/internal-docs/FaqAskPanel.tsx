@@ -96,7 +96,7 @@ export function FaqAskPanel({
   };
 
   return (
-    <Panel data-testid="faq-ask">
+    <Panel id="faq-ask" data-testid="faq-ask">
       <h2 className="text-sm font-[560] text-[var(--mos-text)]">Ask</h2>
       {messages.length === 0 ? (
         <div className="mt-3">

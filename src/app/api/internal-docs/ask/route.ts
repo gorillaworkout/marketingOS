@@ -2,12 +2,14 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireInternalDocsUser } from '@/lib/internal-docs-access';
 import { rateLimit } from '@/lib/rate-limit';
 import { resolveFeatureModel } from '@/lib/model-routing';
+import { parseGuideDocumentId } from '@/lib/internal-docs-cards';
 import {
   citationsFromHits,
   formatInternalDocsPrompt,
+  INTERNAL_DOCS_ASK_LIMIT,
   INTERNAL_DOCS_ASK_SYSTEM,
-  internalDocsAskFallback,
   presentInternalDocsAnswer,
+  resolveInternalDocsAskPlan,
   retrieveInternalDocHits,
   withCitationMedia,
 } from '@/lib/internal-docs';
@@ -35,7 +37,7 @@ export async function POST(request: NextRequest) {
   const limited = rateLimit(request, `internal-docs-ask:${actor.user.id}`);
   if (limited) return limited;
 
-  let body: { question?: unknown; history?: unknown };
+  let body: { question?: unknown; history?: unknown; documentId?: unknown };
   try {
     body = await request.json();
   } catch {
@@ -43,9 +45,10 @@ export async function POST(request: NextRequest) {
   }
   const question = typeof body.question === 'string' ? body.question.trim().slice(0, 2000) : '';
   if (!question) return NextResponse.json({ error: 'Question is required.' }, { status: 400 });
+  const documentId = parseGuideDocumentId(body.documentId);
 
-  const hits = await retrieveInternalDocHits(actor.principal, question);
-  const fallback = internalDocsAskFallback(question, hits);
+  const hits = await retrieveInternalDocHits(actor.principal, question, INTERNAL_DOCS_ASK_LIMIT, documentId);
+  const fallback = resolveInternalDocsAskPlan(question, hits, documentId);
   if (fallback?.confidence === 'none') {
     return NextResponse.json({ answer: fallback.answer, citations: [], confidence: fallback.confidence });
   }

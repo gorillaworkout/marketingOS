@@ -15,6 +15,7 @@ import {
   extractInternalDocText,
   INTERNAL_DOC_NO_TEXT_ERROR,
 } from './internal-docs-extract';
+import { guideCardSummary } from './internal-docs-cards';
 import { persistInternalDocKnowledge } from './internal-docs-knowledge';
 import { internalDocImagePath } from './internal-docs-reader';
 import { resolveStoredInternalDoc } from './internal-docs-storage';
@@ -82,6 +83,7 @@ export interface InternalDocListRow {
   created_at: string | Date;
   updated_at: string | Date;
   snippet?: string | null;
+  card_summary?: string | null;
 }
 
 export interface InternalDocChunkRow {
@@ -130,7 +132,7 @@ export function buildInternalDocsListQuery(options: {
   const pattern = search ? ilikeContains(search) : '';
   const sql = `
     SELECT id, title, original_name, mime_type, file_ext, file_size, access_level, status,
-           error_message, created_at, updated_at,
+           error_message, created_at, updated_at, card_summary,
            CASE
              WHEN ? = '' THEN ''
              ELSE substring(extracted_text from GREATEST(POSITION(LOWER(?) IN LOWER(extracted_text)) - 60, 1) for 220)
@@ -155,13 +157,13 @@ export function buildInternalDocByIdQuery(): { sql: string } {
   return {
     sql: `
       SELECT id, title, original_name, mime_type, file_ext, file_size, storage_key, access_level,
-             status, error_message, extracted_text, created_at, updated_at
+             status, error_message, extracted_text, card_summary, created_at, updated_at
       FROM internal_documents
       WHERE id = ? AND access_level = ANY(?::text[]) AND (? OR status = 'indexed')`,
   };
 }
 
-export function buildInternalDocChunkQuery(tokens: readonly string[] = []): { sql: string; params: unknown[] } {
+export function buildInternalDocChunkQuery(tokens: readonly string[] = [], documentId = ''): { sql: string; params: unknown[] } {
   const terms = [...new Set(
     tokens.map(token => token.toLowerCase().replace(/[^a-z0-9]/g, '')).filter(token => token.length > 2),
   )].slice(0, 12);
@@ -178,15 +180,18 @@ export function buildInternalDocChunkQuery(tokens: readonly string[] = []): { sq
   // A shared token such as "LED" must not fill the candidate window ahead of a
   // guide whose title or body contains the question's subject phrase.
   const phrases = phraseOrderSql(subjectBigrams(terms));
+  const scopedId = documentId.trim();
+  const scopeSql = scopedId ? ' AND c.document_id = ?' : '';
+  const scopeParams = scopedId ? [scopedId] : [];
   return {
     sql: `
       SELECT c.id AS chunk_id, c.document_id, c.content, c.embedding, d.title, d.access_level
       FROM internal_document_chunks c
       JOIN internal_documents d ON d.id = c.document_id
-      WHERE d.status = 'indexed' AND d.access_level = ANY(?::text[])
+      WHERE d.status = 'indexed' AND d.access_level = ANY(?::text[])${scopeSql}
       ORDER BY (${phrases.sql}) + (${overlap}) DESC, d.updated_at DESC, c.chunk_index ASC
       LIMIT 1500`,
-    params: [...phrases.params, ...params],
+    params: [...scopeParams, ...phrases.params, ...params],
   };
 }
 
@@ -479,6 +484,54 @@ export function internalDocsAskFallback(
   return null;
 }
 
+/** Opening passages of one guide, used when a card click should answer even if the overview wording is not in the text. */
+export function overviewHitsFromChunks(
+  documentId: string,
+  rows: InternalDocChunkRow[],
+  principal: InternalDocsPrincipal,
+  limit = 2,
+): InternalDocHit[] {
+  const id = documentId.trim();
+  if (!id) return [];
+  const hits: InternalDocHit[] = [];
+  for (const row of rows) {
+    if (row.document_id !== id) continue;
+    if (row.access_level !== 'company' && row.access_level !== 'it-only') continue;
+    if (!isInternalDocVisible(row.access_level, principal)) continue;
+    const excerpt = row.content.replace(/\s+/g, ' ').trim().slice(0, EXCERPT_CHARS);
+    if (!excerpt) continue;
+    hits.push({
+      documentId: row.document_id,
+      title: row.title,
+      accessLevel: row.access_level === 'it-only' ? 'it-only' : 'company',
+      chunkId: row.chunk_id,
+      excerpt,
+      score: 1,
+      matchedTerms: queryTokens(row.title),
+      subjectMatched: true,
+    });
+    if (hits.length >= limit) break;
+  }
+  return hits;
+}
+
+/**
+ * Card clicks stay on the same Ask pipeline, but a guide the person can read
+ * should be answered instead of rejected because the overview question says "cover".
+ */
+export function resolveInternalDocsAskPlan(
+  question: string,
+  hits: InternalDocHit[],
+  documentId = '',
+): { answer: string; confidence: 'low' | 'none' } | null {
+  const scoped = documentId.trim();
+  if (scoped) {
+    if (hits.some(hit => hit.documentId === scoped)) return null;
+    return { answer: INTERNAL_DOCS_NO_MATCH_ANSWER, confidence: 'none' };
+  }
+  return internalDocsAskFallback(question, hits);
+}
+
 /** Keep a short model reply from becoming an image-only citation. Quote the best guide. */
 export function presentInternalDocsAnswer(generated: string, hits: InternalDocHit[]): string {
   const written = generated.trim();
@@ -628,14 +681,24 @@ export async function retrieveInternalDocHits(
   principal: InternalDocsPrincipal,
   query: string,
   limit = INTERNAL_DOCS_ASK_LIMIT,
+  documentId = '',
 ): Promise<InternalDocHit[]> {
   const trimmed = query.trim();
   if (!trimmed) return [];
+  const scopedId = documentId.trim();
+  if (scopedId) {
+    const visible = await findVisibleDocument<{ id: string; access_level: string }>(principal, scopedId, false);
+    if (!visible) return [];
+  }
   const tokens = queryTokens(trimmed);
-  const { sql, params } = buildInternalDocChunkQuery(tokens);
+  const { sql, params } = buildInternalDocChunkQuery(tokens, scopedId);
   const rows = await queryAll<InternalDocChunkRow>(sql, [allowedAccessLevels(principal), ...params]);
   const embedding = await getEmbedding(trimmed);
-  return rankInternalDocChunks(trimmed, embedding, rows, principal, limit);
+  const hits = rankInternalDocChunks(trimmed, embedding, rows, principal, limit);
+  if (!scopedId) return hits;
+  const scoped = hits.filter(hit => hit.documentId === scopedId);
+  if (scoped.length) return scoped;
+  return overviewHitsFromChunks(scopedId, rows, principal, Math.min(limit, 2));
 }
 
 export function publicDocument(row: InternalDocListRow) {
@@ -652,6 +715,7 @@ export function publicDocument(row: InternalDocListRow) {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     snippet: (row.snippet || '').replace(/\s+/g, ' ').trim(),
+    summary: (row.card_summary || '').replace(/\s+/g, ' ').trim(),
   };
 }
 
@@ -676,7 +740,7 @@ export async function indexDocumentText(documentId: string, text: string): Promi
   if (!extractedTextIsUsable(text)) {
     await execute(
       `UPDATE internal_documents
-       SET extracted_text = '', status = 'failed', error_message = ?, updated_at = CURRENT_TIMESTAMP
+       SET extracted_text = '', card_summary = '', status = 'failed', error_message = ?, updated_at = CURRENT_TIMESTAMP
        WHERE id = ?`,
       [INTERNAL_DOC_NO_TEXT_ERROR, documentId],
     );
@@ -686,11 +750,13 @@ export async function indexDocumentText(documentId: string, text: string): Promi
   const chunks = chunkDocumentText(text);
   const embeddings = await Promise.all(chunks.map(chunk => getEmbedding(chunk)));
   await replaceChunks(documentId, chunks, embeddings);
+  const current = await queryOne<{ title: string }>('SELECT title FROM internal_documents WHERE id = ?', [documentId]);
+  const summary = guideCardSummary(current?.title || '', text);
   await execute(
     `UPDATE internal_documents
-     SET extracted_text = ?, status = 'indexed', error_message = NULL, updated_at = CURRENT_TIMESTAMP
+     SET extracted_text = ?, card_summary = ?, status = 'indexed', error_message = NULL, updated_at = CURRENT_TIMESTAMP
      WHERE id = ?`,
-    [text, documentId],
+    [text, summary, documentId],
   );
   return { status: 'indexed', errorMessage: null, chunkCount: chunks.length };
 }

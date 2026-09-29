@@ -40,3 +40,20 @@ export function FaqListSkeleton() {
     </div>
   );
 }
+
+export function FaqCardSkeleton() {
+  return (
+    <div data-testid="faq-guide-cards-loading" role="status" aria-live="polite" aria-busy="true" className="mt-4">
+      <FaqWorking label="Loading guides" compact />
+      <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3" aria-hidden="true">
+        {[0, 1, 2].map(row => (
+          <div key={row} className="animate-pulse space-y-2 rounded-[var(--mos-radius-control)] border border-[var(--mos-border-subtle)] px-4 py-3">
+            <div className="h-3 w-3/5 rounded bg-white/10" />
+            <div className="h-2 w-full rounded bg-white/[0.06]" />
+            <div className="h-2 w-4/5 rounded bg-white/[0.06]" />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
