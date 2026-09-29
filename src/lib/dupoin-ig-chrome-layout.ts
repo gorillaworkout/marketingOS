@@ -23,10 +23,15 @@ export const DUPOIN_IG_LOCKUP_HEIGHT = 72;
  * Dupoin Academy lockup (public/brand/dupoin-academy-logo.png) on the same
  * 1080×1350 template. The file is a tight transparent sticker: script Dupoin,
  * graduation cap, and ACADEMY. It replaces the normal lockup and is centered.
+ *
+ * Scale follows Bayu's Academy reference: a small top-center stamp, 25% of
+ * the canvas width (270px on 1080), with a 96px top gap so the mark is not
+ * flush with the edge. The header band is only that stamp, so the headline
+ * still has room underneath.
  */
-export const DUPOIN_IG_ACADEMY_LOCKUP_TOP = 40;
-export const DUPOIN_IG_ACADEMY_LOCKUP_WIDTH = 480;
-export const DUPOIN_IG_ACADEMY_LOCKUP_HEIGHT = 203;
+export const DUPOIN_IG_ACADEMY_LOCKUP_TOP = 96;
+export const DUPOIN_IG_ACADEMY_LOCKUP_WIDTH = 270;
+export const DUPOIN_IG_ACADEMY_LOCKUP_HEIGHT = 114;
 export const DUPOIN_IG_ACADEMY_HEADER_BAND_PX = DUPOIN_IG_ACADEMY_LOCKUP_TOP + DUPOIN_IG_ACADEMY_LOCKUP_HEIGHT;
 
 /**
