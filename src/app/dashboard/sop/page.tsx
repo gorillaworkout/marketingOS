@@ -31,7 +31,7 @@ const steps = [
     number: '04',
     title: 'Draft Article',
     badge: 'Production',
-    detail: 'Write an 800–1000 word journalistic article in Indonesian. The title includes the main keyword and is at most 60 characters.',
+    detail: 'Write an 800–1,000 word journalistic article in Indonesian. Drafts up to 1,050 words can still pass the publication gate. The title includes the main keyword and is at most 60 characters.',
     outcome: 'Prepare it in DOCX or Google Docs for review.',
   },
   {
@@ -138,7 +138,7 @@ export default function SopPage() {
       <section className="rounded-[var(--mos-radius-panel)] border border-[var(--mos-border)] bg-[var(--mos-raised)] p-5 md:p-6">
         <p className="text-xs font-semibold uppercase tracking-widest text-blue-400">Output checklist</p>
         <div className="mt-4 grid gap-x-8 gap-y-3 text-sm text-[var(--mos-text-secondary)] md:grid-cols-2">
-          {['A valid topic was found and the source was recorded', 'Five Kontan articles (title, time, URL) were recorded', 'The SEO H1 and five PAA questions were chosen', 'Title ≤60 characters; draft is 800–1000 words', 'The keyword is in the first paragraph and the H1/H2/H3 structure is complete', 'Outlet, source date, facts, and quotations were checked', 'A one-sentence CTA toward a Dupoin account is present', 'DOCX or Google Docs is ready; a score above 90% is documented'].map(item => <div key={item} className="flex gap-3 rounded-lg border border-[var(--mos-border)] bg-[var(--mos-surface)] px-3 py-2.5"><span className="text-blue-400">□</span><span>{item}</span></div>)}
+          {['A valid topic was found and the source was recorded', 'Five Kontan articles (title, time, URL) were recorded', 'The SEO H1 and five PAA questions were chosen', 'Title ≤60 characters; draft is 800–1,050 words', 'The keyword is in the first paragraph and the H1/H2/H3 structure is complete', 'Outlet, source date, facts, and quotations were checked', 'A one-sentence CTA toward a Dupoin account is present', 'DOCX or Google Docs is ready; a score above 90% is documented'].map(item => <div key={item} className="flex gap-3 rounded-lg border border-[var(--mos-border)] bg-[var(--mos-surface)] px-3 py-2.5"><span className="text-blue-400">□</span><span>{item}</span></div>)}
         </div>
       </section>
     </PageStack>

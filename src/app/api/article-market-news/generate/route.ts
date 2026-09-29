@@ -5,7 +5,7 @@ import { execute } from '@/lib/database';
 import { rateLimit } from '@/lib/rate-limit';
 import { fetchKnowledgeContext, fetchStyleContext, generateContent, getUserPreferredModel } from '@/lib/openai';
 import { persistKnowledgeQuietly, summarizeArticleKnowledge } from '@/lib/knowledge-persist';
-import { buildArticleMarketNewsPrompts, ensureEndingDupoinAccountCta, normalizeArticleMarketNewsInput, parseGeneratedArticle, validateGeneratedArticle } from '@/lib/article-market-news';
+import { articleDraftProtectedPhrases, articleWordCountRepairGuidance, buildArticleMarketNewsPrompts, describeArticlePublicationGateFailure, ensureEndingDupoinAccountCta, fitArticleMarkdownWordCount, normalizeArticleMarketNewsInput, parseGeneratedArticle, validateGeneratedArticle } from '@/lib/article-market-news';
 import { researchArticleMarketNews } from '@/lib/article-market-news-research';
 
 export const maxDuration = 300;
@@ -41,8 +41,9 @@ ${feedback}
 PRIOR DRAFT JSON TO REVISE:
 ${priorDraft}
 
-Revise the prior draft instead of starting over. Keep compliant material, correct every listed issue, expand only from the verified source material, target 950–975 words, and return only the required JSON.
-The last prose paragraph before the Sources or Sumber heading must be one imperative Dupoin account-opening sentence starting with Buka, Mulai, Daftar, or Buat. Do not invent prices, percentages, dates, or other numbers.`;
+Revise the prior draft instead of starting over. Keep compliant material and correct every listed issue. When the draft is outside 800–1,000 words, shorten or expand the analysis until it is 920–980 words. Add facts only from the verified source material, and return only the required JSON.
+The last prose paragraph before the Sources or Sumber heading must be one imperative Dupoin account-opening sentence starting with Buka, Mulai, Daftar, or Buat. Do not invent prices, percentages, dates, or other numbers.
+${articleWordCountRepairGuidance(feedback)}`;
 }
 
 export async function POST(request: NextRequest) {
@@ -112,12 +113,24 @@ export async function POST(request: NextRequest) {
             if (!title || !articleMarkdown) throw new Error('AI returned an incomplete article.');
             if (!metaDescription || metaDescription.length > 155) throw new Error(`Meta description must be 1–155 characters; received ${metaDescription.length}.`);
             articleMarkdown = ensureEndingDupoinAccountCta(articleMarkdown);
+            const fitted = fitArticleMarkdownWordCount(articleMarkdown, articleDraftProtectedPhrases(effectiveInput));
+            if (fitted.trimmed) articleMarkdown = fitted.markdown;
             validation = validateGeneratedArticle(title, articleMarkdown, effectiveInput, metaDescription);
-            if (validation.violations.length === 0) break;
+            if (validation.violations.length === 0) {
+              if (fitted.trimmed) {
+                controller.enqueue(encoder.encode(sseEvent({
+                  step: 'draft',
+                  progress: 35 + attempt * 15,
+                  message: `Draft was ${fitted.originalWordCount} words, so it was shortened to ${fitted.wordCount} before the publication gate.`,
+                })));
+              }
+              break;
+            }
             throw new Error(validation.violations.join(' '));
           } catch (attemptError) {
             if (attempt === 3) {
-              throw new Error(`Generated draft failed the publication gate after 3 attempts: ${attemptError instanceof Error ? attemptError.message : 'invalid draft'}`);
+              const detail = attemptError instanceof Error ? attemptError.message : 'invalid draft';
+              throw new Error(describeArticlePublicationGateFailure(detail));
             }
             const feedback = attemptError instanceof Error ? attemptError.message : 'The prior draft was invalid.';
             controller.enqueue(encoder.encode(sseEvent({ step: 'draft', progress: 35 + attempt * 15, message: `Repairing draft after publication-gate feedback (attempt ${attempt + 1}/3)…` })));

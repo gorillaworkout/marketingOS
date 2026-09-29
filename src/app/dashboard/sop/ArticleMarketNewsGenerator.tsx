@@ -391,7 +391,7 @@ export default function ArticleMarketNewsGenerator() {
           <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
             {[
               ['Title ≤60', currentValidation?.qc.titleWithin60Characters || false],
-              ['800–1,000 words', currentValidation?.qc.wordCountWithinRange || false],
+              ['800–1,050 words', currentValidation?.qc.wordCountWithinRange || false],
               ['Keyword lead', currentValidation?.qc.keywordInFirstParagraph || false],
               ['Five PAA', currentValidation?.qc.fivePaaIncluded || false],
               ['Originality', false],

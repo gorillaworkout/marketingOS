@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
-import { buildArticleMarketNewsPrompts, DUPOIN_ACCOUNT_CTA_SENTENCE, ensureEndingDupoinAccountCta, normalizeArticleMarketNewsInput, normalizeResearchUrl, parseGeneratedArticle, repairLooseJson, validateGeneratedArticle } from '../src/lib/article-market-news';
+import { ARTICLE_WORD_MIN, ARTICLE_WORD_SOFT_MAX, ARTICLE_WORD_TARGET_MAX, articleDraftProtectedPhrases, articleWordCountRepairGuidance, buildArticleMarketNewsPrompts, countArticleWords, describeArticlePublicationGateFailure, DUPOIN_ACCOUNT_CTA_SENTENCE, ensureEndingDupoinAccountCta, fitArticleMarkdownWordCount, normalizeArticleMarketNewsInput, normalizeResearchUrl, parseGeneratedArticle, repairLooseJson, validateGeneratedArticle } from '../src/lib/article-market-news';
 import { articleDocxFilename, buildArticleDocxBlob } from '../src/lib/article-market-news-docx';
 
 const read = (relative: string) => {
@@ -160,6 +160,8 @@ test('page exposes the admin Article Market News generation workflow', () => {
   assert.doesNotMatch(generator, /type="datetime-local"/);
   assert.match(page, /ArticleMarketNewsGenerator/);
   assert.match(generator, /Generate Article/i);
+  assert.match(generator, /800–1,050 words/);
+  assert.match(page, /Drafts up to 1,050 words can still pass the publication gate/);
   assert.match(generator, /exactly 5 articles/i);
   assert.match(generator, /People Also Ask/);
   assert.match(generator, /Verified Facts/);
@@ -182,6 +184,11 @@ test('route is feature-gated, gateway-routed, evidence-gated, and never fetches 
   assert.match(route, /Encode newlines as/);
   assert.match(route, /metaDescription\.length > 155/);
   assert.match(route, /validateGeneratedArticle/);
+  assert.match(route, /fitArticleMarkdownWordCount\([\s\S]*validateGeneratedArticle/);
+  assert.match(route, /articleWordCountRepairGuidance\(feedback\)/);
+  assert.match(route, /describeArticlePublicationGateFailure/);
+  assert.match(route, /shorten or expand the analysis/i);
+  assert.doesNotMatch(route, /expand only from the verified source material/);
   assert.doesNotMatch(route, /fetchResearchSource|fetch\(source\.url/);
   assert.match(openai, /GORILLAWORKOUT_API_BASE/);
   assert.doesNotMatch(openai, /child_process|OPENROUTER_API_KEY/);
@@ -243,6 +250,150 @@ test('citation URL gate rejects loopback, private, link-local, metadata, and spe
     'http://192.168.1.1/a', 'http://[::1]/a', 'http://metadata.google.internal/a',
   ]) assert.throws(() => normalizeResearchUrl(url), /private|special-use/);
   assert.match(normalizeResearchUrl('https://investasi.kontan.co.id/news/a'), /^https:/);
+});
+
+function analysisArticle(sentences: string[], leadExtra = ''): string {
+  const lead = `Harga Emas menjadi perhatian pelaku pasar berdasarkan fakta yang telah diverifikasi operator dari laporan Kontan pada 2026-07-27.${leadExtra}`;
+  const faqs = rawInput.paaQuestions.map(question => `## ${question}\nJawaban singkat cukup.`).join('\n\n');
+  const analysis = sentences.length > 0 ? sentences.join(' ') : 'Catatan singkat.';
+  return `# Harga Emas dan Permintaan Pasar\n\n${lead}\n\n## Analisis Pasar\n${analysis}\n\n${faqs}\n\nBuka akun Dupoin untuk memantau peluang pasar dengan pengelolaan risiko.\n\n## Sources\nKontan — 2026-07-27 — https://investasi.kontan.co.id/news/harga-emas`;
+}
+
+function articleOfWordCount(target: number): string {
+  const unit = 'Kondisi pasar tetap diperhatikan pelaku dengan disiplin.';
+  const sentences: string[] = [];
+  let draft = analysisArticle(sentences);
+  while (countArticleWords(draft) + countArticleWords(unit) <= target) {
+    sentences.push(unit);
+    draft = analysisArticle(sentences);
+  }
+  const gap = target - countArticleWords(draft);
+  if (gap > 0) sentences.push(`${Array.from({ length: gap }, () => 'pasar').join(' ')}.`);
+  draft = analysisArticle(sentences);
+  if (countArticleWords(draft) !== target) {
+    throw new Error(`expected ${target} words, received ${countArticleWords(draft)}`);
+  }
+  return draft;
+}
+
+function untrimmableArticle(target: number): string {
+  const base = analysisArticle([]);
+  const gap = target - countArticleWords(base);
+  if (gap < 1) throw new Error(`base article is already ${countArticleWords(base)} words`);
+  return analysisArticle([], ` ${Array.from({ length: gap }, () => 'konteks').join(' ')}`);
+}
+
+test('publication gate trims a 1031-word draft instead of failing the run', () => {
+  const input = normalizeArticleMarketNewsInput(rawInput, '2026-07-27');
+  const draft = articleOfWordCount(1031);
+  assert.equal(countArticleWords(draft), 1031);
+  const fitted = fitArticleMarkdownWordCount(draft, articleDraftProtectedPhrases(input));
+  assert.equal(fitted.trimmed, true);
+  assert.equal(fitted.originalWordCount, 1031);
+  assert.ok(fitted.wordCount <= ARTICLE_WORD_TARGET_MAX, `trimmed to ${fitted.wordCount}`);
+  assert.ok(fitted.wordCount >= ARTICLE_WORD_MIN);
+  const result = validateGeneratedArticle('Harga Emas dan Permintaan Pasar', fitted.markdown, input);
+  assert.equal(result.qc.wordCountWithinRange, true);
+  assert.deepEqual(result.violations, []);
+  for (const question of rawInput.paaQuestions) assert.match(fitted.markdown, new RegExp(question.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  assert.match(fitted.markdown, /Buka akun Dupoin untuk memantau peluang pasar dengan pengelolaan risiko\./);
+  assert.match(fitted.markdown, /## Sources\nKontan — 2026-07-27 — https:\/\/investasi\.kontan\.co\.id\/news\/harga-emas/);
+  assert.match(fitted.markdown, /laporan Kontan pada 2026-07-27/);
+});
+
+test('publication gate soft-accepts 1031 words when the excess sits in the protected lead', () => {
+  const input = normalizeArticleMarketNewsInput(rawInput, '2026-07-27');
+  const draft = untrimmableArticle(1031);
+  assert.equal(countArticleWords(draft), 1031);
+  const fitted = fitArticleMarkdownWordCount(draft, articleDraftProtectedPhrases(input));
+  assert.equal(fitted.trimmed, false);
+  assert.equal(fitted.markdown, draft);
+  const result = validateGeneratedArticle('Harga Emas dan Permintaan Pasar', draft, input);
+  assert.equal(result.wordCount, 1031);
+  assert.equal(result.qc.wordCountWithinRange, true);
+  assert.deepEqual(result.violations, []);
+  const ceiling = validateGeneratedArticle('Harga Emas dan Permintaan Pasar', untrimmableArticle(ARTICLE_WORD_SOFT_MAX), input);
+  assert.equal(ceiling.qc.wordCountWithinRange, true);
+  const over = validateGeneratedArticle('Harga Emas dan Permintaan Pasar', untrimmableArticle(ARTICLE_WORD_SOFT_MAX + 1), input);
+  assert.equal(over.qc.wordCountWithinRange, false);
+  assert.match(over.violations.join(' '), new RegExp(`too long for publication \\(${ARTICLE_WORD_SOFT_MAX + 1} words\\)`));
+});
+
+test('publication gate still rejects wildly short or long drafts and says how to recover', () => {
+  const input = normalizeArticleMarketNewsInput(rawInput, '2026-07-27');
+  const shortDraft = analysisArticle([]);
+  assert.ok(countArticleWords(shortDraft) < ARTICLE_WORD_MIN);
+  const short = validateGeneratedArticle('Harga Emas dan Permintaan Pasar', shortDraft, input);
+  assert.equal(short.qc.wordCountWithinRange, false);
+  assert.match(short.violations.join(' '), new RegExp(`too short for publication \\(${short.wordCount} words\\)`));
+  assert.equal(fitArticleMarkdownWordCount(shortDraft).trimmed, false);
+
+  const longDraft = articleOfWordCount(1_400);
+  const fitted = fitArticleMarkdownWordCount(longDraft, articleDraftProtectedPhrases(input));
+  assert.equal(fitted.trimmed, false);
+  assert.equal(fitted.markdown, longDraft);
+  const long = validateGeneratedArticle('Harga Emas dan Permintaan Pasar', longDraft, input);
+  assert.equal(long.qc.wordCountWithinRange, false);
+  assert.match(long.violations.join(' '), /too long for publication \(1400 words\)/);
+
+  assert.equal(validateGeneratedArticle('Harga Emas dan Permintaan Pasar', articleOfWordCount(ARTICLE_WORD_MIN), input).qc.wordCountWithinRange, true);
+  assert.equal(validateGeneratedArticle('Harga Emas dan Permintaan Pasar', articleOfWordCount(ARTICLE_WORD_MIN - 1), input).qc.wordCountWithinRange, false);
+  assert.equal(validateGeneratedArticle('Harga Emas dan Permintaan Pasar', articleOfWordCount(ARTICLE_WORD_TARGET_MAX), input).violations.length, 0);
+});
+
+test('word-count retries name the direction and the final error stays specific', () => {
+  const tooLong = 'Article is too long for publication (1400 words). Shorten the analysis by about 440 words without removing the keyword lead, PAA headings, Dupoin CTA, or Sources.';
+  const shorten = articleWordCountRepairGuidance(tooLong);
+  assert.match(shorten, /WORD COUNT REWRITE/);
+  assert.match(shorten, /1400 words/);
+  assert.match(shorten, /920–980/);
+  assert.match(shorten, /deleting about 440 words/);
+  assert.match(shorten, /five PAA question headings/);
+  assert.doesNotMatch(shorten, /Expand only the analysis/);
+
+  const tooShort = `Article is too short for publication (640 words). It must be at least ${ARTICLE_WORD_MIN} words.`;
+  const expand = articleWordCountRepairGuidance(tooShort);
+  assert.match(expand, /640 words/);
+  assert.match(expand, /Expand only the analysis/);
+  assert.match(expand, /920 and 980/);
+  assert.equal(articleWordCountRepairGuidance('Title exceeds 60 characters.'), '');
+
+  const failure = describeArticlePublicationGateFailure(tooLong);
+  assert.match(failure, /still too long \(1400 words\)/);
+  assert.match(failure, /after 3 attempts/);
+  assert.match(failure, /1,050/);
+  assert.match(failure, /Generate again so the analysis can be shortened/);
+  const shortFailure = describeArticlePublicationGateFailure(tooShort);
+  assert.match(shortFailure, /still too short \(640 words\)/);
+  assert.match(shortFailure, /expanded from the verified sources/);
+  assert.match(describeArticlePublicationGateFailure('Title exceeds 60 characters.'), /failed the publication gate after 3 attempts/);
+});
+
+test('light trim keeps a protected citation and can clip one long sentence', () => {
+  const input = normalizeArticleMarketNewsInput(rawInput, '2026-07-27');
+  const protectedSentence = 'Kalimat khusus dengan kodeuniksumber untuk pelacakan.';
+  const firstQuestion = rawInput.paaQuestions[0];
+  const base = articleOfWordCount(1031 - countArticleWords(protectedSentence));
+  const withPhrase = base.replace(`\n\n## ${firstQuestion}`, ` ${protectedSentence}\n\n## ${firstQuestion}`);
+  assert.equal(countArticleWords(withPhrase), 1031);
+  const fitted = fitArticleMarkdownWordCount(withPhrase, ['kodeuniksumber']);
+  assert.equal(fitted.trimmed, true);
+  assert.match(fitted.markdown, /kodeuniksumber/);
+  assert.ok(fitted.wordCount <= ARTICLE_WORD_TARGET_MAX);
+  assert.ok(fitted.wordCount >= ARTICLE_WORD_MIN);
+
+  const placeholder = 'Catatan singkat.';
+  const skeletonCount = countArticleWords(analysisArticle([]));
+  const fillerWords = 1031 - (skeletonCount - countArticleWords(placeholder));
+  const oneSentence = analysisArticle([`${Array.from({ length: fillerWords }, () => 'pasar').join(' ')}.`]);
+  assert.equal(countArticleWords(oneSentence), 1031);
+  const clipped = fitArticleMarkdownWordCount(oneSentence, articleDraftProtectedPhrases(input));
+  assert.equal(clipped.trimmed, true);
+  assert.ok(clipped.wordCount <= ARTICLE_WORD_TARGET_MAX);
+  assert.ok(clipped.wordCount >= ARTICLE_WORD_MIN);
+  assert.match(clipped.markdown, /pasar\./);
+  assert.match(clipped.markdown, /## Analisis Pasar/);
+  assert.equal(validateGeneratedArticle('Harga Emas dan Permintaan Pasar', clipped.markdown, input).violations.length, 0);
 });
 
 test('publication gate passes a compliant article', () => {
