@@ -4,7 +4,6 @@ import {
   Document,
   ExternalHyperlink,
   Footer,
-  Header,
   HeadingLevel,
   LevelFormat,
   LineRuleType,
@@ -23,7 +22,6 @@ import {
   type ParagraphChild,
 } from 'docx';
 import {
-  RESEARCH_BRIEF_BRAND,
   RESEARCH_EXPORT_OFFICIAL_HEADING,
   RESEARCH_EXPORT_OTHER_HEADING,
   buildResearchBrief,
@@ -264,10 +262,6 @@ function subjectCard(brief: ResearchBrief): Table {
             },
             children: [
               new Paragraph({
-                spacing: { after: 40 },
-                children: [new TextRun({ text: brief.questionLabel, bold: true, size: 16, color: INDIGO })],
-              }),
-              new Paragraph({
                 spacing: { after: 0, line: 276, lineRule: LineRuleType.AUTO },
                 children: [new TextRun({ text: brief.question, bold: true, size: 32, color: TITLE })],
               }),
@@ -311,7 +305,7 @@ function buildResearchDocument(input: ResearchExportInput): Document {
     creator: 'MarketingOS — Dupoin Futures',
     lastModifiedBy: 'MarketingOS — Dupoin Futures',
     title: brief.question.slice(0, 200),
-    description: `${brief.brand} brief (${brief.modePhrase})`,
+    description: `Research brief (${brief.modePhrase})`,
     styles: {
       default: {
         document: {
@@ -346,14 +340,6 @@ function buildResearchDocument(input: ResearchExportInput): Document {
           margin: { top: 1008, bottom: 1008, left: 1080, right: 1080, header: 576, footer: 640 },
         },
       },
-      headers: {
-        default: new Header({
-          children: [new Paragraph({
-            border: { bottom: { style: BorderStyle.SINGLE, size: 8, color: 'E4E7EC', space: 1 } },
-            children: [new TextRun({ text: RESEARCH_BRIEF_BRAND, bold: true, size: SMALL, color: INDIGO })],
-          })],
-        }),
-      },
       footers: {
         default: new Footer({
           children: [new Paragraph({
@@ -361,7 +347,7 @@ function buildResearchDocument(input: ResearchExportInput): Document {
             children: [new TextRun({
               size: SMALL,
               color: MUTED,
-              children: [RESEARCH_BRIEF_BRAND, '  ·  Page ', PageNumber.CURRENT, ' of ', PageNumber.TOTAL_PAGES],
+              children: ['Page ', PageNumber.CURRENT, ' of ', PageNumber.TOTAL_PAGES],
             })],
           })],
         }),

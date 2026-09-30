@@ -19,7 +19,7 @@ export function AiResearchExportActions({
   mode?: 'fast' | 'deep';
 }) {
   const [copied, setCopied] = useState(false);
-  const [busy, setBusy] = useState<'md' | 'pdf' | 'docx' | null>(null);
+  const [busy, setBusy] = useState<'md' | 'pdf' | 'docx' | 'html' | 'zip' | null>(null);
   const [exportError, setExportError] = useState('');
 
   const markdown = () => buildResearchMarkdownExport({ title, answer, sources, mode });
@@ -44,7 +44,7 @@ export function AiResearchExportActions({
     window.setTimeout(() => setCopied(false), 1600);
   };
 
-  const download = async (extension: 'md' | 'pdf' | 'docx') => {
+  const download = async (extension: 'md' | 'pdf' | 'docx' | 'html' | 'zip') => {
     if (busy) return;
     setBusy(extension);
     setExportError('');
@@ -93,6 +93,24 @@ export function AiResearchExportActions({
           className="rounded-full border border-[var(--mos-border)] bg-[var(--mos-bg)] px-2.5 py-1 text-[10px] font-medium text-[var(--mos-text)] hover:bg-[var(--mos-hover)] disabled:opacity-40"
         >
           {busy === 'docx' ? 'Preparing…' : 'Download Word'}
+        </button>
+        <button
+          type="button"
+          data-testid="ai-research-download-html"
+          onClick={() => { void download('html'); }}
+          disabled={busy !== null}
+          className="rounded-full border border-[var(--mos-border)] bg-[var(--mos-bg)] px-2.5 py-1 text-[10px] font-medium text-[var(--mos-text)] hover:bg-[var(--mos-hover)] disabled:opacity-40"
+        >
+          {busy === 'html' ? 'Preparing…' : 'Download HTML'}
+        </button>
+        <button
+          type="button"
+          data-testid="ai-research-download-zip"
+          onClick={() => { void download('zip'); }}
+          disabled={busy !== null}
+          className="rounded-full border border-[var(--mos-border)] bg-[var(--mos-bg)] px-2.5 py-1 text-[10px] font-medium text-[var(--mos-text)] hover:bg-[var(--mos-hover)] disabled:opacity-40"
+        >
+          {busy === 'zip' ? 'Preparing…' : 'Download ZIP'}
         </button>
       </div>
       {exportError && <p className="mt-1 px-1 text-[10px] text-red-300">{exportError}</p>}

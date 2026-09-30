@@ -4,13 +4,22 @@ import { readFileSync } from 'node:fs';
 import JSZip from 'jszip';
 import { buildResearchDocx } from '../src/lib/ai-research-docx';
 import {
+  buildResearchHtmlExport,
   buildResearchMarkdownExport,
   buildResearchPdf,
+  buildResearchSourcesMarkdown,
+  buildResearchZip,
   researchAnswerToPlainText,
   researchExportFilename,
 } from '../src/lib/ai-research-export';
 
 const read = (path: string) => readFileSync(path, 'utf8');
+
+async function wordPackageText(zip: JSZip): Promise<string> {
+  const names = Object.keys(zip.files).filter(name => name.endsWith('.xml') || name.endsWith('.rels'));
+  const parts = await Promise.all(names.map(name => zip.file(name)?.async('string') || Promise.resolve('')));
+  return parts.join('\n');
+}
 
 test('markdown export includes the query, answer, and source URLs', () => {
   const exportedAt = new Date('2026-09-23T00:00:00.000Z');
@@ -25,10 +34,10 @@ test('markdown export includes the query, answer, and source URLs', () => {
       { title: 'blocked', url: 'javascript:alert(1)' },
     ],
   });
-  assert.match(markdown, /^# Dupoin AI Research/);
-  assert.match(markdown, /\*\*Research question\*\*/);
-  assert.match(markdown, /Harga emas Indonesia/);
+  assert.match(markdown, /^# Harga emas Indonesia/);
   assert.equal(markdown.split('Harga emas Indonesia').length - 1, 1);
+  assert.doesNotMatch(markdown, /Dupoin AI Research/);
+  assert.doesNotMatch(markdown, /Research question/);
   assert.match(markdown, /Deep research · 23 September 2026/);
   assert.doesNotMatch(markdown, /Assistant:/);
   assert.doesNotMatch(markdown, /Mode: Deep/);
@@ -59,14 +68,13 @@ test('pdf export is a multi-page Dupoin document with the answer and sources', (
   assert.match(text, /^%PDF-1\.4/);
   assert.match(text, /%%EOF$/);
   assert.ok((text.match(/\/Type \/Page\b/g) || []).length >= 2);
-  assert.match(text, /Research question/);
   assert.match(text, /Harga emas caf/);
   assert.match(text, /\\351/);
   assert.match(text, /Fast research/);
   assert.match(text, /23 September 2026/);
   assert.match(text, /Kesenjangan dan keterbatasan/);
   assert.match(text, /https:\/\/www\.bi\.go\.id\/emas/);
-  assert.match(text, /Dupoin AI Research/);
+  assert.doesNotMatch(text, /Dupoin AI Research/);
   assert.match(text, /Check the facts against the sources/);
   assert.match(text, /Page 1 of /);
   assert.doesNotMatch(text, /Assistant:/);
@@ -114,7 +122,6 @@ test('docx export is a Word file with the question, answer, and separated source
   const zip = await JSZip.loadAsync(bytes);
   const xml = await zip.file('word/document.xml')?.async('string');
   assert.ok(xml);
-  assert.match(xml, /Research question/);
   assert.match(xml, /Who is Sella Susriana at Dupoin\?/);
   assert.equal(xml.split('Who is Sella Susriana at Dupoin?').length - 1, 1);
   assert.match(xml, /Deep research/);
@@ -135,9 +142,12 @@ test('docx export is a Word file with the question, answer, and separated source
   assert.match(rels, /https:\/\/bappebti\.go\.id\/wakil/);
   assert.match(rels, /https:\/\/example\.com\/sella/);
   const header = await zip.file('word/header1.xml')?.async('string') || '';
-  assert.match(header, /Dupoin AI Research/);
+  assert.doesNotMatch(header, /Dupoin AI Research/);
   const footer = await zip.file('word/footer1.xml')?.async('string') || '';
-  assert.match(footer, /Page/);
+  assert.match(footer, /Page /);
+  assert.doesNotMatch(footer, /Dupoin AI Research/);
+  const packaged = await wordPackageText(zip);
+  assert.doesNotMatch(packaged, /Dupoin AI Research/);
   assert.equal(
     researchExportFilename('Who is Sella?', 'docx', exportedAt),
     'dupoin-ai-research-Who-is-Sella-2026-09-30.docx',
@@ -177,6 +187,10 @@ test('export brief uses the question once as the subject and drops chat chrome',
       '',
       'Download Word',
       '',
+      'Download HTML',
+      '',
+      'Research ZIP',
+      '',
       '## Other public traces',
       '',
       'A different profile may exist.',
@@ -192,7 +206,8 @@ test('export brief uses the question once as the subject and drops chat chrome',
   assert.match(echoedAnswer, /### Other public traces/);
   assert.doesNotMatch(echoedAnswer, /^## /m);
   assert.doesNotMatch(echoedAnswer, /Who is Sella/);
-  assert.doesNotMatch(markdown, /Copy Markdown|Download Word|Open PDF|Research Word/);
+  assert.doesNotMatch(markdown, /Copy Markdown|Download Word|Download HTML|Research ZIP|Open PDF|Research Word/);
+  assert.doesNotMatch(markdown, /Dupoin AI Research/);
 
   const pdf = Buffer.from(buildResearchPdf(echoed)).toString('latin1');
   assert.equal(pdf.split(question).length - 1, 1);
@@ -209,6 +224,120 @@ test('export brief uses the question once as the subject and drops chat chrome',
   assert.doesNotMatch(xml, /Copy Markdown|Download Word|Open PDF/);
 });
 
+test('html export is a self-contained brief without a letterhead', () => {
+  const html = buildResearchHtmlExport({
+    title: 'Who is Sella Susriana at Dupoin?',
+    answer: [
+      'Official role first.',
+      '',
+      '## Other public traces',
+      '',
+      'A different profile may exist. [Bappebti](https://bappebti.go.id/wakil)',
+      '',
+      '<script>alert(1)</script>',
+      '',
+      '| Trace | Note |',
+      '| --- | --- |',
+      '| Roster | Official |',
+    ].join('\n'),
+    mode: 'deep',
+    exportedAt: new Date('2026-09-30T00:00:00.000Z'),
+    sources: [
+      {
+        title: 'Bappebti roster',
+        url: 'https://bappebti.go.id/wakil',
+        official: true,
+        traceKind: 'person_fact',
+        snippet: 'Nama: Sella Susriana',
+      },
+      {
+        title: 'Other profile',
+        url: 'https://example.com/sella',
+        official: false,
+        traceKind: 'other_public_trace',
+        snippet: 'Freelancer listing',
+      },
+    ],
+  });
+  assert.match(html, /^<!DOCTYPE html>/);
+  assert.match(html, /<html lang="en">/);
+  assert.match(html, /<title>Who is Sella Susriana at Dupoin\?<\/title>/);
+  assert.equal(html.split('Who is Sella Susriana at Dupoin?').length - 1, 2);
+  assert.match(html, /<h1>Who is Sella Susriana at Dupoin\?<\/h1>/);
+  assert.match(html, /<p class="meta">Deep research · 30 September 2026<\/p>/);
+  assert.match(html, /<h2>Answer<\/h2>/);
+  assert.match(html, /<p>Official role first\.<\/p>/);
+  assert.match(html, /<h4>Other public traces<\/h4>/);
+  assert.match(html, /<a href="https:\/\/bappebti\.go\.id\/wakil">Bappebti<\/a>/);
+  assert.match(html, /<table>/);
+  assert.match(html, /<th scope="col">Trace<\/th>/);
+  assert.match(html, /&lt;script&gt;alert\(1\)&lt;\/script&gt;/);
+  assert.doesNotMatch(html, /<script>/);
+  assert.match(html, /<h2>Sources<\/h2>/);
+  assert.match(html, /<h3>Official Dupoin \/ Bappebti<\/h3>/);
+  assert.match(html, /<h3>Other sources<\/h3>/);
+  assert.match(html, /<a href="https:\/\/bappebti\.go\.id\/wakil">Bappebti roster<\/a>/);
+  assert.match(html, /Official Dupoin\/Bappebti roster/);
+  assert.match(html, /Nama: Sella Susriana/);
+  assert.match(html, /Freelancer listing/);
+  assert.match(html, /<style>/);
+  assert.doesNotMatch(html, /<link /);
+  assert.match(html, /Check the facts against the sources/);
+  assert.doesNotMatch(html, /Dupoin AI Research/);
+  assert.doesNotMatch(html, /Download HTML|Open PDF|Copy Markdown|Research ZIP/);
+  assert.equal(
+    researchExportFilename('Who is Sella?', 'html', new Date('2026-09-30T00:00:00.000Z')),
+    'dupoin-ai-research-Who-is-Sella-2026-09-30.html',
+  );
+});
+
+test('zip export contains the markdown brief, html brief, and sources list', async () => {
+  const exportedAt = new Date('2026-09-30T00:00:00.000Z');
+  const input = {
+    title: 'Who is Sella Susriana at Dupoin?',
+    answer: 'Official role first.',
+    mode: 'deep' as const,
+    exportedAt,
+    sources: [
+      {
+        title: 'Bappebti roster',
+        url: 'https://bappebti.go.id/wakil',
+        official: true,
+        snippet: 'Nama: Sella Susriana',
+      },
+      {
+        title: 'Other profile',
+        url: 'https://example.com/sella',
+        official: false,
+      },
+    ],
+  };
+  const bytes = await buildResearchZip(input);
+  const zip = await JSZip.loadAsync(bytes);
+  assert.deepEqual(Object.keys(zip.files).sort(), ['research.html', 'research.md', 'sources.md']);
+  const markdown = await zip.file('research.md')?.async('string') || '';
+  const html = await zip.file('research.html')?.async('string') || '';
+  const sources = await zip.file('sources.md')?.async('string') || '';
+  assert.equal(markdown, buildResearchMarkdownExport(input));
+  assert.equal(html, buildResearchHtmlExport(input));
+  assert.equal(sources, buildResearchSourcesMarkdown(input));
+  assert.match(markdown, /^# Who is Sella Susriana at Dupoin\?/);
+  assert.match(markdown, /Official role first/);
+  assert.match(html, /<h1>Who is Sella Susriana at Dupoin\?<\/h1>/);
+  assert.match(html, /<h2>Answer<\/h2>/);
+  assert.match(sources, /^# Sources/);
+  assert.match(sources, /### Official Dupoin \/ Bappebti/);
+  assert.match(sources, /### Other sources/);
+  assert.match(sources, /\[Bappebti roster\]\(https:\/\/bappebti\.go\.id\/wakil\)/);
+  assert.match(sources, /Nama: Sella Susriana/);
+  assert.doesNotMatch(sources, /Official role first/);
+  assert.doesNotMatch(`${markdown}\n${html}\n${sources}`, /Dupoin AI Research/);
+  assert.equal(
+    researchExportFilename(input.title, 'zip', exportedAt),
+    'dupoin-ai-research-Who-is-Sella-Susriana-at-Dupoin-2026-09-30.zip',
+  );
+});
+
 test('AI Research answer actions expose markdown copy and PDF and Word downloads', () => {
   const page = read('src/app/dashboard/ai-research/page.tsx');
   const actions = read('src/components/AiResearchExportActions.tsx');
@@ -222,19 +351,32 @@ test('AI Research answer actions expose markdown copy and PDF and Word downloads
   assert.match(actions, /Download \.md/);
   assert.match(actions, /Download PDF/);
   assert.match(actions, /Download Word/);
+  assert.match(actions, /Download HTML/);
+  assert.match(actions, /Download ZIP/);
   assert.match(actions, /deliverResearchFile/);
   assert.match(actions, /data-testid="ai-research-export"/);
   assert.match(actions, /data-testid="ai-research-download-pdf"/);
   assert.match(actions, /data-testid="ai-research-download-word"/);
+  assert.match(actions, /data-testid="ai-research-download-html"/);
+  assert.match(actions, /data-testid="ai-research-download-zip"/);
   assert.match(chatFiles, /Research PDF/);
   assert.match(chatFiles, /Open PDF/);
   assert.match(chatFiles, /Download PDF/);
   assert.match(chatFiles, /Research Word/);
   assert.match(chatFiles, /Download Word/);
+  assert.match(chatFiles, /Research HTML/);
+  assert.match(chatFiles, /Open HTML/);
+  assert.match(chatFiles, /Download HTML/);
+  assert.match(chatFiles, /Research ZIP/);
+  assert.match(chatFiles, /Download ZIP/);
   assert.match(chatFiles, /data-testid="ai-research-chat-files"/);
   assert.match(chatFiles, /data-testid="ai-research-open-pdf"/);
+  assert.match(chatFiles, /data-testid="ai-research-open-html"/);
+  assert.match(chatFiles, /data-testid="ai-research-chat-download-zip"/);
   assert.doesNotMatch(chatFiles, /Unduh|Buka PDF|melalui chat/);
   assert.match(download, /buildResearchPdf/);
+  assert.match(download, /buildResearchHtmlExport/);
+  assert.match(download, /buildResearchZip/);
   assert.match(download, /buildResearchDocxBlob/);
   assert.match(download, /target = '_blank'/);
 });

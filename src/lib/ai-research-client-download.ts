@@ -1,7 +1,10 @@
 import {
+  buildResearchHtmlExport,
   buildResearchMarkdownExport,
   buildResearchPdf,
+  buildResearchZip,
   researchExportFilename,
+  type ResearchExportExtension,
   type ResearchExportInput,
 } from './ai-research-export';
 
@@ -24,12 +27,21 @@ function saveBlob(blob: Blob, filename: string, open: boolean) {
 /** Download or open the research file already shown in the chat. */
 export async function deliverResearchFile(
   input: ResearchExportInput,
-  extension: 'md' | 'pdf' | 'docx',
+  extension: ResearchExportExtension,
   open = false,
 ): Promise<void> {
   const filename = researchExportFilename(input.title, extension, input.exportedAt);
   if (extension === 'md') {
     saveBlob(new Blob([buildResearchMarkdownExport(input)], { type: 'text/markdown;charset=utf-8' }), filename, false);
+    return;
+  }
+  if (extension === 'html') {
+    saveBlob(new Blob([buildResearchHtmlExport(input)], { type: 'text/html;charset=utf-8' }), filename, open);
+    return;
+  }
+  if (extension === 'zip') {
+    const bytes = await buildResearchZip(input);
+    saveBlob(new Blob([bytes.slice()], { type: 'application/zip' }), filename, false);
     return;
   }
   if (extension === 'pdf') {
