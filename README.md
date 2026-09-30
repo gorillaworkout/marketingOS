@@ -180,21 +180,15 @@ PostgreSQL contains these core tables:
 
 ## Production CI/CD
 
-Pushes to `main` deploy to the AWS VPS (`/home/ubuntu/apps/marketingos`, PM2 process `marketingos`, port 3021) via `.github/workflows/deploy-production.yml`. The VPS deploy key must keep its forced command on `scripts/deploy.sh`.
+Pushes to `main` deploy to the AWS VPS (`/home/ubuntu/apps/marketingos`, PM2 process `marketingos`, port 3021) via `.github/workflows/deploy-production.yml`. The job runs on a self-hosted runner on that VPS (labels `self-hosted`, `linux`, `aws`, `marketingos`) and executes `scripts/deploy.sh` locally. GitHub-hosted runners cannot SSH in because the security group blocks TCP 22.
 
-Add these repository secrets before the workflow can succeed (**Settings → Secrets and variables → Actions**):
-
-- `MARKETINGOS_DEPLOY_SSH_KEY` (private key PEM)
-- `MARKETINGOS_DEPLOY_HOST` (`16.78.68.56`)
-- `MARKETINGOS_DEPLOY_USER` (`ubuntu`)
-
-Optional: `MARKETINGOS_DEPLOY_KNOWN_HOSTS`. The first merge needs a one-time manual deploy so the committed `scripts/deploy.sh` lands on the VPS. Details: [docs/deploy-cicd.md](docs/deploy-cicd.md).
+An admin can still deploy over SSH by running the same script on the server. Details: [docs/deploy-cicd.md](docs/deploy-cicd.md).
 
 ## Documentation
 
 - [API Documentation](docs/API.md) — Semua 19 API endpoints
 - [User Guide](docs/USER-GUIDE.md) — Panduan lengkap untuk marketing team
-- [Production CI/CD](docs/deploy-cicd.md) — Actions secrets and VPS deploy
+- [Production CI/CD](docs/deploy-cicd.md) — Self-hosted runner and VPS deploy
 
 ## Development
 

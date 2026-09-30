@@ -1,6 +1,6 @@
 # Production CI/CD
 
-Pushes to `main` deploy MarketingOS to the AWS VPS. The workflow also supports **Run workflow** (`workflow_dispatch`). A run always deploys `origin/main` on the server.
+Pushes to `main` deploy MarketingOS on the AWS VPS. The workflow also supports **Run workflow** (`workflow_dispatch`). A run always deploys `origin/main` on the server, because `scripts/deploy.sh` checks out that ref.
 
 | Item | Value |
 |------|--------|
@@ -9,7 +9,22 @@ Pushes to `main` deploy MarketingOS to the AWS VPS. The workflow also supports *
 | App port | `3021` |
 | Public URL | https://marketing-aws.gorillaworkout.id |
 | Workflow | `.github/workflows/deploy-production.yml` |
-| Remote script | `scripts/deploy.sh` |
+| Deploy script | `/home/ubuntu/apps/marketingos/scripts/deploy.sh` |
+| Runner labels | `self-hosted`, `linux`, `aws`, `marketingos` |
+
+## Why the job runs on the VPS
+
+The production security group blocks inbound TCP 22. A GitHub-hosted `ubuntu-latest` runner cannot open SSH to the VPS, so the workflow does not SSH and does not read `MARKETINGOS_DEPLOY_*` secrets.
+
+The deploy job runs on a self-hosted GitHub Actions runner on the VPS. It executes:
+
+```bash
+bash /home/ubuntu/apps/marketingos/scripts/deploy.sh
+```
+
+The runner must be registered with labels `self-hosted`, `linux`, `aws`, and `marketingos`. It must run as a user that can update `/home/ubuntu/apps/marketingos` and invoke `git`, `node`, `npm`, `pm2`, and `curl` (the `ubuntu` user). The job timeout is 40 minutes so `npm ci` and `npm run build` can finish.
+
+The earlier GitHub-hosted SSH path is retired.
 
 ## What the VPS script does
 
@@ -22,48 +37,16 @@ Pushes to `main` deploy MarketingOS to the AWS VPS. The workflow also supports *
 
 The script does not run `git clean`. `.env`, `.env.local`, and the database stay on the server. It does not print secret values. Put production `DATABASE_URL` in `.env`; `npm run db:migrate` loads that file. Next.js also reads `.env.local` when that file is present.
 
-After the SSH session exits 0, the GitHub Actions job requests `https://marketing-aws.gorillaworkout.id/api/health` and reports that status.
+After the script exits 0, the GitHub Actions job requests `https://marketing-aws.gorillaworkout.id/api/health` and reports that status.
 
-Overlapping deploys for the same ref use one concurrency group with cancel-in-progress. A newer push cancels the in-flight GitHub job and drops its SSH session. The next run executes the full script again. Database migrations are idempotent.
+Overlapping deploys for the same ref use one concurrency group with cancel-in-progress. A newer push cancels the in-flight job. The next run executes the full script again. Database migrations are idempotent.
 
-## GitHub Actions secrets
+## Manual deploy
 
-Add these under **Settings → Secrets and variables → Actions** on `gorillaworkout/marketingOS`.
-
-| Secret | Required | What to store |
-|--------|----------|----------------|
-| `MARKETINGOS_DEPLOY_SSH_KEY` | yes | Private key PEM for the VPS deploy key |
-| `MARKETINGOS_DEPLOY_HOST` | yes | VPS host. Current production host is `16.78.68.56` |
-| `MARKETINGOS_DEPLOY_USER` | yes | SSH user. Production user is `ubuntu` |
-| `MARKETINGOS_DEPLOY_KNOWN_HOSTS` | no | `ssh-keyscan` output for the host. When this secret is empty, the workflow runs `ssh-keyscan` itself |
-
-Do not commit the private key, `.env`, or `.env.local`.
-
-## Authorized keys
-
-The deploy key on the VPS must keep this forced command. GitHub Actions cannot pass a different remote command:
-
-```
-command="/home/ubuntu/apps/marketingos/scripts/deploy.sh",no-port-forwarding,no-X11-forwarding,no-agent-forwarding,no-pty
-```
-
-The workflow opens SSH with `StrictHostKeyChecking=yes` and does not request a PTY. The key options above reject port forwarding, X11, agent forwarding, and PTY allocation.
-
-## First deploy after this file is committed
-
-The copy of `scripts/deploy.sh` already on the VPS is untracked. Git will not overwrite that file during `git reset --hard`, and the forced command still runs that copy, so the first merge does not replace it by itself.
-
-Add the Actions secrets first. From an admin SSH session (a key that is not the forced-command deploy key), install the committed script once, then run it. After this bootstrap, **workflow_dispatch** and later pushes to `main` deploy on their own:
+An admin SSH session can still deploy with the same script. No security group change is required for that path:
 
 ```bash
-cd /home/ubuntu/apps/marketingos
-git fetch origin
-git show origin/main:scripts/deploy.sh > /tmp/marketingos-deploy.sh
-install -m 755 /tmp/marketingos-deploy.sh scripts/deploy.sh
-rm -f /tmp/marketingos-deploy.sh
-bash scripts/deploy.sh
+bash /home/ubuntu/apps/marketingos/scripts/deploy.sh
 ```
 
-That run moves the untracked script aside, checks out the tracked `scripts/deploy.sh` from `origin/main`, builds, restarts PM2, and waits for local health. Later pushes to `main` deploy on their own.
-
-If secrets are not set yet, the merge commit's workflow run fails at the secret check. After the secrets exist, use **Actions → Deploy production → Run workflow**.
+Do not commit `.env` or `.env.local`. The app checkout and the self-hosted runner must already be on the VPS before the first Actions run.
