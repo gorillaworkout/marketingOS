@@ -1564,7 +1564,7 @@ export default function AIResearchPage() {
                           <AiResearchExportActions
                             title={[...messages].slice(0, i).reverse().find(item => item.role === 'user')?.content || 'Dupoin AI research'}
                             answer={msg.content}
-                            sources={msg.sources?.length ? msg.sources : (i === messages.length - 1 ? inspectorSources : [])}
+                            sources={(i === messages.length - 1 && inspectorSources.length ? inspectorSources : msg.sources) ?? []}
                             mode={msg.researchMode}
                           />
                           <AiResearchAnswerTools

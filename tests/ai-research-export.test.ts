@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import JSZip from 'jszip';
+import { buildResearchDocx } from '../src/lib/ai-research-docx';
 import {
   buildResearchMarkdownExport,
   buildResearchPdf,
@@ -57,17 +59,86 @@ test('pdf export is a multi-page Dupoin document with the answer and sources', (
   assert.match(text, /https:\/\/www\.bi\.go\.id\/emas/);
   assert.match(text, /Dupoin AI Research/);
   assert.match(text, /Check the facts against the sources/);
+  assert.match(text, /Page 1 of /);
+  assert.doesNotMatch(text, /Halaman/);
   assert.doesNotMatch(text, /official brand/i);
 });
 
-test('AI Research answer actions expose markdown copy and both downloads', () => {
+test('docx export is a Word file with the question, answer, and separated sources', async () => {
+  const exportedAt = new Date('2026-09-30T00:00:00.000Z');
+  const bytes = await buildResearchDocx({
+    title: 'Who is Sella Susriana at Dupoin?',
+    answer: [
+      'Official role first.',
+      '',
+      '## Other public traces',
+      '',
+      'A different profile may exist. [Bappebti](https://bappebti.go.id/wakil)',
+      '',
+      '| Trace | Note |',
+      '| --- | --- |',
+      '| Roster | Official |',
+    ].join('\n'),
+    mode: 'deep',
+    exportedAt,
+    sources: [
+      {
+        title: 'Bappebti roster',
+        url: 'https://bappebti.go.id/wakil',
+        official: true,
+        traceKind: 'person_fact',
+        originChip: 'official',
+        snippet: 'Nama: Sella Susriana',
+      },
+      {
+        title: 'Other profile',
+        url: 'https://example.com/sella',
+        official: false,
+        traceKind: 'other_public_trace',
+        originChip: 'international',
+        snippet: 'Freelancer listing',
+      },
+    ],
+  });
+  const zip = await JSZip.loadAsync(bytes);
+  const xml = await zip.file('word/document.xml')?.async('string');
+  assert.ok(xml);
+  assert.match(xml, /Who is Sella Susriana at Dupoin\?/);
+  assert.match(xml, /Mode/);
+  assert.match(xml, /Deep/);
+  assert.match(xml, /2026-09-30/);
+  assert.match(xml, /Official role first/);
+  assert.match(xml, /Other public traces/);
+  assert.match(xml, /Official Dupoin \/ Bappebti/);
+  assert.match(xml, /Other sources/);
+  assert.match(xml, /Bappebti roster/);
+  assert.match(xml, /Official Dupoin\/Bappebti roster/);
+  assert.match(xml, /Nama: Sella Susriana/);
+  assert.match(xml, /Freelancer listing/);
+  assert.match(xml, /Other public trace/);
+  assert.match(xml, /Check the facts against the sources/);
+  const rels = await zip.file('word/_rels/document.xml.rels')?.async('string') || '';
+  assert.match(rels, /https:\/\/bappebti\.go\.id\/wakil/);
+  assert.match(rels, /https:\/\/example\.com\/sella/);
+  assert.equal(
+    researchExportFilename('Who is Sella?', 'docx', exportedAt),
+    'dupoin-ai-research-Who-is-Sella-2026-09-30.docx',
+  );
+});
+
+test('AI Research answer actions expose markdown copy and PDF and Word downloads', () => {
   const page = read('src/app/dashboard/ai-research/page.tsx');
   const actions = read('src/components/AiResearchExportActions.tsx');
   assert.match(page, /AiResearchExportActions/);
+  assert.match(page, /i === messages\.length - 1 && inspectorSources\.length \? inspectorSources : msg\.sources/);
   assert.match(actions, /Copy Markdown/);
   assert.match(actions, /Download \.md/);
   assert.match(actions, /Download PDF/);
+  assert.match(actions, /Download Word/);
   assert.match(actions, /buildResearchMarkdownExport/);
   assert.match(actions, /buildResearchPdf/);
+  assert.match(actions, /buildResearchDocxBlob/);
   assert.match(actions, /data-testid="ai-research-export"/);
+  assert.match(actions, /data-testid="ai-research-download-pdf"/);
+  assert.match(actions, /data-testid="ai-research-download-word"/);
 });
