@@ -3,6 +3,10 @@ import { AI_RESEARCH_ASSISTANT_NAME } from './ai-research';
 export interface ResearchExportSource {
   title: string;
   url: string;
+  official?: boolean;
+  traceKind?: 'person_fact' | 'other_public_trace' | null;
+  originChip?: 'official' | 'indonesia' | 'international' | 'internal';
+  snippet?: string;
 }
 
 export interface ResearchExportInput {
@@ -12,6 +16,22 @@ export interface ResearchExportInput {
   mode?: 'fast' | 'deep';
   exportedAt?: Date;
 }
+
+export const RESEARCH_EXPORT_DISCLAIMER = 'Exported from Dupoin AI Research. Check the facts against the sources.';
+export const RESEARCH_EXPORT_OFFICIAL_HEADING = 'Official Dupoin / Bappebti';
+export const RESEARCH_EXPORT_OTHER_HEADING = 'Other sources';
+
+const TRACE_EXPORT_NOTE: Record<NonNullable<ResearchExportSource['traceKind']>, string> = {
+  person_fact: 'Official Dupoin/Bappebti roster',
+  other_public_trace: 'Other public trace — not necessarily the same person',
+};
+
+const ORIGIN_EXPORT_NOTE: Record<NonNullable<ResearchExportSource['originChip']>, string> = {
+  official: 'Official',
+  indonesia: 'Indonesia',
+  international: 'International',
+  internal: 'FAQ & Guides',
+};
 
 const PDF_PAGE_WIDTH = 595;
 const PDF_PAGE_HEIGHT = 842;
@@ -25,16 +45,68 @@ export function researchExportSources(value: unknown): ResearchExportSource[] {
   const seen = new Set<string>();
   for (const item of value) {
     if (!item || typeof item !== 'object') continue;
-    const record = item as { title?: unknown; url?: unknown };
+    const record = item as {
+      title?: unknown;
+      url?: unknown;
+      official?: unknown;
+      traceKind?: unknown;
+      originChip?: unknown;
+      snippet?: unknown;
+    };
     const url = typeof record.url === 'string' ? record.url.trim() : '';
     if (!/^https?:\/\//i.test(url) || url.length > 2_048) continue;
     const key = url.replace(/\/$/, '');
     if (seen.has(key)) continue;
     seen.add(key);
     const title = typeof record.title === 'string' ? record.title.replace(/\s+/g, ' ').trim().slice(0, 200) : '';
-    sources.push({ title: title || url, url });
+    const source: ResearchExportSource = { title: title || url, url };
+    if (typeof record.official === 'boolean') source.official = record.official;
+    if (record.traceKind === 'person_fact' || record.traceKind === 'other_public_trace') source.traceKind = record.traceKind;
+    if (
+      record.originChip === 'official'
+      || record.originChip === 'indonesia'
+      || record.originChip === 'international'
+      || record.originChip === 'internal'
+    ) {
+      source.originChip = record.originChip;
+    }
+    const snippet = typeof record.snippet === 'string' ? record.snippet.replace(/\s+/g, ' ').trim().slice(0, 500) : '';
+    if (snippet) source.snippet = snippet;
+    sources.push(source);
   }
   return sources;
+}
+
+export function researchExportTitle(title: string): string {
+  return title.replace(/\s+/g, ' ').trim() || 'Dupoin AI research';
+}
+
+export function researchExportModeLabel(mode: ResearchExportInput['mode']): string {
+  return mode === 'deep' ? 'Deep' : 'Fast';
+}
+
+export function researchSourceExportNote(source: ResearchExportSource): string {
+  if (source.traceKind) return TRACE_EXPORT_NOTE[source.traceKind];
+  if (source.originChip) return ORIGIN_EXPORT_NOTE[source.originChip];
+  return '';
+}
+
+export function isOfficialExportSource(source: ResearchExportSource): boolean {
+  return source.official === true || source.originChip === 'official' || source.traceKind === 'person_fact';
+}
+
+export type ResearchExportSourceGroups =
+  | { labeled: false; sources: ResearchExportSource[] }
+  | { labeled: true; official: ResearchExportSource[]; other: ResearchExportSource[] };
+
+export function partitionResearchExportSources(sources: ResearchExportSource[]): ResearchExportSourceGroups {
+  const classified = sources.some(source => typeof source.official === 'boolean' || Boolean(source.originChip) || Boolean(source.traceKind));
+  if (!classified) return { labeled: false, sources };
+  return {
+    labeled: true,
+    official: sources.filter(isOfficialExportSource),
+    other: sources.filter(source => !isOfficialExportSource(source)),
+  };
 }
 
 function markdownLinkLabel(title: string, url: string): string {
@@ -42,14 +114,39 @@ function markdownLinkLabel(title: string, url: string): string {
   return label;
 }
 
+function markdownSourceItem(source: ResearchExportSource, index: number): string {
+  const note = researchSourceExportNote(source);
+  const line = `${index + 1}. [${markdownLinkLabel(source.title, source.url)}](${source.url})${note ? ` — ${note}` : ''}`;
+  return source.snippet ? `${line}\n   ${source.snippet}` : line;
+}
+
+function markdownSourceSection(sources: ResearchExportSource[]): string {
+  const groups = partitionResearchExportSources(sources);
+  if (!groups.labeled) {
+    return groups.sources.length
+      ? groups.sources.map((source, index) => markdownSourceItem(source, index)).join('\n')
+      : '_No sources were saved on this message._';
+  }
+  const section = (items: ResearchExportSource[]) => (
+    items.length
+      ? items.map((source, index) => markdownSourceItem(source, index)).join('\n')
+      : '_None in this section._'
+  );
+  return [
+    `### ${RESEARCH_EXPORT_OFFICIAL_HEADING}`,
+    '',
+    section(groups.official),
+    '',
+    `### ${RESEARCH_EXPORT_OTHER_HEADING}`,
+    '',
+    section(groups.other),
+  ].join('\n');
+}
+
 export function buildResearchMarkdownExport(input: ResearchExportInput): string {
-  const title = (input.title || 'Dupoin AI research').replace(/\s+/g, ' ').trim() || 'Dupoin AI research';
+  const title = researchExportTitle(input.title || 'Dupoin AI research');
   const when = (input.exportedAt ?? new Date()).toISOString().slice(0, 10);
-  const modeLabel = input.mode === 'deep' ? 'Deep' : 'Fast';
-  const sources = researchExportSources(input.sources);
-  const sourceLines = sources.length
-    ? sources.map((source, index) => `${index + 1}. [${markdownLinkLabel(source.title, source.url)}](${source.url})`).join('\n')
-    : '_No sources were saved on this message._';
+  const modeLabel = researchExportModeLabel(input.mode);
   const answer = input.answer.trim() || '_Empty answer._';
   return [
     `# ${title}`,
@@ -64,12 +161,12 @@ export function buildResearchMarkdownExport(input: ResearchExportInput): string 
     '',
     '## Sources',
     '',
-    sourceLines,
+    markdownSourceSection(researchExportSources(input.sources)),
     '',
   ].join('\n');
 }
 
-export function researchExportFilename(title: string, extension: 'md' | 'pdf', date = new Date()): string {
+export function researchExportFilename(title: string, extension: 'md' | 'pdf' | 'docx', date = new Date()): string {
   const slug = (title || 'research')
     .normalize('NFKD')
     .replace(/[\u0300-\u036f]/g, '')
@@ -172,9 +269,9 @@ function wrapText(text: string, fontSize: number, bold: boolean): string[] {
 }
 
 function layoutExportLines(input: ResearchExportInput): PdfLine[] {
-  const title = (input.title || 'Dupoin AI research').replace(/\s+/g, ' ').trim() || 'Dupoin AI research';
+  const title = researchExportTitle(input.title || 'Dupoin AI research');
   const when = (input.exportedAt ?? new Date()).toISOString().slice(0, 10);
-  const modeLabel = input.mode === 'deep' ? 'Deep' : 'Fast';
+  const modeLabel = researchExportModeLabel(input.mode);
   const lines: PdfLine[] = [];
   const push = (text: string, font: 'F1' | 'F2', size: number, gapBefore: number) => {
     for (const line of wrapText(text, size, font === 'F2')) {
@@ -182,21 +279,33 @@ function layoutExportLines(input: ResearchExportInput): PdfLine[] {
       gapBefore = 2;
     }
   };
+  const pushSources = (sources: ResearchExportSource[], emptyLabel: string) => {
+    if (!sources.length) {
+      push(emptyLabel, 'F1', 11, 8);
+      return;
+    }
+    sources.forEach((source, index) => {
+      const note = researchSourceExportNote(source);
+      push(`${index + 1}. ${source.title}${note ? ` — ${note}` : ''}`, 'F1', 11, 8);
+      push(source.url, 'F1', 9, 2);
+      if (source.snippet) push(source.snippet, 'F1', 9, 2);
+    });
+  };
   push(title, 'F2', 16, 0);
   push(`${AI_RESEARCH_ASSISTANT_NAME} · Mode ${modeLabel} · ${when}`, 'F1', 9, 8);
   push('Answer', 'F2', 12, 16);
   push(researchAnswerToPlainText(input.answer.trim() || 'Empty answer.'), 'F1', 11, 8);
   push('Sources', 'F2', 12, 16);
-  const sources = researchExportSources(input.sources);
-  if (!sources.length) {
-    push('No sources were saved on this message.', 'F1', 11, 8);
+  const groups = partitionResearchExportSources(researchExportSources(input.sources));
+  if (!groups.labeled) {
+    pushSources(groups.sources, 'No sources were saved on this message.');
   } else {
-    sources.forEach((source, index) => {
-      push(`${index + 1}. ${source.title}`, 'F1', 11, 8);
-      push(source.url, 'F1', 9, 2);
-    });
+    push(RESEARCH_EXPORT_OFFICIAL_HEADING, 'F2', 11, 10);
+    pushSources(groups.official, 'None in this section.');
+    push(RESEARCH_EXPORT_OTHER_HEADING, 'F2', 11, 12);
+    pushSources(groups.other, 'None in this section.');
   }
-  push('Exported from Dupoin AI Research. Check the facts against the sources.', 'F1', 9, 18);
+  push(RESEARCH_EXPORT_DISCLAIMER, 'F1', 9, 18);
   return lines;
 }
 
@@ -239,7 +348,7 @@ function pageStream(lines: PdfLine[], pageNumber: number, pageCount: number): st
   commands.push('BT');
   commands.push('/F1 8 Tf');
   commands.push(`1 0 0 1 ${PDF_MARGIN_X} 34 Tm`);
-  commands.push(`${pdfLiteral(`Halaman ${pageNumber} dari ${pageCount}`)} Tj`);
+  commands.push(`${pdfLiteral(`Page ${pageNumber} of ${pageCount}`)} Tj`);
   commands.push('ET');
   return commands.join('\n');
 }

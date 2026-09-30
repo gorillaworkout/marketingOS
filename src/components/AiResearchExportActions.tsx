@@ -20,6 +20,7 @@ export function AiResearchExportActions({
   mode?: 'fast' | 'deep';
 }) {
   const [copied, setCopied] = useState(false);
+  const [busy, setBusy] = useState<'md' | 'pdf' | 'docx' | null>(null);
   const [exportError, setExportError] = useState('');
 
   const markdown = () => buildResearchMarkdownExport({ title, answer, sources, mode });
@@ -44,23 +45,36 @@ export function AiResearchExportActions({
     window.setTimeout(() => setCopied(false), 1600);
   };
 
-  const download = (extension: 'md' | 'pdf') => {
+  const triggerDownload = (blob: Blob, filename: string) => {
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  };
+
+  const download = async (extension: 'md' | 'pdf' | 'docx') => {
+    if (busy) return;
+    setBusy(extension);
+    setExportError('');
     try {
       const filename = researchExportFilename(title, extension);
-      const blob = extension === 'md'
-        ? new Blob([markdown()], { type: 'text/markdown;charset=utf-8' })
-        : new Blob([buildResearchPdf({ title, answer, sources, mode }).slice()], { type: 'application/pdf' });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = filename;
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      URL.revokeObjectURL(url);
-      setExportError('');
+      if (extension === 'md') {
+        triggerDownload(new Blob([markdown()], { type: 'text/markdown;charset=utf-8' }), filename);
+      } else if (extension === 'pdf') {
+        const bytes = buildResearchPdf({ title, answer, sources, mode });
+        triggerDownload(new Blob([bytes.slice()], { type: 'application/pdf' }), filename);
+      } else {
+        const { buildResearchDocxBlob } = await import('@/lib/ai-research-docx');
+        triggerDownload(await buildResearchDocxBlob({ title, answer, sources, mode }), filename);
+      }
     } catch (error) {
       setExportError(error instanceof Error ? error.message : 'Could not export the answer');
+    } finally {
+      setBusy(null);
     }
   };
 
@@ -76,17 +90,30 @@ export function AiResearchExportActions({
         </button>
         <button
           type="button"
-          onClick={() => download('md')}
-          className="rounded-full border border-[var(--mos-border)] bg-[var(--mos-bg)] px-2.5 py-1 text-[10px] font-medium text-[var(--mos-text)] hover:bg-[var(--mos-hover)]"
+          data-testid="ai-research-download-md"
+          onClick={() => { void download('md'); }}
+          disabled={busy !== null}
+          className="rounded-full border border-[var(--mos-border)] bg-[var(--mos-bg)] px-2.5 py-1 text-[10px] font-medium text-[var(--mos-text)] hover:bg-[var(--mos-hover)] disabled:opacity-40"
         >
-          Download .md
+          {busy === 'md' ? 'Preparing…' : 'Download .md'}
         </button>
         <button
           type="button"
-          onClick={() => download('pdf')}
-          className="rounded-full border border-[var(--mos-border)] bg-[var(--mos-bg)] px-2.5 py-1 text-[10px] font-medium text-[var(--mos-text)] hover:bg-[var(--mos-hover)]"
+          data-testid="ai-research-download-pdf"
+          onClick={() => { void download('pdf'); }}
+          disabled={busy !== null}
+          className="rounded-full border border-[var(--mos-border)] bg-[var(--mos-bg)] px-2.5 py-1 text-[10px] font-medium text-[var(--mos-text)] hover:bg-[var(--mos-hover)] disabled:opacity-40"
         >
-          Download PDF
+          {busy === 'pdf' ? 'Preparing…' : 'Download PDF'}
+        </button>
+        <button
+          type="button"
+          data-testid="ai-research-download-word"
+          onClick={() => { void download('docx'); }}
+          disabled={busy !== null}
+          className="rounded-full border border-[var(--mos-border)] bg-[var(--mos-bg)] px-2.5 py-1 text-[10px] font-medium text-[var(--mos-text)] hover:bg-[var(--mos-hover)] disabled:opacity-40"
+        >
+          {busy === 'docx' ? 'Preparing…' : 'Download Word'}
         </button>
       </div>
       {exportError && <p className="mt-1 px-1 text-[10px] text-red-300">{exportError}</p>}
