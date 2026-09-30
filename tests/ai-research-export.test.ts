@@ -25,11 +25,17 @@ test('markdown export includes the query, answer, and source URLs', () => {
       { title: 'blocked', url: 'javascript:alert(1)' },
     ],
   });
-  assert.match(markdown, /^# Harga emas Indonesia/);
-  assert.match(markdown, /Mode: Deep/);
-  assert.match(markdown, /2026-09-23/);
+  assert.match(markdown, /^# Dupoin AI Research/);
+  assert.match(markdown, /\*\*Research question\*\*/);
+  assert.match(markdown, /Harga emas Indonesia/);
+  assert.equal(markdown.split('Harga emas Indonesia').length - 1, 1);
+  assert.match(markdown, /Deep research · 23 September 2026/);
+  assert.doesNotMatch(markdown, /Assistant:/);
+  assert.doesNotMatch(markdown, /Mode: Deep/);
   assert.match(markdown, /## Answer/);
-  assert.match(markdown, /Emas menguat/);
+  const answerPart = markdown.split('## Answer')[1]?.split('## Sources')[0] || '';
+  assert.match(answerPart, /Emas menguat/);
+  assert.doesNotMatch(answerPart, /Harga emas Indonesia/);
   assert.match(markdown, /## Sources/);
   assert.match(markdown, /\[Bappebti emas\]\(https:\/\/bappebti\.go\.id\/emas\)/);
   assert.equal(markdown.match(/bappebti\.go\.id\/emas/g)?.length, 2);
@@ -53,13 +59,18 @@ test('pdf export is a multi-page Dupoin document with the answer and sources', (
   assert.match(text, /^%PDF-1\.4/);
   assert.match(text, /%%EOF$/);
   assert.ok((text.match(/\/Type \/Page\b/g) || []).length >= 2);
+  assert.match(text, /Research question/);
   assert.match(text, /Harga emas caf/);
   assert.match(text, /\\351/);
+  assert.match(text, /Fast research/);
+  assert.match(text, /23 September 2026/);
   assert.match(text, /Kesenjangan dan keterbatasan/);
   assert.match(text, /https:\/\/www\.bi\.go\.id\/emas/);
   assert.match(text, /Dupoin AI Research/);
   assert.match(text, /Check the facts against the sources/);
   assert.match(text, /Page 1 of /);
+  assert.doesNotMatch(text, /Assistant:/);
+  assert.doesNotMatch(text, /Copy Markdown|Download Word|Open PDF|Research PDF/);
   assert.doesNotMatch(text, /Halaman/);
   assert.doesNotMatch(text, /official brand/i);
 });
@@ -103,10 +114,13 @@ test('docx export is a Word file with the question, answer, and separated source
   const zip = await JSZip.loadAsync(bytes);
   const xml = await zip.file('word/document.xml')?.async('string');
   assert.ok(xml);
+  assert.match(xml, /Research question/);
   assert.match(xml, /Who is Sella Susriana at Dupoin\?/);
-  assert.match(xml, /Mode/);
-  assert.match(xml, /Deep/);
-  assert.match(xml, /2026-09-30/);
+  assert.equal(xml.split('Who is Sella Susriana at Dupoin?').length - 1, 1);
+  assert.match(xml, /Deep research/);
+  assert.match(xml, /30 September 2026/);
+  assert.doesNotMatch(xml, /Assistant:/);
+  assert.doesNotMatch(xml, /Copy Markdown|Download Word|Open PDF|Research PDF|Follow-up questions/);
   assert.match(xml, /Official role first/);
   assert.match(xml, /Other public traces/);
   assert.match(xml, /Official Dupoin \/ Bappebti/);
@@ -120,10 +134,79 @@ test('docx export is a Word file with the question, answer, and separated source
   const rels = await zip.file('word/_rels/document.xml.rels')?.async('string') || '';
   assert.match(rels, /https:\/\/bappebti\.go\.id\/wakil/);
   assert.match(rels, /https:\/\/example\.com\/sella/);
+  const header = await zip.file('word/header1.xml')?.async('string') || '';
+  assert.match(header, /Dupoin AI Research/);
+  const footer = await zip.file('word/footer1.xml')?.async('string') || '';
+  assert.match(footer, /Page/);
   assert.equal(
     researchExportFilename('Who is Sella?', 'docx', exportedAt),
     'dupoin-ai-research-Who-is-Sella-2026-09-30.docx',
   );
+});
+
+test('export brief uses the question once as the subject and drops chat chrome', async () => {
+  const question = 'Who is Sella Susriana at Dupoin?';
+  const exportedAt = new Date('2026-09-30T00:00:00.000Z');
+  const title = [
+    'Compare the two items below in a balanced way.',
+    'A: Antam gold',
+    'B: Pegadaian gold',
+    'Focus: retail prices',
+    'Use only evidence from the sources that were found. Do not invent prices or facts.',
+  ].join('\n');
+  const compare = buildResearchMarkdownExport({
+    title,
+    answer: 'Antam lists a retail price.',
+    mode: 'fast',
+    exportedAt,
+    sources: [],
+  });
+  assert.match(compare, /Antam gold vs Pegadaian gold — retail prices/);
+  assert.doesNotMatch(compare, /Compare the two items below/);
+  assert.doesNotMatch(compare, /Do not invent prices/);
+  assert.match(compare, /Fast research · 30 September 2026/);
+
+  const echoed = {
+    title: question,
+    answer: [
+      `# ${question}`,
+      '',
+      'Copy Markdown',
+      '',
+      `${question} She is listed on the Bappebti roster.`,
+      '',
+      'Download Word',
+      '',
+      '## Other public traces',
+      '',
+      'A different profile may exist.',
+    ].join('\n'),
+    mode: 'deep' as const,
+    exportedAt,
+    sources: [{ title: 'Bappebti roster', url: 'https://bappebti.go.id/wakil', official: true }],
+  };
+  const markdown = buildResearchMarkdownExport(echoed);
+  assert.equal(markdown.split(question).length - 1, 1);
+  const echoedAnswer = markdown.split('## Answer')[1]?.split('## Sources')[0] || '';
+  assert.match(echoedAnswer, /She is listed on the Bappebti roster/);
+  assert.match(echoedAnswer, /### Other public traces/);
+  assert.doesNotMatch(echoedAnswer, /^## /m);
+  assert.doesNotMatch(echoedAnswer, /Who is Sella/);
+  assert.doesNotMatch(markdown, /Copy Markdown|Download Word|Open PDF|Research Word/);
+
+  const pdf = Buffer.from(buildResearchPdf(echoed)).toString('latin1');
+  assert.equal(pdf.split(question).length - 1, 1);
+  assert.match(pdf, /She is listed on the Bappebti roster/);
+  assert.match(pdf, /Official Dupoin \/ Bappebti/);
+  assert.doesNotMatch(pdf, /Copy Markdown|Download Word/);
+
+  const bytes = await buildResearchDocx(echoed);
+  const zip = await JSZip.loadAsync(bytes);
+  const xml = await zip.file('word/document.xml')?.async('string') || '';
+  assert.equal(xml.split(question).length - 1, 1);
+  assert.match(xml, /She is listed on the Bappebti roster/);
+  assert.match(xml, /Other public traces/);
+  assert.doesNotMatch(xml, /Copy Markdown|Download Word|Open PDF/);
 });
 
 test('AI Research answer actions expose markdown copy and PDF and Word downloads', () => {
