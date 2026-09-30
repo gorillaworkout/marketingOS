@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, useCallback, useMemo, useSyncExternalStore } from 'react';
 import { AiResearchAnswerTools } from '@/components/AiResearchAnswerTools';
+import { AiResearchChatFiles } from '@/components/AiResearchChatFiles';
 import { AiResearchExportActions } from '@/components/AiResearchExportActions';
 import { AiResearchPinFact } from '@/components/AiResearchPinFact';
 import { AiResearchCameraButton } from '@/components/AiResearchCameraButton';
@@ -78,6 +79,20 @@ interface Message {
   files?: ChatFile[];
   researchMode?: 'deep';
   sources?: Array<{ title: string; url: string }>;
+}
+
+function answerDeliverable(
+  messages: Message[],
+  index: number,
+  inspectorSources: InspectorResearchSource[],
+) {
+  const message = messages[index];
+  return {
+    title: [...messages].slice(0, index).reverse().find(item => item.role === 'user')?.content || 'Dupoin AI research',
+    answer: message.content,
+    sources: (index === messages.length - 1 && inspectorSources.length ? inspectorSources : message.sources) ?? [],
+    mode: message.researchMode,
+  };
 }
 
 interface Conversation {
@@ -1561,12 +1576,8 @@ export default function AIResearchPage() {
                       </div>
                       {msg.role === 'assistant' && msg.content.trim() && (
                         <>
-                          <AiResearchExportActions
-                            title={[...messages].slice(0, i).reverse().find(item => item.role === 'user')?.content || 'Dupoin AI research'}
-                            answer={msg.content}
-                            sources={(i === messages.length - 1 && inspectorSources.length ? inspectorSources : msg.sources) ?? []}
-                            mode={msg.researchMode}
-                          />
+                          <AiResearchChatFiles {...answerDeliverable(messages, i, inspectorSources)} />
+                          <AiResearchExportActions {...answerDeliverable(messages, i, inspectorSources)} />
                           <AiResearchAnswerTools
                             query={[...messages].slice(0, i).reverse().find(item => item.role === 'user')?.content || ''}
                             answer={msg.content}

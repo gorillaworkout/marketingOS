@@ -1,10 +1,9 @@
 'use client';
 
 import { useState } from 'react';
+import { deliverResearchFile } from '@/lib/ai-research-client-download';
 import {
   buildResearchMarkdownExport,
-  buildResearchPdf,
-  researchExportFilename,
   type ResearchExportSource,
 } from '@/lib/ai-research-export';
 
@@ -45,32 +44,12 @@ export function AiResearchExportActions({
     window.setTimeout(() => setCopied(false), 1600);
   };
 
-  const triggerDownload = (blob: Blob, filename: string) => {
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = filename;
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    URL.revokeObjectURL(url);
-  };
-
   const download = async (extension: 'md' | 'pdf' | 'docx') => {
     if (busy) return;
     setBusy(extension);
     setExportError('');
     try {
-      const filename = researchExportFilename(title, extension);
-      if (extension === 'md') {
-        triggerDownload(new Blob([markdown()], { type: 'text/markdown;charset=utf-8' }), filename);
-      } else if (extension === 'pdf') {
-        const bytes = buildResearchPdf({ title, answer, sources, mode });
-        triggerDownload(new Blob([bytes.slice()], { type: 'application/pdf' }), filename);
-      } else {
-        const { buildResearchDocxBlob } = await import('@/lib/ai-research-docx');
-        triggerDownload(await buildResearchDocxBlob({ title, answer, sources, mode }), filename);
-      }
+      await deliverResearchFile({ title, answer, sources, mode }, extension);
     } catch (error) {
       setExportError(error instanceof Error ? error.message : 'Could not export the answer');
     } finally {
