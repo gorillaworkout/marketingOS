@@ -1,4 +1,4 @@
-import { AI_RESEARCH_ASSISTANT_NAME } from './ai-research';
+import { parseMarkdown, type MarkdownInline } from './ai-research-markdown';
 
 export interface ResearchExportSource {
   title: string;
@@ -17,9 +17,27 @@ export interface ResearchExportInput {
   exportedAt?: Date;
 }
 
+export const RESEARCH_BRIEF_BRAND = 'Dupoin AI Research';
+export const RESEARCH_QUESTION_LABEL = 'Research question';
 export const RESEARCH_EXPORT_DISCLAIMER = 'Exported from Dupoin AI Research. Check the facts against the sources.';
 export const RESEARCH_EXPORT_OFFICIAL_HEADING = 'Official Dupoin / Bappebti';
 export const RESEARCH_EXPORT_OTHER_HEADING = 'Other sources';
+
+const EXPORT_CHROME_LINES = new Set([
+  'copy markdown',
+  'copied',
+  'download .md',
+  'download pdf',
+  'download word',
+  'preparing…',
+  'preparing...',
+  'opening…',
+  'opening...',
+  'research pdf',
+  'research word',
+  'open pdf',
+  'follow-up questions',
+]);
 
 const TRACE_EXPORT_NOTE: Record<NonNullable<ResearchExportSource['traceKind']>, string> = {
   person_fact: 'Official Dupoin/Bappebti roster',
@@ -77,12 +95,126 @@ export function researchExportSources(value: unknown): ResearchExportSource[] {
   return sources;
 }
 
+function collapseExportText(value: string): string {
+  return value
+    .replace(/\r\n/g, '\n')
+    .replace(/```[\w-]*\n?([\s\S]*?)```/g, '$1')
+    .replace(/^#{1,6}\s+/gm, '')
+    .replace(/\*\*([^*]+)\*\*/g, '$1')
+    .replace(/__([^_]+)__/g, '$1')
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '$1')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/** Subject line for the brief. Chat prompts and markdown marks stay out of the title. */
+export function researchExportQuestion(title: string): string {
+  const collapsed = collapseExportText(title || '').replace(/^(?:research question|user query|question)\s*:\s*/i, '').trim();
+  const compare = collapsed.match(/^Compare the two items below in a balanced way\. A: (.+?) B: (.+?)(?: Focus: (.+?))?(?: Use only evidence from the sources that were found\. Do not invent prices or facts\.)?$/);
+  const subject = compare
+    ? `${compare[1].trim()} vs ${compare[2].trim()}${compare[3]?.trim() ? ` — ${compare[3].trim()}` : ''}`
+    : collapsed;
+  return subject.slice(0, 2_000) || 'Dupoin AI research';
+}
+
 export function researchExportTitle(title: string): string {
-  return title.replace(/\s+/g, ' ').trim() || 'Dupoin AI research';
+  return researchExportQuestion(title);
 }
 
 export function researchExportModeLabel(mode: ResearchExportInput['mode']): string {
   return mode === 'deep' ? 'Deep' : 'Fast';
+}
+
+export function researchExportModePhrase(mode: ResearchExportInput['mode']): string {
+  return `${researchExportModeLabel(mode)} research`;
+}
+
+export function researchBriefMetaLine(brief: Pick<ResearchBrief, 'modePhrase' | 'dateLabel'>): string {
+  return `${brief.modePhrase} · ${brief.dateLabel}`;
+}
+
+export function researchExportDateLabel(date: Date): string {
+  return new Intl.DateTimeFormat('en-GB', {
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+    timeZone: 'UTC',
+  }).format(date);
+}
+
+function normalizeEcho(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[*_`#>]/g, '')
+    .replace(/[“”"'‘’]/g, '')
+    .replace(/[?!.,:;]+/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function stripChromeLines(text: string): string {
+  const kept = text.split('\n').filter(line => !EXPORT_CHROME_LINES.has(line.trim().toLowerCase()));
+  return kept.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+}
+
+function stripOneQuestionEcho(body: string, questionNorm: string): string | null {
+  if (questionNorm.length < 12) return null;
+  const blocks = body.split(/\n\s*\n/);
+  const first = blocks[0]?.trim() ?? '';
+  if (!first) return null;
+  const heading = first.match(/^#{1,6}\s+([\s\S]+)$/);
+  const labeled = first.match(/^(?:\*\*)?(?:research question|user query|question|you|user)(?:\*\*)?\s*:\s*([\s\S]+)$/i);
+  const boldOnly = first.match(/^\*\*([\s\S]+)\*\*$/);
+  const roleOnly = /^(?:you|user|assistant)\s*:?\s*$/i.test(first) || /^assistant\s*:\s*dupoin ai\s*$/i.test(first);
+  if (roleOnly) return blocks.slice(1).join('\n\n').trim();
+  const candidate = (heading?.[1] || labeled?.[1] || boldOnly?.[1] || first).trim();
+  if (normalizeEcho(candidate) === questionNorm) return blocks.slice(1).join('\n\n').trim();
+  if (!heading && !labeled && !boldOnly) {
+    const sentence = candidate.match(/^([\s\S]+?[.?!])(?:\s+([\s\S]+))?$/);
+    if (sentence && normalizeEcho(sentence[1]) === questionNorm && sentence[2]?.trim()) {
+      return [sentence[2].trim(), ...blocks.slice(1)].filter(Boolean).join('\n\n').trim();
+    }
+  }
+  return null;
+}
+
+/** Answer prose for the brief, without a repeated question or chat-button lines. */
+export function researchExportAnswer(answer: string, question: string): string {
+  let body = stripChromeLines((answer || '').replace(/\r\n/g, '\n').trim());
+  const questionNorm = normalizeEcho(researchExportQuestion(question));
+  for (let pass = 0; pass < 4; pass += 1) {
+    const next = stripOneQuestionEcho(body, questionNorm);
+    if (next == null) break;
+    body = next;
+  }
+  return stripChromeLines(body);
+}
+
+export interface ResearchBrief {
+  brand: string;
+  questionLabel: string;
+  question: string;
+  modePhrase: string;
+  dateLabel: string;
+  answer: string;
+  sources: ResearchExportSource[];
+  disclaimer: string;
+}
+
+export function buildResearchBrief(input: ResearchExportInput): ResearchBrief {
+  const question = researchExportQuestion(input.title || '');
+  const answer = researchExportAnswer(input.answer || '', question);
+  return {
+    brand: RESEARCH_BRIEF_BRAND,
+    questionLabel: RESEARCH_QUESTION_LABEL,
+    question,
+    modePhrase: researchExportModePhrase(input.mode),
+    dateLabel: researchExportDateLabel(input.exportedAt ?? new Date()),
+    answer: answer || 'Empty answer.',
+    sources: researchExportSources(input.sources),
+    disclaimer: RESEARCH_EXPORT_DISCLAIMER,
+  };
 }
 
 export function researchSourceExportNote(source: ResearchExportSource): string {
@@ -125,7 +257,7 @@ function markdownSourceSection(sources: ResearchExportSource[]): string {
   if (!groups.labeled) {
     return groups.sources.length
       ? groups.sources.map((source, index) => markdownSourceItem(source, index)).join('\n')
-      : '_No sources were saved on this message._';
+      : '_No sources were included in this brief._';
   }
   const section = (items: ResearchExportSource[]) => (
     items.length
@@ -143,17 +275,29 @@ function markdownSourceSection(sources: ResearchExportSource[]): string {
   ].join('\n');
 }
 
+function nestAnswerMarkdown(markdown: string): string {
+  let fence = false;
+  return markdown.split('\n').map(line => {
+    if (/^```/.test(line)) {
+      fence = !fence;
+      return line;
+    }
+    if (fence) return line;
+    return line.replace(/^(#{1,6})(?=\s)/, hashes => '#'.repeat(Math.min(hashes.length + 1, 6)));
+  }).join('\n');
+}
+
 export function buildResearchMarkdownExport(input: ResearchExportInput): string {
-  const title = researchExportTitle(input.title || 'Dupoin AI research');
-  const when = (input.exportedAt ?? new Date()).toISOString().slice(0, 10);
-  const modeLabel = researchExportModeLabel(input.mode);
-  const answer = input.answer.trim() || '_Empty answer._';
+  const brief = buildResearchBrief(input);
+  const answer = brief.answer === 'Empty answer.' ? '_Empty answer._' : nestAnswerMarkdown(brief.answer);
   return [
-    `# ${title}`,
+    `# ${brief.brand}`,
     '',
-    `- Assistant: ${AI_RESEARCH_ASSISTANT_NAME}`,
-    `- Mode: ${modeLabel}`,
-    `- Exported: ${when}`,
+    `**${brief.questionLabel}**`,
+    '',
+    brief.question,
+    '',
+    researchBriefMetaLine(brief),
     '',
     '## Answer',
     '',
@@ -161,13 +305,15 @@ export function buildResearchMarkdownExport(input: ResearchExportInput): string 
     '',
     '## Sources',
     '',
-    markdownSourceSection(researchExportSources(input.sources)),
+    markdownSourceSection(brief.sources),
+    '',
+    `_${brief.disclaimer}_`,
     '',
   ].join('\n');
 }
 
 export function researchExportFilename(title: string, extension: 'md' | 'pdf' | 'docx', date = new Date()): string {
-  const slug = (title || 'research')
+  const slug = researchExportQuestion(title || 'research')
     .normalize('NFKD')
     .replace(/[\u0300-\u036f]/g, '')
     .replace(/[^a-zA-Z0-9]+/g, '-')
@@ -232,13 +378,22 @@ function pdfLiteral(text: string): string {
   return out;
 }
 
-type PdfLine = { text: string; font: 'F1' | 'F2'; size: number; gapBefore: number };
+type PdfFont = 'F1' | 'F2' | 'F3';
+type PdfText = { kind: 'text'; text: string; font: PdfFont; size: number; gapBefore: number; color: string; indent: number };
+type PdfRule = { kind: 'rule'; gapBefore: number };
+type PdfItem = PdfText | PdfRule;
 
-function wrapText(text: string, fontSize: number, bold: boolean): string[] {
+const PDF_INK = '0.114 0.161 0.224';
+const PDF_TITLE = '0.063 0.094 0.157';
+const PDF_INDIGO = '0.267 0.298 0.906';
+const PDF_MUTED = '0.278 0.333 0.412';
+const PDF_RULE = '0.820 0.835 0.863';
+
+function wrapText(text: string, fontSize: number, bold: boolean, maxCharsOverride?: number): string[] {
   const maxWidth = PDF_PAGE_WIDTH - PDF_MARGIN_X * 2;
   const factor = bold ? 0.56 : 0.5;
   const charWidth = Math.max(1, fontSize * factor);
-  const maxChars = Math.max(16, Math.floor(maxWidth / charWidth));
+  const maxChars = maxCharsOverride ?? Math.max(16, Math.floor(maxWidth / charWidth));
   const paragraphs = text.split('\n');
   const lines: string[] = [];
   for (const paragraph of paragraphs) {
@@ -268,53 +423,100 @@ function wrapText(text: string, fontSize: number, bold: boolean): string[] {
   return lines;
 }
 
-function layoutExportLines(input: ResearchExportInput): PdfLine[] {
-  const title = researchExportTitle(input.title || 'Dupoin AI research');
-  const when = (input.exportedAt ?? new Date()).toISOString().slice(0, 10);
-  const modeLabel = researchExportModeLabel(input.mode);
-  const lines: PdfLine[] = [];
-  const push = (text: string, font: 'F1' | 'F2', size: number, gapBefore: number) => {
-    for (const line of wrapText(text, size, font === 'F2')) {
-      lines.push({ text: line, font, size, gapBefore });
+function inlineExportText(nodes: MarkdownInline[]): string {
+  return nodes.map(node => {
+    if (node.type === 'text' || node.type === 'code') return node.value.replace(/\n/g, ' ');
+    if (node.type === 'link') {
+      const label = inlineExportText(node.children).replace(/\s+/g, ' ').trim() || node.href;
+      return label === node.href ? node.href : `${label} (${node.href})`;
+    }
+    return inlineExportText(node.children);
+  }).join('');
+}
+
+function layoutExportLines(input: ResearchExportInput): PdfItem[] {
+  const brief = buildResearchBrief(input);
+  const lines: PdfItem[] = [];
+  const push = (text: string, font: PdfFont, size: number, gapBefore: number, color: string, indent = 0) => {
+    const maxWidth = PDF_PAGE_WIDTH - PDF_MARGIN_X * 2 - indent;
+    const factor = font === 'F2' ? 0.56 : 0.5;
+    const maxChars = Math.max(16, Math.floor(maxWidth / Math.max(1, size * factor)));
+    const wrapped = wrapText(text, size, font === 'F2', maxChars);
+    for (const line of wrapped) {
+      lines.push({ kind: 'text', text: line, font, size, gapBefore, color, indent });
       gapBefore = 2;
     }
   };
   const pushSources = (sources: ResearchExportSource[], emptyLabel: string) => {
     if (!sources.length) {
-      push(emptyLabel, 'F1', 11, 8);
+      push(emptyLabel, 'F3', 11, 8, PDF_MUTED);
       return;
     }
     sources.forEach((source, index) => {
       const note = researchSourceExportNote(source);
-      push(`${index + 1}. ${source.title}${note ? ` — ${note}` : ''}`, 'F1', 11, 8);
-      push(source.url, 'F1', 9, 2);
-      if (source.snippet) push(source.snippet, 'F1', 9, 2);
+      push(`${index + 1}. ${source.title}${note ? ` — ${note}` : ''}`, 'F1', 11, 8, PDF_INK);
+      push(source.url, 'F1', 9, 2, PDF_MUTED, 14);
+      if (source.snippet) push(source.snippet, 'F3', 9, 2, PDF_MUTED, 14);
     });
   };
-  push(title, 'F2', 16, 0);
-  push(`${AI_RESEARCH_ASSISTANT_NAME} · Mode ${modeLabel} · ${when}`, 'F1', 9, 8);
-  push('Answer', 'F2', 12, 16);
-  push(researchAnswerToPlainText(input.answer.trim() || 'Empty answer.'), 'F1', 11, 8);
-  push('Sources', 'F2', 12, 16);
-  const groups = partitionResearchExportSources(researchExportSources(input.sources));
+  push(brief.questionLabel, 'F2', 9, 0, PDF_INDIGO);
+  push(brief.question, 'F2', 16, 8, PDF_TITLE);
+  push(researchBriefMetaLine(brief), 'F1', 9, 10, PDF_MUTED);
+  lines.push({ kind: 'rule', gapBefore: 8 });
+  push('Answer', 'F2', 13, 14, PDF_TITLE);
+  const blocks = parseMarkdown(brief.answer);
+  if (!blocks.length) push(brief.answer, 'F1', 11, 8, PDF_INK);
+  for (const block of blocks) {
+    if (block.type === 'heading') {
+      const size = block.level === 1 ? 12 : 11;
+      push(inlineExportText(block.children), 'F2', size, block.level === 1 ? 12 : 10, PDF_TITLE);
+      continue;
+    }
+    if (block.type === 'list') {
+      block.items.forEach((item, index) => {
+        const marker = block.ordered ? `${index + 1}. ` : '• ';
+        push(`${marker}${inlineExportText(item)}`, 'F1', 11, 4, PDF_INK, 12);
+      });
+      continue;
+    }
+    if (block.type === 'codeblock') {
+      const codeLines = block.value.split('\n');
+      codeLines.forEach((line, index) => push(line || ' ', 'F1', 9, index === 0 ? 8 : 1, PDF_MUTED, 8));
+      continue;
+    }
+    if (block.type === 'table') {
+      push(block.headers.map(cell => inlineExportText(cell)).join(' | '), 'F2', 10, 8, PDF_TITLE);
+      for (const row of block.rows) push(row.map(cell => inlineExportText(cell)).join(' | '), 'F1', 10, 3, PDF_INK);
+      continue;
+    }
+    push(inlineExportText(block.children), 'F1', 11, 7, PDF_INK);
+  }
+  push('Sources', 'F2', 13, 16, PDF_TITLE);
+  const groups = partitionResearchExportSources(brief.sources);
   if (!groups.labeled) {
-    pushSources(groups.sources, 'No sources were saved on this message.');
+    pushSources(groups.sources, 'No sources were included in this brief.');
   } else {
-    push(RESEARCH_EXPORT_OFFICIAL_HEADING, 'F2', 11, 10);
+    push(RESEARCH_EXPORT_OFFICIAL_HEADING, 'F2', 11, 10, PDF_INDIGO);
     pushSources(groups.official, 'None in this section.');
-    push(RESEARCH_EXPORT_OTHER_HEADING, 'F2', 11, 12);
+    push(RESEARCH_EXPORT_OTHER_HEADING, 'F2', 11, 12, PDF_INDIGO);
     pushSources(groups.other, 'None in this section.');
   }
-  push(RESEARCH_EXPORT_DISCLAIMER, 'F1', 9, 18);
+  lines.push({ kind: 'rule', gapBefore: 14 });
+  push(brief.disclaimer, 'F3', 9, 8, PDF_MUTED);
   return lines;
 }
 
-function paginate(lines: PdfLine[]): PdfLine[][] {
-  const pages: PdfLine[][] = [];
-  let current: PdfLine[] = [];
+function itemHeight(item: PdfItem): number {
+  if (item.kind === 'rule') return item.gapBefore + 6;
+  return item.gapBefore + item.size + 3;
+}
+
+function paginate(lines: PdfItem[]): PdfItem[][] {
+  const pages: PdfItem[][] = [];
+  let current: PdfItem[] = [];
   let y = PDF_CONTENT_TOP;
   for (const line of lines) {
-    const height = line.gapBefore + line.size + 3;
+    const height = itemHeight(line);
     if (current.length && y - height < PDF_CONTENT_BOTTOM) {
       pages.push(current);
       current = [];
@@ -327,24 +529,37 @@ function paginate(lines: PdfLine[]): PdfLine[][] {
   return pages;
 }
 
-function pageStream(lines: PdfLine[], pageNumber: number, pageCount: number): string {
+function pageStream(lines: PdfItem[], pageNumber: number, pageCount: number): string {
   const commands = [
+    '0.6 w',
+    `${PDF_INDIGO} rg`,
     'BT',
-    '/F1 9 Tf',
+    '/F2 9 Tf',
     `1 0 0 1 ${PDF_MARGIN_X} 804 Tm`,
-    `${pdfLiteral('Dupoin AI Research')} Tj`,
+    `${pdfLiteral(RESEARCH_BRIEF_BRAND)} Tj`,
     'ET',
+    `${PDF_RULE} RG`,
+    `${PDF_MARGIN_X} 792 m ${PDF_PAGE_WIDTH - PDF_MARGIN_X} 792 l S`,
   ];
   let y = PDF_CONTENT_TOP;
-  for (const line of lines) {
-    y -= line.gapBefore + line.size;
+  for (const item of lines) {
+    if (item.kind === 'rule') {
+      y -= item.gapBefore;
+      commands.push(`${PDF_RULE} RG`);
+      commands.push(`${PDF_MARGIN_X} ${y} m ${PDF_PAGE_WIDTH - PDF_MARGIN_X} ${y} l S`);
+      y -= 6;
+      continue;
+    }
+    y -= item.gapBefore + item.size;
+    commands.push(`${item.color} rg`);
     commands.push('BT');
-    commands.push(`/${line.font} ${line.size} Tf`);
-    commands.push(`1 0 0 1 ${PDF_MARGIN_X} ${y} Tm`);
-    commands.push(`${pdfLiteral(line.text)} Tj`);
+    commands.push(`/${item.font} ${item.size} Tf`);
+    commands.push(`1 0 0 1 ${PDF_MARGIN_X + item.indent} ${y} Tm`);
+    commands.push(`${pdfLiteral(item.text)} Tj`);
     commands.push('ET');
     y -= 3;
   }
+  commands.push(`${PDF_MUTED} rg`);
   commands.push('BT');
   commands.push('/F1 8 Tf');
   commands.push(`1 0 0 1 ${PDF_MARGIN_X} 34 Tm`);
@@ -364,7 +579,7 @@ export function buildResearchPdf(input: ResearchExportInput): Uint8Array {
   const streams = pages.map((lines, index) => pageStream(lines, index + 1, pages.length));
   const objects: string[] = [];
   const pageIds: number[] = [];
-  let nextId = 5;
+  let nextId = 6;
   const pageObjects: Array<{ id: number; contentId: number; stream: string }> = [];
   for (const stream of streams) {
     const id = nextId;
@@ -378,9 +593,10 @@ export function buildResearchPdf(input: ResearchExportInput): Uint8Array {
   objects.push(`2 0 obj\n<< /Type /Pages /Count ${pageIds.length} /Kids [${pageIds.map(id => `${id} 0 R`).join(' ')}] >>\nendobj\n`);
   objects.push('3 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>\nendobj\n');
   objects.push('4 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>\nendobj\n');
+  objects.push('5 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Oblique /Encoding /WinAnsiEncoding >>\nendobj\n');
   for (const page of pageObjects) {
     objects.push(
-      `${page.id} 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${PDF_PAGE_WIDTH} ${PDF_PAGE_HEIGHT}] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents ${page.contentId} 0 R >>\nendobj\n`,
+      `${page.id} 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${PDF_PAGE_WIDTH} ${PDF_PAGE_HEIGHT}] /Resources << /Font << /F1 3 0 R /F2 4 0 R /F3 5 0 R >> >> /Contents ${page.contentId} 0 R >>\nendobj\n`,
     );
     objects.push(`${page.contentId} 0 obj\n<< /Length ${page.stream.length} >>\nstream\n${page.stream}\nendstream\nendobj\n`);
   }

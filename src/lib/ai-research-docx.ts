@@ -1,17 +1,20 @@
 import {
   AlignmentType,
+  BorderStyle,
   Document,
   ExternalHyperlink,
   Footer,
   Header,
   HeadingLevel,
   LevelFormat,
+  LineRuleType,
   Packer,
   PageNumber,
   Paragraph,
   ShadingType,
   Table,
   TableCell,
+  TableLayoutType,
   TableRow,
   TextRun,
   WidthType,
@@ -19,16 +22,15 @@ import {
   type INumberingOptions,
   type ParagraphChild,
 } from 'docx';
-import { AI_RESEARCH_ASSISTANT_NAME } from './ai-research';
 import {
-  RESEARCH_EXPORT_DISCLAIMER,
+  RESEARCH_BRIEF_BRAND,
   RESEARCH_EXPORT_OFFICIAL_HEADING,
   RESEARCH_EXPORT_OTHER_HEADING,
+  buildResearchBrief,
   partitionResearchExportSources,
-  researchExportModeLabel,
-  researchExportSources,
-  researchExportTitle,
+  researchBriefMetaLine,
   researchSourceExportNote,
+  type ResearchBrief,
   type ResearchExportInput,
   type ResearchExportSource,
 } from './ai-research-export';
@@ -39,15 +41,23 @@ export const RESEARCH_DOCX_MIME = 'application/vnd.openxmlformats-officedocument
 const BODY = 22;
 const META = 20;
 const SMALL = 18;
+const CONTENT_WIDTH = 10080;
+const INK = '1D2939';
+const TITLE = '101828';
+const INDIGO = '444CE7';
+const MUTED = '667085';
 
-function inlineChildren(nodes: MarkdownInline[], marks: { bold?: boolean; italics?: boolean } = {}): ParagraphChild[] {
+const hairline = { style: BorderStyle.SINGLE, size: 4, color: 'E0E7FF' };
+const noneBorder = { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' };
+
+function inlineChildren(nodes: MarkdownInline[], marks: { bold?: boolean; italics?: boolean } = {}, size = BODY): ParagraphChild[] {
   const children: ParagraphChild[] = [];
   for (const node of nodes) {
     if (node.type === 'text') {
       const parts = node.value.split('\n');
       parts.forEach((part, index) => {
         if (index > 0) children.push(new TextRun({ break: 1 }));
-        if (part) children.push(new TextRun({ text: part, bold: marks.bold, italics: marks.italics, size: BODY }));
+        if (part) children.push(new TextRun({ text: part, bold: marks.bold, italics: marks.italics, size, color: INK }));
       });
       continue;
     }
@@ -66,7 +76,7 @@ function inlineChildren(nodes: MarkdownInline[], marks: { bold?: boolean; italic
     const label = inlinePlain(node.children).trim() || node.href;
     children.push(new ExternalHyperlink({
       link: node.href,
-      children: [new TextRun({ text: label, style: 'Hyperlink', bold: marks.bold, italics: marks.italics, size: BODY })],
+      children: [new TextRun({ text: label, style: 'Hyperlink', bold: marks.bold, italics: marks.italics, size })],
     }));
   }
   return children;
@@ -79,11 +89,11 @@ function inlinePlain(nodes: MarkdownInline[]): string {
   }).join('');
 }
 
-function paragraphFromInlines(nodes: MarkdownInline[], spacingAfter = 140): Paragraph {
+function paragraphFromInlines(nodes: MarkdownInline[], spacingAfter = 160): Paragraph {
   const children = inlineChildren(nodes);
   return new Paragraph({
-    spacing: { after: spacingAfter },
-    children: children.length ? children : [new TextRun({ text: '', size: BODY })],
+    spacing: { after: spacingAfter, line: 276, lineRule: LineRuleType.AUTO },
+    children: children.length ? children : [new TextRun({ text: '', size: BODY, color: INK })],
   });
 }
 
@@ -96,10 +106,11 @@ function answerBlocks(markdown: string, numbering: INumberingOptions['config'][n
   for (const block of blocks) {
     if (block.type === 'heading') {
       const level = block.level === 1 ? HeadingLevel.HEADING_2 : block.level === 2 ? HeadingLevel.HEADING_3 : HeadingLevel.HEADING_4;
+      const headingSize = block.level === 1 ? 24 : 22;
       children.push(new Paragraph({
         heading: level,
-        spacing: { before: 200, after: 80 },
-        children: inlineChildren(block.children),
+        spacing: { before: block.level === 1 ? 240 : 180, after: 80 },
+        children: inlineChildren(block.children, { bold: true }, headingSize),
       }));
       continue;
     }
@@ -175,7 +186,7 @@ function sourceBlocks(sources: ResearchExportSource[], emptyLabel: string): Para
   if (!sources.length) {
     return [new Paragraph({
       spacing: { after: 160 },
-      children: [new TextRun({ text: emptyLabel, italics: true, size: BODY, color: '667085' })],
+      children: [new TextRun({ text: emptyLabel, italics: true, size: BODY, color: MUTED })],
     })];
   }
   return sources.flatMap((source, index) => {
@@ -187,7 +198,7 @@ function sourceBlocks(sources: ResearchExportSource[], emptyLabel: string): Para
         children: [new TextRun({ text: source.title, style: 'Hyperlink', size: BODY })],
       }),
     ];
-    if (note) title.push(new TextRun({ text: ` — ${note}`, italics: true, size: META, color: '667085' }));
+    if (note) title.push(new TextRun({ text: ` — ${note}`, italics: true, size: META, color: MUTED }));
     const blocks = [
       new Paragraph({ spacing: { before: 120, after: 20 }, children: title }),
       new Paragraph({
@@ -198,7 +209,7 @@ function sourceBlocks(sources: ResearchExportSource[], emptyLabel: string): Para
     if (source.snippet) {
       blocks.push(new Paragraph({
         spacing: { after: 80 },
-        children: [new TextRun({ text: source.snippet, italics: true, size: META, color: '475467' })],
+        children: [new TextRun({ text: source.snippet, italics: true, size: META, color: MUTED })],
       }));
     }
     return blocks;
@@ -207,97 +218,150 @@ function sourceBlocks(sources: ResearchExportSource[], emptyLabel: string): Para
 
 function sourceSection(sources: ResearchExportSource[]): FileChild[] {
   const groups = partitionResearchExportSources(sources);
-  if (!groups.labeled) return sourceBlocks(groups.sources, 'No sources were saved on this message.');
+  if (!groups.labeled) return sourceBlocks(groups.sources, 'No sources were included in this brief.');
   return [
     new Paragraph({
       heading: HeadingLevel.HEADING_2,
       spacing: { before: 160, after: 80 },
-      children: [new TextRun(RESEARCH_EXPORT_OFFICIAL_HEADING)],
+      children: [new TextRun({ text: RESEARCH_EXPORT_OFFICIAL_HEADING, bold: true, size: 24, color: '2D3282' })],
     }),
     ...sourceBlocks(groups.official, 'None in this section.'),
     new Paragraph({
       heading: HeadingLevel.HEADING_2,
       spacing: { before: 200, after: 80 },
-      children: [new TextRun(RESEARCH_EXPORT_OTHER_HEADING)],
+      children: [new TextRun({ text: RESEARCH_EXPORT_OTHER_HEADING, bold: true, size: 24, color: '2D3282' })],
     }),
     ...sourceBlocks(groups.other, 'None in this section.'),
   ];
 }
 
+function subjectCard(brief: ResearchBrief): Table {
+  return new Table({
+    width: { size: CONTENT_WIDTH, type: WidthType.DXA },
+    columnWidths: [CONTENT_WIDTH],
+    layout: TableLayoutType.FIXED,
+    borders: {
+      top: noneBorder,
+      bottom: noneBorder,
+      left: noneBorder,
+      right: noneBorder,
+      insideHorizontal: noneBorder,
+      insideVertical: noneBorder,
+    },
+    rows: [
+      new TableRow({
+        cantSplit: true,
+        children: [
+          new TableCell({
+            width: { size: CONTENT_WIDTH, type: WidthType.DXA },
+            shading: { type: ShadingType.CLEAR, fill: 'F5F7FF' },
+            margins: { top: 120, bottom: 140, left: 200, right: 200 },
+            borders: {
+              top: hairline,
+              bottom: hairline,
+              left: { style: BorderStyle.SINGLE, size: 18, color: INDIGO },
+              right: hairline,
+            },
+            children: [
+              new Paragraph({
+                spacing: { after: 40 },
+                children: [new TextRun({ text: brief.questionLabel, bold: true, size: 16, color: INDIGO })],
+              }),
+              new Paragraph({
+                spacing: { after: 0, line: 276, lineRule: LineRuleType.AUTO },
+                children: [new TextRun({ text: brief.question, bold: true, size: 32, color: TITLE })],
+              }),
+            ],
+          }),
+        ],
+      }),
+    ],
+  });
+}
+
 function buildResearchDocument(input: ResearchExportInput): Document {
-  const title = researchExportTitle(input.title || 'Dupoin AI research');
-  const when = (input.exportedAt ?? new Date()).toISOString().slice(0, 10);
-  const modeLabel = researchExportModeLabel(input.mode);
+  const brief = buildResearchBrief(input);
   const numbering: INumberingOptions['config'][number][] = [];
   const children: FileChild[] = [
+    subjectCard(brief),
     new Paragraph({
-      heading: HeadingLevel.TITLE,
-      spacing: { after: 160 },
-      children: [new TextRun(title)],
+      border: { bottom: { style: BorderStyle.SINGLE, size: 8, color: 'E4E7EC', space: 1 } },
+      spacing: { before: 160, after: 80 },
+      children: [new TextRun({ text: researchBriefMetaLine(brief), size: META, color: '475467' })],
     }),
-    new Paragraph({
-      spacing: { after: 40 },
-      children: [
-        new TextRun({ text: 'Assistant: ', bold: true, size: META, color: '475467' }),
-        new TextRun({ text: AI_RESEARCH_ASSISTANT_NAME, size: META, color: '475467' }),
-      ],
-    }),
-    new Paragraph({
-      spacing: { after: 40 },
-      children: [
-        new TextRun({ text: 'Mode: ', bold: true, size: META, color: '475467' }),
-        new TextRun({ text: modeLabel, size: META, color: '475467' }),
-      ],
-    }),
-    new Paragraph({
-      spacing: { after: 200 },
-      children: [
-        new TextRun({ text: 'Exported: ', bold: true, size: META, color: '475467' }),
-        new TextRun({ text: when, size: META, color: '475467' }),
-      ],
-    }),
-    new Paragraph({
-      heading: HeadingLevel.HEADING_1,
-      spacing: { before: 120, after: 120 },
-      children: [new TextRun('Answer')],
-    }),
-    ...answerBlocks(input.answer, numbering),
     new Paragraph({
       heading: HeadingLevel.HEADING_1,
       spacing: { before: 280, after: 120 },
-      children: [new TextRun('Sources')],
+      children: [new TextRun({ text: 'Answer', bold: true, size: 28, color: TITLE })],
     }),
-    ...sourceSection(researchExportSources(input.sources)),
+    ...answerBlocks(brief.answer, numbering),
     new Paragraph({
+      heading: HeadingLevel.HEADING_1,
+      spacing: { before: 320, after: 120 },
+      children: [new TextRun({ text: 'Sources', bold: true, size: 28, color: TITLE })],
+    }),
+    ...sourceSection(brief.sources),
+    new Paragraph({
+      border: { top: { style: BorderStyle.SINGLE, size: 6, color: 'E4E7EC', space: 1 } },
       spacing: { before: 280 },
-      children: [new TextRun({ text: RESEARCH_EXPORT_DISCLAIMER, italics: true, size: SMALL, color: '667085' })],
+      children: [new TextRun({ text: brief.disclaimer, italics: true, size: SMALL, color: MUTED })],
     }),
   ];
   return new Document({
     creator: 'MarketingOS — Dupoin Futures',
-    title,
-    description: `Dupoin AI Research export (${modeLabel})`,
+    lastModifiedBy: 'MarketingOS — Dupoin Futures',
+    title: brief.question.slice(0, 200),
+    description: `${brief.brand} brief (${brief.modePhrase})`,
+    styles: {
+      default: {
+        document: {
+          run: { font: 'Calibri', size: BODY, color: INK },
+          paragraph: { spacing: { after: 120, line: 276, lineRule: LineRuleType.AUTO } },
+        },
+        heading1: {
+          run: { font: 'Calibri', size: 28, bold: true, color: TITLE },
+          paragraph: { spacing: { before: 280, after: 120 } },
+        },
+        heading2: {
+          run: { font: 'Calibri', size: 24, bold: true, color: '2D3282' },
+          paragraph: { spacing: { before: 220, after: 80 } },
+        },
+        heading3: {
+          run: { font: 'Calibri', size: 22, bold: true, color: TITLE },
+          paragraph: { spacing: { before: 180, after: 60 } },
+        },
+        heading4: {
+          run: { font: 'Calibri', size: 22, bold: true, color: '344054' },
+          paragraph: { spacing: { before: 140, after: 60 } },
+        },
+        hyperlink: {
+          run: { color: '3538CD' },
+        },
+      },
+    },
     numbering: numbering.length ? { config: numbering } : undefined,
     sections: [{
       properties: {
         page: {
-          margin: { top: 1008, bottom: 1008, left: 1080, right: 1080, header: 576, footer: 576 },
+          margin: { top: 1008, bottom: 1008, left: 1080, right: 1080, header: 576, footer: 640 },
         },
       },
       headers: {
         default: new Header({
           children: [new Paragraph({
-            children: [new TextRun({ text: 'Dupoin AI Research', bold: true, size: SMALL, color: '444CE7' })],
+            border: { bottom: { style: BorderStyle.SINGLE, size: 8, color: 'E4E7EC', space: 1 } },
+            children: [new TextRun({ text: RESEARCH_BRIEF_BRAND, bold: true, size: SMALL, color: INDIGO })],
           })],
         }),
       },
       footers: {
         default: new Footer({
           children: [new Paragraph({
+            border: { top: { style: BorderStyle.SINGLE, size: 6, color: 'E4E7EC', space: 6 } },
             children: [new TextRun({
               size: SMALL,
-              color: '667085',
-              children: ['Page ', PageNumber.CURRENT, ' of ', PageNumber.TOTAL_PAGES],
+              color: MUTED,
+              children: [RESEARCH_BRIEF_BRAND, '  ·  Page ', PageNumber.CURRENT, ' of ', PageNumber.TOTAL_PAGES],
             })],
           })],
         }),
