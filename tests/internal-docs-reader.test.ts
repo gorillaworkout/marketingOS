@@ -9,12 +9,15 @@ import { GuideReader } from '../src/app/dashboard/internal-docs/GuideReader';
 import { docxPreviewHtml, extractInternalDocText } from '../src/lib/internal-docs-extract';
 import { FaqAskPanel, citationDocumentHref, citationFileLink } from '../src/app/dashboard/internal-docs/FaqAskPanel';
 import { documentIdFromInternalDocsPath } from '../src/app/dashboard/internal-docs/InternalDocsRoute';
-import { FAQ_ASK_SESSION_KEY, parseFaqAskMessages, readFaqAskMessages, writeFaqAskMessages, type FaqAskStorage } from '../src/app/dashboard/internal-docs/faq-ask-session';
+import { FAQ_ASK_SESSION_KEY, FAQ_ASK_STORED_MESSAGE_LIMIT, capFaqAskMessages, parseFaqAskMessages, readFaqAskMessages, writeFaqAskMessages, type FaqAskStorage } from '../src/app/dashboard/internal-docs/faq-ask-session';
+import { askHistorySnippet, faqAskHistoryEntries, visibleAskMessages } from '../src/app/dashboard/internal-docs/faq-ask-history';
 import { FaqListSkeleton } from '../src/app/dashboard/internal-docs/FaqFeedback';
 import {
   guideHighlightNeedle,
   locateGuideHighlight,
   internalDocFilePath,
+  internalDocPdfViewPath,
+  pdfPageForHighlight,
   internalDocImagePath,
   isInternalDocImagePath,
   parseMarkdownDocument,
@@ -196,9 +199,12 @@ test('reader shows a document page, a clickable filename, and keeps manage actio
     previewHtml: null,
     extractedText: 'Page 1\nThe password is at reception. https://manual.example/wifi',
   }), false);
+  assert.match(pdf, /data-testid="guide-viewer"/);
   assert.match(pdf, /data-testid="guide-pdf"/);
   assert.match(pdf, /<iframe/);
   assert.match(pdf, new RegExp(`src="/api/internal-docs/${documentId}/file\\?inline=1"`));
+  assert.doesNotMatch(pdf, /#page=/);
+  assert.doesNotMatch(pdf, /data-testid="guide-pdf-citation"/);
   assert.match(pdf, /visitor-wifi\.pdf/);
   assert.match(pdf, /Open file/);
   assert.doesNotMatch(pdf, /Reindex/);
@@ -360,9 +366,46 @@ function memoryStorage(): FaqAskStorage {
   };
 }
 
-test('a PDF opened from Ask shows the matching section instead of only the whole file', () => {
+test('a PDF opened from Ask shows the cited page in the viewer instead of a plain text dump', () => {
   const section = 'Laptop tidak menyala. If the laptop will not turn on or will not boot, connect the charger and hold the power button.';
+  const extractedText = `Page 1\nVisitor wifi password is printed at reception.\n\nPage 2\n${section}\n\nPage 3\nBadge printer reset is on the back panel.`;
+  assert.equal(pdfPageForHighlight(extractedText, section), 2);
+  assert.equal(pdfPageForHighlight('No page markers here. Laptop tidak menyala at all in this note.', section), null);
+  assert.equal(pdfPageForHighlight(extractedText, 'short'), null);
+  assert.equal(internalDocPdfViewPath(documentId, 2), `/api/internal-docs/${documentId}/file?inline=1#page=2`);
+  assert.equal(internalDocPdfViewPath(documentId, null), `/api/internal-docs/${documentId}/file?inline=1`);
+
   const html = renderToStaticMarkup(createElement(GuideReader, {
+    document: guide({
+      title: 'FAQ IT Support',
+      extension: '.pdf',
+      originalName: 'faq-it-support.pdf',
+      previewHtml: null,
+      extractedText,
+    }),
+    canManage: false,
+    highlight: section,
+    onAccessChange: () => undefined,
+    onReindex: () => undefined,
+    onDelete: () => undefined,
+  }));
+  assert.match(html, /data-testid="guide-viewer"/);
+  assert.match(html, /data-testid="guide-pdf"/);
+  assert.match(html, /<iframe/);
+  assert.match(html, new RegExp(`src="/api/internal-docs/${documentId}/file\\?inline=1#page=2"`));
+  assert.match(html, /data-page="2"/);
+  assert.match(html, /data-testid="guide-pdf-citation"/);
+  assert.match(html, /Cited section · Page 2/);
+  assert.match(html, /Laptop tidak menyala/);
+  assert.match(html, /If the laptop will not turn on or will not boot/);
+  assert.match(html, /Show text/);
+  assert.doesNotMatch(html, /data-testid="guide-body"/);
+  assert.equal(locateGuideHighlight(
+    ['Visitor wifi password is printed at reception.', section],
+    section,
+  )?.segment, 1);
+
+  const unpaged = renderToStaticMarkup(createElement(GuideReader, {
     document: guide({
       title: 'FAQ IT Support',
       extension: '.pdf',
@@ -376,14 +419,11 @@ test('a PDF opened from Ask shows the matching section instead of only the whole
     onReindex: () => undefined,
     onDelete: () => undefined,
   }));
-  assert.match(html, /data-testid="guide-body"/);
-  assert.match(html, /Laptop tidak menyala/);
-  assert.match(html, /If the laptop will not turn on or will not boot/);
-  assert.doesNotMatch(html, /data-testid="guide-pdf"/);
-  assert.equal(locateGuideHighlight(
-    ['Visitor wifi password is printed at reception.', section],
-    section,
-  )?.segment, 1);
+  assert.match(unpaged, /data-testid="guide-pdf"/);
+  assert.match(unpaged, /data-testid="guide-pdf-citation"/);
+  assert.match(unpaged, /Cited section/);
+  assert.doesNotMatch(unpaged, /#page=/);
+  assert.doesNotMatch(unpaged, /data-testid="guide-body"/);
 });
 
 test('document title opens the in-page PDF without clearing Ask', () => {
@@ -410,6 +450,8 @@ test('document title opens the in-page PDF without clearing Ask', () => {
   const askPanel = read('src/app/dashboard/internal-docs/FaqAskPanel.tsx');
   const workspace = read('src/app/dashboard/internal-docs/InternalDocsWorkspace.tsx');
   assert.match(reader, /revealGuideReading/);
+  assert.match(reader, /data-testid="guide-viewer"/);
+  assert.match(reveal, /guide-viewer/);
   assert.match(reader, /setShowText\(false\)/);
   assert.doesNotMatch(reader, /scrollIntoView\(\{ block: 'nearest' \}\)/);
   assert.doesNotMatch(reader, /if \(!needle\) return/);
@@ -495,4 +537,94 @@ test('Ask citations are document links, and opening one keeps the question and a
   assert.deepEqual(parseFaqAskMessages('{"role":"user"}'), []);
   storage.setItem(FAQ_ASK_SESSION_KEY, '{');
   assert.deepEqual(readFaqAskMessages(storage), []);
+});
+
+test('Ask keeps the latest exchange on screen and moves older questions into History Search', () => {
+  const pairs = (count: number) => Array.from({ length: count }, (_, index) => {
+    const number = index + 1;
+    return [
+      { role: 'user' as const, content: `Question ${number} about the badge printer` },
+      { role: 'assistant' as const, content: `Answer ${number} is in the IT guide.` },
+    ];
+  }).flat();
+  const messages = pairs(6);
+  assert.equal(visibleAskMessages(messages, null).map(message => message.content).join('\n'), [
+    'Question 5 about the badge printer',
+    'Answer 5 is in the IT guide.',
+    'Question 6 about the badge printer',
+    'Answer 6 is in the IT guide.',
+  ].join('\n'));
+  assert.deepEqual(
+    visibleAskMessages(messages, 0).map(message => message.content),
+    ['Question 1 about the badge printer', 'Answer 1 is in the IT guide.'],
+  );
+  assert.deepEqual(
+    faqAskHistoryEntries(messages, '').map(turn => turn.question),
+    [1, 2, 3, 4].map(number => `Question ${number} about the badge printer`),
+  );
+  assert.deepEqual(
+    faqAskHistoryEntries(messages, 'question 6').map(turn => turn.question),
+    ['Question 6 about the badge printer'],
+  );
+  assert.deepEqual(faqAskHistoryEntries(messages, 'not in the guides'), []);
+  assert.deepEqual(faqAskHistoryEntries(pairs(2), '').map(turn => turn.question), []);
+  assert.equal(askHistorySnippet('Answer 1 is in the IT guide.'), 'Answer 1 is in the IT guide.');
+  assert.ok(askHistorySnippet(`${'badge '.repeat(40)}printer`).length <= 140);
+  assert.match(askHistorySnippet(`${'badge '.repeat(40)}printer`), /…$/);
+  assert.match(read('src/app/dashboard/internal-docs/InternalDocsWorkspace.tsx'), /messages\.slice\(-8\)/);
+
+  const html = renderToStaticMarkup(createElement(FaqAskPanel, {
+    messages,
+    input: '',
+    asking: false,
+    error: '',
+    onInputChange: () => undefined,
+    onSubmit: () => undefined,
+  }));
+  const threadStart = html.indexOf('data-testid="faq-ask-thread"');
+  const historyStart = html.indexOf('data-testid="faq-ask-history"');
+  const thread = html.slice(threadStart, historyStart);
+  assert.match(thread, /Question 5 about the badge printer/);
+  assert.match(thread, /Question 6 about the badge printer/);
+  assert.doesNotMatch(thread, /Question 1 about the badge printer/);
+  assert.doesNotMatch(thread, /Question 4 about the badge printer/);
+  assert.match(html, /History Search/);
+  assert.match(html, /aria-label="History Search"/);
+  assert.match(html, /Search past questions/);
+  assert.match(html, /4 earlier questions/);
+  assert.match(html, /max-h-64/);
+  assert.match(html, /data-testid="faq-ask-history-item"/);
+  assert.match(html, /Question 1 about the badge printer/);
+  assert.match(html, /Answer 1 is in the IT guide\./);
+  assert.doesNotMatch(html.slice(historyStart), /Question 5 about the badge printer/);
+  assert.match(read('src/app/dashboard/internal-docs/FaqAskPanel.tsx'), /data-testid="faq-ask-show-latest"/);
+  assert.doesNotMatch(read('src/app/dashboard/internal-docs/FaqAskPanel.tsx'), /setMessages|FAQ_ASK_SESSION_KEY/);
+
+  const short = renderToStaticMarkup(createElement(FaqAskPanel, {
+    messages: pairs(2),
+    input: '',
+    asking: false,
+    error: '',
+    onInputChange: () => undefined,
+    onSubmit: () => undefined,
+  }));
+  assert.match(short, /Question 1 about the badge printer/);
+  assert.match(short, /Question 2 about the badge printer/);
+  assert.doesNotMatch(short, /data-testid="faq-ask-history"/);
+
+  const many = Array.from({ length: FAQ_ASK_STORED_MESSAGE_LIMIT + 20 }, (_, index) => ({
+    role: index % 2 === 0 ? 'user' as const : 'assistant' as const,
+    content: `Stored message ${index}`,
+  }));
+  assert.equal(capFaqAskMessages(many)[0]?.role, 'user');
+  assert.equal(capFaqAskMessages(many).at(-1)?.content, `Stored message ${FAQ_ASK_STORED_MESSAGE_LIMIT + 19}`);
+  assert.ok(capFaqAskMessages(many).length <= FAQ_ASK_STORED_MESSAGE_LIMIT);
+  assert.notEqual(capFaqAskMessages(many)[0]?.content, 'Stored message 0');
+  const storage = memoryStorage();
+  writeFaqAskMessages(storage, many);
+  const restored = readFaqAskMessages(storage);
+  assert.equal(restored.at(-1)?.content, `Stored message ${FAQ_ASK_STORED_MESSAGE_LIMIT + 19}`);
+  assert.equal(restored[0]?.role, 'user');
+  assert.notEqual(restored[0]?.content, 'Stored message 0');
+  assert.ok(restored.length <= FAQ_ASK_STORED_MESSAGE_LIMIT);
 });

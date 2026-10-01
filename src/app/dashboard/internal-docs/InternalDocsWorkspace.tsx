@@ -421,7 +421,7 @@ export function InternalDocsWorkspace() {
   const submitQuestion = async (question: string, documentId = '') => {
     const trimmed = question.trim();
     if (!trimmed || asking) return;
-    const history = messages.map(message => ({ role: message.role, content: message.content }));
+    const history = messages.slice(-8).map(message => ({ role: message.role, content: message.content }));
     setMessages(current => [...current, { role: 'user', content: trimmed }]);
     if (!documentId && trimmed === askInput.trim()) setAskInput('');
     if (documentId) document.getElementById('faq-ask')?.scrollIntoView({ block: 'start' });

@@ -2,9 +2,20 @@ import type { FaqAskMessage, FaqCitation } from './FaqAskPanel';
 
 export const FAQ_ASK_SESSION_KEY = 'mos.faq-ask.messages';
 
-const MAX_MESSAGES = 24;
+/** Newest questions kept across a refresh. Older than this drop off the front of the store. */
+export const FAQ_ASK_STORED_MESSAGE_LIMIT = 100;
 const MAX_CONTENT = 8000;
 const MAX_CITATIONS = 8;
+
+export function capFaqAskMessages<T extends { role: 'user' | 'assistant' }>(
+  messages: T[],
+  limit = FAQ_ASK_STORED_MESSAGE_LIMIT,
+): T[] {
+  if (messages.length <= limit) return messages;
+  const sliced = messages.slice(-limit);
+  if (sliced[0]?.role === 'assistant') return sliced.slice(1);
+  return sliced;
+}
 
 export interface FaqAskStorage {
   getItem(key: string): string | null;
@@ -41,7 +52,7 @@ export function parseFaqAskMessages(raw: string | null): FaqAskMessage[] {
   }
   if (!Array.isArray(parsed)) return [];
   const messages: FaqAskMessage[] = [];
-  for (const item of parsed.slice(0, MAX_MESSAGES)) {
+  for (const item of parsed) {
     if (!item || typeof item !== 'object') continue;
     const row = item as Record<string, unknown>;
     if ((row.role !== 'user' && row.role !== 'assistant') || typeof row.content !== 'string') continue;
@@ -61,7 +72,7 @@ export function parseFaqAskMessages(raw: string | null): FaqAskMessage[] {
     }
     messages.push(message);
   }
-  return messages;
+  return capFaqAskMessages(messages);
 }
 
 export function readFaqAskMessages(storage: FaqAskStorage | null): FaqAskMessage[] {
