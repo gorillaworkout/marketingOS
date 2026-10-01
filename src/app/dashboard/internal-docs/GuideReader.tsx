@@ -6,7 +6,9 @@ import { FaqWorking } from './FaqFeedback';
 import {
   guideHighlightNeedle,
   internalDocFilePath,
+  internalDocPdfViewPath,
   locateGuideHighlight,
+  pdfPageForHighlight,
   parseMarkdownDocument,
   parsePlainDocument,
   sanitizeDocumentHtml,
@@ -135,18 +137,45 @@ function markGuideHighlight(root: HTMLElement, highlight: string): boolean {
   return true;
 }
 
-function ReadingPane({ document, showText }: { document: GuideDocument; showText: boolean }) {
+function PdfCitation({ highlight, page }: { highlight: string; page: number | null }) {
+  const text = highlight.replace(/\s+/g, ' ').trim();
+  if (!text) return null;
+  return (
+    <aside data-testid="guide-pdf-citation" className="border-b border-[#e3ddd0] bg-[#f4f1ea] px-5 py-4 text-[#1c1b17] sm:px-8">
+      <p className="text-[11px] font-medium uppercase tracking-[0.14em] text-[#6b6456]">
+        {page ? `Cited section · Page ${page}` : 'Cited section'}
+      </p>
+      <p className="mt-2 max-h-36 overflow-y-auto text-[15px] leading-7">{text}</p>
+    </aside>
+  );
+}
+
+function ReadingPane({
+  document,
+  showText,
+  highlight,
+  pdfPage,
+}: {
+  document: GuideDocument;
+  showText: boolean;
+  highlight: string;
+  pdfPage: number | null;
+}) {
   const extension = document.extension.toLowerCase();
   const isPdf = extension === '.pdf';
   const openHref = internalDocFilePath(document.id, isPdf);
   if (isPdf && !showText) {
     return (
-      <iframe
-        data-testid="guide-pdf"
-        title={`${document.title} preview`}
-        src={openHref}
-        className="h-[min(78vh,960px)] min-h-[32rem] w-full border-0 bg-white"
-      />
+      <div data-testid="guide-viewer" className="bg-[#525659]">
+        <PdfCitation highlight={highlight} page={pdfPage} />
+        <iframe
+          data-testid="guide-pdf"
+          title={pdfPage ? `${document.title}, page ${pdfPage}` : `${document.title} preview`}
+          src={internalDocPdfViewPath(document.id, pdfPage)}
+          {...(pdfPage ? { 'data-page': pdfPage } : {})}
+          className="h-[min(78vh,960px)] min-h-[32rem] w-full border-0 bg-[#525659]"
+        />
+      </div>
     );
   }
 
@@ -207,13 +236,12 @@ export function GuideReader({
   onReindex: () => void;
   onDelete: () => void;
 }) {
-  const highlightedPdf = document.extension.toLowerCase() === '.pdf' && highlight.trim().length > 0;
   const textViewKey = `${document.id}\n${highlight}`;
   const [textOverride, setTextOverride] = useState<{ key: string; show: boolean } | null>(null);
-  const showText = textOverride?.key === textViewKey ? textOverride.show : highlightedPdf;
+  const showText = textOverride?.key === textViewKey ? textOverride.show : false;
   const setShowText = (value: boolean | ((current: boolean) => boolean)) => {
     setTextOverride(current => {
-      const base = current?.key === textViewKey ? current.show : highlightedPdf;
+      const base = current?.key === textViewKey ? current.show : false;
       const show = typeof value === 'function' ? value(base) : value;
       return { key: textViewKey, show };
     });
@@ -234,13 +262,15 @@ export function GuideReader({
       const needle = guideHighlightNeedle(highlight);
       const focus = focusReading.current;
       focusReading.current = false;
-      if (needle && markGuideHighlight(root, needle)) return;
+      const marked = Boolean(needle && markGuideHighlight(root, needle));
+      if (!focus && marked) return;
       revealGuideReading(root, focus);
     });
     return () => window.cancelAnimationFrame(frame);
   }, [highlight, document.id, document.extractedText, document.previewHtml, showText]);
 
   const isPdf = document.extension.toLowerCase() === '.pdf';
+  const pdfPage = isPdf ? pdfPageForHighlight(document.extractedText, highlight) : null;
   const openHref = internalDocFilePath(document.id, isPdf);
   const downloadHref = internalDocFilePath(document.id, false);
   const openLinkProps = isPdf ? { target: '_blank' as const, rel: 'noopener noreferrer' } : {};
@@ -328,7 +358,7 @@ export function GuideReader({
       {busy === 'access' && <FaqWorking label="Updating access" testId="internal-docs-access-loading" />}
       {document.errorMessage && <p className="px-4 py-2 text-sm text-red-300 sm:px-5">{document.errorMessage}</p>}
       <div ref={bodyRef} id="guide-document" tabIndex={-1} className="scroll-mt-4 outline-none">
-        <ReadingPane document={document} showText={showText} />
+        <ReadingPane document={document} showText={showText} highlight={highlight} pdfPage={pdfPage} />
       </div>
     </div>
   );

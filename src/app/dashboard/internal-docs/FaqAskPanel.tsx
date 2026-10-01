@@ -1,10 +1,11 @@
 'use client';
 
 import Link from 'next/link';
-import { FormEvent } from 'react';
-import { Button, Panel, StatusBadge, TextArea } from '@/components/ui/dashboard';
+import { FormEvent, useState } from 'react';
+import { Button, Panel, StatusBadge, TextArea, TextInput } from '@/components/ui/dashboard';
 import { guideHighlightNeedle, internalDocFilePath } from '@/lib/internal-docs-reader';
 import { FaqWorking } from './FaqFeedback';
+import { askHistorySnippet, earlierAskTurns, faqAskHistoryEntries, visibleAskMessages } from './faq-ask-history';
 import { revealOpenGuide } from './reveal-guide';
 
 export const ASK_EXAMPLES = [
@@ -96,6 +97,17 @@ export function FaqAskPanel({
     event.preventDefault();
     onSubmit(input);
   };
+  const [historyQuery, setHistoryQuery] = useState('');
+  const [opened, setOpened] = useState<{ length: number; index: number } | null>(null);
+  const focusedIndex = opened && opened.length === messages.length ? opened.index : null;
+  const visible = visibleAskMessages(messages, focusedIndex);
+  const earlier = earlierAskTurns(messages);
+  const history = faqAskHistoryEntries(messages, historyQuery);
+
+  const openHistory = (index: number) => {
+    setOpened({ length: messages.length, index });
+    document.getElementById('faq-ask-thread')?.scrollIntoView({ block: 'start' });
+  };
 
   return (
     <Panel id="faq-ask" data-testid="faq-ask">
@@ -117,10 +129,16 @@ export function FaqAskPanel({
       ) : (
         <p className="mt-1 text-xs leading-5 text-[var(--mos-text-muted)]">Answers use only the documents you are allowed to read.</p>
       )}
-      <div className="mt-4 space-y-3">
-        {messages.map((message, index) => (
+      <div id="faq-ask-thread" data-testid="faq-ask-thread" className="mt-4 space-y-3">
+        {focusedIndex != null && (
+          <div className="flex justify-end">
+            <Button size="sm" data-testid="faq-ask-show-latest" onClick={() => setOpened(null)}>Show latest</Button>
+          </div>
+        )}
+        {visible.map((message, index) => (
           <div
             key={`${message.role}-${index}`}
+            data-testid="faq-ask-message"
             className={message.role === 'user'
               ? 'text-sm text-[var(--mos-text)]'
               : 'rounded-[var(--mos-radius-control)] border border-[var(--mos-border)] bg-[var(--mos-raised)] p-3 text-sm leading-6 text-[var(--mos-text-secondary)]'}
@@ -154,6 +172,46 @@ export function FaqAskPanel({
         )}
         {error && <p className="text-xs text-red-300" role="alert">{error}</p>}
       </div>
+      {earlier.length > 0 && (
+        <div data-testid="faq-ask-history" className="mt-4 border-t border-[var(--mos-border-subtle)] pt-4">
+          <div className="flex items-center justify-between gap-3">
+            <h3 className="text-sm font-[560] text-[var(--mos-text)]">History Search</h3>
+            <p className="text-[11px] text-[var(--mos-text-faint)]">
+              {historyQuery.trim() ? `${history.length} matches` : `${earlier.length} earlier questions`}
+            </p>
+          </div>
+          <TextInput
+            value={historyQuery}
+            onChange={event => setHistoryQuery(event.target.value)}
+            placeholder="Search past questions"
+            aria-label="History Search"
+            className="mt-2"
+          />
+          {history.length === 0 ? (
+            <p data-testid="faq-ask-history-empty" className="mt-3 text-xs text-[var(--mos-text-muted)]">No matching questions</p>
+          ) : (
+            <ul className="mt-2 max-h-64 space-y-1 overflow-y-auto" aria-label="Earlier questions">
+              {history.map(turn => (
+                <li key={turn.index}>
+                  <button
+                    type="button"
+                    data-testid="faq-ask-history-item"
+                    data-turn-index={turn.index}
+                    aria-current={focusedIndex === turn.index ? 'true' : undefined}
+                    onClick={() => openHistory(turn.index)}
+                    className={`flex w-full flex-col items-start rounded-[var(--mos-radius-control)] px-3 py-2 text-left hover:bg-white/[0.04] ${focusedIndex === turn.index ? 'bg-white/[0.05]' : ''}`}
+                  >
+                    <span className="line-clamp-2 text-sm text-[var(--mos-text)]">{turn.question || askHistorySnippet(turn.answer)}</span>
+                    {turn.question && turn.answer && (
+                      <span className="mt-0.5 line-clamp-1 text-xs text-[var(--mos-text-muted)]">{askHistorySnippet(turn.answer)}</span>
+                    )}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
       <form onSubmit={submit} className="mt-4 flex flex-col gap-2">
         <TextArea
           value={input}

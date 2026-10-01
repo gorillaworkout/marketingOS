@@ -3,7 +3,7 @@ export function guideScrollTop(scrollY: number, rectTop: number, gap = 16): numb
   return Math.max(0, Math.round(scrollY + rectTop - gap));
 }
 
-const READING_TARGET = '[data-testid="guide-pdf"], [data-testid="guide-body"]';
+const READING_TARGET = '[data-testid="guide-viewer"], [data-testid="guide-pdf"], [data-testid="guide-body"]';
 
 /** Scroll the in-page PDF or document text into view. Does not touch Ask. */
 export function revealGuideReading(root: ParentNode | null | undefined, focus = false): boolean {

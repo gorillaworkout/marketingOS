@@ -321,6 +321,48 @@ export function internalDocFilePath(id: string, inline: boolean): string {
   return inline ? `${base}?inline=1` : base;
 }
 
+/** Inline PDF URL, opened on the indexed page when the citation can be placed. */
+export function internalDocPdfViewPath(id: string, page: number | null): string {
+  const href = internalDocFilePath(id, true);
+  if (!page || !Number.isInteger(page) || page < 1) return href;
+  return `${href}#page=${page}`;
+}
+
+interface PdfPageSection {
+  page: number;
+  text: string;
+}
+
+/** Indexed PDF text is stored as `Page N` blocks. Body paragraphs stay on that page. */
+export function pdfPageSections(extractedText: string): PdfPageSection[] {
+  const normalized = extractedText.replace(/\r\n/g, '\n').replace(/^\uFEFF/, '').trim();
+  if (!normalized) return [];
+  const marks: { page: number; start: number }[] = [];
+  const pattern = /(?:^|\n\n)Page (\d+)\n/g;
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(normalized))) {
+    const page = Number(match[1]);
+    if (!Number.isInteger(page) || page < 1 || page > 5000) continue;
+    const lead = match[0].startsWith('\n\n') ? 2 : 0;
+    marks.push({ page, start: match.index + lead });
+  }
+  if (!marks.length) return [];
+  return marks.map((mark, index) => {
+    const end = index + 1 < marks.length ? marks[index + 1].start : normalized.length;
+    return { page: mark.page, text: normalized.slice(mark.start, end).trim() };
+  });
+}
+
+/** Page number for a cited excerpt, using the `Page N` markers written at index time. */
+export function pdfPageForHighlight(extractedText: string, highlight: string): number | null {
+  if (guideHighlightNeedle(highlight).length < 12) return null;
+  const pages = pdfPageSections(extractedText);
+  if (!pages.length) return null;
+  const located = locateGuideHighlight(pages.map(page => page.text), highlight);
+  if (!located) return null;
+  return pages[located.segment]?.page ?? null;
+}
+
 export function isInternalDocImagePath(value: string): boolean {
   return INTERNAL_DOC_IMAGE_PATH.test(value);
 }
