@@ -5,6 +5,7 @@ import { FormEvent } from 'react';
 import { Button, Panel, StatusBadge, TextArea } from '@/components/ui/dashboard';
 import { guideHighlightNeedle, internalDocFilePath } from '@/lib/internal-docs-reader';
 import { FaqWorking } from './FaqFeedback';
+import { revealOpenGuide } from './reveal-guide';
 
 export const ASK_EXAMPLES = [
   'Where is the visitor wifi password?',
@@ -53,6 +54,7 @@ function CitationCard({ citation }: { citation: FaqCitation }) {
         data-testid="faq-citation-link"
         href={citationDocumentHref(citation)}
         scroll={false}
+        onClick={() => { revealOpenGuide(citation.documentId); }}
         className="text-sm font-medium text-[var(--mos-accent-soft)] underline decoration-[var(--mos-accent-border)] underline-offset-2 hover:text-white"
       >
         {citation.title}
