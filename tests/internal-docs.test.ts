@@ -354,6 +354,89 @@ test('Lark password questions prefer the Lark guide over auditorium docs that on
   assert.equal(internalDocsAskFallback(query, [])?.answer, INTERNAL_DOCS_NO_MATCH_ANSWER);
 });
 
+test('a laptop that will not turn on prefers the IT FAQ section over venue manuals that only mention a laptop', async () => {
+  const queryVector = [1, 0];
+  const laptopHeavy = JSON.stringify(queryVector);
+  const orthogonal = JSON.stringify([0, 1]);
+  const venue = (id: string, title: string, content: string): InternalDocChunkRow => ({
+    chunk_id: id,
+    document_id: id,
+    title,
+    access_level: 'company',
+    content,
+    embedding: laptopHeavy,
+  });
+  const faqLaptop = 'Company software catalog and printer names. '.repeat(8)
+    + 'Laptop tidak menyala. If the laptop won\'t turn on or won\'t boot, connect the charger and hold the power button for ten seconds. '
+    + 'A laptop that does not start still needs the charger light.';
+  const chunks: InternalDocChunkRow[] = [
+    venue(
+      'doc-sound',
+      'soundsystem Auditorium Area',
+      'Connect the laptop HDMI output to the soundsystem in the Auditorium Area. The laptop HDMI cable is on the mixer. Select the laptop input on the soundsystem. The laptop plays audio through the auditorium soundsystem.',
+    ),
+    venue(
+      'doc-running',
+      'Running Text',
+      'Connect a laptop to the LED running text controller. Open LED Studio on the laptop and send the running text program. The laptop USB port powers the running text dongle.',
+    ),
+    venue(
+      'doc-led',
+      'Manual Book LED Auditorium',
+      'Connect the laptop to the LED processor with an HDMI cable. The laptop display mirrors to the auditorium LED wall. Press the laptop HDMI button on the switcher. The laptop should show the standby image on the LED Auditorium wall.',
+    ),
+    {
+      chunk_id: 'faq-intro',
+      document_id: 'doc-it-faq',
+      title: 'FAQ IT Support',
+      access_level: 'company',
+      content: 'Visitor wifi password is printed at reception. The badge printer reset code is on the front panel.',
+      embedding: orthogonal,
+    },
+    {
+      chunk_id: 'faq-laptop',
+      document_id: 'doc-it-faq',
+      title: 'FAQ IT Support',
+      access_level: 'company',
+      content: faqLaptop,
+      embedding: orthogonal,
+    },
+  ];
+
+  const expectFaq = (query: string, section: RegExp) => {
+    const hits = rankInternalDocChunks(query, queryVector, chunks, company, 6);
+    assert.equal(hits[0]?.documentId, 'doc-it-faq', query);
+    assert.equal(hits.every(hit => hit.documentId === 'doc-it-faq'), true, query);
+    assert.equal(hits[0]?.chunkId, 'faq-laptop', query);
+    assert.equal(internalDocsRetrievalConfidence(query, hits), 'high', query);
+    assert.equal(internalDocsAskFallback(query, hits), null, query);
+    assert.match(hits[0]?.excerpt || '', section);
+    assert.doesNotMatch((hits[0]?.excerpt || '').slice(0, 90), /visitor wifi|HDMI|soundsystem|running text/i);
+    const citations = citationsFromHits(hits, 'https://marketing.example');
+    assert.equal(citations.length, 1);
+    assert.equal(citations[0]?.title, 'FAQ IT Support');
+  };
+
+  expectFaq('laptop tidak bisa nyala', /tidak menyala|won't turn on|won't boot/i);
+
+  const englishOnly = chunks.map(chunk => chunk.chunk_id === 'faq-laptop'
+    ? {
+      ...chunk,
+      content: `${'Printer and account setup for new staff. '.repeat(8)}Laptop. Check the charger light, the power cable, and the battery before you decide it won't turn on or won't boot.`,
+    }
+    : chunk);
+  const englishHits = rankInternalDocChunks('laptop tidak bisa nyala', queryVector, englishOnly, company, 6);
+  assert.equal(englishHits[0]?.documentId, 'doc-it-faq');
+  assert.equal(englishHits.every(hit => hit.documentId === 'doc-it-faq'), true);
+  assert.equal(internalDocsRetrievalConfidence('laptop tidak bisa nyala', englishHits), 'high');
+  assert.match(englishHits[0]?.excerpt || '', /won't turn on|won't boot/i);
+  assert.doesNotMatch((englishHits[0]?.excerpt || '').slice(0, 90), /Printer and account setup/i);
+
+  const missing = rankInternalDocChunks('laptop tidak bisa nyala', queryVector, chunks.filter(chunk => chunk.document_id !== 'doc-it-faq'), company, 6);
+  assert.equal(internalDocsRetrievalConfidence('laptop tidak bisa nyala', missing), 'low');
+  assert.equal(missing.some(hit => hit.documentId === 'doc-it-faq'), false);
+});
+
 test('chunk retrieval orders lexical overlap ahead of recency', () => {
   const ranked = buildInternalDocChunkQuery(['lark', 'password', 'change']);
   assert.match(ranked.sql, /d\.title ILIKE \? ESCAPE/);

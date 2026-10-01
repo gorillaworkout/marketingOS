@@ -13,6 +13,7 @@ import { FAQ_ASK_SESSION_KEY, parseFaqAskMessages, readFaqAskMessages, writeFaqA
 import { FaqListSkeleton } from '../src/app/dashboard/internal-docs/FaqFeedback';
 import {
   guideHighlightNeedle,
+  locateGuideHighlight,
   internalDocFilePath,
   internalDocImagePath,
   isInternalDocImagePath,
@@ -358,6 +359,32 @@ function memoryStorage(): FaqAskStorage {
     removeItem: key => { data.delete(key); },
   };
 }
+
+test('a PDF opened from Ask shows the matching section instead of only the whole file', () => {
+  const section = 'Laptop tidak menyala. If the laptop will not turn on or will not boot, connect the charger and hold the power button.';
+  const html = renderToStaticMarkup(createElement(GuideReader, {
+    document: guide({
+      title: 'FAQ IT Support',
+      extension: '.pdf',
+      originalName: 'faq-it-support.pdf',
+      previewHtml: null,
+      extractedText: `Visitor wifi password is printed at reception.\n\n${section}`,
+    }),
+    canManage: false,
+    highlight: section,
+    onAccessChange: () => undefined,
+    onReindex: () => undefined,
+    onDelete: () => undefined,
+  }));
+  assert.match(html, /data-testid="guide-body"/);
+  assert.match(html, /Laptop tidak menyala/);
+  assert.match(html, /If the laptop will not turn on or will not boot/);
+  assert.doesNotMatch(html, /data-testid="guide-pdf"/);
+  assert.equal(locateGuideHighlight(
+    ['Visitor wifi password is printed at reception.', section],
+    section,
+  )?.segment, 1);
+});
 
 test('document title opens the in-page PDF without clearing Ask', () => {
   assert.equal(guideScrollTop(0, 2349), 2333);
