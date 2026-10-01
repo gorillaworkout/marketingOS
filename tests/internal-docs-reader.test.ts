@@ -10,7 +10,7 @@ import { docxPreviewHtml, extractInternalDocText } from '../src/lib/internal-doc
 import { FaqAskPanel, citationDocumentHref, citationFileLink } from '../src/app/dashboard/internal-docs/FaqAskPanel';
 import { documentIdFromInternalDocsPath } from '../src/app/dashboard/internal-docs/InternalDocsRoute';
 import { FAQ_ASK_SESSION_KEY, FAQ_ASK_STORED_MESSAGE_LIMIT, capFaqAskMessages, parseFaqAskMessages, readFaqAskMessages, writeFaqAskMessages, type FaqAskStorage } from '../src/app/dashboard/internal-docs/faq-ask-session';
-import { askHistorySnippet, faqAskHistoryEntries, visibleAskMessages } from '../src/app/dashboard/internal-docs/faq-ask-history';
+import { askHistorySnippet, FAQ_ASK_RECENT_TURNS, faqAskHistoryEntries, visibleAskMessages } from '../src/app/dashboard/internal-docs/faq-ask-history';
 import { FaqListSkeleton } from '../src/app/dashboard/internal-docs/FaqFeedback';
 import {
   guideHighlightNeedle,
@@ -539,7 +539,8 @@ test('Ask citations are document links, and opening one keeps the question and a
   assert.deepEqual(readFaqAskMessages(storage), []);
 });
 
-test('Ask keeps the latest exchange on screen and moves older questions into History Search', () => {
+test('Ask keeps only the latest exchange on screen and moves every older question into History Search', () => {
+  assert.equal(FAQ_ASK_RECENT_TURNS, 1);
   const pairs = (count: number) => Array.from({ length: count }, (_, index) => {
     const number = index + 1;
     return [
@@ -548,26 +549,34 @@ test('Ask keeps the latest exchange on screen and moves older questions into His
     ];
   }).flat();
   const messages = pairs(6);
-  assert.equal(visibleAskMessages(messages, null).map(message => message.content).join('\n'), [
-    'Question 5 about the badge printer',
-    'Answer 5 is in the IT guide.',
+  assert.deepEqual(visibleAskMessages(messages, null).map(message => message.content), [
     'Question 6 about the badge printer',
     'Answer 6 is in the IT guide.',
-  ].join('\n'));
+  ]);
   assert.deepEqual(
     visibleAskMessages(messages, 0).map(message => message.content),
     ['Question 1 about the badge printer', 'Answer 1 is in the IT guide.'],
   );
   assert.deepEqual(
     faqAskHistoryEntries(messages, '').map(turn => turn.question),
-    [1, 2, 3, 4].map(number => `Question ${number} about the badge printer`),
+    [1, 2, 3, 4, 5].map(number => `Question ${number} about the badge printer`),
   );
   assert.deepEqual(
     faqAskHistoryEntries(messages, 'question 6').map(turn => turn.question),
     ['Question 6 about the badge printer'],
   );
   assert.deepEqual(faqAskHistoryEntries(messages, 'not in the guides'), []);
-  assert.deepEqual(faqAskHistoryEntries(pairs(2), '').map(turn => turn.question), []);
+  assert.deepEqual(faqAskHistoryEntries(pairs(1), '').map(turn => turn.question), []);
+  const waiting = [
+    ...pairs(1),
+    { role: 'user' as const, content: 'Question 2 about the badge printer' },
+  ];
+  assert.deepEqual(visibleAskMessages(waiting, null).map(message => message.content), [
+    'Question 2 about the badge printer',
+  ]);
+  assert.deepEqual(faqAskHistoryEntries(waiting, '').map(turn => turn.question), [
+    'Question 1 about the badge printer',
+  ]);
   assert.equal(askHistorySnippet('Answer 1 is in the IT guide.'), 'Answer 1 is in the IT guide.');
   assert.ok(askHistorySnippet(`${'badge '.repeat(40)}printer`).length <= 140);
   assert.match(askHistorySnippet(`${'badge '.repeat(40)}printer`), /…$/);
@@ -584,33 +593,50 @@ test('Ask keeps the latest exchange on screen and moves older questions into His
   const threadStart = html.indexOf('data-testid="faq-ask-thread"');
   const historyStart = html.indexOf('data-testid="faq-ask-history"');
   const thread = html.slice(threadStart, historyStart);
-  assert.match(thread, /Question 5 about the badge printer/);
   assert.match(thread, /Question 6 about the badge printer/);
+  assert.match(thread, /Answer 6 is in the IT guide/);
+  assert.doesNotMatch(thread, /Question 5 about the badge printer/);
   assert.doesNotMatch(thread, /Question 1 about the badge printer/);
-  assert.doesNotMatch(thread, /Question 4 about the badge printer/);
   assert.match(html, /History Search/);
   assert.match(html, /aria-label="History Search"/);
   assert.match(html, /Search past questions/);
-  assert.match(html, /4 earlier questions/);
+  assert.match(html, /5 earlier questions/);
   assert.match(html, /max-h-64/);
   assert.match(html, /data-testid="faq-ask-history-item"/);
   assert.match(html, /Question 1 about the badge printer/);
   assert.match(html, /Answer 1 is in the IT guide\./);
-  assert.doesNotMatch(html.slice(historyStart), /Question 5 about the badge printer/);
+  assert.match(html.slice(historyStart), /Question 5 about the badge printer/);
+  assert.doesNotMatch(html.slice(historyStart), /Question 6 about the badge printer/);
   assert.match(read('src/app/dashboard/internal-docs/FaqAskPanel.tsx'), /data-testid="faq-ask-show-latest"/);
   assert.doesNotMatch(read('src/app/dashboard/internal-docs/FaqAskPanel.tsx'), /setMessages|FAQ_ASK_SESSION_KEY/);
 
-  const short = renderToStaticMarkup(createElement(FaqAskPanel, {
-    messages: pairs(2),
+  const one = renderToStaticMarkup(createElement(FaqAskPanel, {
+    messages: pairs(1),
     input: '',
     asking: false,
     error: '',
     onInputChange: () => undefined,
     onSubmit: () => undefined,
   }));
-  assert.match(short, /Question 1 about the badge printer/);
-  assert.match(short, /Question 2 about the badge printer/);
-  assert.doesNotMatch(short, /data-testid="faq-ask-history"/);
+  assert.match(one, /Question 1 about the badge printer/);
+  assert.doesNotMatch(one, /data-testid="faq-ask-history"/);
+
+  const submitted = renderToStaticMarkup(createElement(FaqAskPanel, {
+    messages: waiting,
+    input: '',
+    asking: true,
+    error: '',
+    onInputChange: () => undefined,
+    onSubmit: () => undefined,
+  }));
+  const submittedThread = submitted.slice(
+    submitted.indexOf('data-testid="faq-ask-thread"'),
+    submitted.indexOf('data-testid="faq-ask-history"'),
+  );
+  assert.match(submittedThread, /Question 2 about the badge printer/);
+  assert.doesNotMatch(submittedThread, /Question 1 about the badge printer/);
+  assert.match(submitted, /1 earlier question/);
+  assert.match(submitted.slice(submitted.indexOf('data-testid="faq-ask-history"')), /Question 1 about the badge printer/);
 
   const many = Array.from({ length: FAQ_ASK_STORED_MESSAGE_LIMIT + 20 }, (_, index) => ({
     role: index % 2 === 0 ? 'user' as const : 'assistant' as const,
