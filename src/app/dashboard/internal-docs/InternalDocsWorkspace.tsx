@@ -20,6 +20,7 @@ import { useInternalDocsState } from './InternalDocsState';
 import { documentIdFromInternalDocsPath } from './InternalDocsRoute';
 import { FaqListSkeleton, FaqWorking } from './FaqFeedback';
 import { GuideReader } from './GuideReader';
+import { revealOpenGuide } from './reveal-guide';
 import {
   INTERNAL_DOC_FILE_ACCEPT,
   MAX_INTERNAL_DOC_MB,
@@ -624,6 +625,7 @@ export function InternalDocsWorkspace() {
                     <Link
                       href={`/dashboard/internal-docs/${document.id}`}
                       scroll={false}
+                      onClick={() => { revealOpenGuide(document.id); }}
                       className={`block px-4 py-3 transition ${selected ? 'bg-white/[0.05]' : 'hover:bg-white/[0.03]'}`}
                     >
                       <span className="flex items-start justify-between gap-2">

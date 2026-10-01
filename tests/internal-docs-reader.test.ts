@@ -22,6 +22,7 @@ import {
   sanitizeDocumentHtml,
 } from '../src/lib/internal-docs-reader';
 import { contentDispositionFor, inlineDocumentRequested } from '../src/lib/internal-docs-storage';
+import { guideScrollTop } from '../src/app/dashboard/internal-docs/reveal-guide';
 
 const read = (file: string) => readFileSync(path.join(process.cwd(), file), 'utf8');
 
@@ -357,6 +358,43 @@ function memoryStorage(): FaqAskStorage {
     removeItem: key => { data.delete(key); },
   };
 }
+
+test('document title opens the in-page PDF without clearing Ask', () => {
+  assert.equal(guideScrollTop(0, 2349), 2333);
+  assert.equal(guideScrollTop(400, -80), 304);
+  assert.equal(guideScrollTop(10, 0), 0);
+
+  const pdf = renderGuide(guide({
+    title: 'Manual Book LED Auditorium',
+    extension: '.pdf',
+    originalName: 'manual-book-led-auditorium.pdf',
+    previewHtml: null,
+    extractedText: 'Auditorium LED power steps.',
+  }), false);
+  assert.match(pdf, /data-testid="guide-title"/);
+  assert.match(pdf, /href="#guide-document"/);
+  assert.match(pdf, /id="guide-document"/);
+  assert.match(pdf, /Manual Book LED Auditorium/);
+  assert.match(pdf, /data-testid="guide-pdf"/);
+  assert.doesNotMatch(pdf, /<h2[^>]*>Manual Book LED Auditorium<\/h2>/);
+
+  const reader = read('src/app/dashboard/internal-docs/GuideReader.tsx');
+  const reveal = read('src/app/dashboard/internal-docs/reveal-guide.ts');
+  const askPanel = read('src/app/dashboard/internal-docs/FaqAskPanel.tsx');
+  const workspace = read('src/app/dashboard/internal-docs/InternalDocsWorkspace.tsx');
+  assert.match(reader, /revealGuideReading/);
+  assert.match(reader, /setShowText\(false\)/);
+  assert.doesNotMatch(reader, /scrollIntoView\(\{ block: 'nearest' \}\)/);
+  assert.doesNotMatch(reader, /if \(!needle\) return/);
+  assert.match(reveal, /window\.scrollTo/);
+  assert.match(reveal, /focus\(\{ preventScroll: true \}\)/);
+  assert.doesNotMatch(reveal, /setMessages|FAQ_ASK_SESSION_KEY/);
+  assert.match(askPanel, /scroll=\{false\}/);
+  assert.match(askPanel, /revealOpenGuide\(citation\.documentId\)/);
+  assert.doesNotMatch(askPanel, /setMessages|FAQ_ASK_SESSION_KEY/);
+  assert.match(workspace, /scroll=\{false\}/);
+  assert.match(workspace, /revealOpenGuide\(document\.id\)/);
+});
 
 test('Ask citations are document links, and opening one keeps the question and answer', () => {
   const pdfId = '22222222-2222-4222-8222-222222222222';

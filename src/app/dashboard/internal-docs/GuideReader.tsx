@@ -12,6 +12,7 @@ import {
   type DocumentBlock,
   type InlineNode,
 } from '@/lib/internal-docs-reader';
+import { revealGuideReading } from './reveal-guide';
 
 type AccessLevel = 'company' | 'it-only';
 type DocStatus = 'pending' | 'indexed' | 'failed';
@@ -201,6 +202,7 @@ export function GuideReader({
   const [showText, setShowText] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const bodyRef = useRef<HTMLDivElement>(null);
+  const focusReading = useRef(false);
   const working = busy !== '';
 
   useEffect(() => {
@@ -208,16 +210,19 @@ export function GuideReader({
   }, [document.id]);
 
   useEffect(() => {
-    const root = bodyRef.current;
-    if (!root) return;
-    root.querySelectorAll('mark[data-guide-hit]').forEach(mark => {
-      mark.replaceWith(window.document.createTextNode(mark.textContent || ''));
+    const frame = window.requestAnimationFrame(() => {
+      const root = bodyRef.current;
+      if (!root) return;
+      root.querySelectorAll('mark[data-guide-hit]').forEach(mark => {
+        mark.replaceWith(window.document.createTextNode(mark.textContent || ''));
+      });
+      const needle = guideHighlightNeedle(highlight);
+      const focus = focusReading.current;
+      focusReading.current = false;
+      if (needle && markGuideHighlight(root, needle)) return;
+      revealGuideReading(root, focus);
     });
-    const needle = guideHighlightNeedle(highlight);
-    if (!needle) return;
-    if (!markGuideHighlight(root, needle)) {
-      root.querySelector('iframe')?.scrollIntoView({ block: 'nearest' });
-    }
+    return () => window.cancelAnimationFrame(frame);
   }, [highlight, document.id, document.extractedText, document.previewHtml, showText]);
 
   const isPdf = document.extension.toLowerCase() === '.pdf';
@@ -227,10 +232,28 @@ export function GuideReader({
   const extensionLabel = document.extension.replace('.', '').toUpperCase() || 'FILE';
 
   return (
-    <div data-testid="guide-reader" id="guide-reader">
+    <div data-testid="guide-reader" id="guide-reader" data-document-id={document.id}>
       <header className="flex flex-wrap items-start justify-between gap-3 border-b border-[var(--mos-border-subtle)] px-4 py-3 sm:px-5">
         <div className="min-w-0">
-          <h2 className="text-lg font-[560] tracking-[-0.03em] text-[var(--mos-text)]">{document.title}</h2>
+          <h2>
+            <a
+              href="#guide-document"
+              data-testid="guide-title"
+              onClick={event => {
+                event.preventDefault();
+                focusReading.current = true;
+                if (isPdf && showText) {
+                  setShowText(false);
+                  return;
+                }
+                revealGuideReading(bodyRef.current, true);
+                focusReading.current = false;
+              }}
+              className="text-left text-lg font-[560] tracking-[-0.03em] text-[var(--mos-text)] underline decoration-transparent underline-offset-2 hover:decoration-current focus-visible:rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--mos-accent-ring)]"
+            >
+              {document.title}
+            </a>
+          </h2>
           <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">
             <a
               data-testid="guide-filename"
@@ -289,7 +312,7 @@ export function GuideReader({
       {busy === 'reindex' && <FaqWorking label="Indexing this guide" testId="internal-docs-reindex-loading" />}
       {busy === 'access' && <FaqWorking label="Updating access" testId="internal-docs-access-loading" />}
       {document.errorMessage && <p className="px-4 py-2 text-sm text-red-300 sm:px-5">{document.errorMessage}</p>}
-      <div ref={bodyRef}>
+      <div ref={bodyRef} id="guide-document" tabIndex={-1} className="scroll-mt-4 outline-none">
         <ReadingPane document={document} showText={showText} />
       </div>
     </div>
