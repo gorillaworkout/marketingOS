@@ -329,6 +329,80 @@ function termIdf(df: number, total: number): number {
   return Math.log(1 + (total - df + 0.5) / (df + 0.5));
 }
 
+const ID_AFFIX_PREFIX = new Set(['', 'me', 'mem', 'men', 'meng', 'meny', 'di', 'ber', 'ter', 'pe', 'per', 'se']);
+const ID_AFFIX_SUFFIX = new Set(['', 'kan', 'an', 'i', 'lah', 'nya', 'in']);
+
+/** "nyala" and "menyala" are the same word. Affixes only; unrelated words stay apart. */
+function lexemeMatch(queryToken: string, docToken: string): boolean {
+  if (queryToken === docToken) return true;
+  const queryShorter = queryToken.length <= docToken.length;
+  const short = queryShorter ? queryToken : docToken;
+  const long = queryShorter ? docToken : queryToken;
+  if (short.length < 4) return false;
+  const at = long.indexOf(short);
+  if (at < 0) return false;
+  return ID_AFFIX_PREFIX.has(long.slice(0, at)) && ID_AFFIX_SUFFIX.has(long.slice(at + short.length));
+}
+
+function termFrequency(tf: Map<string, number>, token: string): number {
+  const exact = tf.get(token) || 0;
+  if (exact) return exact;
+  let freq = 0;
+  for (const [key, count] of tf) {
+    if (lexemeMatch(token, key)) freq += count;
+  }
+  return freq;
+}
+
+// "laptop tidak bisa nyala" is a fault report. "Power on the LED" is an instruction.
+const POWER_FAILURE = /\b(?:tidak|nggak|gak|ga|belum|gagal)\b\W+(?:\w+\W+){0,4}?(?:[\w]*nyala[\w]*|boot\w*)|\b(?:won't|wont|doesn't|does not|cannot|can't|cant)\b\W+(?:\w+\W+){0,3}?(?:turn on|power on|boot\w*|start up)|\bnot booting\b|\bno power\b|\bmati total\b/i;
+
+function isPowerFailureQuery(query: string): boolean {
+  return POWER_FAILURE.test(query);
+}
+
+function isPowerSymptomToken(token: string): boolean {
+  return token.includes('nyala') || token.startsWith('boot');
+}
+
+function powerFailureIndex(content: string, deviceTokens: readonly string[]): number {
+  const normalized = content.replace(/\s+/g, ' ').trim();
+  const pattern = new RegExp(POWER_FAILURE.source, 'gi');
+  let best = -1;
+  let bestDist = Infinity;
+  for (const match of normalized.matchAll(pattern)) {
+    const at = match.index ?? 0;
+    if (!deviceTokens.length) return at;
+    const lower = normalized.toLowerCase();
+    let dist = Infinity;
+    for (const token of deviceTokens) {
+      let from = 0;
+      while (from < lower.length) {
+        const found = lower.indexOf(token, from);
+        if (found < 0) break;
+        dist = Math.min(dist, Math.abs(found - at));
+        from = found + token.length;
+      }
+    }
+    if (dist < bestDist) {
+      bestDist = dist;
+      best = at;
+    }
+  }
+  if (best < 0 || bestDist > 200) return -1;
+  return best;
+}
+
+function excerptAroundMatch(content: string, at: number): string {
+  const normalized = content.replace(/\s+/g, ' ').trim();
+  if (!normalized) return '';
+  if (at <= 0 || at >= normalized.length) return normalized.slice(0, EXCERPT_CHARS);
+  const before = normalized.slice(0, at);
+  const sentence = Math.max(before.lastIndexOf('. '), before.lastIndexOf('? '), before.lastIndexOf('! '));
+  const start = sentence === -1 ? Math.max(0, at) : sentence + 2;
+  return normalized.slice(start, start + EXCERPT_CHARS).trim();
+}
+
 function bm25Weight(tf: number, docLen: number, avgdl: number, idf: number): number {
   const lengthNorm = 1 - BM25_B + BM25_B * (docLen / Math.max(avgdl, 1));
   return idf * ((tf * (BM25_K1 + 1)) / (tf + BM25_K1 * lengthNorm));
@@ -385,7 +459,7 @@ export function rankInternalDocChunks(
     const matched: string[] = [];
     let lexical = 0;
     for (const token of tokens) {
-      const freq = row.tf.get(token) || 0;
+      const freq = termFrequency(row.tf, token);
       if (!freq) continue;
       matched.push(token);
       lexical += bm25Weight(freq, row.docLen, avgdl, idfOf.get(token) || 0);
@@ -407,6 +481,7 @@ export function rankInternalDocChunks(
       focusMatches: countFocusMatches(matched, focus),
       titleHits,
       bodyHits,
+      failureAt: -1,
       score: lexical + titleHits * 8 + bodyHits * 4 + COSINE_WEIGHT * Math.max(0, row.cosine),
     }];
   });
@@ -433,6 +508,26 @@ export function rankInternalDocChunks(
     }
   }
 
+  // A venue manual can mention "laptop" next to HDMI and still not be the
+  // IT FAQ section about a laptop that will not turn on or boot.
+  if (isPowerFailureQuery(query)) {
+    const device = focus.filter(token => !isPowerSymptomToken(token));
+    const symptoms = focus.filter(isPowerSymptomToken);
+    const grounded = scored.flatMap(row => {
+      const at = powerFailureIndex(row.chunk.content, device);
+      if (at < 0) return [];
+      if (device.length > 0 && !device.every(token => row.matched.includes(token))) return [];
+      const matched = [...new Set([...row.matched, ...symptoms])];
+      return [{
+        ...row,
+        matched,
+        focusMatches: countFocusMatches(matched, focus),
+        failureAt: at,
+      }];
+    });
+    if (grounded.length) scored = grounded;
+  }
+
   // A title that contains the subject phrase outranks a body mention, which
   // outranks a guide that only repeats a shared verb or one broad noun.
   scored.sort((left, right) =>
@@ -451,10 +546,12 @@ export function rankInternalDocChunks(
       title: row.chunk.title,
       accessLevel: row.chunk.access_level === 'it-only' ? 'it-only' : 'company',
       chunkId: row.chunk.chunk_id,
-      excerpt: excerptAroundPhrases(row.chunk.content, bigrams),
+      excerpt: row.failureAt >= 0
+        ? excerptAroundMatch(row.chunk.content, row.failureAt)
+        : excerptAroundPhrases(row.chunk.content, bigrams),
       score: row.score,
       matchedTerms: row.matched,
-      subjectMatched: bigrams.length === 0 || row.titleHits + row.bodyHits > 0,
+      subjectMatched: bigrams.length === 0 || row.titleHits + row.bodyHits > 0 || row.failureAt >= 0,
     });
     if (hits.length >= limit) break;
   }

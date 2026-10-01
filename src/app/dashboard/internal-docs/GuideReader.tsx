@@ -6,6 +6,7 @@ import { FaqWorking } from './FaqFeedback';
 import {
   guideHighlightNeedle,
   internalDocFilePath,
+  locateGuideHighlight,
   parseMarkdownDocument,
   parsePlainDocument,
   sanitizeDocumentHtml,
@@ -91,40 +92,47 @@ function Blocks({ blocks }: { blocks: DocumentBlock[] }) {
 }
 
 function markGuideHighlight(root: HTMLElement, highlight: string): boolean {
+  const nodes: Text[] = [];
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  let node = walker.nextNode();
+  while (node) {
+    nodes.push(node as Text);
+    node = walker.nextNode();
+  }
+  const located = locateGuideHighlight(nodes.map(item => item.textContent || ''), highlight);
+  if (!located) return false;
+  const target = nodes[located.segment];
+  const parent = target?.parentElement;
+  if (!target || !parent || parent.closest('mark[data-guide-hit]')) return false;
   const needle = guideHighlightNeedle(highlight).slice(0, 48);
-  if (needle.length < 12) return false;
   const pattern = needle.split(/\s+/).filter(Boolean).map(part => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('\\s+');
   let matcher: RegExp;
   try {
     matcher = new RegExp(pattern, 'i');
   } catch {
-    return false;
+    parent.scrollIntoView({ block: 'center' });
+    return true;
   }
-  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
-  let node = walker.nextNode();
-  while (node) {
-    const text = node.textContent || '';
-    const match = matcher.exec(text);
-    const parent = node.parentElement;
-    if (match && match.index !== undefined && !parent?.closest('mark[data-guide-hit]')) {
-      try {
-        const range = document.createRange();
-        range.setStart(node, match.index);
-        range.setEnd(node, match.index + match[0].length);
-        const mark = document.createElement('mark');
-        mark.dataset.guideHit = 'true';
-        mark.className = 'rounded-sm bg-[#f6e7a1] px-0.5 text-inherit';
-        range.surroundContents(mark);
-        mark.scrollIntoView({ block: 'center' });
-        return true;
-      } catch {
-        parent?.scrollIntoView({ block: 'center' });
-        return true;
-      }
+  const match = matcher.exec((target.textContent || '').slice(located.index));
+  if (match && match.index !== undefined) {
+    try {
+      const range = document.createRange();
+      const start = located.index + match.index;
+      range.setStart(target, start);
+      range.setEnd(target, start + match[0].length);
+      const mark = document.createElement('mark');
+      mark.dataset.guideHit = 'true';
+      mark.className = 'rounded-sm bg-[#f6e7a1] px-0.5 text-inherit';
+      range.surroundContents(mark);
+      mark.scrollIntoView({ block: 'center' });
+      return true;
+    } catch {
+      parent.scrollIntoView({ block: 'center' });
+      return true;
     }
-    node = walker.nextNode();
   }
-  return false;
+  parent.scrollIntoView({ block: 'center' });
+  return true;
 }
 
 function ReadingPane({ document, showText }: { document: GuideDocument; showText: boolean }) {
@@ -199,15 +207,22 @@ export function GuideReader({
   onReindex: () => void;
   onDelete: () => void;
 }) {
-  const [showText, setShowText] = useState(false);
-  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const highlightedPdf = document.extension.toLowerCase() === '.pdf' && highlight.trim().length > 0;
+  const textViewKey = `${document.id}\n${highlight}`;
+  const [textOverride, setTextOverride] = useState<{ key: string; show: boolean } | null>(null);
+  const showText = textOverride?.key === textViewKey ? textOverride.show : highlightedPdf;
+  const setShowText = (value: boolean | ((current: boolean) => boolean)) => {
+    setTextOverride(current => {
+      const base = current?.key === textViewKey ? current.show : highlightedPdf;
+      const show = typeof value === 'function' ? value(base) : value;
+      return { key: textViewKey, show };
+    });
+  };
+  const [deleteDocumentId, setDeleteDocumentId] = useState('');
+  const confirmingDelete = deleteDocumentId !== '' && deleteDocumentId === document.id;
   const bodyRef = useRef<HTMLDivElement>(null);
   const focusReading = useRef(false);
   const working = busy !== '';
-
-  useEffect(() => {
-    setConfirmingDelete(false);
-  }, [document.id]);
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => {
@@ -296,7 +311,7 @@ export function GuideReader({
             </Select>
           </label>
           <Button size="sm" onClick={onReindex} disabled={working}>Reindex</Button>
-          <Button size="sm" variant="danger" onClick={() => setConfirmingDelete(true)} disabled={working}>Delete</Button>
+          <Button size="sm" variant="danger" onClick={() => setDeleteDocumentId(document.id)} disabled={working}>Delete</Button>
         </div>
       )}
       {canManage && confirmingDelete && (
@@ -304,7 +319,7 @@ export function GuideReader({
           <p className="text-sm leading-6 text-red-100">Delete “{document.title}”? This removes the guide, its indexed passages, and its knowledge graph entry. Ask will no longer use it.</p>
           <div className="mt-3 flex flex-wrap gap-2">
             <Button size="sm" variant="danger" disabled={working} onClick={onDelete}>{busy === 'delete' ? 'Deleting…' : 'Delete guide'}</Button>
-            <Button size="sm" disabled={working} onClick={() => setConfirmingDelete(false)}>Cancel</Button>
+            <Button size="sm" disabled={working} onClick={() => setDeleteDocumentId('')}>Cancel</Button>
           </div>
           {busy === 'delete' && <FaqWorking compact label="Deleting this guide" testId="internal-docs-delete-loading" />}
         </div>

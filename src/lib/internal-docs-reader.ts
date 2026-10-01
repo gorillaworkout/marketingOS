@@ -332,3 +332,41 @@ export function internalDocImagePath(documentId: string, index: number): string 
 export function guideHighlightNeedle(excerpt: string): string {
   return excerpt.replace(/\s+/g, ' ').trim().slice(0, 160);
 }
+
+/** Find which text segment contains the highlight, including a line break between segments. */
+export function locateGuideHighlight(
+  segments: readonly string[],
+  highlight: string,
+): { segment: number; index: number } | null {
+  const needle = guideHighlightNeedle(highlight).slice(0, 48);
+  if (needle.length < 12) return null;
+  const pattern = needle.split(/\s+/).filter(Boolean).map(part => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('\\s+');
+  let matcher: RegExp;
+  try {
+    matcher = new RegExp(pattern, 'i');
+  } catch {
+    return null;
+  }
+  const spans: { segment: number; start: number; end: number }[] = [];
+  let offset = 0;
+  const pieces: string[] = [];
+  segments.forEach((segment, segmentIndex) => {
+    spans.push({ segment: segmentIndex, start: offset, end: offset + segment.length });
+    pieces.push(segment);
+    offset += segment.length;
+    if (segmentIndex < segments.length - 1) {
+      pieces.push('\n');
+      offset += 1;
+    }
+  });
+  const match = matcher.exec(pieces.join(''));
+  if (!match || match.index === undefined) return null;
+  const at = match.index;
+  const span = spans.find(item => at >= item.start && at < item.end);
+  if (!span) {
+    const next = spans.find(item => item.start >= at);
+    if (!next) return null;
+    return { segment: next.segment, index: 0 };
+  }
+  return { segment: span.segment, index: at - span.start };
+}
