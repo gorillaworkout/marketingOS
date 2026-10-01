@@ -177,7 +177,9 @@ export function FaqAskPanel({
           <div className="flex items-center justify-between gap-3">
             <h3 className="text-sm font-[560] text-[var(--mos-text)]">History Search</h3>
             <p className="text-[11px] text-[var(--mos-text-faint)]">
-              {historyQuery.trim() ? `${history.length} matches` : `${earlier.length} earlier questions`}
+              {historyQuery.trim()
+                ? `${history.length} ${history.length === 1 ? 'match' : 'matches'}`
+                : `${earlier.length} ${earlier.length === 1 ? 'earlier question' : 'earlier questions'}`}
             </p>
           </div>
           <TextInput

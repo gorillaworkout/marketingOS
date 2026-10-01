@@ -1,7 +1,7 @@
 import type { FaqAskMessage } from './FaqAskPanel';
 
-/** Latest exchanges kept in the main Ask thread. Everything older goes to History Search. */
-export const FAQ_ASK_RECENT_TURNS = 2;
+/** Only the current Ask stays on screen. The previous exchange moves to History Search as soon as a new question is submitted. */
+export const FAQ_ASK_RECENT_TURNS = 1;
 
 export interface FaqAskTurn {
   index: number;
