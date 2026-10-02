@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { queryOne } from '@/lib/database';
+import { requiresAdminApiAccess } from '@/lib/admin-api-access';
 import { ACCOUNT_FEATURE_LABELS, canAccessFeature, enabledFeaturesForUser, type AccountFeature } from '@/lib/authorization';
 
 export interface AuthResult {
@@ -39,17 +40,8 @@ export async function getSession(request: NextRequest): Promise<AuthResult | Aut
       return { error: 'Unauthorized', status: 401 };
     }
 
-    const adminOnlyPaths = [
-      '/api/dashboard/tokens', '/api/admin/users', '/api/admin/departments',
-      '/api/templates', '/api/calendar', '/api/knowledge',
-      '/api/brand-guidelines',
-    ];
-    // Steps inside a member's own generation run. Feature access is still gated
-    // per-department by requireFeature on the generation routes themselves.
-    const memberAllowedPaths = ['/api/knowledge/save'];
     const pathname = request.nextUrl.pathname;
-    const isMemberAllowed = memberAllowedPaths.includes(pathname);
-    if (!isMemberAllowed && adminOnlyPaths.some(path => pathname === path || pathname.startsWith(`${path}/`))) {
+    if (requiresAdminApiAccess(pathname, request.method)) {
       const user = await queryOne<{ role: string }>('SELECT role FROM users WHERE id = ?', [userId]);
       if (user?.role !== 'admin') return { error: 'Forbidden: admin only', status: 403 };
     }
