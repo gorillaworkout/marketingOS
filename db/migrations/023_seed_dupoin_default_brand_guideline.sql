@@ -1,6 +1,7 @@
 -- Official Dupoin Futures voice guideline for users who have none.
 -- Idempotent: a user with any brand_guidelines row is skipped.
 -- Does not update or delete existing guidelines.
+-- Row ids are core uuid casts (no pgcrypto / gen_random_uuid).
 
 INSERT INTO brand_guidelines (
   id,
@@ -14,7 +15,7 @@ INSERT INTO brand_guidelines (
   examples
 )
 SELECT
-  gen_random_uuid()::text,
+  md5(random()::text || clock_timestamp()::text || u.id)::uuid::text,
   u.id,
   'Dupoin Futures',
   'Professional, stable, trustworthy — clarity over decoration',
