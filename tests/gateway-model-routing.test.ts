@@ -30,6 +30,7 @@ const gatewayConfig = read('src/lib/gateway-config.ts');
 const envExample = read('.env.example');
 const restoreMigration = read('db/migrations/014_restore_codex_ai_research.sql');
 const claude5Migration = read('db/migrations/015_add_claude_sonnet5_opus5.sql');
+const claude55Migration = read('db/migrations/024_add_claude_sonnet55_opus55.sql');
 
 test('MarketingOS exposes GorillaWorkout as its only generation gateway', () => {
   assert.match(openai, /export type ModelProvider = 'gorillaworkout'/);
@@ -134,6 +135,8 @@ test('AI Research routing restores Codex and Claude 5 and never reintroduces Kim
   assert.match(routing, /PREFERRED_CODEX_MODEL/);
   assert.match(routing, /CLAUDE_SONNET_5_MODEL/);
   assert.match(routing, /CLAUDE_OPUS_5_MODEL/);
+  assert.match(routing, /CLAUDE_SONNET_5_5_MODEL/);
+  assert.match(routing, /CLAUDE_OPUS_5_5_MODEL/);
   assert.match(routing, /cx\/gpt-5\.3-codex-spark/);
   assert.match(routing, /cx\/gpt-5\.6-terra/);
   assert.match(routing, /cx\/gpt-5\.6-luna/);
@@ -143,11 +146,15 @@ test('AI Research routing restores Codex and Claude 5 and never reintroduces Kim
   assert.ok(AVAILABLE_MODELS.some(model => model.id === 'cx/gpt-5.3-codex-spark'));
   assert.ok(AVAILABLE_MODELS.some(model => model.id === 'cc/claude-sonnet-5'));
   assert.ok(AVAILABLE_MODELS.some(model => model.id === 'cc/claude-opus-5'));
+  assert.ok(AVAILABLE_MODELS.some(model => model.id === 'cc/claude-sonnet-5-5'));
+  assert.ok(AVAILABLE_MODELS.some(model => model.id === 'cc/claude-opus-5-5'));
   assert.ok(AVAILABLE_MODELS.some(model => model.id === 'ag/claude-sonnet-4-6'));
   assert.ok(AVAILABLE_MODELS.some(model => model.id === 'lr/claude-sonnet-4.5'));
   assert.match(openai, /cx\/gpt-5\.6-sol/);
   assert.match(openai, /cc\/claude-sonnet-5/);
   assert.match(openai, /cc\/claude-opus-5/);
+  assert.match(openai, /cc\/claude-sonnet-5-5/);
+  assert.match(openai, /cc\/claude-opus-5-5/);
   assert.match(modelsRoute, /AVAILABLE_MODELS/);
   assert.match(restoreMigration, /cx\/gpt-5\.6-sol/);
   assert.match(restoreMigration, /cx\/gpt-5\.3-codex-spark/);
@@ -155,4 +162,9 @@ test('AI Research routing restores Codex and Claude 5 and never reintroduces Kim
   assert.match(claude5Migration, /cc\/claude-sonnet-5/);
   assert.match(claude5Migration, /cc\/claude-opus-5/);
   assert.match(claude5Migration, /'ai-research'/);
+  assert.match(claude55Migration, /cc\/claude-sonnet-5-5/);
+  assert.match(claude55Migration, /cc\/claude-opus-5-5/);
+  assert.match(claude55Migration, /'cc\/claude-sonnet-5'/);
+  assert.match(claude55Migration, /'cc\/claude-opus-5'/);
+  assert.match(claude55Migration, /'ai-research'/);
 });

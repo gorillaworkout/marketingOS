@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { AVAILABLE_MODELS, CLAUDE_OPUS_5_MODEL, CLAUDE_SONNET_5_MODEL } from '../src/lib/openai';
+import { AVAILABLE_MODELS, CLAUDE_OPUS_5_5_MODEL, CLAUDE_OPUS_5_MODEL, CLAUDE_SONNET_5_5_MODEL, CLAUDE_SONNET_5_MODEL } from '../src/lib/openai';
 import { IMAGE_MODELS, DEFAULT_IMAGE_MODEL } from '../src/lib/image-models';
 import { GENERATION_FEATURES } from '../src/lib/authorization';
 
@@ -88,6 +88,39 @@ test('015 adds Claude Sonnet 5 and Opus 5 to every feature, drops residual Kimi,
   assert.ok(quoted.includes(CLAUDE_OPUS_5_MODEL));
   const missing = quoted.filter(id => !catalog.has(id));
   assert.deepEqual(missing, [], '015 would write models that are not in AVAILABLE_MODELS');
+});
+
+test('024 adds Claude Sonnet 5.5 and Opus 5.5 to every feature, keeps older Claude ids, and is idempotent', () => {
+  const claude55 = readFileSync('db/migrations/024_add_claude_sonnet55_opus55.sql', 'utf8');
+  const executable = withoutSqlComments(claude55);
+  assert.match(claude55, /BEGIN;[\s\S]*COMMIT;/);
+  assert.match(claude55, /ON CONFLICT \(feature_key\) DO NOTHING/);
+  assert.doesNotMatch(claude55, /DROP TABLE|DELETE FROM|TRUNCATE/i);
+  assert.match(executable, /'cc\/claude-sonnet-5'/);
+  assert.match(executable, /'cc\/claude-opus-5'/);
+  assert.match(executable, /cc\/claude-sonnet-5-5/);
+  assert.match(executable, /cc\/claude-opus-5-5/);
+  assert.match(executable, /ag\/claude-sonnet-4-6/);
+  assert.match(executable, /lr\/claude-sonnet-4\.5/);
+  assert.match(executable, /'ai-research'/);
+  assert.match(executable, /kimi\/%/);
+  assert.match(executable, /tr\/moonshotai\/%/);
+  assert.match(executable, /cmc\/moonshotai\/%/);
+  assert.match(claude55, /chat\/completions was not verified/);
+  assert.doesNotMatch(executable, /kimi\/k3|kimi\/kimi/);
+  assert.doesNotMatch(executable, /cc\/claude-fable|cc\/claude-haiku/);
+  for (const feature of GENERATION_FEATURES) {
+    assert.match(claude55, new RegExp(`'${feature}'`));
+  }
+  const quoted = [...executable.matchAll(/'((?:ag|cc|cx|kimi|tr|lr)\/[^']+|pecut-free)'/g)]
+    .map(match => match[1])
+    .filter(id => !id.includes('%'));
+  assert.ok(quoted.includes(CLAUDE_SONNET_5_MODEL));
+  assert.ok(quoted.includes(CLAUDE_OPUS_5_MODEL));
+  assert.ok(quoted.includes(CLAUDE_SONNET_5_5_MODEL));
+  assert.ok(quoted.includes(CLAUDE_OPUS_5_5_MODEL));
+  const missing = quoted.filter(id => !catalog.has(id));
+  assert.deepEqual(missing, [], '024 would write models that are not in AVAILABLE_MODELS');
 });
 
 test('013 creates image_model_assignments with the current catalog and is safe on existing prod', () => {

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { AVAILABLE_MODELS, CLAUDE_OPUS_5_MODEL, CLAUDE_SONNET_5_MODEL, getModelProvider } from '../src/lib/openai';
+import { AVAILABLE_MODELS, CLAUDE_OPUS_5_5_MODEL, CLAUDE_OPUS_5_MODEL, CLAUDE_SONNET_5_5_MODEL, CLAUDE_SONNET_5_MODEL, getModelProvider } from '../src/lib/openai';
 
 test('Claude-family catalog IDs are exposed only through GorillaWorkout', () => {
   const claudeFamily = AVAILABLE_MODELS.filter(model => model.id.includes('claude'));
@@ -11,17 +11,28 @@ test('Claude-family catalog IDs are exposed only through GorillaWorkout', () => 
   assert.equal(AVAILABLE_MODELS.some(model => ['haiku', 'sonnet', 'opus'].includes(model.id)), false);
   assert.ok(AVAILABLE_MODELS.some(model => model.id === CLAUDE_SONNET_5_MODEL), 'Claude Sonnet 5 must be in the catalog');
   assert.ok(AVAILABLE_MODELS.some(model => model.id === CLAUDE_OPUS_5_MODEL), 'Claude Opus 5 must be in the catalog');
+  assert.ok(AVAILABLE_MODELS.some(model => model.id === CLAUDE_SONNET_5_5_MODEL), 'Claude Sonnet 5.5 must be in the catalog');
+  assert.ok(AVAILABLE_MODELS.some(model => model.id === CLAUDE_OPUS_5_5_MODEL), 'Claude Opus 5.5 must be in the catalog');
+  assert.equal(AVAILABLE_MODELS.find(model => model.id === CLAUDE_SONNET_5_5_MODEL)?.tier, 'balanced');
   assert.equal(AVAILABLE_MODELS.find(model => model.id === CLAUDE_OPUS_5_MODEL)?.tier, 'premium');
+  assert.equal(AVAILABLE_MODELS.find(model => model.id === CLAUDE_OPUS_5_5_MODEL)?.tier, 'premium');
   assert.equal(AVAILABLE_MODELS.find(model => model.id === CLAUDE_SONNET_5_MODEL)?.name, 'Claude Sonnet 5');
   assert.equal(AVAILABLE_MODELS.find(model => model.id === CLAUDE_OPUS_5_MODEL)?.name, 'Claude Opus 5');
+  assert.equal(AVAILABLE_MODELS.find(model => model.id === CLAUDE_SONNET_5_5_MODEL)?.name, 'Claude Sonnet 5.5');
+  assert.equal(AVAILABLE_MODELS.find(model => model.id === CLAUDE_OPUS_5_5_MODEL)?.name, 'Claude Opus 5.5');
 });
 
 test('retired upstream prefixes stay out of the catalog', () => {
   // VPS GET /models lists cmc/moonshotai/Kimi-K2.5 and Kimi-K2.6 — do not catalog.
-  // kimi/* and tr/* stay retired. cc/claude-sonnet-5 and cc/claude-opus-5 are
-  // restored for llmdupoin; other cc/* are listed but not cataloged.
+  // kimi/* and tr/* stay retired. cc/claude-sonnet-5, cc/claude-opus-5,
+  // cc/claude-sonnet-5-5, and cc/claude-opus-5-5 are cataloged for llmdupoin;
+  // other cc/* are listed but not cataloged.
   const retired = AVAILABLE_MODELS.filter(model =>
-    (model.id.startsWith('cc/') && model.id !== CLAUDE_SONNET_5_MODEL && model.id !== CLAUDE_OPUS_5_MODEL)
+    (model.id.startsWith('cc/')
+      && model.id !== CLAUDE_SONNET_5_MODEL
+      && model.id !== CLAUDE_OPUS_5_MODEL
+      && model.id !== CLAUDE_SONNET_5_5_MODEL
+      && model.id !== CLAUDE_OPUS_5_5_MODEL)
     || model.id.startsWith('kimi/') || model.id.startsWith('tr/')
     || model.id.startsWith('cmc/')
     || model.id.toLowerCase().includes('kimi')
@@ -32,6 +43,8 @@ test('retired upstream prefixes stay out of the catalog', () => {
   assert.ok(AVAILABLE_MODELS.some(model => model.id === 'cx/gpt-5.3-codex-spark'), 'Codex Spark must be in the catalog');
   assert.ok(AVAILABLE_MODELS.some(model => model.id === CLAUDE_SONNET_5_MODEL), 'Claude Sonnet 5 must be in the catalog');
   assert.ok(AVAILABLE_MODELS.some(model => model.id === CLAUDE_OPUS_5_MODEL), 'Claude Opus 5 must be in the catalog');
+  assert.ok(AVAILABLE_MODELS.some(model => model.id === CLAUDE_SONNET_5_5_MODEL), 'Claude Sonnet 5.5 must be in the catalog');
+  assert.ok(AVAILABLE_MODELS.some(model => model.id === CLAUDE_OPUS_5_5_MODEL), 'Claude Opus 5.5 must be in the catalog');
   assert.ok(AVAILABLE_MODELS.some(model => model.id === 'ag/claude-sonnet-4-6'), 'Claude Sonnet 4.6 must stay in the catalog');
   assert.ok(AVAILABLE_MODELS.some(model => model.id === 'lr/claude-sonnet-4.5'), 'Claude Sonnet 4.5 must stay in the catalog');
 });
