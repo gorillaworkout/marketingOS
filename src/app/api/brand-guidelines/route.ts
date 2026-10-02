@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { queryOne, queryAll, execute } from '@/lib/database';
 import { getSession } from '@/lib/auth';
+import { ensureDefaultBrandGuideline } from '@/lib/dupoin-default-brand-guideline';
 import { v4 as uuidv4 } from 'uuid';
 
 // GET: List all brand guidelines for the authenticated user
@@ -8,6 +9,8 @@ export async function GET(request: NextRequest) {
   const auth = await getSession(request);
   if (auth.error) return NextResponse.json({ error: auth.error }, { status: auth.status });
   const userId = auth.userId;
+  if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  await ensureDefaultBrandGuideline(userId);
   const guidelines = await queryAll('SELECT id, brand_name, tone_of_voice, target_market, key_messages, do_list, dont_list, examples, created_at, updated_at FROM brand_guidelines WHERE user_id = ? ORDER BY updated_at DESC', [userId]) as Record<string, unknown>[];
 
   return NextResponse.json({
