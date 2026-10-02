@@ -1,9 +1,12 @@
 /**
- * Self-check for db/migrations/015_add_claude_sonnet5_opus5.sql.
+ * Self-check for db/migrations/015_add_claude_sonnet5_opus5.sql, then
+ * db/migrations/024_add_claude_sonnet55_opus55.sql.
  *
  * Rebuilds a post-014 assignment state (Codex on AI Research, no Claude 5),
- * applies the migration twice, and asserts Sonnet 5 + Opus 5 land on every
- * feature, Kimi stays out, defaults are unchanged, and no user row was lost.
+ * applies 015 twice, and asserts Sonnet 5 + Opus 5 land on every feature,
+ * Kimi stays out, defaults are unchanged, and no user row was lost.
+ * Then applies 024 twice and asserts Sonnet 5.5 + Opus 5.5 are unioned onto
+ * every feature without changing those defaults or live preferences.
  *
  * Usage:
  *   TEST_DATABASE_URL=postgres://postgres@127.0.0.1:5599/mostest \
@@ -23,10 +26,18 @@ process.env.DATABASE_URL = TEST_DATABASE_URL;
 
 async function main() {
   const { execute, queryAll, closeDb } = await import('../src/lib/database');
-  const { AVAILABLE_MODELS, CLAUDE_OPUS_5_MODEL, CLAUDE_SONNET_5_MODEL, PREFERRED_CODEX_MODEL } = await import('../src/lib/openai');
+  const {
+    AVAILABLE_MODELS,
+    CLAUDE_OPUS_5_5_MODEL,
+    CLAUDE_OPUS_5_MODEL,
+    CLAUDE_SONNET_5_5_MODEL,
+    CLAUDE_SONNET_5_MODEL,
+    PREFERRED_CODEX_MODEL,
+  } = await import('../src/lib/openai');
   const live = new Set(AVAILABLE_MODELS.map(model => model.id));
 
   const sql = await readFile(path.join(process.cwd(), 'db/migrations/015_add_claude_sonnet5_opus5.sql'), 'utf8');
+  const sql55 = await readFile(path.join(process.cwd(), 'db/migrations/024_add_claude_sonnet55_opus55.sql'), 'utf8');
 
   await execute('DELETE FROM task_model_preferences');
   await execute('DELETE FROM feature_model_assignments');
@@ -142,6 +153,52 @@ async function main() {
 
   console.log('PASS — migration 015 adds Claude Sonnet 5 and Opus 5 without data loss or Kimi');
   for (const row of assignments) {
+    console.log(`  ${row.feature_key.padEnd(22)} default=${row.default_model.padEnd(22)} ${JSON.stringify(row.allowed_models)}`);
+  }
+
+  const defaultsBefore55 = new Map(assignments.map(row => [row.feature_key, row.default_model]));
+  const preferencesBefore55 = preferences.map(row => `${row.task_type}:${row.model}`);
+
+  await execute(sql55);
+  await execute(sql55);
+
+  const after55 = await queryAll<{ feature_key: string; allowed_models: string[]; default_model: string }>(
+    'SELECT feature_key, allowed_models, default_model FROM feature_model_assignments ORDER BY feature_key',
+  );
+  assert.equal(after55.length, 6, '024 keeps every generation feature');
+  const catalogCc = new Set([
+    CLAUDE_SONNET_5_MODEL,
+    CLAUDE_OPUS_5_MODEL,
+    CLAUDE_SONNET_5_5_MODEL,
+    CLAUDE_OPUS_5_5_MODEL,
+  ]);
+  for (const row of after55) {
+    assert.equal(row.default_model, defaultsBefore55.get(row.feature_key), `${row.feature_key} default changed`);
+    assert.equal(new Set(row.allowed_models).size, row.allowed_models.length, `${row.feature_key} duplicated an allowlist id`);
+    assert.ok(row.allowed_models.includes(CLAUDE_SONNET_5_MODEL), `${row.feature_key} dropped Sonnet 5`);
+    assert.ok(row.allowed_models.includes(CLAUDE_OPUS_5_MODEL), `${row.feature_key} dropped Opus 5`);
+    assert.ok(row.allowed_models.includes(CLAUDE_SONNET_5_5_MODEL), `${row.feature_key} missing Sonnet 5.5`);
+    assert.ok(row.allowed_models.includes(CLAUDE_OPUS_5_5_MODEL), `${row.feature_key} missing Opus 5.5`);
+    assert.ok(row.allowed_models.includes(row.default_model), `${row.feature_key} default left the allowlist`);
+    for (const model of row.allowed_models) {
+      assert.ok(live.has(model), `${row.feature_key} allows unknown model ${model}`);
+      if (model.startsWith('cc/')) {
+        assert.ok(catalogCc.has(model), `${row.feature_key} allows unrequested ${model}`);
+      }
+    }
+  }
+
+  const preferencesAfter55 = await queryAll<{ task_type: string; model: string }>(
+    'SELECT task_type, model FROM task_model_preferences ORDER BY task_type',
+  );
+  assert.deepEqual(
+    preferencesAfter55.map(row => `${row.task_type}:${row.model}`),
+    preferencesBefore55,
+    '024 left live preferences untouched',
+  );
+
+  console.log('PASS — migration 024 adds Claude Sonnet 5.5 and Opus 5.5 without changing defaults');
+  for (const row of after55) {
     console.log(`  ${row.feature_key.padEnd(22)} default=${row.default_model.padEnd(22)} ${JSON.stringify(row.allowed_models)}`);
   }
   await closeDb();
