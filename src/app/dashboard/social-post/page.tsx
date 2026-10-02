@@ -25,6 +25,12 @@ import {
 } from '@/lib/social-post-status';
 import { TASK_EDITOR_QUERY, fetchOwnHistoryTask } from '@/lib/history-editor';
 import { IMAGE_REMIX_QUERY, readImageRemix, type ImageRemixRecord } from '@/lib/image-remix';
+import {
+  defaultSocialPostBrandGuidelineId,
+  readSocialPostBrandGuidelines,
+  socialPostGenerateRequestBody,
+  type SocialPostBrandGuideline,
+} from '@/lib/social-post-brand-guideline';
 
 interface QCCheck {
   name: string;
@@ -279,6 +285,9 @@ export default function SocialPostPage() {
   const [platform, setPlatform] = useState('Instagram');
   const [targetAudience, setTargetAudience] = useState('');
   const [goal, setGoal] = useState('Awareness');
+  const [brandGuidelines, setBrandGuidelines] = useState<SocialPostBrandGuideline[]>([]);
+  const [brandGuidelineId, setBrandGuidelineId] = useState('');
+  const brandGuidelineTouched = useRef(false);
   const [loading, setLoading] = useState(false);
   const [options, setOptions] = useState<PostOption[] | null>(null);
   const [result, setResult] = useState<any>(null);
@@ -361,6 +370,24 @@ export default function SocialPostPage() {
   // Load recent posts on mount
   useEffect(() => {
     fetchPosts();
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/brand-guidelines')
+      .then(async (res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (cancelled || data == null) return;
+        const guidelines = readSocialPostBrandGuidelines(data);
+        setBrandGuidelines(guidelines);
+        if (!brandGuidelineTouched.current) {
+          setBrandGuidelineId(defaultSocialPostBrandGuidelineId(guidelines));
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const fetchPosts = async () => {
@@ -461,7 +488,13 @@ export default function SocialPostPage() {
       const res = await fetch('/api/social-post/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ brief, platform, targetAudience, goal }),
+        body: JSON.stringify(socialPostGenerateRequestBody({
+          brief,
+          platform,
+          targetAudience,
+          goal,
+          brandGuidelineId,
+        })),
         signal: controller.signal,
       });
 
@@ -943,6 +976,21 @@ export default function SocialPostPage() {
               <FormField label="Goal">
                 <Select value={goal} onChange={e => setGoal(e.target.value)}>
                   <option>Awareness</option><option>Engagement</option><option>Lead Generation</option><option>Education</option><option>Event Promotion</option>
+                </Select>
+              </FormField>
+              <FormField label="Brand guideline">
+                <Select
+                  data-testid="social-post-brand-guideline"
+                  value={brandGuidelineId}
+                  onChange={(event) => {
+                    brandGuidelineTouched.current = true;
+                    setBrandGuidelineId(event.target.value);
+                  }}
+                >
+                  <option value="">None</option>
+                  {brandGuidelines.map((guideline) => (
+                    <option key={guideline.id} value={guideline.id}>{guideline.brand_name}</option>
+                  ))}
                 </Select>
               </FormField>
             </div>
