@@ -437,6 +437,91 @@ test('a laptop that will not turn on prefers the IT FAQ section over venue manua
   assert.equal(missing.some(hit => hit.documentId === 'doc-it-faq'), false);
 });
 
+test('unstable office wifi prefers the IT FAQ section over LED network setup that only mentions wifi', () => {
+  const queryVector = [1, 0];
+  const wifiHeavy = JSON.stringify(queryVector);
+  const orthogonal = JSON.stringify([0, 1]);
+  const running = 'HDPlayer LED Screen Network setup. Wifi SSID is HD-LED and the Wifi password is on the controller. Network Wifi SSIDs and passwords for the LED screen. The scroll speed looks stabil on the LED. '.repeat(4);
+  const faqWifi = 'Company software catalog and printer names. '.repeat(8)
+    + '1.2 Koneksi Wi-Fi Tidak Stabil (Wireless Unstable Issue). Interference from nearby devices, AP overload, and DNS can make the office connection drop. Toggle the wireless adapter, then renew the DNS. ';
+  const chunks: InternalDocChunkRow[] = [
+    {
+      chunk_id: 'run',
+      document_id: 'doc-running',
+      title: 'Running Text',
+      access_level: 'company',
+      content: running,
+      embedding: wifiHeavy,
+    },
+    {
+      chunk_id: 'visitor',
+      document_id: 'doc-visitor',
+      title: 'Visitor wifi',
+      access_level: 'company',
+      content: 'The visitor wifi password is printed at reception. Guests use Dupoin-Guest.',
+      embedding: wifiHeavy,
+    },
+    {
+      chunk_id: 'faq-intro',
+      document_id: 'doc-it-faq',
+      title: 'FAQ IT Support',
+      access_level: 'company',
+      content: 'Visitor wifi password is printed at reception. The badge printer reset code is on the front panel.',
+      embedding: orthogonal,
+    },
+    {
+      chunk_id: 'faq-wifi',
+      document_id: 'doc-it-faq',
+      title: 'FAQ IT Support',
+      access_level: 'company',
+      content: faqWifi,
+      embedding: orthogonal,
+    },
+  ];
+
+  const expectFaq = (query: string) => {
+    const hits = rankInternalDocChunks(query, queryVector, chunks, company, 6);
+    assert.equal(hits[0]?.documentId, 'doc-it-faq', query);
+    assert.equal(hits[0]?.chunkId, 'faq-wifi', query);
+    assert.equal(hits.every(hit => hit.documentId === 'doc-it-faq'), true, query);
+    assert.equal(internalDocsRetrievalConfidence(query, hits), 'high', query);
+    assert.equal(internalDocsAskFallback(query, hits), null, query);
+    assert.match(hits[0]?.excerpt || '', /1\.2 Koneksi Wi-Fi Tidak Stabil|Wireless Unstable Issue/);
+    assert.match(hits[0]?.excerpt || '', /Interference|AP overload|wireless adapter/);
+    assert.doesNotMatch((hits[0]?.excerpt || '').slice(0, 90), /HDPlayer|SSID|printer names|Visitor wifi/i);
+    const citations = citationsFromHits(hits, 'https://marketing.example');
+    assert.equal(citations.length, 1, query);
+    assert.equal(citations[0]?.title, 'FAQ IT Support');
+  };
+
+  expectFaq('kenapa wifi gak stabil ya');
+  expectFaq('koneksi wifi tidak stabil');
+  expectFaq('wireless unstable');
+
+  const englishOnly = chunks.map(chunk => chunk.chunk_id === 'faq-wifi'
+    ? {
+      ...chunk,
+      content: `${'Printer and account setup for new staff. '.repeat(8)}The office Wi-Fi connection is unstable. Interference, AP overload, and DNS are the usual causes. Toggle the wireless adapter.`,
+    }
+    : chunk);
+  const englishHits = rankInternalDocChunks('kenapa wifi gak stabil ya', queryVector, englishOnly, company, 6);
+  assert.equal(englishHits[0]?.documentId, 'doc-it-faq');
+  assert.equal(englishHits[0]?.chunkId, 'faq-wifi');
+  assert.equal(englishHits.every(hit => hit.documentId === 'doc-it-faq'), true);
+  assert.equal(internalDocsRetrievalConfidence('kenapa wifi gak stabil ya', englishHits), 'high');
+  assert.match(englishHits[0]?.excerpt || '', /Wi-Fi connection is unstable|wireless adapter/);
+  assert.doesNotMatch((englishHits[0]?.excerpt || '').slice(0, 90), /Printer and account setup|HDPlayer|SSID/i);
+
+  const missing = rankInternalDocChunks('kenapa wifi gak stabil ya', queryVector, chunks.filter(chunk => chunk.document_id !== 'doc-it-faq'), company, 6);
+  assert.equal(internalDocsRetrievalConfidence('kenapa wifi gak stabil ya', missing), 'low');
+  assert.equal(missing.some(hit => hit.documentId === 'doc-it-faq'), false);
+  assert.equal(missing[0]?.title, 'Running Text');
+
+  const passwordHits = rankInternalDocChunks('Where is the visitor wifi password?', queryVector, chunks, company, 6);
+  assert.equal(passwordHits[0]?.documentId, 'doc-visitor');
+  assert.equal(internalDocsRetrievalConfidence('Where is the visitor wifi password?', passwordHits), 'high');
+});
+
 test('chunk retrieval orders lexical overlap ahead of recency', () => {
   const ranked = buildInternalDocChunkQuery(['lark', 'password', 'change']);
   assert.match(ranked.sql, /d\.title ILIKE \? ESCAPE/);

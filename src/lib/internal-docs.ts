@@ -49,6 +49,8 @@ const QUERY_STOPWORDS = new Set([
   'kalau', 'kami', 'kapan', 'karena', 'lebih', 'mana', 'masih', 'mohon', 'nya',
   'oleh', 'pada', 'perlu', 'saya', 'sangat', 'sebagai', 'sudah', 'supaya',
   'telah', 'tetapi', 'tidak', 'tolong', 'untuk', 'yang',
+  // "kenapa wifi gak stabil" — why / not. The fault is wifi + stabil, not the question frame.
+  'enggak', 'gak', 'kenapa', 'mengapa', 'ngga', 'nggak',
 ]);
 
 const BM25_K1 = 1.2;
@@ -233,9 +235,13 @@ export function chunkDocumentText(
   return chunks;
 }
 
+/** "Wi-Fi" and "wi fi" are the same device word as "wifi". */
+function normalizeAskText(text: string): string {
+  return text.toLowerCase().replace(/wi[\s-]+fi\b/g, 'wifi');
+}
+
 function tokensOf(text: string): string[] {
-  return text
-    .toLowerCase()
+  return normalizeAskText(text)
     .replace(/[^a-z0-9\s]/g, ' ')
     .split(/\s+/)
     .filter(token => token.length > 2 && !QUERY_STOPWORDS.has(token));
@@ -256,8 +262,7 @@ function countFocusMatches(matched: readonly string[], focus: readonly string[])
 }
 
 function contentWords(text: string): string[] {
-  return text
-    .toLowerCase()
+  return normalizeAskText(text)
     .replace(/[^a-z0-9\s]/g, ' ')
     .split(/\s+/)
     .filter(Boolean);
@@ -393,6 +398,55 @@ function powerFailureIndex(content: string, deviceTokens: readonly string[]): nu
   return best;
 }
 
+// "wifi gak stabil" is an office connection fault. An LED guide that only lists Wifi SSIDs is not.
+const WIFI_UNSTABLE = /\b(?:wifi|wi[\s-]?fi|wireless)\b(?:\W+\w+){0,6}?\W+\b(?:unstable|instability|intermittent)\b|\b(?:unstable|instability)\b(?:\W+\w+){0,4}?\W+\b(?:wifi|wi[\s-]?fi|wireless)\b|\b(?:wifi|wi[\s-]?fi|wireless|koneksi)\b(?:\W+\w+){0,6}?\W+\b(?:tidak|nggak|gak|ga|isn't|is not|not)\b(?:\W+\w+){0,3}?\W+\bstabil\w*\b|\b(?:tidak|nggak|gak|ga|isn't|is not|not)\b(?:\W+\w+){0,3}?\W+\bstabil\w*\b(?:\W+\w+){0,6}?\W+\b(?:wifi|wi[\s-]?fi|wireless)\b/i;
+
+function isWifiUnstableQuery(query: string): boolean {
+  return WIFI_UNSTABLE.test(query);
+}
+
+function isWifiSymptomToken(token: string): boolean {
+  return token.startsWith('stabil') || token.startsWith('unstab') || token.startsWith('instabil') || token === 'intermittent';
+}
+
+function tokenOffsets(haystack: string, token: string): number[] {
+  if (token === 'wifi' || token === 'wireless') {
+    return [...haystack.matchAll(/\b(?:wi[\s-]?fi|wireless)\b/gi)].map(match => match.index ?? 0);
+  }
+  const offsets: number[] = [];
+  let from = 0;
+  while (from < haystack.length) {
+    const found = haystack.indexOf(token, from);
+    if (found < 0) break;
+    offsets.push(found);
+    from = found + token.length;
+  }
+  return offsets;
+}
+
+function wifiUnstableIndex(content: string, deviceTokens: readonly string[]): number {
+  const normalized = content.replace(/\s+/g, ' ').trim();
+  const pattern = new RegExp(WIFI_UNSTABLE.source, 'gi');
+  let best = -1;
+  let bestDist = Infinity;
+  for (const match of normalized.matchAll(pattern)) {
+    const at = match.index ?? 0;
+    if (!deviceTokens.length) return at;
+    let dist = Infinity;
+    for (const token of deviceTokens) {
+      for (const found of tokenOffsets(normalized.toLowerCase(), token)) {
+        dist = Math.min(dist, Math.abs(found - at));
+      }
+    }
+    if (dist < bestDist) {
+      bestDist = dist;
+      best = at;
+    }
+  }
+  if (best < 0 || bestDist > 200) return -1;
+  return best;
+}
+
 function excerptAroundMatch(content: string, at: number): string {
   const normalized = content.replace(/\s+/g, ' ').trim();
   if (!normalized) return '';
@@ -485,6 +539,28 @@ export function rankInternalDocChunks(
       score: lexical + titleHits * 8 + bodyHits * 4 + COSINE_WEIGHT * Math.max(0, row.cosine),
     }];
   });
+
+  // A running-text manual can list Wifi SSIDs and still not be the IT FAQ
+  // section about an office connection that is tidak stabil / unstable.
+  // This runs before the rare-token gate: "unstable" is the same fault as
+  // "stabil", and a decoy that merely contains "stabil" must not hide it.
+  if (isWifiUnstableQuery(query)) {
+    const device = focus.filter(token => !isWifiSymptomToken(token));
+    const symptoms = focus.filter(isWifiSymptomToken);
+    const grounded = scored.flatMap(row => {
+      const at = wifiUnstableIndex(row.chunk.content, device);
+      if (at < 0) return [];
+      if (device.length > 0 && !device.every(token => row.matched.includes(token))) return [];
+      const matched = [...new Set([...row.matched, ...symptoms])];
+      return [{
+        ...row,
+        matched,
+        focusMatches: countFocusMatches(matched, focus),
+        failureAt: at,
+      }];
+    });
+    if (grounded.length) scored = grounded;
+  }
 
   // "LED auditorium" must not pull in every manual that says LED. When a guide
   // title or passage contains that phrase, drop chunks that only share a token.
