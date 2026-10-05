@@ -529,6 +529,77 @@ test('Indonesian IT questions prefer the matching FAQ section over LED manuals t
   assert.match(rankInternalDocChunks('laptop tidak bisa nyala', queryVector, chunks, company, 6)[0]?.excerpt || '', /tidak menyala|won't turn on|won't boot/i);
 });
 
+test('an exact subsection heading beats a merged chunk that only shares the parent topic', () => {
+  const queryVector = [1, 0];
+  const parentHeavy = JSON.stringify(queryVector);
+  const orthogonal = JSON.stringify([0, 1]);
+  const filler = 'Badge printer kertas macet di lobi. '.repeat(30);
+  const chunks: InternalDocChunkRow[] = [
+    {
+      chunk_id: 'faq-2-1',
+      document_id: 'doc-it-faq',
+      title: 'FAQ IT Support',
+      access_level: 'company',
+      content: [
+        '2.1 CPU Mati',
+        'CPU mati atau hang. CPU tidak menyala. Restart the CPU and check the power cable. CPU mati total.',
+        '2.2 Laptop Lambat',
+        'Laptop lambat saat membuka aplikasi. Laptop tidak menyala sebentar lalu hidup. Jika laptop tidak bisa nyala lalu terasa lambat, restart dulu.',
+      ].join('\n'),
+      embedding: parentHeavy,
+    },
+    {
+      chunk_id: 'faq-2-3',
+      document_id: 'doc-it-faq',
+      title: 'FAQ IT Support',
+      access_level: 'company',
+      content: [
+        '2.3 Laptop Tidak Menyala',
+        'Laptop tidak menyala. If the laptop won\'t turn on or won\'t boot, connect the charger and hold the power button for ten seconds.',
+        'Komputer mati total tetap butuh kabel power.',
+        filler,
+      ].join('\n'),
+      embedding: orthogonal,
+    },
+    {
+      chunk_id: 'led-aud',
+      document_id: 'doc-led-aud',
+      title: 'Manual Book LED Auditorium',
+      access_level: 'company',
+      content: 'Cara pakai LED auditorium. Connect the laptop HDMI cable to the LED processor.',
+      embedding: parentHeavy,
+    },
+  ];
+
+  const first = (query: string) => rankInternalDocChunks(query, queryVector, chunks, company, 6);
+
+  const off = first('laptop tidak bisa nyala');
+  assert.equal(off[0]?.chunkId, 'faq-2-3', `laptop tidak bisa nyala -> ${off.map(hit => hit.chunkId).join(', ')}`);
+  assert.match(off[0]?.excerpt || '', /2\.3|Tidak Menyala/i);
+  assert.equal(internalDocsRetrievalConfidence('laptop tidak bisa nyala', off), 'high');
+
+  const slow = first('laptop lambat');
+  assert.equal(slow[0]?.chunkId, 'faq-2-1', `laptop lambat -> ${slow.map(hit => hit.chunkId).join(', ')}`);
+  assert.match(slow[0]?.excerpt || '', /2\.2 Laptop Lambat/);
+  assert.doesNotMatch(slow[0]?.excerpt || '', /2\.1 CPU Mati/);
+
+  const cpu = first('cpu mati');
+  assert.equal(cpu[0]?.chunkId, 'faq-2-1', `cpu mati -> ${cpu.map(hit => hit.chunkId).join(', ')}`);
+  assert.match((cpu[0]?.excerpt || '').slice(0, 40), /2\.1 CPU Mati/);
+  assert.match(cpu[0]?.excerpt || '', /mati total/i);
+  assert.doesNotMatch(cpu[0]?.excerpt || '', /2\.2 Laptop Lambat|2\.3/);
+
+  const hidup = first('laptop tidak hidup');
+  assert.equal(hidup[0]?.chunkId, 'faq-2-3', `laptop tidak hidup -> ${hidup.map(hit => hit.chunkId).join(', ')}`);
+
+  const dead = first('laptop gak nyala');
+  assert.equal(dead[0]?.chunkId, 'faq-2-3', `laptop gak nyala -> ${dead.map(hit => hit.chunkId).join(', ')}`);
+
+  const total = first('laptop mati total');
+  assert.equal(total[0]?.chunkId, 'faq-2-3', `laptop mati total -> ${total.map(hit => hit.chunkId).join(', ')}`);
+  assert.match(total[0]?.excerpt || '', /2\.3 Laptop Tidak Menyala/);
+});
+
 test('wifi retrieval searches hyphenated and Indonesian aliases, not only the raw token', () => {
   const ranked = buildInternalDocChunkQuery(['wifi', 'lemot']);
   assert.ok(ranked.params.some(param => typeof param === 'string' && param.toLowerCase().includes('wi-fi')));
