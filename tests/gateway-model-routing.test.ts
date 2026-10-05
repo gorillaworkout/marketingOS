@@ -31,6 +31,7 @@ const envExample = read('.env.example');
 const restoreMigration = read('db/migrations/014_restore_codex_ai_research.sql');
 const claude5Migration = read('db/migrations/015_add_claude_sonnet5_opus5.sql');
 const claude55Migration = read('db/migrations/024_add_claude_sonnet55_opus55.sql');
+const retire46Migration = read('db/migrations/025_retire_claude_sonnet_4_6.sql');
 
 test('MarketingOS exposes GorillaWorkout as its only generation gateway', () => {
   assert.match(openai, /export type ModelProvider = 'gorillaworkout'/);
@@ -148,7 +149,8 @@ test('AI Research routing restores Codex and Claude 5 and never reintroduces Kim
   assert.ok(AVAILABLE_MODELS.some(model => model.id === 'cc/claude-opus-5'));
   assert.ok(AVAILABLE_MODELS.some(model => model.id === 'cc/claude-sonnet-5-5'));
   assert.ok(AVAILABLE_MODELS.some(model => model.id === 'cc/claude-opus-5-5'));
-  assert.ok(AVAILABLE_MODELS.some(model => model.id === 'ag/claude-sonnet-4-6'));
+  assert.ok(!AVAILABLE_MODELS.some(model => model.id === 'ag/claude-sonnet-4-6' || model.id.includes('claude-opus-4-6') || model.id.includes('claude-sonnet-4-6')));
+  assert.doesNotMatch(routing, /ag\/claude-sonnet-4-6/);
   assert.ok(AVAILABLE_MODELS.some(model => model.id === 'lr/claude-sonnet-4.5'));
   assert.match(openai, /cx\/gpt-5\.6-sol/);
   assert.match(openai, /cc\/claude-sonnet-5/);
@@ -167,4 +169,9 @@ test('AI Research routing restores Codex and Claude 5 and never reintroduces Kim
   assert.match(claude55Migration, /'cc\/claude-sonnet-5'/);
   assert.match(claude55Migration, /'cc\/claude-opus-5'/);
   assert.match(claude55Migration, /'ai-research'/);
+  assert.match(retire46Migration, /model <> 'ag\/claude-sonnet-4-6'/);
+  assert.match(retire46Migration, /cc\/claude-sonnet-5-5/);
+  assert.match(retire46Migration, /cc\/claude-opus-5-5/);
+  assert.match(retire46Migration, /WHEN default_model = 'ag\/claude-sonnet-4-6' THEN 'cc\/claude-sonnet-5-5'/);
+  assert.doesNotMatch(routing, /defaultModel: 'ag\/claude-sonnet-4-6'/);
 });

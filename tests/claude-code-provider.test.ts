@@ -45,7 +45,7 @@ test('retired upstream prefixes stay out of the catalog', () => {
   assert.ok(AVAILABLE_MODELS.some(model => model.id === CLAUDE_OPUS_5_MODEL), 'Claude Opus 5 must be in the catalog');
   assert.ok(AVAILABLE_MODELS.some(model => model.id === CLAUDE_SONNET_5_5_MODEL), 'Claude Sonnet 5.5 must be in the catalog');
   assert.ok(AVAILABLE_MODELS.some(model => model.id === CLAUDE_OPUS_5_5_MODEL), 'Claude Opus 5.5 must be in the catalog');
-  assert.ok(AVAILABLE_MODELS.some(model => model.id === 'ag/claude-sonnet-4-6'), 'Claude Sonnet 4.6 must stay in the catalog');
+  assert.ok(!AVAILABLE_MODELS.some(model => model.id === 'ag/claude-sonnet-4-6' || model.id.includes('claude-opus-4-6') || model.id.includes('claude-sonnet-4-6')), 'Claude 4.6 must stay out of the catalog');
   assert.ok(AVAILABLE_MODELS.some(model => model.id === 'lr/claude-sonnet-4.5'), 'Claude Sonnet 4.5 must stay in the catalog');
 });
 

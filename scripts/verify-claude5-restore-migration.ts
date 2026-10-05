@@ -7,6 +7,9 @@
  * Kimi stays out, defaults are unchanged, and no user row was lost.
  * Then applies 024 twice and asserts Sonnet 5.5 + Opus 5.5 are unioned onto
  * every feature without changing those defaults or live preferences.
+ * Then applies 025 twice and asserts Sonnet 4.6 is gone, both 5.5 ids
+ * remain, Article Market News and Market Research default to Sonnet 5.5,
+ * and a stored 4.6 preference is repointed rather than deleted.
  *
  * Usage:
  *   TEST_DATABASE_URL=postgres://postgres@127.0.0.1:5599/mostest \
@@ -35,9 +38,12 @@ async function main() {
     PREFERRED_CODEX_MODEL,
   } = await import('../src/lib/openai');
   const live = new Set(AVAILABLE_MODELS.map(model => model.id));
+  // 015 and 024 still write ag/claude-sonnet-4-6. Migration 025 removes it.
+  const historicallyLive = (model: string) => live.has(model) || model === 'ag/claude-sonnet-4-6';
 
   const sql = await readFile(path.join(process.cwd(), 'db/migrations/015_add_claude_sonnet5_opus5.sql'), 'utf8');
   const sql55 = await readFile(path.join(process.cwd(), 'db/migrations/024_add_claude_sonnet55_opus55.sql'), 'utf8');
+  const sql46 = await readFile(path.join(process.cwd(), 'db/migrations/025_retire_claude_sonnet_4_6.sql'), 'utf8');
 
   await execute('DELETE FROM task_model_preferences');
   await execute('DELETE FROM feature_model_assignments');
@@ -76,7 +82,7 @@ async function main() {
   for (const row of assignments) {
     assert.ok(row.allowed_models.length >= 2, `${row.feature_key} keeps more than one choice`);
     for (const model of row.allowed_models) {
-      assert.ok(live.has(model), `${row.feature_key} allows unknown model ${model}`);
+      assert.ok(historicallyLive(model), `${row.feature_key} allows unknown model ${model}`);
       assert.ok(!model.startsWith('kimi/'), `${row.feature_key} still allows ${model}`);
       assert.ok(!model.startsWith('tr/'), `${row.feature_key} still allows ${model}`);
       assert.ok(!model.startsWith('cmc/moonshotai/'), `${row.feature_key} still allows ${model}`);
@@ -87,7 +93,7 @@ async function main() {
         );
       }
     }
-    assert.ok(live.has(row.default_model), `${row.feature_key} defaults to unknown model ${row.default_model}`);
+    assert.ok(historicallyLive(row.default_model), `${row.feature_key} defaults to unknown model ${row.default_model}`);
     assert.ok(row.allowed_models.includes(row.default_model), `${row.feature_key} default is inside its allowlist`);
     assert.ok(row.allowed_models.includes(CLAUDE_SONNET_5_MODEL), `${row.feature_key} missing Sonnet 5`);
     assert.ok(row.allowed_models.includes(CLAUDE_OPUS_5_MODEL), `${row.feature_key} missing Opus 5`);
@@ -129,7 +135,7 @@ async function main() {
   );
   assert.equal(preferences.length, 4, 'preferences are rewritten, never deleted');
   for (const row of preferences) {
-    assert.ok(live.has(row.model), `${row.task_type} preference still on dead model ${row.model}`);
+    assert.ok(historicallyLive(row.model), `${row.task_type} preference still on dead model ${row.model}`);
     assert.ok(!row.model.startsWith('kimi/'), `${row.task_type} preference still on Kimi`);
   }
   assert.equal(
@@ -181,7 +187,7 @@ async function main() {
     assert.ok(row.allowed_models.includes(CLAUDE_OPUS_5_5_MODEL), `${row.feature_key} missing Opus 5.5`);
     assert.ok(row.allowed_models.includes(row.default_model), `${row.feature_key} default left the allowlist`);
     for (const model of row.allowed_models) {
-      assert.ok(live.has(model), `${row.feature_key} allows unknown model ${model}`);
+      assert.ok(historicallyLive(model), `${row.feature_key} allows unknown model ${model}`);
       if (model.startsWith('cc/')) {
         assert.ok(catalogCc.has(model), `${row.feature_key} allows unrequested ${model}`);
       }
@@ -199,6 +205,80 @@ async function main() {
 
   console.log('PASS — migration 024 adds Claude Sonnet 5.5 and Opus 5.5 without changing defaults');
   for (const row of after55) {
+    console.log(`  ${row.feature_key.padEnd(22)} default=${row.default_model.padEnd(22)} ${JSON.stringify(row.allowed_models)}`);
+  }
+
+  const defaultsBefore46 = new Map(after55.map(row => [row.feature_key, row.default_model]));
+  await execute(
+    `INSERT INTO image_model_assignments (id, allowed_models, default_model)
+     VALUES ('verify-sonnet-46', '["cx/gpt-5.5-image","ag/claude-sonnet-4-6"]', 'ag/claude-sonnet-4-6')
+     ON CONFLICT (id) DO UPDATE
+       SET allowed_models = EXCLUDED.allowed_models,
+           default_model = EXCLUDED.default_model`,
+  );
+
+  await execute(sql46);
+  await execute(sql46);
+
+  const after46 = await queryAll<{ feature_key: string; allowed_models: string[]; default_model: string }>(
+    'SELECT feature_key, allowed_models, default_model FROM feature_model_assignments ORDER BY feature_key',
+  );
+  assert.equal(after46.length, 6, '025 keeps every generation feature');
+  for (const row of after46) {
+    assert.equal(new Set(row.allowed_models).size, row.allowed_models.length, `${row.feature_key} duplicated an allowlist id`);
+    assert.ok(!row.allowed_models.includes('ag/claude-sonnet-4-6'), `${row.feature_key} still allows Sonnet 4.6`);
+    assert.ok(row.allowed_models.includes(CLAUDE_SONNET_5_5_MODEL), `${row.feature_key} missing Sonnet 5.5`);
+    assert.ok(row.allowed_models.includes(CLAUDE_OPUS_5_5_MODEL), `${row.feature_key} missing Opus 5.5`);
+    assert.ok(row.allowed_models.includes(CLAUDE_SONNET_5_MODEL), `${row.feature_key} dropped Sonnet 5`);
+    assert.ok(row.allowed_models.includes(CLAUDE_OPUS_5_MODEL), `${row.feature_key} dropped Opus 5`);
+    assert.ok(row.allowed_models.includes(row.default_model), `${row.feature_key} default left the allowlist`);
+    assert.notEqual(row.default_model, 'ag/claude-sonnet-4-6', `${row.feature_key} still defaults to Sonnet 4.6`);
+    for (const model of row.allowed_models) {
+      assert.ok(live.has(model), `${row.feature_key} allows unknown model ${model}`);
+    }
+    assert.ok(live.has(row.default_model), `${row.feature_key} defaults to unknown model ${row.default_model}`);
+    if (row.feature_key === 'article-market-news' || row.feature_key === 'market-research') {
+      assert.equal(row.default_model, CLAUDE_SONNET_5_5_MODEL, `${row.feature_key} should default to Sonnet 5.5`);
+      assert.ok(row.allowed_models.includes('lr/claude-sonnet-4.5'), `${row.feature_key} dropped Sonnet 4.5`);
+    } else {
+      assert.equal(row.default_model, defaultsBefore46.get(row.feature_key), `${row.feature_key} default changed`);
+    }
+  }
+
+  const preferencesAfter46 = await queryAll<{ task_type: string; model: string }>(
+    'SELECT task_type, model FROM task_model_preferences ORDER BY task_type',
+  );
+  assert.equal(preferencesAfter46.length, 4, '025 updates preferences and never deletes them');
+  for (const row of preferencesAfter46) {
+    assert.ok(live.has(row.model), `${row.task_type} preference still on dead model ${row.model}`);
+    assert.notEqual(row.model, 'ag/claude-sonnet-4-6', `${row.task_type} preference still names Sonnet 4.6`);
+  }
+  assert.equal(
+    preferencesAfter46.find(row => row.task_type === 'market-research')?.model,
+    CLAUDE_SONNET_5_5_MODEL,
+    'a Sonnet 4.6 preference is repointed to the feature default',
+  );
+  assert.equal(
+    preferencesAfter46.find(row => row.task_type === 'event-plan')?.model,
+    'ag/gemini-3.1-pro-low',
+    'an already-live preference is left untouched',
+  );
+  assert.equal(
+    preferencesAfter46.find(row => row.task_type === 'ai-research')?.model,
+    PREFERRED_CODEX_MODEL,
+    'an already-live AI Research Codex preference is left untouched',
+  );
+
+  const image = await queryAll<{ id: string; allowed_models: string; default_model: string }>(
+    `SELECT id, allowed_models, default_model FROM image_model_assignments WHERE id = 'verify-sonnet-46'`,
+  );
+  assert.equal(image.length, 1, 'image assignment row is updated, not deleted');
+  assert.equal(image[0].default_model, 'cx/gpt-5.5-image');
+  assert.ok(!image[0].allowed_models.includes('ag/claude-sonnet-4-6'), 'image allowlist still names Sonnet 4.6');
+  assert.ok(image[0].allowed_models.includes('cx/gpt-5.5-image'));
+
+  console.log('PASS — migration 025 removes Claude Sonnet 4.6 and keeps Claude 5.5');
+  for (const row of after46) {
     console.log(`  ${row.feature_key.padEnd(22)} default=${row.default_model.padEnd(22)} ${JSON.stringify(row.allowed_models)}`);
   }
   await closeDb();

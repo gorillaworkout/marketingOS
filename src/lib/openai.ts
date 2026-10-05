@@ -49,18 +49,20 @@ export interface ModelInfo {
 //   cc/claude-sonnet-5, cc/claude-opus-5. Migration 011 retired cc/* after a
 //   401 on llm.gorillaworkout.id. cc/* may work again on llmdupoin —
 //   re-probe with scripts/probe-gateway-models.ts before removing.
-//   Keep live 4.6 / 4.5 (`ag/claude-sonnet-4-6`, `lr/claude-sonnet-4.5`).
+//   Keep Claude Sonnet 4.5 (`lr/claude-sonnet-4.5`).
 //
 // Claude Sonnet 5.5 / Opus 5.5 (VPS GET /v1/models on llmdupoin, 2026-10-02,
 // 9router 0.5.95): cc/claude-sonnet-5-5, cc/claude-opus-5-5. Catalog only —
-// chat/completions was not verified (Claude OAuth may be expired).
-// Keep Sonnet 5 / Opus 5. Do not change feature defaults.
+// chat/completions was not verified (Claude OAuth returned 503 on 2026-10-02).
+// Article Market News and Market Research default to Sonnet 5.5. Other
+// feature defaults stay put. Keep Sonnet 5 / Opus 5.
 //
 // Still out (do not re-add):
 //   kimi/*, tr/moonshotai/*              — retired; no Kimi API key.
 //   cmc/moonshotai/Kimi-K2.5, Kimi-K2.6  — listed on the gateway; do not catalog.
 //   cc/claude-fable-5, cc/claude-haiku-4-5-20251001 — listed; not cataloged.
-//   ag/claude-opus-4-6-thinking, lr/claude-sonnet-4-6 — listed; not cataloged.
+//   ag/claude-sonnet-4-6                 — Claude Sonnet 4.6 no longer exists on the gateway.
+//   ag/claude-opus-4-6-thinking, lr/claude-sonnet-4-6 — listed earlier; not cataloged.
 //   ag/gemini-3.7-*                      — 404, never existed upstream.
 //   ag/gemini-3.5-*, ag/gemini-3-flash-agent — retired (HTTP 200 retirement notice).
 //   pecut-free                           — upstream 400 "Unsupported model mimo-auto".
@@ -71,7 +73,6 @@ export const AVAILABLE_MODELS: ModelInfo[] = [
   { id: 'ag/gemini-3.6-flash-high', name: 'Gemini 3.6 Flash High', tier: 'balanced', provider: 'gorillaworkout', input: 0, output: 0 },
   { id: 'ag/gemini-3.1-pro-low', name: 'Gemini 3.1 Pro Low', tier: 'balanced', provider: 'gorillaworkout', input: 0, output: 0 },
   { id: 'ag/gemini-pro-agent', name: 'Gemini Pro Agent', tier: 'balanced', provider: 'gorillaworkout', input: 0, output: 0 },
-  { id: 'ag/claude-sonnet-4-6', name: 'Claude Sonnet 4.6', tier: 'balanced', provider: 'gorillaworkout', input: 0, output: 0 },
   { id: 'lr/claude-sonnet-4.5', name: 'Claude Sonnet 4.5', tier: 'balanced', provider: 'gorillaworkout', input: 0, output: 0 },
   { id: CLAUDE_SONNET_5_MODEL, name: 'Claude Sonnet 5', tier: 'balanced', provider: 'gorillaworkout', input: 0, output: 0 },
   { id: CLAUDE_SONNET_5_5_MODEL, name: 'Claude Sonnet 5.5', tier: 'balanced', provider: 'gorillaworkout', input: 0, output: 0 },

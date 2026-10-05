@@ -4,8 +4,8 @@
  * rename required keys. Extract the first unambiguous article object so the
  * publication gate can run QC instead of failing on raw `JSON.parse`.
  *
- * Prod signal (ag/claude-sonnet-4-6): gateway completions succeed with ~2.4–2.9k
- * output tokens, then local parse failed for all 3 publication-gate attempts.
+ * Prod signal: gateway completions succeed with ~2.4–2.9k output tokens,
+ * then local parse failed for all 3 publication-gate attempts.
  */
 export function parseGeneratedArticle(content: string): Record<string, unknown> {
   const asArticle = (parsed: unknown): Record<string, unknown> | null => {
