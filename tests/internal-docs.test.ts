@@ -437,6 +437,105 @@ test('a laptop that will not turn on prefers the IT FAQ section over venue manua
   assert.equal(missing.some(hit => hit.documentId === 'doc-it-faq'), false);
 });
 
+test('Indonesian IT questions prefer the matching FAQ section over LED manuals that only share generic words', () => {
+  const queryVector = [1, 0];
+  const ledHeavy = JSON.stringify(queryVector);
+  const orthogonal = JSON.stringify([0, 1]);
+  const chunks: InternalDocChunkRow[] = [
+    {
+      chunk_id: 'running',
+      document_id: 'doc-running',
+      title: 'Manual Book Running Text LED',
+      access_level: 'company',
+      content: [
+        'Cara pakai running text LED di lobi.',
+        'Controller ini tidak memakai wifi. Jika software terasa lemot, restart PC.',
+        'Pastikan koneksi kabel stabil sebelum mengirim program.',
+        'Jika tampilan tidak stabil, restart controller.',
+        'Internet tidak dipakai untuk layar ini. Sinyal power harus nyala.',
+        'Jaringan kabel harus terpasang. The running text scroll should stay stable.',
+      ].join('\n'),
+      embedding: ledHeavy,
+    },
+    {
+      chunk_id: 'led-aud',
+      document_id: 'doc-led-aud',
+      title: 'Manual Book LED Auditorium',
+      access_level: 'company',
+      content: [
+        'Cara pakai LED auditorium.',
+        'Power on the LED Auditorium wall from the control room.',
+        'Connect the laptop HDMI cable to the LED processor.',
+        'The LED Auditorium wall should show the standby image.',
+      ].join('\n'),
+      embedding: ledHeavy,
+    },
+    {
+      chunk_id: 'faq-printer',
+      document_id: 'doc-it-faq',
+      title: 'FAQ IT Support',
+      access_level: 'company',
+      content: '1.1 Printer\nThe badge printer password reset code is on the front panel. Sandi printer dicatat di resepsionis.',
+      embedding: orthogonal,
+    },
+    {
+      chunk_id: 'faq-wifi',
+      document_id: 'doc-it-faq',
+      title: 'FAQ IT Support',
+      access_level: 'company',
+      content: [
+        '1.2 Wi-Fi',
+        'Jika Wi-Fi tidak stabil atau lemot, lupakan jaringan tersebut lalu sambungkan lagi.',
+        'The office Wi-Fi password is at reception. A weak signal can make the internet feel slow.',
+      ].join('\n'),
+      embedding: orthogonal,
+    },
+    {
+      chunk_id: 'faq-laptop',
+      document_id: 'doc-it-faq',
+      title: 'FAQ IT Support',
+      access_level: 'company',
+      content: [
+        '1.3 Laptop',
+        'Laptop tidak menyala. If the laptop won\'t turn on or won\'t boot, connect the charger and hold the power button for ten seconds.',
+        'Komputer mati total tetap butuh kabel power.',
+      ].join('\n'),
+      embedding: orthogonal,
+    },
+    {
+      chunk_id: 'generic-net',
+      document_id: 'doc-ops',
+      title: 'Office operations',
+      access_level: 'company',
+      content: 'Pastikan koneksi stabil. Internet kantor harus stabil. Sinyal stabil setiap pagi. Jaringan stabil dan tidak boleh putus.',
+      embedding: ledHeavy,
+    },
+  ];
+
+  const expectSection = (query: string, chunkId: string) => {
+    const hits = rankInternalDocChunks(query, queryVector, chunks, company, 6);
+    assert.equal(hits[0]?.chunkId, chunkId, `${query} -> ${hits.map(hit => hit.chunkId).join(', ')}`);
+    assert.equal(hits[0]?.title, chunkId.startsWith('faq-') ? 'FAQ IT Support' : hits[0]?.title, query);
+    assert.equal(internalDocsRetrievalConfidence(query, hits), 'high', query);
+    assert.equal(internalDocsAskFallback(query, hits), null, query);
+  };
+
+  expectSection('kenapa wifi gak stabil', 'faq-wifi');
+  expectSection('wifi lemot', 'faq-wifi');
+  expectSection('laptop tidak bisa nyala', 'faq-laptop');
+  expectSection('cara pakai LED auditorium', 'led-aud');
+  expectSection('cara pakai running text', 'running');
+  assert.match(rankInternalDocChunks('kenapa wifi gak stabil', queryVector, chunks, company, 6)[0]?.excerpt || '', /wi-?fi/i);
+  assert.match(rankInternalDocChunks('laptop tidak bisa nyala', queryVector, chunks, company, 6)[0]?.excerpt || '', /tidak menyala|won't turn on|won't boot/i);
+});
+
+test('wifi retrieval searches hyphenated and Indonesian aliases, not only the raw token', () => {
+  const ranked = buildInternalDocChunkQuery(['wifi', 'lemot']);
+  assert.ok(ranked.params.some(param => typeof param === 'string' && param.toLowerCase().includes('wi-fi')));
+  assert.ok(ranked.params.some(param => typeof param === 'string' && param.toLowerCase().includes('jaringan')));
+  assert.ok(ranked.params.some(param => typeof param === 'string' && param.toLowerCase().includes('lemot')));
+});
+
 test('chunk retrieval orders lexical overlap ahead of recency', () => {
   const ranked = buildInternalDocChunkQuery(['lark', 'password', 'change']);
   assert.match(ranked.sql, /d\.title ILIKE \? ESCAPE/);
@@ -444,10 +543,11 @@ test('chunk retrieval orders lexical overlap ahead of recency', () => {
   assert.match(ranked.sql, /ORDER BY \(/);
   assert.match(ranked.sql, /DESC, d\.updated_at DESC/);
   assert.match(ranked.sql, /THEN 3 ELSE 0 END/);
-  assert.equal(ranked.params.length, 10);
+  assert.equal(ranked.params.length, 12);
   assert.ok(ranked.params.some(param => typeof param === 'string' && param.includes('lark password')));
   assert.ok(ranked.params.some(param => typeof param === 'string' && param.includes('password lark')));
-  assert.ok(ranked.params.every(param => typeof param === 'string' && (param.includes('lark') || param.includes('password') || param.includes('change'))));
+  assert.ok(ranked.params.some(param => typeof param === 'string' && param.includes('sandi')));
+  assert.ok(ranked.params.every(param => typeof param === 'string' && (param.includes('lark') || param.includes('password') || param.includes('change') || param.includes('sandi'))));
 
   const plain = buildInternalDocChunkQuery();
   assert.match(plain.sql, /access_level = ANY\(\?::text\[\]\)/);

@@ -68,7 +68,45 @@ const GENERIC_ASK_TERMS = new Set([
   'save', 'select', 'set', 'show', 'start', 'stop', 'switch', 'switching',
   'turn', 'ubah', 'update', 'updated', 'updating', 'use', 'used', 'using',
   'view', 'want',
+  // Question words and negations that are not already stripped as stopwords.
+  'enggak', 'ga', 'gak', 'kenapa', 'knp', 'mengapa', 'nggak',
+  'memakai', 'pakai', 'pake',
 ]);
+
+// Symptom and network words that show up in unrelated manuals. They may match,
+// but a guide whose only overlap is these tokens is not the subject of the question.
+const GENERIC_OVERLAP = new Set<string>([
+  ...GENERIC_ASK_TERMS,
+  'cepat', 'internet', 'jaringan', 'koneksi', 'lambat', 'lemot', 'signal',
+  'sinyal', 'slow', 'stabil', 'stable',
+]);
+
+type AskAliasGroup = {
+  specific: readonly string[];
+  generic: readonly string[];
+};
+
+/** Indonesian and English aliases for the IT terms employees actually ask about. */
+const ASK_ALIAS_GROUPS: readonly AskAliasGroup[] = [
+  { specific: ['wifi'], generic: ['internet', 'jaringan', 'koneksi', 'sinyal', 'signal'] },
+  { specific: ['gak', 'tidak', 'nggak', 'enggak'], generic: ['ga'] },
+  { specific: ['lemot', 'lambat', 'slow'], generic: [] },
+  { specific: ['mati', 'nyala', 'boot'], generic: ['start'] },
+  { specific: ['laptop', 'komputer', 'pc'], generic: [] },
+  { specific: ['printer'], generic: [] },
+  { specific: ['password', 'sandi'], generic: [] },
+  { specific: ['email'], generic: [] },
+];
+
+const ASK_ALIAS_LOOKUP = new Map<string, { specific: ReadonlySet<string>; all: ReadonlySet<string> }>();
+for (const group of ASK_ALIAS_GROUPS) {
+  const specific = new Set(group.specific);
+  const all = new Set([...group.specific, ...group.generic]);
+  const record = { specific, all };
+  for (const term of all) ASK_ALIAS_LOOKUP.set(term, record);
+}
+
+const SHORT_ASK_TOKENS = new Set(['ga', 'pc']);
 
 export interface InternalDocListRow {
   id: string;
@@ -165,17 +203,20 @@ export function buildInternalDocByIdQuery(): { sql: string } {
 
 export function buildInternalDocChunkQuery(tokens: readonly string[] = [], documentId = ''): { sql: string; params: unknown[] } {
   const terms = [...new Set(
-    tokens.map(token => token.toLowerCase().replace(/[^a-z0-9]/g, '')).filter(token => token.length > 2),
+    tokens.map(token => token.toLowerCase().replace(/[^a-z0-9]/g, '')).filter(token => token.length > 2 || SHORT_ASK_TOKENS.has(token)),
   )].slice(0, 12);
-  const params = terms.flatMap(token => {
+  // Phrase order stays on the question's own words. Alias forms only widen the
+  // candidate overlap so "wifi" still finds a section titled "Wi-Fi".
+  const searchTerms = expandAskSearchTerms(terms);
+  const params = searchTerms.flatMap(token => {
     const pattern = ilikeContains(token);
     return [pattern, pattern];
   });
   // A recently reindexed auditorium manual can fill the candidate window and
   // hide an older guide that actually uses the question's words. Count title
   // and body hits first, then use recency only as a tie-break.
-  const overlap = terms.length
-    ? terms.map(() => `(CASE WHEN d.title ILIKE ? ESCAPE '\\' OR c.content ILIKE ? ESCAPE '\\' THEN 1 ELSE 0 END)`).join(' + ')
+  const overlap = searchTerms.length
+    ? searchTerms.map(() => `(CASE WHEN d.title ILIKE ? ESCAPE '\\' OR c.content ILIKE ? ESCAPE '\\' THEN 1 ELSE 0 END)`).join(' + ')
     : '0';
   // A shared token such as "LED" must not fill the candidate window ahead of a
   // guide whose title or body contains the question's subject phrase.
@@ -233,12 +274,44 @@ export function chunkDocumentText(
   return chunks;
 }
 
-function tokensOf(text: string): string[] {
+function normalizeAskText(text: string): string {
   return text
     .toLowerCase()
+    .replace(/wi[\s-]*fi/g, 'wifi')
+    .replace(/e[\s-]*mail/g, 'email');
+}
+
+function tokenizeAskText(text: string): string[] {
+  return normalizeAskText(text)
     .replace(/[^a-z0-9\s]/g, ' ')
     .split(/\s+/)
-    .filter(token => token.length > 2 && !QUERY_STOPWORDS.has(token));
+    .filter(Boolean);
+}
+
+function tokensOf(text: string): string[] {
+  return tokenizeAskText(text)
+    .filter(token => (token.length > 2 || SHORT_ASK_TOKENS.has(token)) && !QUERY_STOPWORDS.has(token));
+}
+
+/** Alias forms that ranking must see even when the raw word is a stopword ("tidak"). */
+function aliasSurfaceTokens(text: string): string[] {
+  return tokenizeAskText(text).filter(token => ASK_ALIAS_LOOKUP.has(token));
+}
+
+function expandAskSearchTerms(tokens: readonly string[]): string[] {
+  const expanded: string[] = [];
+  for (const token of tokens) {
+    if (token.length >= 3) expanded.push(token);
+    const group = ASK_ALIAS_LOOKUP.get(token);
+    if (!group || group.specific.has('tidak')) continue;
+    for (const alias of group.all) {
+      if (alias.length < 3) continue;
+      if (alias === 'wifi') expanded.push('wi-fi');
+      else if (alias === 'email') expanded.push('e-mail');
+      expanded.push(alias);
+    }
+  }
+  return [...new Set(expanded)].slice(0, 16);
 }
 
 function queryTokens(query: string): string[] {
@@ -256,16 +329,39 @@ function countFocusMatches(matched: readonly string[], focus: readonly string[])
 }
 
 function contentWords(text: string): string[] {
-  return text
-    .toLowerCase()
-    .replace(/[^a-z0-9\s]/g, ' ')
-    .split(/\s+/)
-    .filter(Boolean);
+  return tokenizeAskText(text);
+}
+
+function sectionHeadingTexts(title: string, content: string): string[] {
+  const headings = [title];
+  for (const line of content.split(/\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    const markdown = /^#{1,6}\s+(\S+(?:\s+\S+){0,8})/.exec(trimmed);
+    if (markdown) {
+      headings.push(markdown[1]);
+      continue;
+    }
+    const numbered = /^\d+\.\d+(?:\.\d+)*\.?\s+(\S+(?:\s+\S+){0,6})/.exec(trimmed);
+    if (numbered) headings.push(numbered[1].replace(/[.:;,]+$/, ''));
+  }
+  return headings;
+}
+
+function countHeadingHits(headings: readonly string[], focus: readonly string[]): number {
+  const tokens = headings.flatMap(heading => tokensOf(heading));
+  let hits = 0;
+  for (const token of focus) {
+    if (tokens.some(docToken => tokensMatch(token, docToken))) hits += 1;
+  }
+  return hits;
 }
 
 /** Adjacent subject words, in question order. "LED auditorium" stays one phrase. */
 function subjectBigrams(tokens: readonly string[]): string[][] {
-  const focus = focusTokens([...tokens]);
+  // "wifi stabil" is a symptom, not a title. Requiring those words to sit next
+  // to each other lets a manual that says "wifi stabil" hide the Wi-Fi section.
+  const focus = focusTokens([...tokens]).filter(token => !GENERIC_OVERLAP.has(token));
   const bigrams: string[][] = [];
   for (let index = 0; index < focus.length - 1; index += 1) {
     bigrams.push([focus[index], focus[index + 1]]);
@@ -344,14 +440,39 @@ function lexemeMatch(queryToken: string, docToken: string): boolean {
   return ID_AFFIX_PREFIX.has(long.slice(0, at)) && ID_AFFIX_SUFFIX.has(long.slice(at + short.length));
 }
 
-function termFrequency(tf: Map<string, number>, token: string): number {
+function tokensMatch(queryToken: string, docToken: string): boolean {
+  if (queryToken === docToken || lexemeMatch(queryToken, docToken)) return true;
+  const group = ASK_ALIAS_LOOKUP.get(queryToken);
+  return Boolean(group && group.all.has(docToken));
+}
+
+function termFrequency(tf: Map<string, number>, surfaces: ReadonlySet<string>, token: string): number {
   const exact = tf.get(token) || 0;
   if (exact) return exact;
   let freq = 0;
   for (const [key, count] of tf) {
-    if (lexemeMatch(token, key)) freq += count;
+    if (tokensMatch(token, key)) freq += count;
   }
-  return freq;
+  if (freq) return freq;
+  for (const surface of surfaces) {
+    if (tokensMatch(token, surface)) return 1;
+  }
+  return 0;
+}
+
+function hasSpecificOverlap(matched: readonly string[], docTokens: ReadonlySet<string>): boolean {
+  return matched.some(token => {
+    if (GENERIC_OVERLAP.has(token)) return false;
+    const group = ASK_ALIAS_LOOKUP.get(token);
+    if (!group) return true;
+    for (const term of group.specific) {
+      if (docTokens.has(term)) return true;
+      for (const docToken of docTokens) {
+        if (lexemeMatch(term, docToken)) return true;
+      }
+    }
+    return false;
+  });
 }
 
 // "laptop tidak bisa nyala" is a fault report. "Power on the LED" is an instruction.
@@ -436,9 +557,11 @@ export function rankInternalDocChunks(
     const tf = new Map<string, number>();
     for (const token of bodyTokens) tf.set(token, (tf.get(token) || 0) + 1);
     for (const token of titleTokens) tf.set(token, (tf.get(token) || 0) + TITLE_TF_BOOST);
+    const surfaces = new Set([...aliasSurfaceTokens(chunk.title), ...aliasSurfaceTokens(chunk.content)]);
     return [{
       chunk,
       tf,
+      surfaces,
       docLen: bodyTokens.length + titleTokens.length * TITLE_TF_BOOST,
       cosine: chunkCosine(chunk.embedding, queryEmbedding),
     }];
@@ -459,7 +582,7 @@ export function rankInternalDocChunks(
     const matched: string[] = [];
     let lexical = 0;
     for (const token of tokens) {
-      const freq = termFrequency(row.tf, token);
+      const freq = termFrequency(row.tf, row.surfaces, token);
       if (!freq) continue;
       matched.push(token);
       lexical += bm25Weight(freq, row.docLen, avgdl, idfOf.get(token) || 0);
@@ -475,14 +598,23 @@ export function rankInternalDocChunks(
       if (containsWordPhrase(titleWords, bigram)) titleHits += 1;
       else if (containsWordPhrase(bodyWords, bigram)) bodyHits += 1;
     }
+    const headings = sectionHeadingTexts(row.chunk.title, row.chunk.content);
+    const headingHits = countHeadingHits(headings, focus);
+    const docTokens = new Set<string>([...row.tf.keys(), ...row.surfaces]);
+    const specific = hasSpecificOverlap(matched, docTokens);
+    // Cosine is a tie-break only. A section heading that names the subject
+    // outranks a manual that shares a generic word and a closer vector.
+    const genericPenalty = specific ? 1 : 0.2;
     return [{
       chunk: row.chunk,
       matched,
       focusMatches: countFocusMatches(matched, focus),
+      headingHits,
       titleHits,
       bodyHits,
+      specific,
       failureAt: -1,
-      score: lexical + titleHits * 8 + bodyHits * 4 + COSINE_WEIGHT * Math.max(0, row.cosine),
+      score: (lexical + headingHits * 12 + titleHits * 8 + bodyHits * 4 + COSINE_WEIGHT * Math.max(0, row.cosine)) * genericPenalty,
     }];
   });
 
@@ -528,11 +660,14 @@ export function rankInternalDocChunks(
     if (grounded.length) scored = grounded;
   }
 
-  // A title that contains the subject phrase outranks a body mention, which
-  // outranks a guide that only repeats a shared verb or one broad noun.
+  // A section heading or title that names the subject outranks a body mention.
+  // A guide whose only overlap is a generic token such as "stabil" or "koneksi"
+  // stays behind a guide that actually contains the specific term.
   scored.sort((left, right) =>
-    right.titleHits - left.titleHits
+    right.headingHits - left.headingHits
+    || right.titleHits - left.titleHits
     || right.bodyHits - left.bodyHits
+    || Number(right.specific) - Number(left.specific)
     || right.focusMatches - left.focusMatches
     || right.score - left.score
     || left.chunk.chunk_id.localeCompare(right.chunk.chunk_id));
