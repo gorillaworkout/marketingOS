@@ -9,6 +9,11 @@ const migrate = readFileSync('scripts/migrate.ts', 'utf8');
 const aiResearch = readFileSync('db/migrations/012_ai_research_conversations.sql', 'utf8');
 const imageAssignments = readFileSync('db/migrations/013_image_model_assignments.sql', 'utf8');
 const catalog = new Set(AVAILABLE_MODELS.map(model => model.id));
+const RETIRED_SONNET_46 = 'ag/claude-sonnet-4-6';
+
+function missingFromCurrentCatalog(ids: string[]): string[] {
+  return ids.filter(id => id !== RETIRED_SONNET_46 && !catalog.has(id));
+}
 
 function withoutSqlComments(sql: string): string {
   return sql.replace(/--.*$/gm, '');
@@ -36,7 +41,7 @@ test('012 creates ai_research_conversations and expands department features idem
   assert.match(aiResearch, /"ag\/gemini-3\.1-pro-low"/);
 
   const quoted = [...executable.matchAll(/'((?:ag|cc|cx|kimi|tr|lr)\/[^']+|pecut-free)'/g)].map(match => match[1]);
-  const missing = quoted.filter(id => !catalog.has(id));
+  const missing = missingFromCurrentCatalog(quoted);
   assert.deepEqual(missing, [], '012 would write models that are not in AVAILABLE_MODELS');
 });
 
@@ -58,7 +63,7 @@ test('014 restores Codex on AI Research, drops residual Kimi, and is idempotent'
   const quoted = [...executable.matchAll(/'((?:ag|cc|cx|kimi|tr|lr)\/[^']+|pecut-free)'/g)]
     .map(match => match[1])
     .filter(id => !id.includes('%'));
-  const missing = quoted.filter(id => !catalog.has(id));
+  const missing = missingFromCurrentCatalog(quoted);
   assert.deepEqual(missing, [], '014 would write models that are not in AVAILABLE_MODELS');
 });
 
@@ -86,7 +91,7 @@ test('015 adds Claude Sonnet 5 and Opus 5 to every feature, drops residual Kimi,
     .filter(id => !id.includes('%'));
   assert.ok(quoted.includes(CLAUDE_SONNET_5_MODEL));
   assert.ok(quoted.includes(CLAUDE_OPUS_5_MODEL));
-  const missing = quoted.filter(id => !catalog.has(id));
+  const missing = missingFromCurrentCatalog(quoted);
   assert.deepEqual(missing, [], '015 would write models that are not in AVAILABLE_MODELS');
 });
 
@@ -119,8 +124,41 @@ test('024 adds Claude Sonnet 5.5 and Opus 5.5 to every feature, keeps older Clau
   assert.ok(quoted.includes(CLAUDE_OPUS_5_MODEL));
   assert.ok(quoted.includes(CLAUDE_SONNET_5_5_MODEL));
   assert.ok(quoted.includes(CLAUDE_OPUS_5_5_MODEL));
-  const missing = quoted.filter(id => !catalog.has(id));
+  const missing = missingFromCurrentCatalog(quoted);
   assert.deepEqual(missing, [], '024 would write models that are not in AVAILABLE_MODELS');
+});
+
+test('025 removes Claude Sonnet 4.6, keeps Sonnet 5.5 and Opus 5.5, and is idempotent', () => {
+  const retire46 = readFileSync('db/migrations/025_retire_claude_sonnet_4_6.sql', 'utf8');
+  const executable = withoutSqlComments(retire46);
+  assert.match(retire46, /BEGIN;[\s\S]*COMMIT;/);
+  assert.match(retire46, /ON CONFLICT \(feature_key\) DO NOTHING/);
+  assert.doesNotMatch(retire46, /DROP TABLE|DELETE FROM|TRUNCATE/i);
+  assert.match(executable, /model <> 'ag\/claude-sonnet-4-6'/);
+  assert.match(executable, /WHEN default_model = 'ag\/claude-sonnet-4-6' THEN 'cc\/claude-sonnet-5-5'/);
+  assert.match(executable, /preference\.model = 'ag\/claude-sonnet-4-6'/);
+  assert.match(executable, /cc\/claude-sonnet-5-5/);
+  assert.match(executable, /cc\/claude-opus-5-5/);
+  assert.match(executable, /'cc\/claude-sonnet-5'/);
+  assert.match(executable, /'cc\/claude-opus-5'/);
+  assert.match(executable, /lr\/claude-sonnet-4\.5/);
+  assert.match(executable, /image_model_assignments/);
+  assert.match(retire46, /503 on 2026-10-02/);
+  assert.doesNotMatch(executable, /kimi\/k3|kimi\/kimi/);
+  const seeded = executable.split(/INSERT INTO feature_model_assignments/)[1]?.split(/UPDATE task_model_preferences/)[0] ?? '';
+  assert.doesNotMatch(seeded, /ag\/claude-sonnet-4-6/);
+  assert.match(seeded, /'cc\/claude-sonnet-5-5'/);
+  for (const feature of GENERATION_FEATURES) {
+    assert.match(retire46, new RegExp(`'${feature}'`));
+  }
+  const quoted = [...executable.matchAll(/'((?:ag|cc|cx|kimi|tr|lr)\/[^']+|pecut-free)'/g)]
+    .map(match => match[1])
+    .filter(id => !id.includes('%') && !IMAGE_MODELS.includes(id));
+  assert.ok(quoted.includes(CLAUDE_SONNET_5_5_MODEL));
+  assert.ok(quoted.includes(CLAUDE_OPUS_5_5_MODEL));
+  assert.ok(quoted.includes(RETIRED_SONNET_46));
+  const missing = missingFromCurrentCatalog(quoted);
+  assert.deepEqual(missing, [], '025 would write chat models that are not in AVAILABLE_MODELS');
 });
 
 test('013 creates image_model_assignments with the current catalog and is safe on existing prod', () => {

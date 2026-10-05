@@ -26,6 +26,8 @@ async function main() {
   const { execute, queryAll, closeDb } = await import('../src/lib/database');
   const { AVAILABLE_MODELS, PREFERRED_CODEX_MODEL } = await import('../src/lib/openai');
   const live = new Set(AVAILABLE_MODELS.map(model => model.id));
+  // 014 still writes ag/claude-sonnet-4-6. Migration 025 removes it from the catalog.
+  const historicallyLive = (model: string) => live.has(model) || model === 'ag/claude-sonnet-4-6';
 
   const sql = await readFile(path.join(process.cwd(), 'db/migrations/014_restore_codex_ai_research.sql'), 'utf8');
 
@@ -66,12 +68,12 @@ async function main() {
   for (const row of assignments) {
     assert.ok(row.allowed_models.length >= 2, `${row.feature_key} keeps more than one choice`);
     for (const model of row.allowed_models) {
-      assert.ok(live.has(model), `${row.feature_key} allows unknown model ${model}`);
+      assert.ok(historicallyLive(model), `${row.feature_key} allows unknown model ${model}`);
       assert.ok(!model.startsWith('kimi/'), `${row.feature_key} still allows ${model}`);
       assert.ok(!model.startsWith('tr/'), `${row.feature_key} still allows ${model}`);
       assert.ok(!model.startsWith('cmc/moonshotai/'), `${row.feature_key} still allows ${model}`);
     }
-    assert.ok(live.has(row.default_model), `${row.feature_key} defaults to unknown model ${row.default_model}`);
+    assert.ok(historicallyLive(row.default_model), `${row.feature_key} defaults to unknown model ${row.default_model}`);
     assert.ok(row.allowed_models.includes(row.default_model), `${row.feature_key} default is inside its allowlist`);
   }
 
@@ -102,7 +104,7 @@ async function main() {
   );
   assert.equal(preferences.length, 4, 'preferences are rewritten, never deleted');
   for (const row of preferences) {
-    assert.ok(live.has(row.model), `${row.task_type} preference still on dead model ${row.model}`);
+    assert.ok(historicallyLive(row.model), `${row.task_type} preference still on dead model ${row.model}`);
     assert.ok(!row.model.startsWith('kimi/'), `${row.task_type} preference still on Kimi`);
   }
   assert.equal(
