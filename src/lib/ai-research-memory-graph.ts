@@ -176,8 +176,8 @@ const postgresGraphStore: MemoryGraphStore = {
     const embedding = node.embedding?.length ? JSON.stringify(node.embedding) : null;
     const updated = await execute(
       `UPDATE knowledge_entries
-       SET brief = ?, selected_output = ?, embedding = COALESCE(?, embedding),
-           conversation_id = COALESCE(?, conversation_id), content_hash = ?, task_id = ?
+       SET brief = ?, selected_output = ?, embedding = COALESCE(?::text, embedding),
+           conversation_id = COALESCE(?::text, conversation_id), content_hash = ?, task_id = ?
        WHERE id = ? AND user_id = ? AND task_type = ?`,
       [
         node.brief,

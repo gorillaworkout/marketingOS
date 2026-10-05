@@ -224,6 +224,29 @@ test('internal knowledge context cites approved knowledge ahead of public eviden
   assert.match(block, /Kelola risiko sebelum membuka posisi/);
 });
 
+test('knowledge dedupe and AI Research merge SQL cast parameters Postgres cannot infer', () => {
+  const persist = read('src/lib/knowledge-persist.ts');
+  const graph = read('src/lib/ai-research-memory-graph.ts');
+  const memory = read('src/lib/ai-research-memory.ts');
+
+  assert.match(persist, /\?::text IS NOT NULL AND task_id = \?::text/);
+  assert.doesNotMatch(persist, /\(\? IS NOT NULL/);
+  assert.match(persist, /embedding = COALESCE\(\?::text, embedding\)/);
+  assert.match(persist, /task_id = COALESCE\(task_id, \?::text\)/);
+  assert.match(persist, /content_hash = COALESCE\(content_hash, \?::text\)/);
+  assert.match(persist, /source_urls = COALESCE\(\?::text, source_urls\)/);
+  assert.match(persist, /conversation_id = COALESCE\(conversation_id, \?::text\)/);
+  assert.match(persist, /project_id = COALESCE\(project_id, \?::text\)/);
+
+  assert.match(graph, /embedding = COALESCE\(\?::text, embedding\)/);
+  assert.match(graph, /conversation_id = COALESCE\(\?::text, conversation_id\)/);
+  assert.doesNotMatch(graph, /COALESCE\(\?,/);
+
+  assert.match(memory, /embedding = COALESCE\(\?::text, embedding\)/);
+  assert.match(memory, /source_conversation_id = COALESCE\(source_conversation_id, \?::text\)/);
+  assert.doesNotMatch(memory, /COALESCE\(\?, embedding\)/);
+});
+
 test('approve, research, and generator routes persist and read knowledge', () => {
   const status = read('src/app/api/social-post/status/route.ts');
   const chat = read('src/app/api/ai-research/chat/route.ts');

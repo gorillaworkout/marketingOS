@@ -393,7 +393,7 @@ export async function persistKnowledgeEntry(input: PersistKnowledgeInput): Promi
         `UPDATE knowledge_entries
          SET brief = ?, selected_output = ?, audience = ?, content_hash = ?,
              quality_score = GREATEST(quality_score, ?),
-             embedding = COALESCE(?, embedding)
+             embedding = COALESCE(?::text, embedding)
          WHERE id = ? AND user_id = ?`,
         [
           brief,
@@ -435,8 +435,8 @@ export async function persistKnowledgeEntry(input: PersistKnowledgeInput): Promi
     await execute(
       `UPDATE knowledge_entries
        SET quality_score = GREATEST(quality_score, ?),
-           task_id = COALESCE(task_id, ?),
-           content_hash = COALESCE(content_hash, ?)
+           task_id = COALESCE(task_id, ?::text),
+           content_hash = COALESCE(content_hash, ?::text)
        WHERE id = ? AND user_id = ?`,
       [qualityScore, taskId, contentHash, duplicate.id, input.userId],
     );
@@ -464,9 +464,9 @@ export async function persistKnowledgeEntry(input: PersistKnowledgeInput): Promi
           `UPDATE knowledge_entries
            SET brief = ?, selected_output = ?, audience = ?, content_hash = ?,
                embedding = ?, quality_score = GREATEST(quality_score, ?),
-               source_urls = COALESCE(?, source_urls),
-               conversation_id = COALESCE(conversation_id, ?),
-               project_id = COALESCE(project_id, ?)
+               source_urls = COALESCE(?::text, source_urls),
+               conversation_id = COALESCE(conversation_id, ?::text),
+               project_id = COALESCE(project_id, ?::text)
            WHERE id = ? AND user_id = ?`,
           [
             brief,
@@ -605,7 +605,7 @@ async function loadDedupeCandidates(
      FROM knowledge_entries
      WHERE user_id = ? AND task_type = ?
        AND (
-         (? IS NOT NULL AND task_id = ?)
+         (?::text IS NOT NULL AND task_id = ?::text)
          OR content_hash = ?
          OR selected_output = ?
        )

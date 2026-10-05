@@ -566,9 +566,9 @@ async function defaultUpsertMemory(row: MemoryRow): Promise<void> {
   const embedding = row.embedding?.length ? JSON.stringify(row.embedding) : null;
   const updated = await execute(
     `UPDATE user_memories
-     SET kind = ?, content = ?, content_hash = ?, embedding = COALESCE(?, embedding),
+     SET kind = ?, content = ?, content_hash = ?, embedding = COALESCE(?::text, embedding),
          mention_count = ?, confidence = ?, last_used_at = ?, updated_at = ?,
-         source_conversation_id = COALESCE(source_conversation_id, ?)
+         source_conversation_id = COALESCE(source_conversation_id, ?::text)
      WHERE id = ? AND user_id = ?`,
     [
       row.kind,
