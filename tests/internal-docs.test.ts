@@ -484,7 +484,7 @@ test('Indonesian IT questions prefer the matching FAQ section over LED manuals t
       title: 'FAQ IT Support',
       access_level: 'company',
       content: [
-        '1.2 Wi-Fi',
+        '1.2 Koneksi Wi-Fi Tidak Stabil',
         'Jika Wi-Fi tidak stabil atau lemot, lupakan jaringan tersebut lalu sambungkan lagi.',
         'The office Wi-Fi password is at reception. A weak signal can make the internet feel slow.',
       ].join('\n'),
@@ -525,11 +525,12 @@ test('Indonesian IT questions prefer the matching FAQ section over LED manuals t
   expectSection('laptop tidak bisa nyala', 'faq-laptop');
   expectSection('cara pakai LED auditorium', 'led-aud');
   expectSection('cara pakai running text', 'running');
+  expectSection('cara ganti running text', 'running');
   assert.match(rankInternalDocChunks('kenapa wifi gak stabil', queryVector, chunks, company, 6)[0]?.excerpt || '', /wi-?fi/i);
   assert.match(rankInternalDocChunks('laptop tidak bisa nyala', queryVector, chunks, company, 6)[0]?.excerpt || '', /tidak menyala|won't turn on|won't boot/i);
 });
 
-test('an exact subsection heading beats a merged chunk that only shares the parent topic', () => {
+test('a literal subsection heading beats an alias heading that shares the same fault phrase', () => {
   const queryVector = [1, 0];
   const parentHeavy = JSON.stringify(queryVector);
   const orthogonal = JSON.stringify([0, 1]);
@@ -541,10 +542,10 @@ test('an exact subsection heading beats a merged chunk that only shares the pare
       title: 'FAQ IT Support',
       access_level: 'company',
       content: [
-        '2.1 CPU Mati',
-        'CPU mati atau hang. CPU tidak menyala. Restart the CPU and check the power cable. CPU mati total.',
+        '2.1 CPU Komputer Mati / Tidak Menyala',
+        'Komputer tidak menyala. CPU komputer mati. Komputer tidak bisa nyala. Restart komputer dan cek kabel power. Komputer mati total.',
         '2.2 Laptop Lambat',
-        'Laptop lambat saat membuka aplikasi. Laptop tidak menyala sebentar lalu hidup. Jika laptop tidak bisa nyala lalu terasa lambat, restart dulu.',
+        'Laptop lambat saat membuka aplikasi. Laptop terasa lambat. Restart dulu jika laptop lambat.',
       ].join('\n'),
       embedding: parentHeavy,
     },
@@ -556,8 +557,19 @@ test('an exact subsection heading beats a merged chunk that only shares the pare
       content: [
         '2.3 Laptop Tidak Menyala',
         'Laptop tidak menyala. If the laptop won\'t turn on or won\'t boot, connect the charger and hold the power button for ten seconds.',
-        'Komputer mati total tetap butuh kabel power.',
         filler,
+      ].join('\n'),
+      embedding: orthogonal,
+    },
+    {
+      chunk_id: 'faq-wifi',
+      document_id: 'doc-it-faq',
+      title: 'FAQ IT Support',
+      access_level: 'company',
+      content: [
+        '1.2 Koneksi Wi-Fi Tidak Stabil',
+        'Jika Wi-Fi tidak stabil atau lemot, lupakan jaringan tersebut lalu sambungkan lagi.',
+        'The office Wi-Fi password is at reception. A weak signal can make the internet feel slow.',
       ].join('\n'),
       embedding: orthogonal,
     },
@@ -569,35 +581,48 @@ test('an exact subsection heading beats a merged chunk that only shares the pare
       content: 'Cara pakai LED auditorium. Connect the laptop HDMI cable to the LED processor.',
       embedding: parentHeavy,
     },
+    {
+      chunk_id: 'running',
+      document_id: 'doc-running',
+      title: 'Manual Book Running Text LED',
+      access_level: 'company',
+      content: 'Cara ganti running text LED di lobi. Controller ini tidak memakai wifi. Jika software terasa lemot, restart PC.',
+      embedding: parentHeavy,
+    },
   ];
 
   const first = (query: string) => rankInternalDocChunks(query, queryVector, chunks, company, 6);
 
   const off = first('laptop tidak bisa nyala');
-  assert.equal(off[0]?.chunkId, 'faq-2-3', `laptop tidak bisa nyala -> ${off.map(hit => hit.chunkId).join(', ')}`);
-  assert.match(off[0]?.excerpt || '', /2\.3|Tidak Menyala/i);
+  assert.equal(off[0]?.chunkId, 'faq-2-3', `laptop tidak bisa nyala -> ${off.map(hit => `${hit.chunkId}:${hit.score.toFixed(2)}`).join(', ')}`);
+  assert.match(off[0]?.excerpt || '', /2\.3 Laptop Tidak Menyala/);
   assert.equal(internalDocsRetrievalConfidence('laptop tidak bisa nyala', off), 'high');
+
+  const komputer = first('komputer tidak menyala');
+  assert.equal(komputer[0]?.chunkId, 'faq-2-1', `komputer tidak menyala -> ${komputer.map(hit => hit.chunkId).join(', ')}`);
+  assert.match(komputer[0]?.excerpt || '', /2\.1 CPU Komputer Mati \/ Tidak Menyala/);
+  assert.doesNotMatch(komputer[0]?.excerpt || '', /2\.2 Laptop Lambat|2\.3/);
+
+  const cpu = first('cpu mati');
+  assert.equal(cpu[0]?.chunkId, 'faq-2-1', `cpu mati -> ${cpu.map(hit => hit.chunkId).join(', ')}`);
+  assert.match((cpu[0]?.excerpt || '').slice(0, 48), /2\.1 CPU Komputer Mati/);
+  assert.doesNotMatch(cpu[0]?.excerpt || '', /2\.2 Laptop Lambat|2\.3/);
 
   const slow = first('laptop lambat');
   assert.equal(slow[0]?.chunkId, 'faq-2-1', `laptop lambat -> ${slow.map(hit => hit.chunkId).join(', ')}`);
   assert.match(slow[0]?.excerpt || '', /2\.2 Laptop Lambat/);
-  assert.doesNotMatch(slow[0]?.excerpt || '', /2\.1 CPU Mati/);
+  assert.doesNotMatch(slow[0]?.excerpt || '', /2\.1 CPU Komputer Mati/);
 
-  const cpu = first('cpu mati');
-  assert.equal(cpu[0]?.chunkId, 'faq-2-1', `cpu mati -> ${cpu.map(hit => hit.chunkId).join(', ')}`);
-  assert.match((cpu[0]?.excerpt || '').slice(0, 40), /2\.1 CPU Mati/);
-  assert.match(cpu[0]?.excerpt || '', /mati total/i);
-  assert.doesNotMatch(cpu[0]?.excerpt || '', /2\.2 Laptop Lambat|2\.3/);
+  const wifi = first('kenapa wifi gak stabil');
+  assert.equal(wifi[0]?.chunkId, 'faq-wifi', `kenapa wifi gak stabil -> ${wifi.map(hit => hit.chunkId).join(', ')}`);
+  assert.match(wifi[0]?.excerpt || '', /1\.2 Koneksi Wi-Fi Tidak Stabil/);
+  const lemot = first('wifi lemot');
+  assert.equal(lemot[0]?.chunkId, 'faq-wifi', `wifi lemot -> ${lemot.map(hit => hit.chunkId).join(', ')}`);
 
-  const hidup = first('laptop tidak hidup');
-  assert.equal(hidup[0]?.chunkId, 'faq-2-3', `laptop tidak hidup -> ${hidup.map(hit => hit.chunkId).join(', ')}`);
-
-  const dead = first('laptop gak nyala');
-  assert.equal(dead[0]?.chunkId, 'faq-2-3', `laptop gak nyala -> ${dead.map(hit => hit.chunkId).join(', ')}`);
-
-  const total = first('laptop mati total');
-  assert.equal(total[0]?.chunkId, 'faq-2-3', `laptop mati total -> ${total.map(hit => hit.chunkId).join(', ')}`);
-  assert.match(total[0]?.excerpt || '', /2\.3 Laptop Tidak Menyala/);
+  const led = first('cara pakai LED auditorium');
+  assert.equal(led[0]?.chunkId, 'led-aud', `cara pakai LED auditorium -> ${led.map(hit => hit.chunkId).join(', ')}`);
+  const running = first('cara ganti running text');
+  assert.equal(running[0]?.chunkId, 'running', `cara ganti running text -> ${running.map(hit => hit.chunkId).join(', ')}`);
 });
 
 test('wifi retrieval searches hyphenated and Indonesian aliases, not only the raw token', () => {

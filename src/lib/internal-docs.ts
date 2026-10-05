@@ -385,30 +385,31 @@ function subsectionSpans(title: string, content: string): SubsectionSpan[] {
   return found;
 }
 
-function focusHitsInText(text: string, focus: readonly string[]): number {
-  const tokens = tokensOf(text);
-  let hits = 0;
-  for (const token of focus) {
-    if (tokens.some(docToken => tokensMatch(token, docToken))) hits += 1;
-  }
-  return hits;
-}
-
 /**
  * Score the one subsection heading that best matches the question.
  * A merged chunk must not add "laptop" from 2.2 to "mati" from 2.1 and
  * pretend that combination is the heading "Laptop Tidak Menyala".
- * Ties go to the heading that actually governs the matched text.
+ * A literal query word outranks an alias of that word. Ties go to the heading
+ * that actually governs the matched text.
  */
 function bestSubsectionHeading(
   title: string,
   content: string,
   focus: readonly string[],
   phraseGroups: readonly (readonly string[])[],
-): { headingHits: number; phraseHit: number; at: number; end: number; inBody: boolean; multi: boolean } {
+): {
+  headingHits: number;
+  headingWeights: number[];
+  phraseHit: number;
+  at: number;
+  end: number;
+  inBody: boolean;
+  multi: boolean;
+} {
   const found = subsectionSpans(title, content);
   let best = {
     headingHits: 0,
+    headingWeights: focus.map(() => 0),
     phraseHit: 0,
     bodyFocus: -1,
     at: 0,
@@ -417,15 +418,19 @@ function bestSubsectionHeading(
     multi: found.length > 1,
   };
   for (const item of found) {
-    const hits = focusHitsInText(item.heading, focus);
+    const headingWeights = tokenWeights(item.heading, focus);
+    const hits = weightSum(headingWeights);
     const phraseHit = headingPhraseHit(item.heading, phraseGroups) ? 1 : 0;
-    const bodyFocus = focusHitsInText(content.slice(item.at, item.end), focus);
+    const bodyFocus = weightSum(tokenWeights(content.slice(item.at, item.end), focus));
+    const weightOrder = compareWeights(best.headingWeights, headingWeights);
     const betterPhrase = phraseHit > best.phraseHit;
-    const betterHeading = phraseHit === best.phraseHit && hits > best.headingHits;
-    const closerText = phraseHit === best.phraseHit && hits === best.headingHits && bodyFocus > best.bodyFocus;
-    if (betterPhrase || betterHeading || closerText) {
+    const betterHeading = phraseHit === best.phraseHit && weightOrder > 0;
+    const richerHeading = phraseHit === best.phraseHit && weightOrder === 0 && hits > best.headingHits;
+    const closerText = phraseHit === best.phraseHit && weightOrder === 0 && hits === best.headingHits && bodyFocus > best.bodyFocus;
+    if (betterPhrase || betterHeading || richerHeading || closerText) {
       best = {
         headingHits: hits,
+        headingWeights,
         phraseHit,
         bodyFocus,
         at: item.at,
@@ -521,24 +526,61 @@ function lexemeMatch(queryToken: string, docToken: string): boolean {
   return ID_AFFIX_PREFIX.has(long.slice(0, at)) && ID_AFFIX_SUFFIX.has(long.slice(at + short.length));
 }
 
-function tokensMatch(queryToken: string, docToken: string): boolean {
-  if (queryToken === docToken || lexemeMatch(queryToken, docToken)) return true;
+/** A synonym such as komputer→laptop counts, but less than the word the person typed. */
+const ALIAS_MATCH_WEIGHT = 0.5;
+const HEADING_HIT_BOOST = 48;
+
+function matchWeight(queryToken: string, docToken: string): number {
+  if (queryToken === docToken || lexemeMatch(queryToken, docToken)) return 1;
   const group = ASK_ALIAS_LOOKUP.get(queryToken);
-  return Boolean(group && group.all.has(docToken));
+  if (group?.all.has(docToken)) return ALIAS_MATCH_WEIGHT;
+  return 0;
+}
+
+/** Best weight for one query token. Alias hits do not stack on top of a literal hit. */
+function tokenWeights(text: string, focus: readonly string[]): number[] {
+  const tokens = tokensOf(text);
+  return focus.map(token => {
+    let best = 0;
+    for (const docToken of tokens) {
+      const weight = matchWeight(token, docToken);
+      if (weight > best) best = weight;
+      if (best >= 1) break;
+    }
+    return best;
+  });
+}
+
+function weightSum(weights: readonly number[]): number {
+  return weights.reduce((sum, weight) => sum + weight, 0);
+}
+
+/** Earlier query tokens win a tie. Literal "laptop" beats alias "komputer" before body score. */
+function compareWeights(left: readonly number[], right: readonly number[]): number {
+  const length = Math.max(left.length, right.length);
+  for (let index = 0; index < length; index += 1) {
+    const delta = (right[index] || 0) - (left[index] || 0);
+    if (delta) return delta;
+  }
+  return 0;
 }
 
 function termFrequency(tf: Map<string, number>, surfaces: ReadonlySet<string>, token: string): number {
-  const exact = tf.get(token) || 0;
-  if (exact) return exact;
-  let freq = 0;
+  let literal = 0;
+  let alias = 0;
   for (const [key, count] of tf) {
-    if (tokensMatch(token, key)) freq += count;
+    const weight = matchWeight(token, key);
+    if (weight >= 1) literal += count;
+    else if (weight > 0) alias += count;
   }
-  if (freq) return freq;
+  if (literal) return literal;
+  if (alias) return alias * ALIAS_MATCH_WEIGHT;
   for (const surface of surfaces) {
-    if (tokensMatch(token, surface)) return 1;
+    const weight = matchWeight(token, surface);
+    if (weight >= 1) return 1;
+    if (weight > 0) alias = Math.max(alias, 1);
   }
-  return 0;
+  return alias * ALIAS_MATCH_WEIGHT;
 }
 
 function hasSpecificOverlap(matched: readonly string[], docTokens: ReadonlySet<string>): boolean {
@@ -714,8 +756,9 @@ export function rankInternalDocChunks(
     const specific = hasSpecificOverlap(matched, docTokens);
     // Most of the question's content words inside one subsection heading is
     // the section the person asked for, even when another chunk has a closer vector.
+    // Half a point (literal vs alias) is worth more than ordinary body overlap.
     const strongHeading = focus.length > 0 && heading.headingHits * 2 > focus.length;
-    const headingBoost = heading.headingHits * 12 + (strongHeading ? 36 : 0) + heading.phraseHit * 24;
+    const headingBoost = heading.headingHits * HEADING_HIT_BOOST + (strongHeading ? 36 : 0) + heading.phraseHit * 24;
     // A chunk that glues 2.1 and 2.2 together is scored on the winning subsection
     // only, so the sibling section's words cannot carry the rank.
     const sectionLexical = heading.multi
@@ -727,6 +770,7 @@ export function rankInternalDocChunks(
       matched,
       focusMatches: countFocusMatches(matched, focus),
       headingHits: heading.headingHits,
+      headingWeights: heading.headingWeights,
       phraseHit: heading.phraseHit,
       sectionAt: heading.at,
       sectionEnd: heading.end,
@@ -786,6 +830,7 @@ export function rankInternalDocChunks(
   // stays behind a guide that actually contains the specific term.
   scored.sort((left, right) =>
     right.phraseHit - left.phraseHit
+    || compareWeights(left.headingWeights, right.headingWeights)
     || right.headingHits - left.headingHits
     || right.titleHits - left.titleHits
     || right.bodyHits - left.bodyHits
