@@ -91,7 +91,7 @@ const ASK_ALIAS_GROUPS: readonly AskAliasGroup[] = [
   { specific: ['wifi'], generic: ['internet', 'jaringan', 'koneksi', 'sinyal', 'signal'] },
   { specific: ['gak', 'tidak', 'nggak', 'enggak'], generic: ['ga'] },
   { specific: ['lemot', 'lambat', 'slow'], generic: [] },
-  { specific: ['mati', 'nyala', 'boot'], generic: ['start'] },
+  { specific: ['mati', 'nyala', 'menyala', 'hidup'], generic: ['boot', 'start'] },
   { specific: ['laptop', 'komputer', 'pc'], generic: [] },
   { specific: ['printer'], generic: [] },
   { specific: ['password', 'sandi'], generic: [] },
@@ -107,6 +107,11 @@ for (const group of ASK_ALIAS_GROUPS) {
 }
 
 const SHORT_ASK_TOKENS = new Set(['ga', 'pc']);
+
+/** Same fault, different wording. A heading has to contain one full phrase. */
+const ASK_PHRASE_ALIASES: readonly (readonly string[])[] = [
+  ['tidak menyala', 'tidak bisa nyala', 'gak nyala', 'nggak nyala', 'ga nyala', 'mati total'],
+];
 
 export interface InternalDocListRow {
   id: string;
@@ -332,29 +337,105 @@ function contentWords(text: string): string[] {
   return tokenizeAskText(text);
 }
 
-function sectionHeadingTexts(title: string, content: string): string[] {
-  const headings = [title];
-  for (const line of content.split(/\n/)) {
-    const trimmed = line.trim();
-    if (!trimmed) continue;
-    const markdown = /^#{1,6}\s+(\S+(?:\s+\S+){0,8})/.exec(trimmed);
-    if (markdown) {
-      headings.push(markdown[1]);
-      continue;
-    }
-    const numbered = /^\d+\.\d+(?:\.\d+)*\.?\s+(\S+(?:\s+\S+){0,6})/.exec(trimmed);
-    if (numbered) headings.push(numbered[1].replace(/[.:;,]+$/, ''));
-  }
-  return headings;
+function subsectionHeadingLabel(line: string): string | null {
+  const trimmed = line.trim();
+  if (!trimmed) return null;
+  const markdown = /^#{1,6}\s+(\S+(?:\s+\S+){0,8})/.exec(trimmed);
+  if (markdown) return markdown[1].replace(/[.:;,]+$/, '');
+  const numbered = /^\d+\.\d+(?:\.\d+)*\.?\s+(\S+(?:\s+\S+){0,6})/.exec(trimmed);
+  if (numbered) return numbered[1].replace(/[.:;,]+$/, '');
+  return null;
 }
 
-function countHeadingHits(headings: readonly string[], focus: readonly string[]): number {
-  const tokens = headings.flatMap(heading => tokensOf(heading));
+function normalizedPhrase(text: string): string {
+  return normalizeAskText(text).replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+function activePhraseGroups(query: string): readonly (readonly string[])[] {
+  const normalized = normalizedPhrase(query);
+  return ASK_PHRASE_ALIASES.filter(group => group.some(phrase => normalized.includes(phrase)));
+}
+
+function headingPhraseHit(heading: string, groups: readonly (readonly string[])[]): boolean {
+  const normalized = normalizedPhrase(heading);
+  return groups.some(group => group.some(phrase => normalized.includes(phrase)));
+}
+
+type SubsectionSpan = {
+  heading: string;
+  at: number;
+  end: number;
+  inBody: boolean;
+};
+
+/** Numbered or markdown headings, each owning the text until the next heading. */
+function subsectionSpans(title: string, content: string): SubsectionSpan[] {
+  const found: SubsectionSpan[] = [];
+  let searchFrom = 0;
+  for (const line of content.split('\n')) {
+    const label = subsectionHeadingLabel(line);
+    const at = line ? content.indexOf(line, searchFrom) : searchFrom;
+    if (label && at >= 0) found.push({ heading: label, at, end: content.length, inBody: true });
+    if (at >= 0 && line) searchFrom = at + line.length;
+  }
+  for (let index = 0; index < found.length - 1; index += 1) {
+    found[index].end = found[index + 1].at;
+  }
+  if (!found.length) found.push({ heading: title, at: 0, end: content.length, inBody: false });
+  return found;
+}
+
+function focusHitsInText(text: string, focus: readonly string[]): number {
+  const tokens = tokensOf(text);
   let hits = 0;
   for (const token of focus) {
     if (tokens.some(docToken => tokensMatch(token, docToken))) hits += 1;
   }
   return hits;
+}
+
+/**
+ * Score the one subsection heading that best matches the question.
+ * A merged chunk must not add "laptop" from 2.2 to "mati" from 2.1 and
+ * pretend that combination is the heading "Laptop Tidak Menyala".
+ * Ties go to the heading that actually governs the matched text.
+ */
+function bestSubsectionHeading(
+  title: string,
+  content: string,
+  focus: readonly string[],
+  phraseGroups: readonly (readonly string[])[],
+): { headingHits: number; phraseHit: number; at: number; end: number; inBody: boolean; multi: boolean } {
+  const found = subsectionSpans(title, content);
+  let best = {
+    headingHits: 0,
+    phraseHit: 0,
+    bodyFocus: -1,
+    at: 0,
+    end: content.length,
+    inBody: false,
+    multi: found.length > 1,
+  };
+  for (const item of found) {
+    const hits = focusHitsInText(item.heading, focus);
+    const phraseHit = headingPhraseHit(item.heading, phraseGroups) ? 1 : 0;
+    const bodyFocus = focusHitsInText(content.slice(item.at, item.end), focus);
+    const betterPhrase = phraseHit > best.phraseHit;
+    const betterHeading = phraseHit === best.phraseHit && hits > best.headingHits;
+    const closerText = phraseHit === best.phraseHit && hits === best.headingHits && bodyFocus > best.bodyFocus;
+    if (betterPhrase || betterHeading || closerText) {
+      best = {
+        headingHits: hits,
+        phraseHit,
+        bodyFocus,
+        at: item.at,
+        end: item.end,
+        inBody: item.inBody,
+        multi: found.length > 1,
+      };
+    }
+  }
+  return best;
 }
 
 /** Adjacent subject words, in question order. "LED auditorium" stays one phrase. */
@@ -524,6 +605,35 @@ function excerptAroundMatch(content: string, at: number): string {
   return normalized.slice(start, start + EXCERPT_CHARS).trim();
 }
 
+/** Quote only the winning subsection, not the sibling headings packed into the same chunk. */
+function excerptOfSpan(content: string, at: number, end: number): string {
+  const slice = content.slice(Math.max(0, at), Math.max(at, end));
+  return slice.replace(/\s+/g, ' ').trim().slice(0, EXCERPT_CHARS);
+}
+
+function lexicalOfText(
+  text: string,
+  title: string,
+  tokens: readonly string[],
+  avgdl: number,
+  idfOf: ReadonlyMap<string, number>,
+): number {
+  const bodyTokens = tokensOf(text);
+  const titleTokens = tokensOf(title);
+  const tf = new Map<string, number>();
+  for (const token of bodyTokens) tf.set(token, (tf.get(token) || 0) + 1);
+  for (const token of titleTokens) tf.set(token, (tf.get(token) || 0) + TITLE_TF_BOOST);
+  const surfaces = new Set([...aliasSurfaceTokens(title), ...aliasSurfaceTokens(text)]);
+  const docLen = bodyTokens.length + titleTokens.length * TITLE_TF_BOOST;
+  let lexical = 0;
+  for (const token of tokens) {
+    const freq = termFrequency(tf, surfaces, token);
+    if (!freq) continue;
+    lexical += bm25Weight(freq, docLen, avgdl, idfOf.get(token) || 0);
+  }
+  return lexical;
+}
+
 function bm25Weight(tf: number, docLen: number, avgdl: number, idf: number): number {
   const lengthNorm = 1 - BM25_B + BM25_B * (docLen / Math.max(avgdl, 1));
   return idf * ((tf * (BM25_K1 + 1)) / (tf + BM25_K1 * lengthNorm));
@@ -578,6 +688,7 @@ export function rankInternalDocChunks(
 
   const focus = focusTokens(tokens);
   const bigrams = subjectBigrams(tokens);
+  const phraseGroups = activePhraseGroups(query);
   let scored = visible.flatMap(row => {
     const matched: string[] = [];
     let lexical = 0;
@@ -598,23 +709,33 @@ export function rankInternalDocChunks(
       if (containsWordPhrase(titleWords, bigram)) titleHits += 1;
       else if (containsWordPhrase(bodyWords, bigram)) bodyHits += 1;
     }
-    const headings = sectionHeadingTexts(row.chunk.title, row.chunk.content);
-    const headingHits = countHeadingHits(headings, focus);
+    const heading = bestSubsectionHeading(row.chunk.title, row.chunk.content, focus, phraseGroups);
     const docTokens = new Set<string>([...row.tf.keys(), ...row.surfaces]);
     const specific = hasSpecificOverlap(matched, docTokens);
-    // Cosine is a tie-break only. A section heading that names the subject
-    // outranks a manual that shares a generic word and a closer vector.
+    // Most of the question's content words inside one subsection heading is
+    // the section the person asked for, even when another chunk has a closer vector.
+    const strongHeading = focus.length > 0 && heading.headingHits * 2 > focus.length;
+    const headingBoost = heading.headingHits * 12 + (strongHeading ? 36 : 0) + heading.phraseHit * 24;
+    // A chunk that glues 2.1 and 2.2 together is scored on the winning subsection
+    // only, so the sibling section's words cannot carry the rank.
+    const sectionLexical = heading.multi
+      ? lexicalOfText(row.chunk.content.slice(heading.at, heading.end), row.chunk.title, tokens, avgdl, idfOf)
+      : lexical;
     const genericPenalty = specific ? 1 : 0.2;
     return [{
       chunk: row.chunk,
       matched,
       focusMatches: countFocusMatches(matched, focus),
-      headingHits,
+      headingHits: heading.headingHits,
+      phraseHit: heading.phraseHit,
+      sectionAt: heading.at,
+      sectionEnd: heading.end,
+      sectionInBody: heading.inBody,
       titleHits,
       bodyHits,
       specific,
       failureAt: -1,
-      score: (lexical + headingHits * 12 + titleHits * 8 + bodyHits * 4 + COSINE_WEIGHT * Math.max(0, row.cosine)) * genericPenalty,
+      score: (sectionLexical + headingBoost + titleHits * 8 + bodyHits * 4 + COSINE_WEIGHT * Math.max(0, row.cosine)) * genericPenalty,
     }];
   });
 
@@ -664,7 +785,8 @@ export function rankInternalDocChunks(
   // A guide whose only overlap is a generic token such as "stabil" or "koneksi"
   // stays behind a guide that actually contains the specific term.
   scored.sort((left, right) =>
-    right.headingHits - left.headingHits
+    right.phraseHit - left.phraseHit
+    || right.headingHits - left.headingHits
     || right.titleHits - left.titleHits
     || right.bodyHits - left.bodyHits
     || Number(right.specific) - Number(left.specific)
@@ -681,9 +803,11 @@ export function rankInternalDocChunks(
       title: row.chunk.title,
       accessLevel: row.chunk.access_level === 'it-only' ? 'it-only' : 'company',
       chunkId: row.chunk.chunk_id,
-      excerpt: row.failureAt >= 0
-        ? excerptAroundMatch(row.chunk.content, row.failureAt)
-        : excerptAroundPhrases(row.chunk.content, bigrams),
+      excerpt: row.sectionInBody
+        ? excerptOfSpan(row.chunk.content, row.sectionAt, row.sectionEnd)
+        : row.failureAt >= 0
+          ? excerptAroundMatch(row.chunk.content, row.failureAt)
+          : excerptAroundPhrases(row.chunk.content, bigrams),
       score: row.score,
       matchedTerms: row.matched,
       subjectMatched: bigrams.length === 0 || row.titleHits + row.bodyHits > 0 || row.failureAt >= 0,
