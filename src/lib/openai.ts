@@ -595,11 +595,14 @@ export async function fetchKnowledgeContext(
   taskType?: string,
   limit: number = 5,
   mode: 'selection' | 'internal' = 'selection',
+  retrieval?: { taskTypes?: readonly string[]; minScore?: number },
 ): Promise<string> {
   try {
     if (!userId || !String(query || '').trim()) return '';
     const { findSimilarEntries } = await import('@/lib/embeddings');
-    const entries = await findSimilarEntries(query, { userId, taskType, limit });
+    const taskTypes = retrieval?.taskTypes?.filter(type => typeof type === 'string' && type.trim());
+    const minScore = retrieval?.minScore;
+    const entries = await findSimilarEntries(query, { userId, taskType, limit, taskTypes, minScore });
     return mode === 'internal' ? formatInternalKnowledgeContext(entries) : formatKnowledgeContext(entries);
   } catch (e) {
     console.error('Failed to fetch knowledge context:', e);

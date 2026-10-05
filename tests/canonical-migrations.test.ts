@@ -161,6 +161,25 @@ test('025 removes Claude Sonnet 4.6, keeps Sonnet 5.5 and Opus 5.5, and is idemp
   assert.deepEqual(missing, [], '025 would write chat models that are not in AVAILABLE_MODELS');
 });
 
+test('026 adds per-user AI Research memory and is idempotent', () => {
+  const memory = readFileSync('db/migrations/026_ai_research_memory.sql', 'utf8');
+  const executable = withoutSqlComments(memory);
+  assert.match(memory, /BEGIN;[\s\S]*COMMIT;/);
+  assert.match(memory, /CREATE TABLE IF NOT EXISTS ai_research_qa_index/);
+  assert.match(memory, /CREATE TABLE IF NOT EXISTS user_memories/);
+  assert.match(memory, /ai_memory_enabled BOOLEAN NOT NULL DEFAULT TRUE/);
+  assert.match(memory, /UNIQUE \(user_id, content_hash\)/);
+  assert.match(memory, /REFERENCES users\(id\) ON DELETE CASCADE/);
+  assert.match(memory, /CREATE INDEX IF NOT EXISTS idx_ai_research_qa_user/);
+  assert.match(memory, /CREATE INDEX IF NOT EXISTS idx_user_memories_user/);
+  assert.match(executable, /'role'/);
+  assert.match(executable, /'interest'/);
+  assert.match(executable, /'preference'/);
+  assert.match(executable, /'style'/);
+  assert.match(executable, /'context'/);
+  assert.doesNotMatch(executable, /DROP TABLE|DELETE FROM|TRUNCATE/i);
+});
+
 test('013 creates image_model_assignments with the current catalog and is safe on existing prod', () => {
   const executable = withoutSqlComments(imageAssignments);
   assert.match(imageAssignments, /CREATE TABLE IF NOT EXISTS image_model_assignments/);
