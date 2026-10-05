@@ -81,7 +81,7 @@ test('findSimilarEntries and fetchKnowledgeContext require a user scope', () => 
   assert.doesNotMatch(embeddings, /SELECT \* FROM knowledge_entries WHERE embedding IS NOT NULL['`;]/);
 
   assert.match(openai, /export async function fetchKnowledgeContext\(/);
-  assert.match(openai, /findSimilarEntries\(query, \{ userId, taskType, limit \}\)/);
+  assert.match(openai, /findSimilarEntries\(query, \{ userId, taskType, limit, taskTypes, minScore \}\)/);
   assert.match(openai, /formatKnowledgeContext\(entries\)/);
 });
 

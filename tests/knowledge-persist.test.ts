@@ -239,7 +239,7 @@ test('approve, research, and generator routes persist and read knowledge', () =>
   assert.match(status, /primarySocialPostOutput/);
   assert.doesNotMatch(status, /persistKnowledgeQuietly\([\s\S]{0,200}draft/);
 
-  assert.match(chat, /const knowledgeContext = await fetchKnowledgeContext\(auth\.id, query, undefined, 5, 'internal'\)/);
+  assert.match(chat, /fetchKnowledgeContext\(auth\.id, query, undefined, 5, 'internal', \{[\s\S]*taskTypes: AI_RESEARCH_RETRIEVAL_TASK_TYPES[\s\S]*minScore: AI_RESEARCH_KNOWLEDGE_MIN_SCORE/);
   assert.equal((chat.match(/persistCompletedResearchAnswer\(/g) || []).length, 2);
   assert.match(chat, /sources: researchEvent\.sources/);
   assert.match(chat, /aborted: false/);

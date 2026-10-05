@@ -1,4 +1,4 @@
-import { ACCOUNT_FEATURE_LABELS, type AccountFeature } from '@/lib/authorization';
+import { ACCOUNT_FEATURE_LABELS } from '@/lib/authorization';
 import { KNOWLEDGE_TASK_TYPES, type KnowledgeTaskType } from '@/lib/knowledge-task-types';
 
 /** Dupoin brand teal. Reserved for AI Research nodes. */
@@ -21,7 +21,22 @@ export const KNOWLEDGE_FEATURE_COLORS: Record<KnowledgeFeatureKey, string> = {
   'article-market-news': '#60A5FA',
   'market-research': '#F97316',
   'internal-docs': '#4ADE80',
+  'user-memory': '#C026D3',
+  'ai-research-qa': '#84CC16',
   other: '#94A3B8',
+};
+
+const FEATURE_LABELS: Record<KnowledgeFeatureKey, string> = {
+  'ai-research': ACCOUNT_FEATURE_LABELS['ai-research'],
+  'social-post': ACCOUNT_FEATURE_LABELS['social-post'],
+  'video-script': ACCOUNT_FEATURE_LABELS['video-script'],
+  'event-plan': ACCOUNT_FEATURE_LABELS['event-plan'],
+  'article-market-news': ACCOUNT_FEATURE_LABELS['article-market-news'],
+  'market-research': ACCOUNT_FEATURE_LABELS['market-research'],
+  'internal-docs': ACCOUNT_FEATURE_LABELS['internal-docs'],
+  'user-memory': 'User Memory',
+  'ai-research-qa': 'Research Q&A',
+  other: 'Other',
 };
 
 const KNOWN_TASK_TYPES = new Set<string>(KNOWLEDGE_TASK_TYPES);
@@ -40,9 +55,7 @@ export function knowledgeFeatureKey(taskType: string | null | undefined): Knowle
 }
 
 export function knowledgeFeatureLabel(taskType: string | null | undefined): string {
-  const key = knowledgeFeatureKey(taskType);
-  if (key === KNOWLEDGE_FEATURE_OTHER) return 'Other';
-  return ACCOUNT_FEATURE_LABELS[key as AccountFeature];
+  return FEATURE_LABELS[knowledgeFeatureKey(taskType)];
 }
 
 export function knowledgeFeatureColor(taskType: string | null | undefined): string {
@@ -64,7 +77,7 @@ export function knowledgeFeaturesInGraph(taskTypes: Iterable<string | null | und
   for (const taskType of taskTypes) present.add(knowledgeFeatureKey(taskType));
   return FEATURE_ORDER.filter(key => present.has(key)).map(key => ({
     key,
-    label: key === KNOWLEDGE_FEATURE_OTHER ? 'Other' : ACCOUNT_FEATURE_LABELS[key],
+    label: FEATURE_LABELS[key],
     color: KNOWLEDGE_FEATURE_COLORS[key],
   }));
 }

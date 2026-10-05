@@ -35,10 +35,14 @@ test('each knowledge task type has one fixed color, with Dupoin teal on AI Resea
   }
   for (const taskType of KNOWLEDGE_TASK_TYPES) {
     assert.equal(knowledgeFeatureKey(taskType), taskType);
-    assert.equal(knowledgeFeatureLabel(taskType), ACCOUNT_FEATURE_LABELS[taskType]);
+    if (taskType in ACCOUNT_FEATURE_LABELS) {
+      assert.equal(knowledgeFeatureLabel(taskType), ACCOUNT_FEATURE_LABELS[taskType as keyof typeof ACCOUNT_FEATURE_LABELS]);
+    }
     assert.equal(knowledgeFeatureColor(taskType), KNOWLEDGE_FEATURE_COLORS[taskType]);
     assert.match(knowledgeFeatureLabel(taskType), /^[A-Za-z0-9 &]+$/);
   }
+  assert.equal(knowledgeFeatureLabel('user-memory'), 'User Memory');
+  assert.equal(knowledgeFeatureLabel('ai-research-qa'), 'Research Q&A');
 });
 
 test('missing and unknown task types share the Other color', () => {

@@ -8,6 +8,12 @@ import { AiResearchPinFact } from '@/components/AiResearchPinFact';
 import { AiResearchCameraButton } from '@/components/AiResearchCameraButton';
 import { AiResearchVoiceButton } from '@/components/AiResearchVoiceButton';
 import { AiResearchWatchPanel } from '@/components/AiResearchWatchPanel';
+import {
+  AiResearchMemoryPanel,
+  AiResearchPriorPreview,
+  AiResearchPriorQuestionChip,
+  type AiResearchPriorQuestion,
+} from '@/components/AiResearchMemoryPanel';
 import { AiResearchFileChip, AiResearchMarkdown } from '@/components/AiResearchMarkdown';
 import { AiResearchDeepProgress } from '@/components/AiResearchDeepProgress';
 import { AiResearchSourcesPanel } from '@/components/AiResearchSourcesPanel';
@@ -79,6 +85,7 @@ interface Message {
   files?: ChatFile[];
   researchMode?: 'deep';
   sources?: Array<{ title: string; url: string }>;
+  priorQuestions?: AiResearchPriorQuestion[];
 }
 
 function answerDeliverable(
@@ -291,6 +298,10 @@ export default function AIResearchPage() {
   const [sourcesPanelOpen, setSourcesPanelOpen] = useState(false);
   const [watchOpen, setWatchOpen] = useState(false);
   const [watchSeed, setWatchSeed] = useState('');
+  const [memoryOpen, setMemoryOpen] = useState(false);
+  const [livePriors, setLivePriors] = useState<AiResearchPriorQuestion[]>([]);
+  const [priorPreviewId, setPriorPreviewId] = useState<string | null>(null);
+  const livePriorsRef = useRef<AiResearchPriorQuestion[]>([]);
   const [researchNotice, setResearchNotice] = useState<{ tone: 'warning' | 'danger'; text: string } | null>(null);
   const [urlNotices, setUrlNotices] = useState<string[]>([]);
   const [linkDraftOpen, setLinkDraftOpen] = useState(false);
@@ -741,6 +752,8 @@ export default function AIResearchPage() {
     }
     const sentMode = compareRequest ? 'fast' : researchMode;
     sourcesRef.current = [];
+    livePriorsRef.current = [];
+    setLivePriors([]);
     setRunMode(sentMode);
     setDeepProgress(sentMode === 'deep' ? createDeepProgress() : null);
     setStreaming('');
@@ -798,6 +811,7 @@ export default function AIResearchPage() {
             round?: number;
             maxRounds?: number;
             skippedSearch?: boolean;
+            priorQuestions?: Array<{ conversationId?: string | null; question?: string; date?: string; score?: number }>;
           };
           try { d = JSON.parse(t.slice(6)); } catch { continue; }
           if (d.type === 'start') {
@@ -807,6 +821,23 @@ export default function AIResearchPage() {
             }
             if (d.model) setModel(d.model);
             loadConversations();
+          } else if (d.type === 'memory') {
+            const priors = Array.isArray(d.priorQuestions)
+              ? d.priorQuestions.flatMap(item => {
+                const question = typeof item?.question === 'string' ? item.question : '';
+                const date = typeof item?.date === 'string' ? item.date : '';
+                if (!question || !date) return [];
+                const match: AiResearchPriorQuestion = {
+                  conversationId: typeof item.conversationId === 'string' ? item.conversationId : null,
+                  question,
+                  date,
+                  score: typeof item.score === 'number' ? item.score : 0,
+                };
+                return [match];
+              })
+              : [];
+            livePriorsRef.current = priors;
+            setLivePriors(priors);
           } else if (d.type === 'context-urls') {
             const notes = Array.isArray(d.failures)
               ? d.failures.flatMap(item => {
@@ -858,7 +889,9 @@ export default function AIResearchPage() {
               content,
               researchMode: sentMode === 'deep' ? 'deep' : undefined,
               sources: sourcesRef.current.length ? [...sourcesRef.current] : undefined,
+              priorQuestions: livePriorsRef.current.length ? [...livePriorsRef.current] : undefined,
             }]);
+            setLivePriors([]);
             if (d.conversationId && !activeConvoId) {
               skipNextLoadRef.current = true;
               setActiveConvoId(d.conversationId);
@@ -880,7 +913,9 @@ export default function AIResearchPage() {
             content,
             researchMode: sentMode === 'deep' ? 'deep' : undefined,
             sources: sourcesRef.current.length ? [...sourcesRef.current] : undefined,
+            priorQuestions: livePriorsRef.current.length ? [...livePriorsRef.current] : undefined,
           }]);
+          setLivePriors([]);
         }
         setStreaming('');
         setDeepProgress(prev => (prev && prev.outcome === 'running' ? failDeepProgress(prev) : prev));
@@ -904,6 +939,9 @@ export default function AIResearchPage() {
   const newConversation = () => {
     setActiveConvoId(null);
     setMessages([]);
+    livePriorsRef.current = [];
+    setLivePriors([]);
+    setPriorPreviewId(null);
     setStreaming('');
     setResearchSourceCount(null);
     setInspectorSources([]);
@@ -934,6 +972,9 @@ export default function AIResearchPage() {
   const resetThreadView = () => {
     setActiveConvoId(null);
     setMessages([]);
+    livePriorsRef.current = [];
+    setLivePriors([]);
+    setPriorPreviewId(null);
     setStreaming('');
     setResearchSourceCount(null);
     setInspectorSources([]);
@@ -1266,6 +1307,14 @@ export default function AIResearchPage() {
         </button>
         <button
           type="button"
+          data-testid="ai-research-memory-open"
+          onClick={() => setMemoryOpen(true)}
+          className="min-h-7 flex-shrink-0 rounded-lg border border-[var(--mos-border)] bg-[var(--mos-raised)] px-2 py-1 text-[11px] font-medium text-[var(--mos-text)] hover:bg-[var(--mos-hover)] transition-colors"
+        >
+          Memory
+        </button>
+        <button
+          type="button"
           onClick={() => setSourcesPanelOpen(open => !open)}
           aria-expanded={sourcesPanelOpen}
           className="min-h-7 flex-shrink-0 rounded-lg border border-[var(--mos-border)] bg-[var(--mos-raised)] px-2 py-1 text-[11px] font-medium text-[var(--mos-text)] hover:bg-[var(--mos-hover)] transition-colors"
@@ -1538,6 +1587,9 @@ export default function AIResearchPage() {
                       }
                     </div>
                     <div className="min-w-0">
+                      {msg.role === 'assistant' && msg.priorQuestions?.[0] && (
+                        <AiResearchPriorQuestionChip match={msg.priorQuestions[0]} onView={setPriorPreviewId} />
+                      )}
                       <p className="text-[10px] font-semibold text-[var(--mos-text-muted)] mb-1 px-1 flex items-center gap-1.5">
                         {msg.role === 'user' ? 'You' : AI_RESEARCH_ASSISTANT_NAME}
                         {msg.researchMode === 'deep' && (
@@ -1664,6 +1716,9 @@ export default function AIResearchPage() {
                       <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.5"><path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09z" /></svg>
                     </div>
                     <div className="min-w-0">
+                      {livePriors[0] && (
+                        <AiResearchPriorQuestionChip match={livePriors[0]} onView={setPriorPreviewId} />
+                      )}
                       <p className="text-[10px] font-semibold text-[var(--mos-text-muted)] mb-1 px-1 flex items-center gap-2">
                         {AI_RESEARCH_ASSISTANT_NAME}
                         {runMode === 'deep' && (
@@ -2017,6 +2072,10 @@ export default function AIResearchPage() {
           </div>
         </div>
         <AiResearchWatchPanel open={watchOpen} seed={watchSeed} onClose={() => setWatchOpen(false)} />
+        <AiResearchMemoryPanel open={memoryOpen} onClose={() => setMemoryOpen(false)} />
+        {priorPreviewId && (
+          <AiResearchPriorPreview conversationId={priorPreviewId} onClose={() => setPriorPreviewId(null)} />
+        )}
         <AiResearchSourcesPanel
           open={sourcesPanelOpen}
           onClose={() => setSourcesPanelOpen(false)}

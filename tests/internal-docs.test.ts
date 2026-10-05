@@ -552,7 +552,7 @@ test('sidebar, routes, migration, and AI Research keep Internal Docs ACL separat
   assert.match(chat, /departmentName: auth\.departmentName/);
   assert.match(chat, /formatInternalDocsPrompt\(internalDocHits/);
   assert.match(chat, /mergeInternalDocSources\(researchEvent, internalDocHits/);
-  assert.match(chat, /const knowledgeContext = await fetchKnowledgeContext\(auth\.id, query, undefined, 5, 'internal'\)/);
+  assert.match(chat, /fetchKnowledgeContext\(auth\.id, query, undefined, 5, 'internal', \{[\s\S]*taskTypes: AI_RESEARCH_RETRIEVAL_TASK_TYPES[\s\S]*minScore: AI_RESEARCH_KNOWLEDGE_MIN_SCORE/);
   assert.match(chat, /sources: researchEvent\.sources/);
   assert.ok(chat.indexOf('const knowledgeContext') < chat.indexOf('buildAiResearchChatMessages({'));
 

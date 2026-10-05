@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { v4 as uuidv4 } from 'uuid';
 import { execute, queryAll, queryOne } from './database';
-import { cosineSimilarity, getEmbedding } from './embeddings';
+import { cosineSimilarity, getEmbedding, knowledgeEmbeddingInput, parseStoredEmbedding } from './embeddings';
 import {
   AI_RESEARCH_KNOWLEDGE_TASK,
   extractPinnableClaims,
@@ -12,6 +12,7 @@ import {
 } from './knowledge-pin';
 
 export { KNOWLEDGE_TASK_TYPES, type KnowledgeTaskType } from './knowledge-task-types';
+export { knowledgeEmbeddingInput } from './embeddings';
 
 export type KnowledgePersistAction = 'select' | 'approve' | 'publish' | 'complete' | 'pin';
 
@@ -19,6 +20,9 @@ export type KnowledgePersistAction = 'select' | 'approve' | 'publish' | 'complet
 export const KNOWLEDGE_DEDUPE_WINDOW_MS = 10 * 60 * 1000;
 
 export const AUTO_RESEARCH_CLAIM_LIMIT = 3;
+
+/** Paraphrased AI Research claims update the existing row instead of copying it. */
+export const AI_RESEARCH_NEAR_DUPLICATE_SCORE = 0.86;
 
 const OUTPUT_CHAR_LIMIT = 8_000;
 const SIMILARITY_THRESHOLD = 0.75;
@@ -91,7 +95,7 @@ export function qualityScoreForAction(action: KnowledgePersistAction): number {
 /** Style learning follows explicit marketing choices, not research citations or auto-saved reports. */
 export function shouldUpdateStylePreferences(taskType: string, action: KnowledgePersistAction): boolean {
   if (action !== 'select' && action !== 'approve' && action !== 'publish') return false;
-  if (taskType === AI_RESEARCH_KNOWLEDGE_TASK || taskType === 'market-research' || taskType === 'internal-docs') return false;
+  if (taskType === AI_RESEARCH_KNOWLEDGE_TASK || taskType === 'ai-research-qa' || taskType === 'user-memory' || taskType === 'market-research' || taskType === 'internal-docs') return false;
   return true;
 }
 
@@ -101,6 +105,18 @@ export function knowledgeFingerprint(value: unknown): string {
 
 export function knowledgeContentHash(value: unknown): string {
   return createHash('sha256').update(knowledgeFingerprint(value)).digest('hex');
+}
+
+export function chooseNearDuplicateId(
+  rows: Array<{ id: string; score: number }>,
+  minScore = AI_RESEARCH_NEAR_DUPLICATE_SCORE,
+): string | null {
+  let best: { id: string; score: number } | null = null;
+  for (const row of rows) {
+    if (!Number.isFinite(row.score) || row.score < minScore) continue;
+    if (!best || row.score > best.score) best = row;
+  }
+  return best?.id ?? null;
 }
 
 export function readClientTaskId(value: unknown): string | null {
@@ -369,7 +385,7 @@ export async function persistKnowledgeEntry(input: PersistKnowledgeInput): Promi
     if (current) {
       let nextEmbedding: number[] = [];
       try {
-        nextEmbedding = await getEmbedding(selectedOutput);
+        nextEmbedding = await getEmbedding(knowledgeEmbeddingInput(input.taskType, brief, selectedOutput));
       } catch (error) {
         console.warn('Embedding generation failed, keeping the previous vector:', error);
       }
@@ -435,9 +451,48 @@ export async function persistKnowledgeEntry(input: PersistKnowledgeInput): Promi
 
   let embedding: number[] = [];
   try {
-    embedding = await getEmbedding(selectedOutput);
+    embedding = await getEmbedding(knowledgeEmbeddingInput(input.taskType, brief, selectedOutput));
   } catch (error) {
     console.warn('Embedding generation failed, saving without vector:', error);
+  }
+
+  if (input.taskType === AI_RESEARCH_KNOWLEDGE_TASK && embedding.length) {
+    try {
+      const nearId = await findAiResearchNearDuplicate(input.userId, embedding);
+      if (nearId) {
+        await execute(
+          `UPDATE knowledge_entries
+           SET brief = ?, selected_output = ?, audience = ?, content_hash = ?,
+               embedding = ?, quality_score = GREATEST(quality_score, ?),
+               source_urls = COALESCE(?, source_urls),
+               conversation_id = COALESCE(conversation_id, ?),
+               project_id = COALESCE(project_id, ?)
+           WHERE id = ? AND user_id = ?`,
+          [
+            brief,
+            selectedOutput,
+            audience,
+            contentHash,
+            JSON.stringify(embedding),
+            qualityScore,
+            serializeSourceUrls(input.sourceUrls),
+            optionalRecordId(input.conversationId),
+            optionalRecordId(input.projectId),
+            nearId,
+            input.userId,
+          ],
+        );
+        return {
+          knowledgeId: nearId,
+          connectionsCount: 0,
+          deduped: true,
+          skipped: false,
+          qualityScore,
+        };
+      }
+    } catch (error) {
+      console.warn('AI Research near-duplicate lookup failed:', error);
+    }
   }
 
   const knowledgeId = uuidv4();
@@ -582,6 +637,23 @@ function toDedupeRow(row: DbKnowledgeRow): KnowledgeDedupeRow {
   };
 }
 
+async function findAiResearchNearDuplicate(userId: string, embedding: number[]): Promise<string | null> {
+  const rows = await queryAll<{ id: string; embedding: string }>(
+    `SELECT id, embedding FROM knowledge_entries
+     WHERE user_id = ? AND task_type = ? AND embedding IS NOT NULL
+     ORDER BY created_at DESC
+     LIMIT 40`,
+    [userId, AI_RESEARCH_KNOWLEDGE_TASK],
+  );
+  const scored: Array<{ id: string; score: number }> = [];
+  for (const row of rows) {
+    const other = parseStoredEmbedding(row.embedding);
+    if (!other) continue;
+    scored.push({ id: row.id, score: cosineSimilarity(embedding, other) });
+  }
+  return chooseNearDuplicateId(scored);
+}
+
 async function linkSimilarEntries(userId: string, knowledgeId: string, embedding: number[]): Promise<number> {
   if (!embedding.length) return 0;
   const existing = await queryAll<{ id: string; embedding: string }>(
@@ -628,7 +700,9 @@ async function recordMarketingStyleSelection(userId: string, taskType: string): 
   if (totalSelections % 5 !== 0) return;
   try {
     const recent = await queryAll<{ selected_output: string; task_type: string; platform: string | null }>(
-      'SELECT selected_output, task_type, platform FROM knowledge_entries WHERE user_id = ? ORDER BY created_at DESC LIMIT 20',
+      `SELECT selected_output, task_type, platform FROM knowledge_entries
+       WHERE user_id = ? AND task_type NOT IN ('user-memory', 'ai-research-qa')
+       ORDER BY created_at DESC LIMIT 20`,
       [userId],
     );
     const samples = recent.map((row, index) => `${index + 1}. [${row.task_type}/${row.platform}] ${row.selected_output}`).join('\n');

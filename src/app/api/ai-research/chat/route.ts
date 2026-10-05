@@ -60,6 +60,15 @@ import {
 } from '@/lib/ai-research-inspector';
 import { GORILLAWORKOUT_API_BASE, GORILLAWORKOUT_API_KEY } from '@/lib/gateway-config';
 import { AVAILABLE_MODELS, fetchKnowledgeContext } from '@/lib/openai';
+import { AI_RESEARCH_KNOWLEDGE_MIN_SCORE, AI_RESEARCH_RETRIEVAL_TASK_TYPES } from '@/lib/knowledge-task-types';
+import {
+  deleteQaForConversation,
+  extractUserMemories,
+  findSimilarPastQuestions,
+  formatPriorAnswersBlock,
+  indexQaTurn,
+  loadUserProfileBlock,
+} from '@/lib/ai-research-memory';
 import {
   formatInternalDocsPrompt,
   mergeInternalDocSources,
@@ -304,6 +313,34 @@ async function gatherResearchSide(
   }
 }
 
+async function loadLearnedMemory(userId: string, query: string, conversationId: string) {
+  const [profileBlock, priorQuestions] = await Promise.all([
+    loadUserProfileBlock(userId),
+    findSimilarPastQuestions(userId, query, conversationId),
+  ]);
+  return {
+    profileBlock,
+    priorBlock: formatPriorAnswersBlock(priorQuestions),
+    priorQuestions: priorQuestions.map(item => ({
+      conversationId: item.conversationId,
+      question: item.question,
+      date: item.date,
+      score: Math.round(item.score * 1000) / 1000,
+    })),
+  };
+}
+
+async function rememberResearchTurn(input: {
+  userId: string;
+  conversationId: string;
+  question: string;
+  answer: string;
+  sources?: Array<{ title?: string; url?: string }>;
+}) {
+  await indexQaTurn(input);
+  await extractUserMemories(input);
+}
+
 function usageCost(model: string, inputTokens: number, outputTokens: number): number {
   const pricing = AVAILABLE_MODELS.find(candidate => candidate.id === model);
   return inputTokens * (pricing?.input ?? 0) + outputTokens * (pricing?.output ?? 0);
@@ -388,7 +425,7 @@ export async function POST(request: NextRequest) {
       'SELECT id FROM ai_research_projects WHERE id = ? AND user_id = ?',
       [parsed.projectId, auth.id],
     );
-    if (!owned) return jsonError('Proyek tidak ditemukan', 404);
+    if (!owned) return jsonError('Project not found', 404);
     activeProjectId = owned.id;
   }
 
@@ -437,7 +474,14 @@ export async function POST(request: NextRequest) {
         const effectiveMode = compare ? 'fast' : mode;
         emit({ type: 'start', conversationId: convId, model, mode: effectiveMode });
         const query = latestUser?.content || '';
-        const knowledgeContext = await fetchKnowledgeContext(auth.id, query, undefined, 5, 'internal');
+        const knowledgeContext = await fetchKnowledgeContext(auth.id, query, undefined, 5, 'internal', {
+          taskTypes: AI_RESEARCH_RETRIEVAL_TASK_TYPES,
+          minScore: AI_RESEARCH_KNOWLEDGE_MIN_SCORE,
+        });
+        const learned = await loadLearnedMemory(auth.id, query, convId);
+        if (learned.priorQuestions.length) {
+          emit({ type: 'memory', priorQuestions: learned.priorQuestions });
+        }
         throwIfResearchAborted(signal);
         const internalDocsPrincipal = { role: auth.role, departmentName: auth.departmentName };
         let internalDocHits: InternalDocHit[] = [];
@@ -558,6 +602,8 @@ export async function POST(request: NextRequest) {
           const apiMessages = buildAiResearchChatMessages({
             systemPrompt: [
               AI_RESEARCH_SYSTEM_PROMPT,
+              learned.profileBlock,
+              learned.priorBlock,
               knowledgeContext,
               internalDocsContext,
               AI_RESEARCH_DEEP_SYSTEM_ADDENDUM,
@@ -610,6 +656,13 @@ export async function POST(request: NextRequest) {
             sources: researchEvent.sources,
             aborted: false,
           });
+          const memoryWrite = rememberResearchTurn({
+            userId: auth.id,
+            conversationId: convId,
+            question: query,
+            answer: fullContent,
+            sources: researchEvent.sources,
+          });
           await persistConversation(convId, auth.id, allMessages, model, true, activeProjectId);
           try {
             await rememberProjectTurn(auth.id, activeProjectId, query, fullContent);
@@ -624,6 +677,7 @@ export async function POST(request: NextRequest) {
             reported: mergeGatewayUsage(planUsage, streamed.usage),
           });
           emit({ type: 'done', conversationId: convId, model, mode: 'deep' });
+          await memoryWrite;
           close();
           return;
         }
@@ -681,6 +735,8 @@ export async function POST(request: NextRequest) {
         const apiMessages = buildAiResearchChatMessages({
           systemPrompt: [
             AI_RESEARCH_SYSTEM_PROMPT,
+            learned.profileBlock,
+            learned.priorBlock,
             knowledgeContext,
             internalDocsContext,
             projectMemoryBlock,
@@ -719,6 +775,13 @@ export async function POST(request: NextRequest) {
           sources: researchEvent.sources,
           aborted: false,
         });
+        const memoryWrite = rememberResearchTurn({
+          userId: auth.id,
+          conversationId: convId,
+          question: query,
+          answer: streamed.content,
+          sources: researchEvent.sources,
+        });
         await persistConversation(convId, auth.id, allMessages, model, true, activeProjectId);
         try {
           await rememberProjectTurn(auth.id, activeProjectId, query, streamed.content);
@@ -734,6 +797,7 @@ export async function POST(request: NextRequest) {
         });
 
         emit({ type: 'done', conversationId: convId, model });
+        await memoryWrite;
         close();
       } catch (error) {
         if (signal.aborted || isAbortError(error)) {
@@ -775,7 +839,7 @@ export async function GET(request: NextRequest) {
         'SELECT id FROM ai_research_projects WHERE id = ? AND user_id = ?',
         [projectParam, auth.id],
       );
-      if (!owned) return jsonError('Proyek tidak ditemukan', 404);
+      if (!owned) return jsonError('Project not found', 404);
       projectClause = 'AND project_id = ?';
       params.push(owned.id);
     }
@@ -842,6 +906,11 @@ export async function DELETE(request: NextRequest) {
     return jsonError('Conversation ID is required', 400);
   }
 
+  try {
+    await deleteQaForConversation(auth.id, conversationId);
+  } catch (error) {
+    console.warn('[ai-research] QA index delete failed:', error);
+  }
   await execute(
     'DELETE FROM ai_research_conversations WHERE id = ? AND user_id = ?',
     [conversationId, auth.id],
