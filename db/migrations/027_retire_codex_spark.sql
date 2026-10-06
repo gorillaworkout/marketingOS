@@ -21,37 +21,51 @@ BEGIN;
 
 -- 1. Drop Spark and, in the same statement, repoint a Spark default.
 --    Existing order of the other ids is preserved. A non-spark default
---    stays put via ELSE default_model.
-UPDATE feature_model_assignments SET
-  allowed_models = COALESCE(
-    (
-      SELECT jsonb_agg(model ORDER BY ordinality)
-      FROM jsonb_array_elements_text(allowed_models)
-        WITH ORDINALITY AS existing(model, ordinality)
-      WHERE model <> 'cx/gpt-5.3-codex-spark'
-    ),
-    CASE feature_key
-      WHEN 'article-market-news' THEN '["lr/claude-sonnet-4.5","ag/gemini-3.1-pro-low","cx/gpt-5.6-sol","cc/claude-sonnet-5","cc/claude-opus-5","cc/claude-sonnet-5-5","cc/claude-opus-5-5"]'::jsonb
-      WHEN 'market-research'     THEN '["lr/claude-sonnet-4.5","ag/gemini-3.1-pro-low","cx/gpt-5.6-sol","cc/claude-sonnet-5","cc/claude-opus-5","cc/claude-sonnet-5-5","cc/claude-opus-5-5"]'::jsonb
-      WHEN 'event-plan'          THEN '["ag/gemini-3-flash","ag/gemini-3.1-pro-low","cx/gpt-5.6-sol","cc/claude-sonnet-5","cc/claude-opus-5","cc/claude-sonnet-5-5","cc/claude-opus-5-5"]'::jsonb
-      WHEN 'ai-research'         THEN '["cx/gpt-5.6-sol","cx/gpt-5.6-terra","cx/gpt-5.6-luna","ag/gemini-3-flash","ag/gemini-3.6-flash-high","cc/claude-sonnet-5","cc/claude-opus-5","ag/gemini-3.1-pro-low","cc/claude-sonnet-5-5","cc/claude-opus-5-5"]'::jsonb
-      ELSE '["ag/gemini-3-flash","ag/gemini-3.6-flash-medium","cx/gpt-5.6-sol","cc/claude-sonnet-5","cc/claude-opus-5","cc/claude-sonnet-5-5","cc/claude-opus-5-5"]'::jsonb
-    END
-  ),
-  default_model = CASE
-    WHEN default_model = 'cx/gpt-5.3-codex-spark' THEN
-      CASE feature_key
-        WHEN 'ai-research' THEN 'cx/gpt-5.6-sol'
-        WHEN 'event-plan' THEN 'ag/gemini-3.1-pro-low'
-        WHEN 'article-market-news' THEN 'cc/claude-sonnet-5-5'
-        WHEN 'market-research' THEN 'cc/claude-sonnet-5-5'
-        ELSE 'ag/gemini-3-flash'
-      END
-    ELSE default_model
+--    stays put via ELSE default_model. If that replacement is missing
+--    from the remaining allowlist, append it so default_allowed stays
+--    valid.
+UPDATE feature_model_assignments AS assignment SET
+  allowed_models = CASE
+    WHEN next_values.models @> jsonb_build_array(next_values.candidate)
+      THEN next_values.models
+    ELSE next_values.models || jsonb_build_array(next_values.candidate)
   END,
+  default_model = next_values.candidate,
   updated_at = CURRENT_TIMESTAMP
-WHERE allowed_models @> '["cx/gpt-5.3-codex-spark"]'::jsonb
-   OR default_model = 'cx/gpt-5.3-codex-spark';
+FROM (
+  SELECT
+    feature_key,
+    COALESCE(
+      (
+        SELECT jsonb_agg(model ORDER BY ordinality)
+        FROM jsonb_array_elements_text(allowed_models)
+          WITH ORDINALITY AS existing(model, ordinality)
+        WHERE model <> 'cx/gpt-5.3-codex-spark'
+      ),
+      CASE feature_key
+        WHEN 'article-market-news' THEN '["lr/claude-sonnet-4.5","ag/gemini-3.1-pro-low","cx/gpt-5.6-sol","cc/claude-sonnet-5","cc/claude-opus-5","cc/claude-sonnet-5-5","cc/claude-opus-5-5"]'::jsonb
+        WHEN 'market-research'     THEN '["lr/claude-sonnet-4.5","ag/gemini-3.1-pro-low","cx/gpt-5.6-sol","cc/claude-sonnet-5","cc/claude-opus-5","cc/claude-sonnet-5-5","cc/claude-opus-5-5"]'::jsonb
+        WHEN 'event-plan'          THEN '["ag/gemini-3-flash","ag/gemini-3.1-pro-low","cx/gpt-5.6-sol","cc/claude-sonnet-5","cc/claude-opus-5","cc/claude-sonnet-5-5","cc/claude-opus-5-5"]'::jsonb
+        WHEN 'ai-research'         THEN '["cx/gpt-5.6-sol","cx/gpt-5.6-terra","cx/gpt-5.6-luna","ag/gemini-3-flash","ag/gemini-3.6-flash-high","cc/claude-sonnet-5","cc/claude-opus-5","ag/gemini-3.1-pro-low","cc/claude-sonnet-5-5","cc/claude-opus-5-5"]'::jsonb
+        ELSE '["ag/gemini-3-flash","ag/gemini-3.6-flash-medium","cx/gpt-5.6-sol","cc/claude-sonnet-5","cc/claude-opus-5","cc/claude-sonnet-5-5","cc/claude-opus-5-5"]'::jsonb
+      END
+    ) AS models,
+    CASE
+      WHEN default_model = 'cx/gpt-5.3-codex-spark' THEN
+        CASE feature_key
+          WHEN 'ai-research' THEN 'cx/gpt-5.6-sol'
+          WHEN 'event-plan' THEN 'ag/gemini-3.1-pro-low'
+          WHEN 'article-market-news' THEN 'cc/claude-sonnet-5-5'
+          WHEN 'market-research' THEN 'cc/claude-sonnet-5-5'
+          ELSE 'ag/gemini-3-flash'
+        END
+      ELSE default_model
+    END AS candidate
+  FROM feature_model_assignments
+  WHERE allowed_models @> '["cx/gpt-5.3-codex-spark"]'::jsonb
+     OR default_model = 'cx/gpt-5.3-codex-spark'
+) AS next_values
+WHERE assignment.feature_key = next_values.feature_key;
 
 -- 2. A default that is no longer inside its allowlist falls back to the first allowed model.
 UPDATE feature_model_assignments SET

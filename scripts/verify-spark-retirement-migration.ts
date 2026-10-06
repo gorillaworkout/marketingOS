@@ -123,6 +123,20 @@ async function main() {
   const userCountAfter = (await queryAll('SELECT id FROM users')).length;
   assert.equal(userCountAfter, userCountBefore, 'no user row was lost');
 
+  await execute(
+    `UPDATE feature_model_assignments
+     SET allowed_models = '["${SPARK}"]'::jsonb, default_model = '${SPARK}'
+     WHERE feature_key = 'social-post'`,
+  );
+  await execute(sql);
+  const sparkOnly = await queryAll<{ allowed_models: string[]; default_model: string }>(
+    `SELECT allowed_models, default_model FROM feature_model_assignments WHERE feature_key = 'social-post'`,
+  );
+  assert.equal(sparkOnly.length, 1);
+  assert.ok(!sparkOnly[0].allowed_models.includes(SPARK), 'spark-only allowlist still names Spark');
+  assert.equal(sparkOnly[0].default_model, 'ag/gemini-3-flash');
+  assert.ok(sparkOnly[0].allowed_models.includes('ag/gemini-3-flash'));
+
   console.log('PASS — migration 027 removes Codex Spark and keeps non-spark defaults');
   for (const row of assignments) {
     console.log(`  ${row.feature_key.padEnd(22)} default=${row.default_model.padEnd(28)} ${JSON.stringify(row.allowed_models)}`);
