@@ -38,8 +38,12 @@ async function main() {
     PREFERRED_CODEX_MODEL,
   } = await import('../src/lib/openai');
   const live = new Set(AVAILABLE_MODELS.map(model => model.id));
-  // 015 and 024 still write ag/claude-sonnet-4-6. Migration 025 removes it.
-  const historicallyLive = (model: string) => live.has(model) || model === 'ag/claude-sonnet-4-6';
+  // 015 and 024 still write ag/claude-sonnet-4-6 (removed by 025) and
+  // cx/gpt-5.3-codex-spark (removed from the catalog by 027). 025 still
+  // leaves Spark on allowlists; 027 is what drops it.
+  const historicallyLive = (model: string) =>
+    live.has(model) || model === 'ag/claude-sonnet-4-6' || model === 'cx/gpt-5.3-codex-spark';
+  const liveAfter025 = (model: string) => live.has(model) || model === 'cx/gpt-5.3-codex-spark';
 
   const sql = await readFile(path.join(process.cwd(), 'db/migrations/015_add_claude_sonnet5_opus5.sql'), 'utf8');
   const sql55 = await readFile(path.join(process.cwd(), 'db/migrations/024_add_claude_sonnet55_opus55.sql'), 'utf8');
@@ -234,9 +238,9 @@ async function main() {
     assert.ok(row.allowed_models.includes(row.default_model), `${row.feature_key} default left the allowlist`);
     assert.notEqual(row.default_model, 'ag/claude-sonnet-4-6', `${row.feature_key} still defaults to Sonnet 4.6`);
     for (const model of row.allowed_models) {
-      assert.ok(live.has(model), `${row.feature_key} allows unknown model ${model}`);
+      assert.ok(liveAfter025(model), `${row.feature_key} allows unknown model ${model}`);
     }
-    assert.ok(live.has(row.default_model), `${row.feature_key} defaults to unknown model ${row.default_model}`);
+    assert.ok(liveAfter025(row.default_model), `${row.feature_key} defaults to unknown model ${row.default_model}`);
     if (row.feature_key === 'article-market-news' || row.feature_key === 'market-research') {
       assert.equal(row.default_model, CLAUDE_SONNET_5_5_MODEL, `${row.feature_key} should default to Sonnet 5.5`);
       assert.ok(row.allowed_models.includes('lr/claude-sonnet-4.5'), `${row.feature_key} dropped Sonnet 4.5`);
@@ -250,7 +254,7 @@ async function main() {
   );
   assert.equal(preferencesAfter46.length, 4, '025 updates preferences and never deletes them');
   for (const row of preferencesAfter46) {
-    assert.ok(live.has(row.model), `${row.task_type} preference still on dead model ${row.model}`);
+    assert.ok(liveAfter025(row.model), `${row.task_type} preference still on dead model ${row.model}`);
     assert.notEqual(row.model, 'ag/claude-sonnet-4-6', `${row.task_type} preference still names Sonnet 4.6`);
   }
   assert.equal(

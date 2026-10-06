@@ -32,6 +32,7 @@ const restoreMigration = read('db/migrations/014_restore_codex_ai_research.sql')
 const claude5Migration = read('db/migrations/015_add_claude_sonnet5_opus5.sql');
 const claude55Migration = read('db/migrations/024_add_claude_sonnet55_opus55.sql');
 const retire46Migration = read('db/migrations/025_retire_claude_sonnet_4_6.sql');
+const retireSparkMigration = read('db/migrations/027_retire_codex_spark.sql');
 
 test('MarketingOS exposes GorillaWorkout as its only generation gateway', () => {
   assert.match(openai, /export type ModelProvider = 'gorillaworkout'/);
@@ -138,13 +139,13 @@ test('AI Research routing restores Codex and Claude 5 and never reintroduces Kim
   assert.match(routing, /CLAUDE_OPUS_5_MODEL/);
   assert.match(routing, /CLAUDE_SONNET_5_5_MODEL/);
   assert.match(routing, /CLAUDE_OPUS_5_5_MODEL/);
-  assert.match(routing, /cx\/gpt-5\.3-codex-spark/);
+  assert.doesNotMatch(routing, /cx\/gpt-5\.3-codex-spark/);
   assert.match(routing, /cx\/gpt-5\.6-terra/);
   assert.match(routing, /cx\/gpt-5\.6-luna/);
   assert.ok(!AVAILABLE_MODELS.some(model =>
     model.id.startsWith('kimi/') || model.id.startsWith('tr/') || model.id.startsWith('cmc/moonshotai/') || model.id.toLowerCase().includes('kimi')));
   assert.ok(AVAILABLE_MODELS.some(model => model.id === 'cx/gpt-5.6-sol'));
-  assert.ok(AVAILABLE_MODELS.some(model => model.id === 'cx/gpt-5.3-codex-spark'));
+  assert.ok(!AVAILABLE_MODELS.some(model => model.id === 'cx/gpt-5.3-codex-spark'));
   assert.ok(AVAILABLE_MODELS.some(model => model.id === 'cc/claude-sonnet-5'));
   assert.ok(AVAILABLE_MODELS.some(model => model.id === 'cc/claude-opus-5'));
   assert.ok(AVAILABLE_MODELS.some(model => model.id === 'cc/claude-sonnet-5-5'));
@@ -160,6 +161,11 @@ test('AI Research routing restores Codex and Claude 5 and never reintroduces Kim
   assert.match(modelsRoute, /AVAILABLE_MODELS/);
   assert.match(restoreMigration, /cx\/gpt-5\.6-sol/);
   assert.match(restoreMigration, /cx\/gpt-5\.3-codex-spark/);
+  assert.match(retireSparkMigration, /model <> 'cx\/gpt-5\.3-codex-spark'/);
+  assert.match(retireSparkMigration, /WHEN 'ai-research' THEN 'cx\/gpt-5\.6-sol'/);
+  assert.match(retireSparkMigration, /preference\.model = 'cx\/gpt-5\.3-codex-spark'/);
+  const sparkSeed = retireSparkMigration.split(/INSERT INTO feature_model_assignments/)[1]?.split(/UPDATE task_model_preferences/)[0] ?? '';
+  assert.doesNotMatch(sparkSeed, /cx\/gpt-5\.3-codex-spark/);
   assert.match(restoreMigration, /feature_key = 'ai-research'/);
   assert.match(claude5Migration, /cc\/claude-sonnet-5/);
   assert.match(claude5Migration, /cc\/claude-opus-5/);

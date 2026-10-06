@@ -40,7 +40,7 @@ test('retired upstream prefixes stay out of the catalog', () => {
     || model.id === 'ag/gemini-3-flash-agent');
   assert.deepEqual(retired, [], 'catalog must not list models that no longer answer');
   assert.ok(AVAILABLE_MODELS.some(model => model.id === 'cx/gpt-5.6-sol'), 'GPT-5.6 Sol must be in the catalog');
-  assert.ok(AVAILABLE_MODELS.some(model => model.id === 'cx/gpt-5.3-codex-spark'), 'Codex Spark must be in the catalog');
+  assert.ok(!AVAILABLE_MODELS.some(model => model.id === 'cx/gpt-5.3-codex-spark'), 'Codex Spark is unsupported on a ChatGPT-account Codex login');
   assert.ok(AVAILABLE_MODELS.some(model => model.id === CLAUDE_SONNET_5_MODEL), 'Claude Sonnet 5 must be in the catalog');
   assert.ok(AVAILABLE_MODELS.some(model => model.id === CLAUDE_OPUS_5_MODEL), 'Claude Opus 5 must be in the catalog');
   assert.ok(AVAILABLE_MODELS.some(model => model.id === CLAUDE_SONNET_5_5_MODEL), 'Claude Sonnet 5.5 must be in the catalog');

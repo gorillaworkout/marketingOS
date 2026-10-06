@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { AVAILABLE_MODELS, CLAUDE_OPUS_5_5_MODEL, CLAUDE_OPUS_5_MODEL, CLAUDE_SONNET_5_5_MODEL, CLAUDE_SONNET_5_MODEL, PREFERRED_CODEX_MODEL } from '../src/lib/openai';
 import { DEFAULT_FEATURE_ASSIGNMENTS } from '../src/lib/model-routing';
 import { IMAGE_MODELS } from '../src/lib/image-models';
@@ -19,12 +19,17 @@ const restore = readFileSync('db/migrations/014_restore_codex_ai_research.sql', 
 const claude5 = readFileSync('db/migrations/015_add_claude_sonnet5_opus5.sql', 'utf8');
 const claude55 = readFileSync('db/migrations/024_add_claude_sonnet55_opus55.sql', 'utf8');
 const retire46 = readFileSync('db/migrations/025_retire_claude_sonnet_4_6.sql', 'utf8');
+const retireSpark = existsSync('db/migrations/027_retire_codex_spark.sql')
+  ? readFileSync('db/migrations/027_retire_codex_spark.sql', 'utf8')
+  : '';
 
 /** Historical migrations still write this id. Migration 025 removes it from live allowlists. */
 const RETIRED_SONNET_46 = 'ag/claude-sonnet-4-6';
+/** Historical migrations 014–025 still write this id. Migration 027 removes it from live allowlists. */
+const RETIRED_SPARK = 'cx/gpt-5.3-codex-spark';
 
 function missingFromCurrentCatalog(ids: string[]): string[] {
-  return ids.filter(id => id !== RETIRED_SONNET_46 && !catalog.has(id));
+  return ids.filter(id => id !== RETIRED_SONNET_46 && id !== RETIRED_SPARK && !catalog.has(id));
 }
 
 function quotedModelIds(source: string): string[] {
@@ -73,7 +78,7 @@ test('AI Research defaults include GPT-5.6 Sol, Claude 5, and no Kimi', () => {
   const assignment = DEFAULT_FEATURE_ASSIGNMENTS['ai-research'];
   assert.equal(assignment.defaultModel, PREFERRED_CODEX_MODEL);
   assert.ok(assignment.allowedModels.includes(PREFERRED_CODEX_MODEL));
-  assert.ok(assignment.allowedModels.includes('cx/gpt-5.3-codex-spark'));
+  assert.ok(!assignment.allowedModels.includes(RETIRED_SPARK));
   assert.ok(assignment.allowedModels.includes('cx/gpt-5.6-terra'));
   assert.ok(assignment.allowedModels.includes('cx/gpt-5.6-luna'));
   assert.ok(assignment.allowedModels.includes('ag/gemini-3-flash'));
@@ -91,10 +96,10 @@ test('AI Research defaults include GPT-5.6 Sol, Claude 5, and no Kimi', () => {
     id.startsWith('kimi/') || id.startsWith('tr/') || id.startsWith('cmc/moonshotai/') || id.toLowerCase().includes('kimi')));
 });
 
-test('every workflow allowlist includes Sol, Spark, Claude 5, and Claude 5.5 and drops Sonnet 4.6', () => {
+test('every workflow allowlist includes Sol, Claude 5, and Claude 5.5 and drops Spark and Sonnet 4.6', () => {
   for (const [feature, assignment] of Object.entries(DEFAULT_FEATURE_ASSIGNMENTS)) {
     assert.ok(assignment.allowedModels.includes(PREFERRED_CODEX_MODEL), `${feature} missing Sol`);
-    assert.ok(assignment.allowedModels.includes('cx/gpt-5.3-codex-spark'), `${feature} missing Spark`);
+    assert.ok(!assignment.allowedModels.includes(RETIRED_SPARK), `${feature} still allows Codex Spark`);
     assert.ok(assignment.allowedModels.includes(CLAUDE_SONNET_5_MODEL), `${feature} missing Claude Sonnet 5`);
     assert.ok(assignment.allowedModels.includes(CLAUDE_OPUS_5_MODEL), `${feature} missing Claude Opus 5`);
     assert.ok(assignment.allowedModels.includes(CLAUDE_SONNET_5_5_MODEL), `${feature} missing Claude Sonnet 5.5`);
@@ -210,9 +215,11 @@ test('migration 025 removes Sonnet 4.6, keeps Claude 5.5, and only writes catalo
   }
 });
 
-test('catalog itself contains Codex, Claude 5, Claude 5.5, and excludes Kimi and Sonnet 4.6', () => {
+test('catalog itself contains Codex, Claude 5, Claude 5.5, and excludes Spark, Kimi, and Sonnet 4.6', () => {
   assert.ok(catalog.has(PREFERRED_CODEX_MODEL));
-  assert.ok(catalog.has('cx/gpt-5.3-codex-spark'));
+  assert.ok(catalog.has('cx/gpt-5.6-terra'));
+  assert.ok(catalog.has('cx/gpt-5.6-luna'));
+  assert.ok(!catalog.has(RETIRED_SPARK));
   assert.ok(catalog.has(CLAUDE_SONNET_5_MODEL));
   assert.ok(catalog.has(CLAUDE_OPUS_5_MODEL));
   assert.ok(catalog.has(CLAUDE_SONNET_5_5_MODEL));
@@ -225,4 +232,35 @@ test('catalog itself contains Codex, Claude 5, Claude 5.5, and excludes Kimi and
     id.startsWith('kimi/') || id.startsWith('tr/') || id.startsWith('cmc/moonshotai/') || id.toLowerCase().includes('kimi')));
   assert.ok(![...catalog].some(id => id.startsWith('cc/') && id !== CLAUDE_SONNET_5_MODEL && id !== CLAUDE_OPUS_5_MODEL && id !== CLAUDE_SONNET_5_5_MODEL && id !== CLAUDE_OPUS_5_5_MODEL), 'unrequested cc/* stay out');
   assert.ok(![...catalog].some(id => id.endsWith('-review')), 'do not dump unverified *-review Codex ids');
+});
+
+test('migration 027 removes Codex Spark, keeps other defaults, and only writes catalog models', () => {
+  const referenced = [...new Set(quotedModelIds(retireSpark))];
+  assert.ok(referenced.includes(RETIRED_SPARK), '027 must name Codex Spark in order to remove it');
+  assert.ok(referenced.includes(PREFERRED_CODEX_MODEL));
+  const missing = missingFromCurrentCatalog(referenced);
+  assert.deepEqual(missing, [], '027 would write models that are not in AVAILABLE_MODELS');
+  const executable = retireSpark.replace(/--.*$/gm, '');
+  const seeded = executable.split(/INSERT INTO feature_model_assignments/)[1]?.split(/UPDATE task_model_preferences/)[0] ?? '';
+  assert.doesNotMatch(seeded, /cx\/gpt-5\.3-codex-spark/);
+  assert.match(seeded, /cx\/gpt-5\.6-sol/);
+  assert.match(executable, /model <> 'cx\/gpt-5\.3-codex-spark'/);
+  assert.match(executable, /WHEN default_model = 'cx\/gpt-5\.3-codex-spark'/);
+  assert.match(executable, /WHEN 'ai-research' THEN 'cx\/gpt-5\.6-sol'/);
+  assert.match(executable, /ELSE default_model/);
+  assert.match(executable, /preference\.model = 'cx\/gpt-5\.3-codex-spark'/);
+  assert.match(executable, /model = assignment\.default_model/);
+  assert.doesNotMatch(retireSpark, /DROP TABLE|DELETE FROM|TRUNCATE/i);
+  assert.match(retireSpark, /BEGIN;[\s\S]*COMMIT;/);
+  assert.match(retireSpark, /ON CONFLICT \(feature_key\) DO NOTHING/);
+  assert.match(retireSpark, /ChatGPT-account Codex login/);
+  for (const feature of ['social-post', 'video-script', 'event-plan', 'article-market-news', 'market-research', 'ai-research']) {
+    assert.match(retireSpark, new RegExp(`'${feature}'`));
+  }
+  assert.equal(DEFAULT_FEATURE_ASSIGNMENTS['ai-research'].defaultModel, PREFERRED_CODEX_MODEL);
+  assert.equal(DEFAULT_FEATURE_ASSIGNMENTS['social-post'].defaultModel, 'ag/gemini-3-flash');
+  assert.equal(DEFAULT_FEATURE_ASSIGNMENTS['video-script'].defaultModel, 'ag/gemini-3-flash');
+  assert.equal(DEFAULT_FEATURE_ASSIGNMENTS['event-plan'].defaultModel, 'ag/gemini-3.1-pro-low');
+  assert.equal(DEFAULT_FEATURE_ASSIGNMENTS['article-market-news'].defaultModel, CLAUDE_SONNET_5_5_MODEL);
+  assert.equal(DEFAULT_FEATURE_ASSIGNMENTS['market-research'].defaultModel, CLAUDE_SONNET_5_5_MODEL);
 });

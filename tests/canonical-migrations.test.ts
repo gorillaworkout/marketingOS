@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { AVAILABLE_MODELS, CLAUDE_OPUS_5_5_MODEL, CLAUDE_OPUS_5_MODEL, CLAUDE_SONNET_5_5_MODEL, CLAUDE_SONNET_5_MODEL } from '../src/lib/openai';
 import { IMAGE_MODELS, DEFAULT_IMAGE_MODEL } from '../src/lib/image-models';
 import { GENERATION_FEATURES } from '../src/lib/authorization';
@@ -10,9 +10,10 @@ const aiResearch = readFileSync('db/migrations/012_ai_research_conversations.sql
 const imageAssignments = readFileSync('db/migrations/013_image_model_assignments.sql', 'utf8');
 const catalog = new Set(AVAILABLE_MODELS.map(model => model.id));
 const RETIRED_SONNET_46 = 'ag/claude-sonnet-4-6';
+const RETIRED_SPARK = 'cx/gpt-5.3-codex-spark';
 
 function missingFromCurrentCatalog(ids: string[]): string[] {
-  return ids.filter(id => id !== RETIRED_SONNET_46 && !catalog.has(id));
+  return ids.filter(id => id !== RETIRED_SONNET_46 && id !== RETIRED_SPARK && !catalog.has(id));
 }
 
 function withoutSqlComments(sql: string): string {
@@ -159,6 +160,37 @@ test('025 removes Claude Sonnet 4.6, keeps Sonnet 5.5 and Opus 5.5, and is idemp
   assert.ok(quoted.includes(RETIRED_SONNET_46));
   const missing = missingFromCurrentCatalog(quoted);
   assert.deepEqual(missing, [], '025 would write chat models that are not in AVAILABLE_MODELS');
+});
+
+test('027 removes Codex Spark from allowlists and is idempotent', () => {
+  const retireSpark = existsSync('db/migrations/027_retire_codex_spark.sql')
+    ? readFileSync('db/migrations/027_retire_codex_spark.sql', 'utf8')
+    : '';
+  const executable = withoutSqlComments(retireSpark);
+  assert.match(retireSpark, /BEGIN;[\s\S]*COMMIT;/);
+  assert.match(retireSpark, /ON CONFLICT \(feature_key\) DO NOTHING/);
+  assert.doesNotMatch(retireSpark, /DROP TABLE|DELETE FROM|TRUNCATE/i);
+  assert.match(executable, /model <> 'cx\/gpt-5\.3-codex-spark'/);
+  assert.match(executable, /WHEN default_model = 'cx\/gpt-5\.3-codex-spark'/);
+  assert.match(executable, /WHEN 'ai-research' THEN 'cx\/gpt-5\.6-sol'/);
+  assert.match(executable, /ELSE default_model/);
+  assert.match(executable, /preference\.model = 'cx\/gpt-5\.3-codex-spark'/);
+  assert.match(executable, /cx\/gpt-5\.6-terra/);
+  assert.match(executable, /cx\/gpt-5\.6-luna/);
+  assert.match(retireSpark, /ChatGPT-account Codex login/);
+  const seeded = executable.split(/INSERT INTO feature_model_assignments/)[1]?.split(/UPDATE task_model_preferences/)[0] ?? '';
+  assert.doesNotMatch(seeded, /cx\/gpt-5\.3-codex-spark/);
+  assert.match(seeded, /'cx\/gpt-5\.6-sol'/);
+  for (const feature of GENERATION_FEATURES) {
+    assert.match(retireSpark, new RegExp(`'${feature}'`));
+  }
+  const quoted = [...executable.matchAll(/'((?:ag|cc|cx|kimi|tr|lr)\/[^']+|pecut-free)'/g)]
+    .map(match => match[1])
+    .filter(id => !id.includes('%'));
+  assert.ok(quoted.includes(RETIRED_SPARK));
+  assert.ok(quoted.includes('cx/gpt-5.6-sol'));
+  const missing = missingFromCurrentCatalog(quoted);
+  assert.deepEqual(missing, [], '027 would write models that are not in AVAILABLE_MODELS');
 });
 
 test('026 adds per-user AI Research memory and is idempotent', () => {
