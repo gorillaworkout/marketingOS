@@ -4,12 +4,14 @@ import { readFile } from 'node:fs/promises';
 import { parseExtractedMemories } from '../src/lib/ai-research-memory';
 import {
   FACT_EXTRACTION_FAILED,
+  applyApproval,
   extractionInput,
   parseImportExtraction,
   readStoredDraft,
   requestImportDraft,
   validateImportAnswer,
   validateImportQuestion,
+  type ImportDraft,
 } from '../src/lib/chat-import-extract';
 
 function ids(): () => string {
@@ -110,4 +112,46 @@ test('import extraction does not use the live 4-fact parser', async () => {
   assert.match(extract, /jsonRepairAttempts: 0/);
   assert.match(extract, /taskType: 'ai-research'/);
   assert.doesNotMatch(extract, /parseExtractedMemories|extractUserMemories|indexQaTurn/);
+});
+
+function draft(): ImportDraft {
+  return {
+    facts: [
+      { id: 'f1', kind: 'context', content: 'Works on Dupoin campaigns.', confidence: 0.4, included: true },
+      { id: 'f2', kind: 'role', content: 'Frontend engineer.', confidence: 0.9, included: true },
+    ],
+    qa: [
+      { id: 'q1', question: 'Where is the brand guide?', answerSummary: 'Internal Docs.', included: true },
+    ],
+  };
+}
+
+test('approval keeps checked edits, drops omitted rows, and rejects unknown ids', () => {
+  const selected = applyApproval(draft(), {
+    facts: [{ id: 'f1', kind: 'interest', content: 'Works on Dupoin campaigns.', included: true }],
+    qa: [{ id: 'q1', question: 'Where is the brand guide?', answerSummary: 'Internal Docs.', included: false }],
+  });
+  assert.equal(selected.ok, true);
+  if (selected.ok) {
+    assert.deepEqual(selected.facts, [{ id: 'f1', kind: 'interest', content: 'Works on Dupoin campaigns.', confidence: 0.4 }]);
+    assert.deepEqual(selected.qa, []);
+  }
+  const unknown = applyApproval(draft(), {
+    facts: [{ id: 'nope', kind: 'context', content: 'Works on Dupoin campaigns.', included: true }],
+    qa: [],
+  });
+  assert.deepEqual(unknown, { ok: false, error: 'That row is not in this draft.' });
+  const badKind = applyApproval(draft(), {
+    facts: [{ id: 'f2', kind: 'secret', content: 'Frontend engineer.', included: false }],
+    qa: [],
+  });
+  assert.deepEqual(badKind, { ok: false, error: 'Choose a memory kind.' });
+  const sensitive = applyApproval(draft(), {
+    facts: [{ id: 'f1', kind: 'context', content: 'my password is hunter2', included: true }],
+    qa: [],
+  });
+  assert.equal(sensitive.ok, false);
+  const none = applyApproval(draft(), {});
+  assert.equal(none.ok, true);
+  if (none.ok) assert.deepEqual(none, { ok: true, facts: [], qa: [] });
 });

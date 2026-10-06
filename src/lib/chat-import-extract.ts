@@ -175,6 +175,61 @@ export async function requestImportDraft(input: {
   return { ok: true, draft };
 }
 
+export interface ApprovalFact {
+  id: string;
+  kind: MemoryKind;
+  content: string;
+  confidence: number;
+}
+
+export interface ApprovalQa {
+  id: string;
+  question: string;
+  answerSummary: string;
+}
+
+export function applyApproval(
+  draft: ImportDraft,
+  body: { facts?: unknown; qa?: unknown },
+): { ok: true; facts: ApprovalFact[]; qa: ApprovalQa[] } | { ok: false; error: string } {
+  const factItems = body.facts === undefined ? [] : body.facts;
+  const qaItems = body.qa === undefined ? [] : body.qa;
+  if (!Array.isArray(factItems) || !Array.isArray(qaItems)) {
+    return { ok: false, error: 'That row is not in this draft.' };
+  }
+  const factById = new Map(draft.facts.map(fact => [fact.id, fact]));
+  const qaById = new Map(draft.qa.map(row => [row.id, row]));
+  const facts: ApprovalFact[] = [];
+  const qa: ApprovalQa[] = [];
+  for (const item of factItems) {
+    if (!item || typeof item !== 'object') return { ok: false, error: 'That row is not in this draft.' };
+    const row = item as { id?: unknown; kind?: unknown; content?: unknown; included?: unknown };
+    if (typeof row.id !== 'string' || !factById.has(row.id)) return { ok: false, error: 'That row is not in this draft.' };
+    if (!isMemoryKind(row.kind)) return { ok: false, error: 'Choose a memory kind.' };
+    if (row.included !== true) continue;
+    const validated = validateMemoryContent(row.content);
+    if (!validated.ok) return { ok: false, error: validated.error };
+    facts.push({
+      id: row.id,
+      kind: row.kind,
+      content: validated.content,
+      confidence: factById.get(row.id)!.confidence,
+    });
+  }
+  for (const item of qaItems) {
+    if (!item || typeof item !== 'object') return { ok: false, error: 'That row is not in this draft.' };
+    const row = item as { id?: unknown; question?: unknown; answerSummary?: unknown; included?: unknown };
+    if (typeof row.id !== 'string' || !qaById.has(row.id)) return { ok: false, error: 'That row is not in this draft.' };
+    if (row.included !== true) continue;
+    const question = validateImportQuestion(row.question);
+    if (!question.ok) return { ok: false, error: question.error };
+    const answer = validateImportAnswer(row.answerSummary);
+    if (!answer.ok) return { ok: false, error: answer.error };
+    qa.push({ id: row.id, question: question.question, answerSummary: answer.answerSummary });
+  }
+  return { ok: true, facts, qa };
+}
+
 export async function completeImportExtraction(userId: string, prompt: string): Promise<string> {
   const { generateContent } = await import('./openai');
   const result = await generateContent(IMPORT_EXTRACT_SYSTEM, prompt, userId, undefined, {
