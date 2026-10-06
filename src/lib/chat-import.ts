@@ -119,7 +119,8 @@ export type ChatImportResult = {
 
 export const LIST_CHAT_IMPORTS_SQL = `SELECT id, user_id, source, parser, parser_fallback, title, transcript, content_hash, status, draft, knowledge_entry_id, error, approve_result, created_at FROM chat_imports WHERE user_id = ? ORDER BY created_at DESC`;
 export const READ_CHAT_IMPORT_SQL = `SELECT id, user_id, source, parser, parser_fallback, title, transcript, content_hash, status, draft, knowledge_entry_id, error, approve_result, created_at FROM chat_imports WHERE id = ? AND user_id = ?`;
-export const INSERT_CHAT_IMPORT_SQL = `INSERT INTO chat_imports SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, NULL, NULL, NOW(), NOW() WHERE NOT EXISTS (SELECT 1 FROM chat_imports WHERE user_id = ? AND content_hash = ?)`;
+const CHAT_IMPORT_COLUMNS = 'id, user_id, source, parser, parser_fallback, title, transcript, content_hash, status, draft, knowledge_entry_id, error, approve_result, created_at, updated_at';
+export const INSERT_CHAT_IMPORT_SQL = `INSERT INTO chat_imports (${CHAT_IMPORT_COLUMNS}) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, NULL, NULL, NOW(), NOW() WHERE NOT EXISTS (SELECT 1 FROM chat_imports WHERE user_id = ? AND content_hash = ?)`;
 export const SAVE_DRAFT_SQL = `UPDATE chat_imports SET status = 'review', draft = ?::jsonb, error = NULL, updated_at = NOW() WHERE id = ? AND user_id = ? AND status IN ('extract_failed', 'chat_only')`;
 export const SAVE_EXTRACT_FAILURE_SQL = `UPDATE chat_imports SET status = 'extract_failed', draft = '{"facts":[],"qa":[]}'::jsonb, error = 'Fact extraction failed.', updated_at = NOW() WHERE id = ? AND user_id = ?`;
 export const EXTRACT_SUCCESS_SQL = `UPDATE chat_imports SET status = 'review', draft = ?::jsonb, error = NULL, updated_at = NOW() WHERE id = ? AND user_id = ? AND status IN ('extract_failed', 'chat_only')`;
