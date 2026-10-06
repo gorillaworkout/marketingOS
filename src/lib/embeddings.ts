@@ -10,6 +10,7 @@
 
 import { queryOne, queryAll, execute } from './database';
 import { v4 as uuidv4 } from 'uuid';
+import { IMPORTED_CHAT_TASK_TYPE } from './knowledge-task-types';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -113,7 +114,7 @@ function getTFIDFEmbedding(text: string): number[] {
  */
 export function knowledgeEmbeddingInput(taskType: string | null | undefined, brief: string, selectedOutput: string): string {
   const answer = (selectedOutput || '').trim();
-  if (taskType === 'ai-research' || taskType === 'ai-research-qa' || taskType === 'user-memory') {
+  if (taskType === 'ai-research' || taskType === 'ai-research-qa' || taskType === 'user-memory' || taskType === IMPORTED_CHAT_TASK_TYPE) {
     const question = (brief || '').trim();
     if (question && answer) return `${question}\n${answer}`;
     return question || answer;

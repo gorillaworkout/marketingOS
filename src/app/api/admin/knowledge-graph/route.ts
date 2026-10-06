@@ -23,27 +23,31 @@ export async function GET(request: NextRequest) {
   const rawLimit = Number(request.nextUrl.searchParams.get('limit') || 250);
   const limit = Math.min(Math.max(Number.isFinite(rawLimit) ? Math.floor(rawLimit) : 250, 1), 500);
 
+  const ownImport = `(ke.task_type <> 'imported-chat' OR ke.user_id = ?)`;
   const [entries, edgeRows, departments, taskTypes, previous, current, totals] = await Promise.all([
     queryAll(`
       SELECT ke.id, ke.user_id, u.username, u.name AS user_name,
              COALESCE(d.name, 'Admin / Unassigned') AS department,
-             ke.task_type, ke.brief, ke.style_cluster, ke.platform,
+             ke.task_type, ke.task_id, ke.brief, ke.style_cluster, ke.platform,
              ke.audience, ke.quality_score, ke.created_at, ke.source_urls,
              CASE WHEN ke.task_type = 'ai-research' THEN LEFT(ke.selected_output, 2000) ELSE NULL END AS fact_text
       FROM knowledge_entries ke
       JOIN users u ON u.id = ke.user_id
       LEFT JOIN departments d ON d.id = u.department_id
+      WHERE (ke.task_type <> 'imported-chat' OR ke.user_id = ?)
       ORDER BY ke.created_at DESC
       LIMIT ?
-    `, [limit]) as Promise<Record<string, unknown>[]>,
+    `, [admin.id, limit]) as Promise<Record<string, unknown>[]>,
     queryAll(`
       SELECT e.source_id, e.target_id, e.relationship, e.weight
       FROM knowledge_edges e
       JOIN knowledge_entries source ON source.id = e.source_id
       JOIN knowledge_entries target ON target.id = e.target_id
+      WHERE (source.task_type <> 'imported-chat' OR source.user_id = ?)
+        AND (target.task_type <> 'imported-chat' OR target.user_id = ?)
       ORDER BY e.created_at DESC
       LIMIT 1500
-    `, []) as Promise<Record<string, unknown>[]>,
+    `, [admin.id, admin.id]) as Promise<Record<string, unknown>[]>,
     queryAll(`
       SELECT COALESCE(d.name, 'Admin / Unassigned') AS name,
              COUNT(ke.id)::INTEGER AS knowledge_count,
@@ -51,13 +55,16 @@ export async function GET(request: NextRequest) {
       FROM knowledge_entries ke
       JOIN users u ON u.id = ke.user_id
       LEFT JOIN departments d ON d.id = u.department_id
+      WHERE (ke.task_type <> 'imported-chat' OR ke.user_id = ?)
       GROUP BY COALESCE(d.name, 'Admin / Unassigned')
       ORDER BY knowledge_count DESC
-    `, []) as Promise<Record<string, unknown>[]>,
+    `, [admin.id]) as Promise<Record<string, unknown>[]>,
     queryAll(`
-      SELECT task_type AS name, COUNT(*)::INTEGER AS count
-      FROM knowledge_entries GROUP BY task_type ORDER BY count DESC
-    `, []) as Promise<Record<string, unknown>[]>,
+      SELECT ke.task_type AS name, COUNT(*)::INTEGER AS count
+      FROM knowledge_entries ke
+      WHERE (ke.task_type <> 'imported-chat' OR ke.user_id = ?)
+      GROUP BY ke.task_type ORDER BY count DESC
+    `, [admin.id]) as Promise<Record<string, unknown>[]>,
     queryOne<LearningWindow>(`
       SELECT COUNT(*)::INTEGER AS generated,
              COUNT(*) FILTER (WHERE status IN ('approved', 'published'))::INTEGER AS approved,
@@ -76,10 +83,17 @@ export async function GET(request: NextRequest) {
       WHERE created_at >= CURRENT_TIMESTAMP - INTERVAL '30 days'
     `, []),
     Promise.all([
-      queryOne<CountRow>('SELECT COUNT(*)::INTEGER AS count FROM knowledge_entries', []),
-      queryOne<CountRow>('SELECT COUNT(*)::INTEGER AS count FROM knowledge_edges', []),
-      queryOne<CountRow>("SELECT COUNT(*)::INTEGER AS count FROM knowledge_entries WHERE created_at >= CURRENT_TIMESTAMP - INTERVAL '30 days'", []),
-      queryOne<CountRow>('SELECT COUNT(DISTINCT user_id)::INTEGER AS count FROM knowledge_entries', []),
+      queryOne<CountRow>(`SELECT COUNT(*)::INTEGER AS count FROM knowledge_entries ke WHERE ${ownImport}`, [admin.id]),
+      queryOne<CountRow>(`
+        SELECT COUNT(*)::INTEGER AS count
+        FROM knowledge_edges e
+        JOIN knowledge_entries source ON source.id = e.source_id
+        JOIN knowledge_entries target ON target.id = e.target_id
+        WHERE (source.task_type <> 'imported-chat' OR source.user_id = ?)
+          AND (target.task_type <> 'imported-chat' OR target.user_id = ?)
+      `, [admin.id, admin.id]),
+      queryOne<CountRow>(`SELECT COUNT(*)::INTEGER AS count FROM knowledge_entries ke WHERE ${ownImport} AND ke.created_at >= CURRENT_TIMESTAMP - INTERVAL '30 days'`, [admin.id]),
+      queryOne<CountRow>(`SELECT COUNT(DISTINCT ke.user_id)::INTEGER AS count FROM knowledge_entries ke WHERE ${ownImport}`, [admin.id]),
       queryOne<CountRow>('SELECT COUNT(*)::INTEGER AS count FROM departments', []),
     ]),
   ]);
@@ -95,6 +109,7 @@ export async function GET(request: NextRequest) {
     qualityScore: asNumber(entry.quality_score as number | string | null),
     sourceUrls: parseStoredSourceUrls(entry.source_urls),
     fact: entry.fact_text ? String(entry.fact_text) : null,
+    taskId: String(entry.task_type || '') === 'imported-chat' && entry.task_id ? String(entry.task_id) : null,
     department: String(entry.department || 'Admin / Unassigned'),
     username: String(entry.username || entry.user_name || 'Unknown'),
     createdAt: String(entry.created_at),

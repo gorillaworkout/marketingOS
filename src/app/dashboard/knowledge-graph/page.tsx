@@ -2,13 +2,15 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { Button, EmptyState, LoadingState, MetricCard, PageHeader, PageStack, Panel, Select, StatusBadge, Toolbar } from '@/components/ui/dashboard';
+import { AiResearchImportModal } from '@/components/AiResearchImportModal';
+import { ImportedChatRecordActions } from '@/components/ImportedChatRecordActions';
 import { knowledgeFeatureColor, knowledgeFeatureLabel } from '@/lib/knowledge-graph-colors';
 import { knowledgeAudienceLabel } from '@/lib/knowledge-graph-entry';
 import KnowledgeEntryActions from './KnowledgeEntryActions';
 import KnowledgeFeatureLegend from './KnowledgeFeatureLegend';
 import KnowledgeGraphCanvas from './KnowledgeGraphCanvas';
 
-type GraphNode = { id: string; brief: string; taskType: string; styleCluster: string; platform: string | null; audience: string | null; qualityScore: number; department: string; username: string; createdAt: string; sourceUrls?: string[]; fact?: string | null };
+type GraphNode = { id: string; brief: string; taskType: string; taskId?: string | null; styleCluster: string; platform: string | null; audience: string | null; qualityScore: number; department: string; username: string; createdAt: string; sourceUrls?: string[]; fact?: string | null };
 type GraphEdge = { source: string; target: string; type: string; weight: number; sourceType: 'stored' | 'derived' };
 type WindowMetrics = { generated: number; approved: number; rated: number; approvalRate: number; feedbackCoverage: number; averageRating: number };
 type GraphData = {
@@ -38,6 +40,7 @@ export default function AdminKnowledgeGraphPage() {
   const [taskType, setTaskType] = useState('all');
   const [selected, setSelected] = useState<GraphNode | null>(null);
   const [focusId, setFocusId] = useState('');
+  const [importStart, setImportStart] = useState<{ kind: 'existing'; id: string; intent: 'view' | 'review' | 'retry' } | null>(null);
 
   const load = async (quiet = false) => {
     if (!quiet) {
@@ -48,7 +51,10 @@ export default function AdminKnowledgeGraphPage() {
       const response = await fetch('/api/admin/knowledge-graph?limit=350', { cache: 'no-store' });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || 'Knowledge graph could not be loaded.');
-      setData(payload);
+      setData({
+        ...payload,
+        nodes: (payload.nodes || []).map((node: GraphNode) => ({ ...node, taskId: node.taskId || null })),
+      });
       setSelected(current => current ? (payload.nodes || []).find((node: GraphNode) => node.id === current.id) || null : null);
     } catch (cause) {
       if (!quiet) setError(cause instanceof Error ? cause.message : 'Knowledge graph could not be loaded.');
@@ -162,6 +168,14 @@ export default function AdminKnowledgeGraphPage() {
                   <p className="text-[10px] text-[var(--mos-text-faint)]">Connection provenance</p>
                   <p className="mt-1 text-xs text-[var(--mos-text-muted)]">{selectedConnections.filter(edge => edge.sourceType === 'stored').length} stored · {selectedConnections.filter(edge => edge.sourceType === 'derived').length} derived</p>
                 </div>
+                {selected.taskType === 'imported-chat' && selected.taskId && (
+                  <ImportedChatRecordActions
+                    importId={selected.taskId}
+                    onView={() => setImportStart({ kind: 'existing', id: selected.taskId as string, intent: 'view' })}
+                    onReview={() => setImportStart({ kind: 'existing', id: selected.taskId as string, intent: 'review' })}
+                    onRetry={() => setImportStart({ kind: 'existing', id: selected.taskId as string, intent: 'retry' })}
+                  />
+                )}
                 <KnowledgeEntryActions
                   entryId={selected.id}
                   title={selected.brief}
@@ -193,6 +207,12 @@ export default function AdminKnowledgeGraphPage() {
       </Panel>
 
       <footer className="flex flex-col gap-2 border-t border-[var(--mos-border-subtle)] pt-5 text-xs leading-5 text-[var(--mos-text-faint)] md:flex-row md:justify-between"><p>Knowledge is saved from selected options, approvals, published posts, finished event plans, completed market research and articles, and grounded AI Research claims. Drafts, failed runs, and aborted answers stay out.</p><p>More records do not imply better quality. Learning health depends on approvals, ratings, and feedback coverage.</p></footer>
+      <AiResearchImportModal
+        open={importStart !== null}
+        start={importStart ?? { kind: 'new' }}
+        onClose={() => setImportStart(null)}
+        onChanged={() => { void load(true); }}
+      />
     </PageStack>
   );
 }

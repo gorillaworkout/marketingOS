@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { v4 as uuidv4 } from 'uuid';
 import { execute, queryAll, queryOne } from './database';
 import { cosineSimilarity, getEmbedding, knowledgeEmbeddingInput, parseStoredEmbedding } from './embeddings';
+import { IMPORTED_CHAT_TASK_TYPE } from './knowledge-task-types';
 import {
   AI_RESEARCH_KNOWLEDGE_TASK,
   extractPinnableClaims,
@@ -95,7 +96,14 @@ export function qualityScoreForAction(action: KnowledgePersistAction): number {
 /** Style learning follows explicit marketing choices, not research citations or auto-saved reports. */
 export function shouldUpdateStylePreferences(taskType: string, action: KnowledgePersistAction): boolean {
   if (action !== 'select' && action !== 'approve' && action !== 'publish') return false;
-  if (taskType === AI_RESEARCH_KNOWLEDGE_TASK || taskType === 'ai-research-qa' || taskType === 'user-memory' || taskType === 'market-research' || taskType === 'internal-docs') return false;
+  if (
+    taskType === AI_RESEARCH_KNOWLEDGE_TASK
+    || taskType === 'ai-research-qa'
+    || taskType === 'user-memory'
+    || taskType === IMPORTED_CHAT_TASK_TYPE
+    || taskType === 'market-research'
+    || taskType === 'internal-docs'
+  ) return false;
   return true;
 }
 
@@ -701,7 +709,7 @@ async function recordMarketingStyleSelection(userId: string, taskType: string): 
   try {
     const recent = await queryAll<{ selected_output: string; task_type: string; platform: string | null }>(
       `SELECT selected_output, task_type, platform FROM knowledge_entries
-       WHERE user_id = ? AND task_type NOT IN ('user-memory', 'ai-research-qa')
+       WHERE user_id = ? AND task_type NOT IN ('user-memory', 'ai-research-qa', 'imported-chat')
        ORDER BY created_at DESC LIMIT 20`,
       [userId],
     );
