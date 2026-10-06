@@ -190,9 +190,14 @@ export function AiResearchMemoryPanel({
     }
   };
 
+  const reload = async () => {
+    await load();
+    await loadImports();
+  };
+
   useEffect(() => {
     if (!open) return;
-    const timer = window.setTimeout(() => { void load(); void loadImports(); }, 0);
+    const timer = window.setTimeout(() => { void reload(); }, 0);
     return () => window.clearTimeout(timer);
   }, [open]);
 
@@ -447,7 +452,7 @@ export function AiResearchMemoryPanel({
         open={importStart !== null}
         start={importStart ?? { kind: 'new' }}
         onClose={() => setImportStart(null)}
-        onChanged={() => { void load(); void loadImports(); }}
+        onChanged={() => { void reload(); }}
       />
     </div>
   );
