@@ -64,29 +64,28 @@ export const DEFAULT_FEATURE_ASSIGNMENTS: Record<GenerationFeature, {
   defaultModel: string;
 }> = {
   'social-post': {
-    allowedModels: ['ag/gemini-3-flash', 'ag/gemini-3.6-flash-medium', PREFERRED_CODEX_MODEL, 'cx/gpt-5.3-codex-spark', CLAUDE_SONNET_5_MODEL, CLAUDE_OPUS_5_MODEL, CLAUDE_SONNET_5_5_MODEL, CLAUDE_OPUS_5_5_MODEL],
+    allowedModels: ['ag/gemini-3-flash', 'ag/gemini-3.6-flash-medium', PREFERRED_CODEX_MODEL, CLAUDE_SONNET_5_MODEL, CLAUDE_OPUS_5_MODEL, CLAUDE_SONNET_5_5_MODEL, CLAUDE_OPUS_5_5_MODEL],
     defaultModel: 'ag/gemini-3-flash',
   },
   'video-script': {
-    allowedModels: ['ag/gemini-3-flash', 'ag/gemini-3.6-flash-medium', PREFERRED_CODEX_MODEL, 'cx/gpt-5.3-codex-spark', CLAUDE_SONNET_5_MODEL, CLAUDE_OPUS_5_MODEL, CLAUDE_SONNET_5_5_MODEL, CLAUDE_OPUS_5_5_MODEL],
+    allowedModels: ['ag/gemini-3-flash', 'ag/gemini-3.6-flash-medium', PREFERRED_CODEX_MODEL, CLAUDE_SONNET_5_MODEL, CLAUDE_OPUS_5_MODEL, CLAUDE_SONNET_5_5_MODEL, CLAUDE_OPUS_5_5_MODEL],
     defaultModel: 'ag/gemini-3-flash',
   },
   'event-plan': {
-    allowedModels: ['ag/gemini-3-flash', 'ag/gemini-3.1-pro-low', PREFERRED_CODEX_MODEL, 'cx/gpt-5.3-codex-spark', CLAUDE_SONNET_5_MODEL, CLAUDE_OPUS_5_MODEL, CLAUDE_SONNET_5_5_MODEL, CLAUDE_OPUS_5_5_MODEL],
+    allowedModels: ['ag/gemini-3-flash', 'ag/gemini-3.1-pro-low', PREFERRED_CODEX_MODEL, CLAUDE_SONNET_5_MODEL, CLAUDE_OPUS_5_MODEL, CLAUDE_SONNET_5_5_MODEL, CLAUDE_OPUS_5_5_MODEL],
     defaultModel: 'ag/gemini-3.1-pro-low',
   },
   'article-market-news': {
-    allowedModels: ['lr/claude-sonnet-4.5', 'ag/gemini-3.1-pro-low', PREFERRED_CODEX_MODEL, 'cx/gpt-5.3-codex-spark', CLAUDE_SONNET_5_MODEL, CLAUDE_OPUS_5_MODEL, CLAUDE_SONNET_5_5_MODEL, CLAUDE_OPUS_5_5_MODEL],
+    allowedModels: ['lr/claude-sonnet-4.5', 'ag/gemini-3.1-pro-low', PREFERRED_CODEX_MODEL, CLAUDE_SONNET_5_MODEL, CLAUDE_OPUS_5_MODEL, CLAUDE_SONNET_5_5_MODEL, CLAUDE_OPUS_5_5_MODEL],
     defaultModel: CLAUDE_SONNET_5_5_MODEL,
   },
   'market-research': {
-    allowedModels: ['lr/claude-sonnet-4.5', 'ag/gemini-3.1-pro-low', PREFERRED_CODEX_MODEL, 'cx/gpt-5.3-codex-spark', CLAUDE_SONNET_5_MODEL, CLAUDE_OPUS_5_MODEL, CLAUDE_SONNET_5_5_MODEL, CLAUDE_OPUS_5_5_MODEL],
+    allowedModels: ['lr/claude-sonnet-4.5', 'ag/gemini-3.1-pro-low', PREFERRED_CODEX_MODEL, CLAUDE_SONNET_5_MODEL, CLAUDE_OPUS_5_MODEL, CLAUDE_SONNET_5_5_MODEL, CLAUDE_OPUS_5_5_MODEL],
     defaultModel: CLAUDE_SONNET_5_5_MODEL,
   },
   'ai-research': {
     allowedModels: [
       PREFERRED_CODEX_MODEL,
-      'cx/gpt-5.3-codex-spark',
       'cx/gpt-5.6-terra',
       'cx/gpt-5.6-luna',
       'ag/gemini-3-flash',

@@ -25,7 +25,7 @@ assert(ids.includes('cx/gpt-5.6-luna'), 'GPT-5.6 Luna must be offered');
 assert(ids.includes('cx/gpt-5.5'), 'GPT-5.5 must be offered');
 assert(ids.includes('cx/gpt-5.4'), 'GPT-5.4 must be offered');
 assert(ids.includes('cx/gpt-5.4-mini'), 'GPT-5.4 Mini must be offered');
-assert(ids.includes('cx/gpt-5.3-codex-spark'), 'GPT-5.3 Codex Spark must be offered');
+assert(!ids.includes('cx/gpt-5.3-codex-spark'), 'GPT-5.3 Codex Spark is unsupported on a ChatGPT-account Codex login');
 
 assert.equal(CLAUDE_SONNET_5_MODEL, 'cc/claude-sonnet-5');
 assert.equal(CLAUDE_OPUS_5_MODEL, 'cc/claude-opus-5');

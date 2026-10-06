@@ -66,6 +66,9 @@ export interface ModelInfo {
 //   ag/gemini-3.7-*                      — 404, never existed upstream.
 //   ag/gemini-3.5-*, ag/gemini-3-flash-agent — retired (HTTP 200 retirement notice).
 //   pecut-free                           — upstream 400 "Unsupported model mimo-auto".
+//   cx/gpt-5.3-codex-spark               — unsupported on a ChatGPT-account Codex login.
+//     A call returns 400 and 9router cools down the whole Codex account for
+//     about 30 minutes, which takes down AI Research (default cx/gpt-5.6-sol).
 export const AVAILABLE_MODELS: ModelInfo[] = [
   { id: 'ag/gemini-3-flash', name: 'Gemini 3 Flash', tier: 'budget', provider: 'gorillaworkout', input: 0, output: 0 },
   { id: 'ag/gemini-3.6-flash-low', name: 'Gemini 3.6 Flash Low', tier: 'budget', provider: 'gorillaworkout', input: 0, output: 0 },
@@ -86,7 +89,6 @@ export const AVAILABLE_MODELS: ModelInfo[] = [
   { id: 'cx/gpt-5.5', name: 'GPT-5.5', tier: 'balanced', provider: 'gorillaworkout', input: 0, output: 0 },
   { id: 'cx/gpt-5.4', name: 'GPT-5.4', tier: 'balanced', provider: 'gorillaworkout', input: 0, output: 0 },
   { id: 'cx/gpt-5.4-mini', name: 'GPT-5.4 Mini', tier: 'budget', provider: 'gorillaworkout', input: 0, output: 0 },
-  { id: 'cx/gpt-5.3-codex-spark', name: 'GPT-5.3 Codex Spark', tier: 'budget', provider: 'gorillaworkout', input: 0, output: 0 },
 ];
 
 export function getModelProvider(modelId: string): ModelProvider {

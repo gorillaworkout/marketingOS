@@ -88,7 +88,7 @@ export function getModelGuidance(modelId: string): ModelGuidance {
 
   if (lower.startsWith('cx/') || lower.includes('gpt') || lower.includes('codex')) {
     const review = lower.includes('review');
-    const mini = lower.includes('mini') || lower.includes('spark') || lower.includes('luna');
+    const mini = lower.includes('mini') || lower.includes('luna');
     const sol = lower.includes('sol');
     return {
       family: 'GPT / Codex',

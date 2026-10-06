@@ -21,7 +21,7 @@ test('Models API exposes only the configured GorillaWorkout gateway catalog', ()
   assert.match(modelsRoute, /AVAILABLE_MODELS/);
   assert.doesNotMatch(modelsRoute, /OpenRouter|openrouter\.ai|credits/);
   assert.ok(AVAILABLE_MODELS.some(model => model.id === 'cx/gpt-5.6-sol'), 'library page is empty of Sol without this catalog id');
-  assert.ok(AVAILABLE_MODELS.some(model => model.id === 'cx/gpt-5.3-codex-spark'), 'library page is empty of Codex Spark without this catalog id');
+  assert.ok(!AVAILABLE_MODELS.some(model => model.id === 'cx/gpt-5.3-codex-spark'), 'library page must not offer Codex Spark');
   assert.ok(AVAILABLE_MODELS.some(model => model.id === CLAUDE_SONNET_5_MODEL), 'library page is empty of Claude Sonnet 5 without this catalog id');
   assert.ok(AVAILABLE_MODELS.some(model => model.id === CLAUDE_OPUS_5_MODEL), 'library page is empty of Claude Opus 5 without this catalog id');
   assert.ok(AVAILABLE_MODELS.some(model => model.id === CLAUDE_SONNET_5_5_MODEL), 'library page is empty of Claude Sonnet 5.5 without this catalog id');
