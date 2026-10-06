@@ -212,6 +212,25 @@ test('026 adds per-user AI Research memory and is idempotent', () => {
   assert.doesNotMatch(executable, /DROP TABLE|DELETE FROM|TRUNCATE/i);
 });
 
+test('028 adds chat_imports and is idempotent', () => {
+  const sql = readFileSync('db/migrations/028_chat_imports.sql', 'utf8');
+  const executable = withoutSqlComments(sql);
+  assert.match(sql, /BEGIN;[\s\S]*COMMIT;/);
+  assert.match(sql, /CREATE TABLE IF NOT EXISTS chat_imports/);
+  assert.match(sql, /user_id TEXT NOT NULL REFERENCES users\(id\) ON DELETE CASCADE/);
+  assert.match(sql, /source TEXT NOT NULL CHECK \(source IN \('codex', 'claude', 'text'\)\)/);
+  assert.match(sql, /parser TEXT NOT NULL CHECK \(parser IN \('codex', 'claude', 'text'\)\)/);
+  assert.match(sql, /parser_fallback BOOLEAN NOT NULL DEFAULT FALSE/);
+  assert.match(sql, /status TEXT NOT NULL CHECK \(status IN \('review', 'extract_failed', 'approved', 'chat_only'\)\)/);
+  assert.match(sql, /draft JSONB NOT NULL DEFAULT '\{"facts":\[\],"qa":\[\]\}'::jsonb/);
+  assert.match(sql, /knowledge_entry_id TEXT REFERENCES knowledge_entries\(id\) ON DELETE SET NULL/);
+  assert.match(sql, /UNIQUE \(user_id, content_hash\)/);
+  assert.match(sql, /CREATE INDEX IF NOT EXISTS idx_chat_imports_user/);
+  assert.match(sql, /ON chat_imports \(user_id, created_at DESC\)/);
+  assert.doesNotMatch(executable, /DROP TABLE|DELETE FROM|TRUNCATE/i);
+  assert.doesNotMatch(executable, /ALTER TABLE knowledge_entries/);
+});
+
 test('013 creates image_model_assignments with the current catalog and is safe on existing prod', () => {
   const executable = withoutSqlComments(imageAssignments);
   assert.match(imageAssignments, /CREATE TABLE IF NOT EXISTS image_model_assignments/);
