@@ -23,6 +23,7 @@ export const KNOWLEDGE_FEATURE_COLORS: Record<KnowledgeFeatureKey, string> = {
   'internal-docs': '#4ADE80',
   'user-memory': '#C026D3',
   'ai-research-qa': '#84CC16',
+  'imported-chat': '#E11D48',
   other: '#94A3B8',
 };
 
@@ -36,6 +37,7 @@ const FEATURE_LABELS: Record<KnowledgeFeatureKey, string> = {
   'internal-docs': ACCOUNT_FEATURE_LABELS['internal-docs'],
   'user-memory': 'User Memory',
   'ai-research-qa': 'Research Q&A',
+  'imported-chat': 'Imported Chat',
   other: 'Other',
 };
 

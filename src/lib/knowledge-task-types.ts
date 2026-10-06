@@ -9,10 +9,12 @@ export const KNOWLEDGE_TASK_TYPES = [
   'internal-docs',
   'user-memory',
   'ai-research-qa',
+  'imported-chat',
 ] as const;
 
 export const USER_MEMORY_TASK_TYPE = 'user-memory' as const;
 export const AI_RESEARCH_QA_TASK_TYPE = 'ai-research-qa' as const;
+export const IMPORTED_CHAT_TASK_TYPE = 'imported-chat' as const;
 
 export type KnowledgeTaskType = (typeof KNOWLEDGE_TASK_TYPES)[number];
 
