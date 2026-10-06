@@ -66,3 +66,13 @@ test('the memory panel can import when memory is empty or off', async () => {
   assert.match(modal, /Context/);
   assert.doesNotMatch(modal, /ai_research_conversations|extractUserMemories|indexQaTurn/);
 });
+
+test('the selected-record actions do not render the transcript', async () => {
+  const actions = await readFile('src/components/ImportedChatRecordActions.tsx', 'utf8');
+  assert.match(actions, /importListActions/);
+  assert.match(actions, /View chat/);
+  assert.match(actions, /Review facts/);
+  assert.match(actions, /Retry extract/);
+  assert.doesNotMatch(actions, /transcript/);
+  assert.match(actions, /\/api\/ai-research\/imports/);
+});
