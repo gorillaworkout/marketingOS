@@ -1,7 +1,9 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { AiResearchImportModal } from '@/components/AiResearchImportModal';
 import { AiResearchMarkdown } from '@/components/AiResearchMarkdown';
+import { IMPORT_SOURCE_LABEL, IMPORT_STATUS_LABEL, importDateLabel, importListActions } from '@/lib/chat-import-ui';
 
 export type AiResearchMemoryKind = 'role' | 'interest' | 'preference' | 'style' | 'context';
 
@@ -19,6 +21,18 @@ export type AiResearchPriorQuestion = {
   question: string;
   date: string;
   score: number;
+};
+
+type ImportedChatStatus = 'review' | 'extract_failed' | 'approved' | 'chat_only';
+type ImportedChatSource = 'codex' | 'claude' | 'text';
+type ImportedChatListItem = {
+  id: string;
+  title: string;
+  status: ImportedChatStatus;
+  source: ImportedChatSource;
+  parserFallback: boolean;
+  createdAt: string;
+  knowledgeEntryId: string | null;
 };
 
 const KIND_ORDER: AiResearchMemoryKind[] = ['role', 'interest', 'preference', 'style', 'context'];
@@ -144,6 +158,10 @@ export function AiResearchMemoryPanel({
   const [draft, setDraft] = useState('');
   const [deleteArmed, setDeleteArmed] = useState('');
   const [clearArmed, setClearArmed] = useState(false);
+  const [imports, setImports] = useState<ImportedChatListItem[]>([]);
+  const [importStart, setImportStart] = useState<
+    { kind: 'new' } | { kind: 'existing'; id: string; intent: 'view' | 'review' | 'retry' } | null
+  >(null);
 
   const load = async () => {
     setLoading(true);
@@ -161,9 +179,20 @@ export function AiResearchMemoryPanel({
     }
   };
 
+  const loadImports = async () => {
+    try {
+      const response = await fetch('/api/ai-research/imports', { cache: 'no-store' });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.error || 'Could not load imports');
+      setImports(Array.isArray(payload.imports) ? payload.imports : []);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Could not load imports');
+    }
+  };
+
   useEffect(() => {
     if (!open) return;
-    const timer = window.setTimeout(() => { void load(); }, 0);
+    const timer = window.setTimeout(() => { void load(); void loadImports(); }, 0);
     return () => window.clearTimeout(timer);
   }, [open]);
 
@@ -282,8 +311,40 @@ export function AiResearchMemoryPanel({
             <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition-transform ${enabled ? 'left-5' : 'left-0.5'}`} />
           </button>
         </div>
+        <div className="flex shrink-0 border-b border-[var(--mos-border)] px-4 py-3">
+          <button
+            type="button"
+            data-testid="ai-research-import-open"
+            onClick={() => setImportStart({ kind: 'new' })}
+            className="rounded-lg border border-[var(--mos-border)] px-2.5 py-1.5 text-[11px] font-medium text-[var(--mos-text)] hover:bg-[var(--mos-hover)]"
+          >
+            Import chat
+          </button>
+        </div>
         {error && <p className="px-4 pt-2 text-[11px] text-amber-200">{error}</p>}
         <div className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain px-4 py-3">
+          <div data-testid="ai-research-import-list" className="space-y-2">
+            {imports.map(item => (
+              <article key={item.id} className="rounded-xl border border-[var(--mos-border)] bg-[var(--mos-raised)] p-3">
+                <p className="text-xs font-medium text-[var(--mos-text)]">{item.title}</p>
+                <p className="mt-1 text-[10px] text-[var(--mos-text-muted)]">
+                  {IMPORT_SOURCE_LABEL[item.source]} · {IMPORT_STATUS_LABEL[item.status]} · {importDateLabel(item.createdAt)}
+                </p>
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {importListActions(item.status).map(action => (
+                    <button
+                      key={action}
+                      type="button"
+                      onClick={() => setImportStart({ kind: 'existing', id: item.id, intent: action })}
+                      className="rounded-lg border border-[var(--mos-border)] px-2 py-1 text-[10px] text-[var(--mos-text)] hover:bg-[var(--mos-hover)]"
+                    >
+                      {action === 'view' ? 'View chat' : action === 'review' ? 'Review facts' : 'Retry extract'}
+                    </button>
+                  ))}
+                </div>
+              </article>
+            ))}
+          </div>
           {loading && memories.length === 0 && <p className="text-[11px] text-[var(--mos-text-muted)]">Loading memory…</p>}
           {!loading && memories.length === 0 && (
             <p className="text-[11px] leading-5 text-[var(--mos-text-muted)]">
@@ -382,6 +443,12 @@ export function AiResearchMemoryPanel({
           )}
         </div>
       </aside>
+      <AiResearchImportModal
+        open={importStart !== null}
+        start={importStart ?? { kind: 'new' }}
+        onClose={() => setImportStart(null)}
+        onChanged={() => { void load(); void loadImports(); }}
+      />
     </div>
   );
 }
