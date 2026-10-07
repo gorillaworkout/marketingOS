@@ -11,15 +11,17 @@ export interface AiResearchChatBody {
   mode: AiResearchMode;
   compare?: AiResearchCompareRequest;
   skill?: AiResearchSkillId;
+  retry: boolean;
 }
 
 export function parseAiResearchChatBody(body: unknown): AiResearchChatBody {
   const parsed = parseChatRequest(body);
-  const raw = (body && typeof body === 'object') ? body as { projectId?: unknown; compare?: unknown; skill?: unknown } : {};
+  const raw = (body && typeof body === 'object') ? body as { projectId?: unknown; compare?: unknown; skill?: unknown; retry?: unknown } : {};
   return {
     ...parsed,
     projectId: normalizeProjectId(raw.projectId),
     compare: parseCompareSides(raw.compare),
     skill: parseAiResearchSkill(raw.skill),
+    retry: raw.retry === true,
   };
 }
