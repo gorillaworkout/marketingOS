@@ -95,12 +95,12 @@ export function AiResearchPinFact({
   if (!answer.trim()) return null;
 
   return (
-    <div className="mt-2" data-testid="ai-research-pin-fact">
-      <div className="flex flex-wrap gap-1.5">
+    <div className="mt-1" data-testid="ai-research-pin-fact">
+      <div className="flex flex-nowrap items-center gap-1 overflow-x-auto">
         <button
           type="button"
           onClick={() => openDraft(answer.trim().slice(0, 4_000), sources.map(source => source.url))}
-          className="rounded-full border border-emerald-400/30 bg-emerald-500/10 px-2.5 py-1 text-[10px] font-medium text-emerald-100 hover:bg-emerald-500/20"
+          className="inline-flex h-6 shrink-0 items-center whitespace-nowrap rounded-full border border-emerald-400/30 bg-emerald-500/10 px-2 text-[10px] font-medium leading-none text-emerald-100 hover:bg-emerald-500/20"
         >
           Pin to Knowledge Graph
         </button>
@@ -108,7 +108,7 @@ export function AiResearchPinFact({
           <button
             type="button"
             onClick={() => onWatchTopic(topicSuggestion.trim().slice(0, 120))}
-            className="rounded-full border border-[var(--mos-border)] bg-[var(--mos-bg)] px-2.5 py-1 text-[10px] font-medium text-[var(--mos-text)] hover:bg-[var(--mos-hover)]"
+            className="inline-flex h-6 shrink-0 items-center whitespace-nowrap rounded-full border border-[var(--mos-border)] bg-[var(--mos-bg)] px-2 text-[10px] font-medium leading-none text-[var(--mos-text)] hover:bg-[var(--mos-hover)]"
           >
             Watch this topic
           </button>
@@ -118,7 +118,7 @@ export function AiResearchPinFact({
             key={claim.text}
             type="button"
             onClick={() => openDraft(claim.text, claim.sourceUrls)}
-            className="max-w-[240px] truncate rounded-full border border-[var(--mos-border)] bg-[var(--mos-bg)] px-2.5 py-1 text-[10px] font-medium text-[var(--mos-text)] hover:bg-[var(--mos-hover)]"
+            className="inline-flex h-6 max-w-[240px] shrink-0 items-center truncate rounded-full border border-[var(--mos-border)] bg-[var(--mos-bg)] px-2 text-[10px] font-medium leading-none text-[var(--mos-text)] hover:bg-[var(--mos-hover)]"
             title={claim.text}
           >
             Save fact: {claim.text.slice(0, 72)}

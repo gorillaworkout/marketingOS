@@ -57,63 +57,73 @@ export function AiResearchExportActions({
     }
   };
 
+  const actionClass = 'inline-flex h-6 shrink-0 items-center gap-1 rounded-md border border-[var(--mos-border)] bg-[var(--mos-bg)] px-1.5 text-[10px] font-medium leading-none text-[var(--mos-text)] hover:bg-[var(--mos-hover)] disabled:opacity-40';
+
   return (
-    <div className="mt-2" data-testid="ai-research-export">
-      <div className="flex flex-wrap gap-1.5">
-        <button
-          type="button"
-          onClick={() => { void copyMarkdown(); }}
-          className="rounded-full border border-[var(--mos-border)] bg-[var(--mos-bg)] px-2.5 py-1 text-[10px] font-medium text-[var(--mos-text)] hover:bg-[var(--mos-hover)]"
-        >
-          {copied ? 'Copied' : 'Copy Markdown'}
-        </button>
-        <button
-          type="button"
-          data-testid="ai-research-download-md"
-          onClick={() => { void download('md'); }}
-          disabled={busy !== null}
-          className="rounded-full border border-[var(--mos-border)] bg-[var(--mos-bg)] px-2.5 py-1 text-[10px] font-medium text-[var(--mos-text)] hover:bg-[var(--mos-hover)] disabled:opacity-40"
-        >
-          {busy === 'md' ? 'Preparing…' : 'Download .md'}
-        </button>
-        <button
-          type="button"
-          data-testid="ai-research-download-pdf"
-          onClick={() => { void download('pdf'); }}
-          disabled={busy !== null}
-          className="rounded-full border border-[var(--mos-border)] bg-[var(--mos-bg)] px-2.5 py-1 text-[10px] font-medium text-[var(--mos-text)] hover:bg-[var(--mos-hover)] disabled:opacity-40"
-        >
-          {busy === 'pdf' ? 'Preparing…' : 'Download PDF'}
-        </button>
-        <button
-          type="button"
-          data-testid="ai-research-download-word"
-          onClick={() => { void download('docx'); }}
-          disabled={busy !== null}
-          className="rounded-full border border-[var(--mos-border)] bg-[var(--mos-bg)] px-2.5 py-1 text-[10px] font-medium text-[var(--mos-text)] hover:bg-[var(--mos-hover)] disabled:opacity-40"
-        >
-          {busy === 'docx' ? 'Preparing…' : 'Download Word'}
-        </button>
-        <button
-          type="button"
-          data-testid="ai-research-download-html"
-          onClick={() => { void download('html'); }}
-          disabled={busy !== null}
-          className="rounded-full border border-[var(--mos-border)] bg-[var(--mos-bg)] px-2.5 py-1 text-[10px] font-medium text-[var(--mos-text)] hover:bg-[var(--mos-hover)] disabled:opacity-40"
-        >
-          {busy === 'html' ? 'Preparing…' : 'Download HTML'}
-        </button>
-        <button
-          type="button"
-          data-testid="ai-research-download-zip"
-          onClick={() => { void download('zip'); }}
-          disabled={busy !== null}
-          className="rounded-full border border-[var(--mos-border)] bg-[var(--mos-bg)] px-2.5 py-1 text-[10px] font-medium text-[var(--mos-text)] hover:bg-[var(--mos-hover)] disabled:opacity-40"
-        >
-          {busy === 'zip' ? 'Preparing…' : 'Download ZIP'}
-        </button>
-      </div>
-      {exportError && <p className="mt-1 px-1 text-[10px] text-red-300">{exportError}</p>}
+    <div className="mt-1 flex flex-nowrap items-center gap-1 overflow-x-auto" data-testid="ai-research-export">
+      <button
+        type="button"
+        onClick={() => { void copyMarkdown(); }}
+        aria-label="Copy Markdown"
+        className={actionClass}
+      >
+        <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+          <rect x="9" y="9" width="13" height="13" rx="2" />
+          <path strokeLinecap="round" strokeLinejoin="round" d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" />
+        </svg>
+        {copied ? 'Copied' : 'Copy'}
+      </button>
+      <button
+        type="button"
+        data-testid="ai-research-download-md"
+        onClick={() => { void download('md'); }}
+        disabled={busy !== null}
+        aria-label="Download .md"
+        className={actionClass}
+      >
+        {busy === 'md' ? 'Preparing…' : '.md'}
+      </button>
+      <button
+        type="button"
+        data-testid="ai-research-download-pdf"
+        onClick={() => { void download('pdf'); }}
+        disabled={busy !== null}
+        aria-label="Download PDF"
+        className={actionClass}
+      >
+        {busy === 'pdf' ? 'Preparing…' : 'PDF'}
+      </button>
+      <button
+        type="button"
+        data-testid="ai-research-download-word"
+        onClick={() => { void download('docx'); }}
+        disabled={busy !== null}
+        aria-label="Download Word"
+        className={actionClass}
+      >
+        {busy === 'docx' ? 'Preparing…' : 'Word'}
+      </button>
+      <button
+        type="button"
+        data-testid="ai-research-download-html"
+        onClick={() => { void download('html'); }}
+        disabled={busy !== null}
+        aria-label="Download HTML"
+        className={actionClass}
+      >
+        {busy === 'html' ? 'Preparing…' : 'HTML'}
+      </button>
+      <button
+        type="button"
+        data-testid="ai-research-download-zip"
+        onClick={() => { void download('zip'); }}
+        disabled={busy !== null}
+        aria-label="Download ZIP"
+        className={actionClass}
+      >
+        {busy === 'zip' ? 'Preparing…' : 'ZIP'}
+      </button>
+      {exportError && <p className="shrink-0 px-1 text-[10px] text-red-300">{exportError}</p>}
     </div>
   );
 }

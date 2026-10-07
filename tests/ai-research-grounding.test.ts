@@ -1132,7 +1132,8 @@ test('AI Research UI shows a thinking bubble before tokens and keeps the stream 
   assert.match(page, /Sources used/);
   assert.match(page, /pinnedSourceUrls/);
   assert.match(page, /RESEARCH_FAILED_BANNER/);
-  assert.match(page, /RESEARCH_DISCONNECT_BANNER/);
+  assert.match(page, /resolveAiResearchAbruptStreamEnd/);
+  assert.doesNotMatch(page, /RESEARCH_DISCONNECT_BANNER/);
   assert.match(page, /ai-research-stream-cursor/);
   assert.match(page, /animate-spin/);
 });

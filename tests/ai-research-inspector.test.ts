@@ -175,7 +175,8 @@ test('AI Research page and panel show every grounded source in the inspector UI'
   assert.match(page, /Sources used/);
   assert.match(page, /pinnedSourceUrls/);
   assert.match(page, /RESEARCH_FAILED_BANNER/);
-  assert.match(page, /RESEARCH_DISCONNECT_BANNER/);
+  assert.match(page, /resolveAiResearchAbruptStreamEnd/);
+  assert.doesNotMatch(page, /RESEARCH_DISCONNECT_BANNER/);
   assert.match(page, /streamCompleted/);
   assert.match(panel, /Sources used/);
   assert.match(panel, /PERSON_FACT/);

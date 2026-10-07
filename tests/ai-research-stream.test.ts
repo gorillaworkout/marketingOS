@@ -10,6 +10,8 @@ import {
   aiResearchClientErrorMessage,
   appendResearchTurnMessages,
   isAiResearchConnectionError,
+  openAiResearchSseSession,
+  resolveAiResearchAbruptStreamEnd,
   shouldAutoRetryAiResearchStream,
   shouldSkipWebGatherForTurn,
   sseKeepaliveComment,
@@ -164,7 +166,9 @@ test('a retry does not append the same user turn twice', () => {
 test('chat route keeps SSE alive through gather and skips conversational web gather', () => {
   const route = read('src/app/api/ai-research/chat/route.ts');
   const page = read('src/app/dashboard/ai-research/page.tsx');
-  assert.match(route, /startSseKeepalive/);
+  const sessionAt = route.indexOf('const session = openAiResearchSseSession');
+  const gatherAt = route.indexOf('shouldSkipWebGatherForTurn({');
+  assert.ok(sessionAt >= 0 && gatherAt > sessionAt);
   assert.match(route, /shouldSkipWebGatherForTurn/);
   assert.match(route, /appendResearchTurnMessages/);
   assert.equal(route.split('history: modelHistory').length - 1, 2);
@@ -172,8 +176,105 @@ test('chat route keeps SSE alive through gather and skips conversational web gat
   assert.match(route, /if \(skipWebGather\) return \{ research: null, failed: false \}/);
   assert.match(route, /if \(mode === 'deep' && !compare\)/);
   assert.match(route, /if \(skipWebGather\) \{\s*emit\(buildDeepStatusEvent\(\{ phase: 'synthesize', skippedSearch: true \}\)\)/);
-  assert.match(page, /shouldAutoRetryAiResearchStream/);
-  assert.match(page, /aiResearchClientErrorMessage/);
+  assert.match(route, /session\.complete\(\{ type: 'done', conversationId: convId, model, mode: 'deep' \}\);\s*await memoryWrite;/);
+  assert.match(route, /session\.complete\(\{ type: 'done', conversationId: convId, model \}\);\s*await memoryWrite;/);
+  assert.doesNotMatch(route, /if \(closed\) return/);
+  assert.match(page, /resolveAiResearchAbruptStreamEnd/);
+  assert.match(page, /end\.action === 'soft-complete'/);
+  assert.match(page, /if \(answerCommitted\)/);
+  assert.doesNotMatch(page, /RESEARCH_DISCONNECT_BANNER/);
   assert.match(page, /AI_RESEARCH_CONNECTION_RETRYING_MESSAGE/);
   assert.match(page, /retry: attempt > 1/);
+});
+
+test('SSE session pings until done, then writes done and closes once', () => {
+  const frames: string[] = [];
+  let tick: (() => void) | undefined;
+  let closed = 0;
+  let failPing = false;
+  const session = openAiResearchSseSession({
+    write: frame => {
+      if (failPing && frame.startsWith(':')) throw new Error('enqueue failed');
+      frames.push(frame);
+    },
+    close: () => { closed += 1; },
+    schedule: next => {
+      tick = next;
+      return () => { tick = () => {}; };
+    },
+  });
+  assert.ok(tick);
+  tick();
+  session.emit({ type: 'token', content: 'Gold held near 2650.' });
+  tick();
+  assert.deepEqual(frames.filter(frame => frame.startsWith(':')), [': ping\n\n', ': ping\n\n']);
+  failPing = true;
+  tick();
+  failPing = false;
+  session.complete({ type: 'done', conversationId: 'conv-1' });
+  assert.equal(closed, 1);
+  assert.match(frames.at(-1) || '', /"type":"done"/);
+  assert.match(frames.at(-1) || '', /conv-1/);
+  const afterDone = frames.length;
+  tick();
+  session.complete({ type: 'done', conversationId: 'again' });
+  session.close();
+  assert.equal(frames.length, afterDone);
+  assert.equal(closed, 1);
+});
+
+test('a failed done write still closes the SSE stream', () => {
+  let closed = 0;
+  const session = openAiResearchSseSession({
+    write: () => { throw new Error('controller errored'); },
+    close: () => { closed += 1; },
+    schedule: () => () => {},
+  });
+  session.complete({ type: 'done' });
+  assert.equal(closed, 1);
+  session.close();
+  assert.equal(closed, 1);
+});
+
+test('abrupt end after assistant text is a soft complete with no connection banner', () => {
+  assert.deepEqual(resolveAiResearchAbruptStreamEnd({
+    alreadyRetried: false,
+    receivedContent: true,
+  }), { action: 'soft-complete' });
+  assert.deepEqual(resolveAiResearchAbruptStreamEnd({
+    error: new TypeError('Failed to fetch'),
+    alreadyRetried: false,
+    receivedContent: true,
+  }), { action: 'soft-complete' });
+  assert.deepEqual(resolveAiResearchAbruptStreamEnd({
+    error: new TypeError('terminated'),
+    alreadyRetried: true,
+    receivedContent: true,
+  }), { action: 'soft-complete' });
+
+  assert.deepEqual(resolveAiResearchAbruptStreamEnd({
+    error: new TypeError('Failed to fetch'),
+    alreadyRetried: false,
+    receivedContent: false,
+  }), { action: 'retry' });
+  const exhausted = resolveAiResearchAbruptStreamEnd({
+    error: new TypeError('Failed to fetch'),
+    alreadyRetried: true,
+    receivedContent: false,
+  });
+  assert.equal(exhausted.action, 'show-error');
+  if (exhausted.action === 'show-error') {
+    assert.equal(exhausted.message, AI_RESEARCH_CONNECTION_DROPPED_MESSAGE);
+  }
+
+  const apiError = resolveAiResearchAbruptStreamEnd({
+    error: new Error('API error 500: no'),
+    alreadyRetried: false,
+    receivedContent: true,
+  });
+  assert.equal(apiError.action, 'show-error');
+  if (apiError.action === 'show-error') {
+    assert.equal(apiError.message, 'API error 500: no');
+    assert.doesNotMatch(apiError.message, /connection dropped/i);
+  }
 });
