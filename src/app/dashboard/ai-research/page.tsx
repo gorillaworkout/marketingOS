@@ -77,6 +77,11 @@ import {
 } from '@/lib/ai-research-urls';
 import { appendVoiceTranscript } from '@/lib/ai-research-voice';
 import { AI_RESEARCH_STOPPED_STATUS, isAbortError } from '@/lib/ai-research-abort';
+import {
+  AI_RESEARCH_CONNECTION_RETRYING_MESSAGE,
+  aiResearchClientErrorMessage,
+  shouldAutoRetryAiResearchStream,
+} from '@/lib/ai-research-stream';
 
 interface ChatImage {
   mimeType: string;
@@ -789,16 +794,27 @@ export default function AIResearchPage() {
     setLoading(true);
     if (!fromChip && inputRef.current) inputRef.current.style.height = 'auto';
 
+    let requestConversationId = activeConvoId || crypto.randomUUID();
+    let conversationBound = Boolean(activeConvoId);
+    let attempt = 0;
     try {
+      while (attempt < 2) {
+        attempt += 1;
+        if (attempt > 1) setError(AI_RESEARCH_CONNECTION_RETRYING_MESSAGE);
+        let streamCompleted = false;
+        let content = '';
+        streamContentRef.current = '';
+        try {
       const res = await fetch('/api/ai-research/chat', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         signal: controller.signal,
         body: JSON.stringify({
           messages: [userMsg],
-          conversationId: activeConvoId,
+          conversationId: requestConversationId,
           pinnedSourceUrls,
           mode: sentMode,
           projectId: activeProjectId,
+          retry: attempt > 1,
           ...(compareRequest ? { compare: compareRequest } : {}),
           ...(activeSkill ? { skill: activeSkill } : {}),
         }),
@@ -810,8 +826,7 @@ export default function AIResearchPage() {
       }
       const reader = res.body!.getReader();
       const decoder = new TextDecoder();
-      let buffer = '', content = '';
-      let streamCompleted = false;
+      let buffer = '';
       while (true) {
         const { done, value } = await reader.read();
         if (!stillCurrent()) return;
@@ -821,6 +836,7 @@ export default function AIResearchPage() {
         buffer = lines.pop() || '';
         for (const line of lines) {
           const t = line.trim();
+          if (!t || t.startsWith(':')) continue;
           if (!t.startsWith('data: ')) continue;
           let d: {
             type?: string;
@@ -841,7 +857,9 @@ export default function AIResearchPage() {
           };
           try { d = JSON.parse(t.slice(6)); } catch { continue; }
           if (d.type === 'start') {
-            if (d.conversationId && !activeConvoId) {
+            if (d.conversationId) requestConversationId = d.conversationId;
+            if (d.conversationId && !conversationBound) {
+              conversationBound = true;
               skipNextLoadRef.current = true;
               setActiveConvoId(d.conversationId);
             }
@@ -918,7 +936,8 @@ export default function AIResearchPage() {
               priorQuestions: livePriorsRef.current.length ? [...livePriorsRef.current] : undefined,
             }]);
             setLivePriors([]);
-            if (d.conversationId && !activeConvoId) {
+            if (d.conversationId && !conversationBound) {
+              conversationBound = true;
               skipNextLoadRef.current = true;
               setActiveConvoId(d.conversationId);
             }
@@ -942,17 +961,45 @@ export default function AIResearchPage() {
             priorQuestions: livePriorsRef.current.length ? [...livePriorsRef.current] : undefined,
           }]);
           setLivePriors([]);
+          setStreaming('');
+          setDeepProgress(prev => (prev && prev.outcome === 'running' ? failDeepProgress(prev) : prev));
+          setResearchNotice({ tone: 'warning', text: RESEARCH_DISCONNECT_BANNER });
+        } else {
+          throw new TypeError('Failed to fetch');
         }
-        setStreaming('');
-        setDeepProgress(prev => (prev && prev.outcome === 'running' ? failDeepProgress(prev) : prev));
-        setResearchNotice({ tone: 'warning', text: RESEARCH_DISCONNECT_BANNER });
       }
-    } catch (e) {
-      if (!stillCurrent()) return;
-      if (controller.signal.aborted || isAbortError(e)) return;
-      setError(e instanceof Error ? e.message : 'An error occurred');
-      setStreaming('');
-      setDeepProgress(prev => (prev && prev.outcome === 'running' ? failDeepProgress(prev) : prev));
+      setError('');
+      break;
+        } catch (e) {
+          if (!stillCurrent()) return;
+          if (controller.signal.aborted || isAbortError(e)) return;
+          const retrying = shouldAutoRetryAiResearchStream({
+            error: e,
+            alreadyRetried: attempt > 1,
+            receivedContent: Boolean(streamContentRef.current.trim()),
+          });
+          if (retrying) continue;
+          const partial = streamContentRef.current.trim();
+          if (partial) {
+            streamContentRef.current = '';
+            setMessages(prev => [...prev, {
+              role: 'assistant',
+              content: partial,
+              researchMode: sentMode === 'deep' ? 'deep' : undefined,
+              sources: sourcesRef.current.length ? [...sourcesRef.current] : undefined,
+              priorQuestions: livePriorsRef.current.length ? [...livePriorsRef.current] : undefined,
+            }]);
+            setLivePriors([]);
+            setResearchNotice({ tone: 'warning', text: RESEARCH_DISCONNECT_BANNER });
+            setError('');
+          } else {
+            setError(aiResearchClientErrorMessage(e));
+          }
+          setStreaming('');
+          setDeepProgress(prev => (prev && prev.outcome === 'running' ? failDeepProgress(prev) : prev));
+          break;
+        }
+      }
     } finally {
       if (stillCurrent()) {
         sendingRef.current = false;

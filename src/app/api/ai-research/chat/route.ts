@@ -44,6 +44,11 @@ import {
 } from '@/lib/ai-research-compare';
 import { withSkillSystemPrompt, type AiResearchSkillId } from '@/lib/ai-research-skills';
 import {
+  appendResearchTurnMessages,
+  shouldSkipWebGatherForTurn,
+  startSseKeepalive,
+} from '@/lib/ai-research-stream';
+import {
   AI_RESEARCH_INBOX_PROJECT,
   appendProjectSummary,
   buildProjectMemoryBlock,
@@ -390,6 +395,7 @@ export async function POST(request: NextRequest) {
     mode: AiResearchMode;
     compare?: { a: string; b: string };
     skill?: AiResearchSkillId;
+    retry: boolean;
   };
   try {
     parsed = parseChatRequest(await request.json());
@@ -440,7 +446,8 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  const pendingMessages = [...dbMessages, ...messages];
+  const pendingMessages = appendResearchTurnMessages(dbMessages, messages, parsed.retry === true);
+  const modelHistory = pendingMessages.slice(0, Math.max(0, pendingMessages.length - messages.length));
   const latestUser = messages[messages.length - 1];
 
   try {
@@ -455,6 +462,7 @@ export async function POST(request: NextRequest) {
   const stream = new ReadableStream({
     async start(controller) {
       let closed = false;
+      let stopKeepalive = () => {};
       const emit = (data: unknown) => {
         if (closed) return;
         const type = data && typeof data === 'object' && 'type' in data ? (data as { type?: unknown }).type : undefined;
@@ -467,15 +475,30 @@ export async function POST(request: NextRequest) {
         }
       };
       const close = () => {
+        stopKeepalive();
         if (closed) return;
         closed = true;
         try { controller.close(); } catch { /* client already cancelled the stream */ }
       };
       try {
+        stopKeepalive = startSseKeepalive(frame => {
+          if (closed || signal.aborted) return;
+          try {
+            controller.enqueue(encoder.encode(frame));
+          } catch {
+            closed = true;
+          }
+        });
         throwIfResearchAborted(signal);
         const effectiveMode = compare ? 'fast' : mode;
         emit({ type: 'start', conversationId: convId, model, mode: effectiveMode });
         const query = latestUser?.content || '';
+        const skipWebGather = shouldSkipWebGatherForTurn({
+          skill,
+          query,
+          pinnedSourceUrls,
+          compare: Boolean(compare),
+        });
         const knowledgeContext = await fetchKnowledgeContext(auth.id, query, undefined, 5, 'internal', {
           taskTypes: AI_RESEARCH_RETRIEVAL_TASK_TYPES,
           minScore: AI_RESEARCH_KNOWLEDGE_MIN_SCORE,
@@ -499,6 +522,9 @@ export async function POST(request: NextRequest) {
         const urlOnly = isUrlOnlyQuery(query);
 
         if (mode === 'deep' && !compare) {
+          if (skipWebGather) {
+            emit(buildDeepStatusEvent({ phase: 'synthesize', skippedSearch: true }));
+          } else {
           emit(buildDeepStatusEvent({ phase: 'plan' }));
           const skipped = urlOnly ? 'url-only' : !shouldResearchQuery(query) ? 'not-needed' : null;
           let plan = fallbackDeepResearchPlan(query);
@@ -612,7 +638,7 @@ export async function POST(request: NextRequest) {
               formatDeepResearchPlanNote(plan, gatherResult),
               projectMemoryBlock,
             ], skill),
-            history: dbMessages,
+            history: modelHistory,
             incoming: applyContextUrlsToIncoming(messages, urlContext.failures),
             maxHistory: MAX_HISTORY,
             research: modelResearch,
@@ -682,9 +708,11 @@ export async function POST(request: NextRequest) {
           await memoryWrite;
           close();
           return;
+          }
         }
 
         const gatherTask = (async (): Promise<{ research: ResearchContext | null; failed: boolean }> => {
+          if (skipWebGather) return { research: null, failed: false };
           if (compare) {
             const [sideA, sideB] = await Promise.all([
               gatherResearchSide(buildCompareSearchQuery(compare.a), signal),
@@ -720,6 +748,7 @@ export async function POST(request: NextRequest) {
           query,
           research: displayResearch,
           failed: gatherOutcome.failed && urlContext.sources.length === 0,
+          skipped: skipWebGather,
         });
         const citedResearchEvent = mergeInternalDocSources(researchEvent, internalDocHits, request.nextUrl.origin);
         emit({
@@ -744,7 +773,7 @@ export async function POST(request: NextRequest) {
             projectMemoryBlock,
             compare ? buildCompareSystemAddendum(compare) : '',
           ], skill),
-          history: dbMessages,
+          history: modelHistory,
           incoming: applyContextUrlsToIncoming(messages, urlContext.failures),
           maxHistory: MAX_HISTORY,
           research: modelResearch,
@@ -808,6 +837,8 @@ export async function POST(request: NextRequest) {
         }
         emit({ type: 'error', error: error instanceof Error ? error.message : 'Unknown error' });
         close();
+      } finally {
+        stopKeepalive();
       }
     },
     cancel() {
@@ -818,7 +849,7 @@ export async function POST(request: NextRequest) {
   return new Response(stream, {
     headers: {
       'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache',
+      'Cache-Control': 'no-cache, no-transform',
       'Connection': 'keep-alive',
       'X-Accel-Buffering': 'no',
     },

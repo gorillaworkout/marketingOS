@@ -76,9 +76,10 @@ export function resolveResearchGatherStatus(options: {
   query: string;
   failed: boolean;
   sourceCount: number;
+  skipped?: boolean;
 }): ResearchGatherStatus {
   if (options.failed) return 'failed';
-  if (!shouldResearchQuery(options.query)) return 'skipped';
+  if (options.skipped || !shouldResearchQuery(options.query)) return 'skipped';
   if (options.sourceCount <= 0) return 'empty';
   return 'ok';
 }
@@ -155,6 +156,7 @@ export function buildResearchSsePayload(options: {
   query: string;
   research: ResearchContext | null;
   failed: boolean;
+  skipped?: boolean;
 }): ResearchSsePayload {
   const sources = options.failed ? [] : serializeInspectorSources(options.research);
   return {
@@ -164,6 +166,7 @@ export function buildResearchSsePayload(options: {
       query: options.query,
       failed: options.failed,
       sourceCount: sources.length,
+      skipped: options.skipped,
     }),
     sources,
   };
