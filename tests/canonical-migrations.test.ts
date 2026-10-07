@@ -231,6 +231,22 @@ test('028 adds chat_imports and is idempotent', () => {
   assert.doesNotMatch(executable, /ALTER TABLE knowledge_entries/);
 });
 
+test('029 adds user_api_tokens and is idempotent', () => {
+  const sql = readFileSync('db/migrations/029_user_api_tokens.sql', 'utf8');
+  const executable = withoutSqlComments(sql);
+  assert.match(sql, /BEGIN;[\s\S]*COMMIT;/);
+  assert.match(sql, /CREATE TABLE IF NOT EXISTS user_api_tokens/);
+  assert.match(sql, /user_id TEXT NOT NULL REFERENCES users\(id\) ON DELETE CASCADE/);
+  assert.match(sql, /name TEXT NOT NULL/);
+  assert.match(sql, /token_hash TEXT NOT NULL UNIQUE/);
+  assert.match(sql, /token_prefix TEXT NOT NULL/);
+  assert.match(sql, /last_used_at TIMESTAMPTZ/);
+  assert.match(sql, /revoked_at TIMESTAMPTZ/);
+  assert.match(sql, /CREATE INDEX IF NOT EXISTS idx_user_api_tokens_user/);
+  assert.match(sql, /ON user_api_tokens \(user_id, created_at DESC\)/);
+  assert.doesNotMatch(executable, /DROP TABLE|DELETE FROM|TRUNCATE/i);
+});
+
 test('013 creates image_model_assignments with the current catalog and is safe on existing prod', () => {
   const executable = withoutSqlComments(imageAssignments);
   assert.match(imageAssignments, /CREATE TABLE IF NOT EXISTS image_model_assignments/);

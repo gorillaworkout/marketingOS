@@ -141,7 +141,10 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     },
     {
       label: 'AI workspace',
-      items: [{ href: '/dashboard/models', label: 'Models', icon: 'models' }],
+      items: [
+        { href: '/dashboard/models', label: 'Models', icon: 'models' },
+        { href: '/dashboard/settings/api-tokens', label: 'API tokens', icon: 'tokens', feature: 'ai-research' },
+      ],
     },
     {
       label: 'Administration',
