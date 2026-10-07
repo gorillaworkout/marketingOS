@@ -42,7 +42,8 @@ test('AI Research page shows follow-up chips only from a completed assistant ans
   const page = read('src/app/dashboard/ai-research/page.tsx');
   assert.match(page, /suggestAiResearchFollowUps/);
   assert.match(page, /data-testid="ai-research-followups"/);
-  assert.match(page, /Follow-up questions/);
+  assert.match(page, /aria-label="Follow-up questions"/);
+  assert.match(page, /data-testid="ai-research-followups"[\s\S]{0,220}flex-nowrap items-center gap-1 overflow-x-auto/);
   assert.match(page, /if \(loading \|\| streaming\) return \[\]/);
   assert.match(page, /onClick=\{\(\) => sendMessage\(suggestion\)\}/);
   assert.match(page, /const fromChip = typeof rawText === 'string'/);

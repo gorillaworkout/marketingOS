@@ -48,7 +48,6 @@ import {
   inferResearchFileType,
 } from '@/lib/ai-research';
 import {
-  RESEARCH_DISCONNECT_BANNER,
   RESEARCH_FAILED_BANNER,
   normalizeInspectorSource,
   type InspectorResearchSource,
@@ -79,8 +78,7 @@ import { appendVoiceTranscript } from '@/lib/ai-research-voice';
 import { AI_RESEARCH_STOPPED_STATUS, isAbortError } from '@/lib/ai-research-abort';
 import {
   AI_RESEARCH_CONNECTION_RETRYING_MESSAGE,
-  aiResearchClientErrorMessage,
-  shouldAutoRetryAiResearchStream,
+  resolveAiResearchAbruptStreamEnd,
 } from '@/lib/ai-research-stream';
 
 interface ChatImage {
@@ -797,6 +795,20 @@ export default function AIResearchPage() {
     let requestConversationId = activeConvoId || crypto.randomUUID();
     let conversationBound = Boolean(activeConvoId);
     let attempt = 0;
+    let answerCommitted = false;
+    const commitAssistant = (text: string) => {
+      answerCommitted = true;
+      streamContentRef.current = '';
+      setStreaming('');
+      setMessages(prev => [...prev, {
+        role: 'assistant',
+        content: text,
+        researchMode: sentMode === 'deep' ? 'deep' : undefined,
+        sources: sourcesRef.current.length ? [...sourcesRef.current] : undefined,
+        priorQuestions: livePriorsRef.current.length ? [...livePriorsRef.current] : undefined,
+      }]);
+      setLivePriors([]);
+    };
     try {
       while (attempt < 2) {
         attempt += 1;
@@ -925,17 +937,8 @@ export default function AIResearchPage() {
           }
           else if (d.type === 'done') {
             streamCompleted = true;
-            streamContentRef.current = '';
-            setStreaming('');
+            commitAssistant(content);
             setDeepProgress(null);
-            setMessages(prev => [...prev, {
-              role: 'assistant',
-              content,
-              researchMode: sentMode === 'deep' ? 'deep' : undefined,
-              sources: sourcesRef.current.length ? [...sourcesRef.current] : undefined,
-              priorQuestions: livePriorsRef.current.length ? [...livePriorsRef.current] : undefined,
-            }]);
-            setLivePriors([]);
             if (d.conversationId && !conversationBound) {
               conversationBound = true;
               skipNextLoadRef.current = true;
@@ -951,52 +954,44 @@ export default function AIResearchPage() {
       }
       if (!stillCurrent() || controller.signal.aborted) return;
       if (!streamCompleted) {
-        if (content) {
-          streamContentRef.current = '';
-          setMessages(prev => [...prev, {
-            role: 'assistant',
-            content,
-            researchMode: sentMode === 'deep' ? 'deep' : undefined,
-            sources: sourcesRef.current.length ? [...sourcesRef.current] : undefined,
-            priorQuestions: livePriorsRef.current.length ? [...livePriorsRef.current] : undefined,
-          }]);
-          setLivePriors([]);
-          setStreaming('');
-          setDeepProgress(prev => (prev && prev.outcome === 'running' ? failDeepProgress(prev) : prev));
-          setResearchNotice({ tone: 'warning', text: RESEARCH_DISCONNECT_BANNER });
-        } else {
-          throw new TypeError('Failed to fetch');
+        const end = resolveAiResearchAbruptStreamEnd({
+          alreadyRetried: attempt > 1,
+          receivedContent: Boolean(content.trim()),
+        });
+        if (end.action === 'retry') continue;
+        if (end.action === 'soft-complete') {
+          commitAssistant(content);
+          setDeepProgress(null);
+          setError('');
+          break;
         }
+        throw new TypeError('Failed to fetch');
       }
       setError('');
       break;
         } catch (e) {
           if (!stillCurrent()) return;
           if (controller.signal.aborted || isAbortError(e)) return;
-          const retrying = shouldAutoRetryAiResearchStream({
+          if (answerCommitted) {
+            setError('');
+            break;
+          }
+          const end = resolveAiResearchAbruptStreamEnd({
             error: e,
             alreadyRetried: attempt > 1,
             receivedContent: Boolean(streamContentRef.current.trim()),
           });
-          if (retrying) continue;
-          const partial = streamContentRef.current.trim();
-          if (partial) {
-            streamContentRef.current = '';
-            setMessages(prev => [...prev, {
-              role: 'assistant',
-              content: partial,
-              researchMode: sentMode === 'deep' ? 'deep' : undefined,
-              sources: sourcesRef.current.length ? [...sourcesRef.current] : undefined,
-              priorQuestions: livePriorsRef.current.length ? [...livePriorsRef.current] : undefined,
-            }]);
-            setLivePriors([]);
-            setResearchNotice({ tone: 'warning', text: RESEARCH_DISCONNECT_BANNER });
+          if (end.action === 'retry') continue;
+          const partial = streamContentRef.current;
+          if (partial.trim()) commitAssistant(partial);
+          else setStreaming('');
+          if (end.action === 'soft-complete') {
             setError('');
+            setDeepProgress(null);
           } else {
-            setError(aiResearchClientErrorMessage(e));
+            setError(end.message);
+            setDeepProgress(prev => (prev && prev.outcome === 'running' ? failDeepProgress(prev) : prev));
           }
-          setStreaming('');
-          setDeepProgress(prev => (prev && prev.outcome === 'running' ? failDeepProgress(prev) : prev));
           break;
         }
       }
@@ -1774,20 +1769,21 @@ export default function AIResearchPage() {
                         </>
                       )}
                       {i === followUpIndex && (
-                        <div className="mt-2" data-testid="ai-research-followups">
-                          <p className="mb-1.5 px-1 text-[10px] font-semibold text-[var(--mos-text-muted)]">Follow-up questions</p>
-                          <div className="flex flex-wrap gap-1.5">
-                            {followUps.map(suggestion => (
-                              <button
-                                key={suggestion}
-                                type="button"
-                                onClick={() => sendMessage(suggestion)}
-                                className="rounded-full border border-[var(--mos-border)] bg-[var(--mos-bg)] px-3 py-1.5 text-left text-[11px] text-[var(--mos-text)] transition-colors hover:bg-[var(--mos-hover)]"
-                              >
-                                {suggestion}
-                              </button>
-                            ))}
-                          </div>
+                        <div
+                          data-testid="ai-research-followups"
+                          aria-label="Follow-up questions"
+                          className="mt-1 flex flex-nowrap items-center gap-1 overflow-x-auto"
+                        >
+                          {followUps.map(suggestion => (
+                            <button
+                              key={suggestion}
+                              type="button"
+                              onClick={() => sendMessage(suggestion)}
+                              className="shrink-0 whitespace-nowrap rounded-full border border-[var(--mos-border)] bg-[var(--mos-bg)] px-2 py-0.5 text-[10px] leading-4 text-[var(--mos-text)] transition-colors hover:bg-[var(--mos-hover)]"
+                            >
+                              {suggestion}
+                            </button>
+                          ))}
                         </div>
                       )}
                     </div>

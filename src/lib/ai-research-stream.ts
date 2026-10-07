@@ -39,6 +39,114 @@ export function sseKeepaliveComment(): string {
   return ': ping\n\n';
 }
 
+export function sseDataFrame(data: unknown): string {
+  return `data: ${JSON.stringify(data)}\n\n`;
+}
+
+export interface AiResearchSseSession {
+  emit: (data: unknown) => void;
+  /** Stop keepalives, write `done`, then close. Close still runs if the done write throws. */
+  complete: (done: unknown) => void;
+  /** Stop keepalives and close without a done event. */
+  close: () => void;
+}
+
+/**
+ * Keepalive comments run until `complete` or `close`.
+ * A failed ping or token write must not swallow the later done event or skip `close`.
+ */
+export function openAiResearchSseSession(options: {
+  write: (frame: string) => void;
+  close: () => void;
+  isAborted?: () => boolean;
+  intervalMs?: number;
+  schedule?: (tick: () => void, intervalMs: number) => () => void;
+}): AiResearchSseSession {
+  let ended = false;
+  const stopKeepalive = startSseKeepalive(frame => {
+    if (ended || options.isAborted?.()) return;
+    try {
+      options.write(frame);
+    } catch {
+      // A failed ping must not mark the session finished.
+    }
+  }, {
+    intervalMs: options.intervalMs,
+    schedule: options.schedule,
+  });
+
+  const end = (writeDone?: () => void) => {
+    if (ended) return;
+    stopKeepalive();
+    try {
+      writeDone?.();
+    } catch {
+      // The done frame may not have flushed. Close anyway.
+    } finally {
+      ended = true;
+      try {
+        options.close();
+      } catch {
+        // The controller was already closed or cancelled.
+      }
+    }
+  };
+
+  return {
+    emit(data) {
+      if (ended) return;
+      const type = data && typeof data === 'object' && 'type' in data
+        ? (data as { type?: unknown }).type
+        : undefined;
+      if (options.isAborted?.() && type !== 'done') return;
+      try {
+        options.write(sseDataFrame(data));
+      } catch {
+        // Leave the session open so complete() can still close the controller.
+      }
+    },
+    complete(done) {
+      end(() => {
+        options.write(sseDataFrame(done));
+      });
+    },
+    close() {
+      end();
+    },
+  };
+}
+
+export type AiResearchAbruptStreamEnd =
+  | { action: 'soft-complete' }
+  | { action: 'retry' }
+  | { action: 'show-error'; message: string };
+
+/**
+ * An abrupt SSE end after assistant text is already visible is a soft complete.
+ * Do not surface the connection-dropped banner in that case.
+ */
+export function resolveAiResearchAbruptStreamEnd(options: {
+  error?: unknown;
+  alreadyRetried: boolean;
+  receivedContent: boolean;
+}): AiResearchAbruptStreamEnd {
+  const error = options.error ?? new TypeError('Failed to fetch');
+  if (options.receivedContent && (options.error == null || isAiResearchConnectionError(error))) {
+    return { action: 'soft-complete' };
+  }
+  if (shouldAutoRetryAiResearchStream({
+    error,
+    alreadyRetried: options.alreadyRetried,
+    receivedContent: options.receivedContent,
+  })) {
+    return { action: 'retry' };
+  }
+  return {
+    action: 'show-error',
+    message: aiResearchClientErrorMessage(error),
+  };
+}
+
 function defaultSseKeepaliveSchedule(tick: () => void, intervalMs: number): () => void {
   const timer = setInterval(tick, intervalMs);
   if (typeof timer === 'object' && timer && 'unref' in timer) timer.unref();

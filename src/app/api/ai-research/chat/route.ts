@@ -45,8 +45,8 @@ import {
 import { withSkillSystemPrompt, type AiResearchSkillId } from '@/lib/ai-research-skills';
 import {
   appendResearchTurnMessages,
+  openAiResearchSseSession,
   shouldSkipWebGatherForTurn,
-  startSseKeepalive,
 } from '@/lib/ai-research-stream';
 import {
   AI_RESEARCH_INBOX_PROJECT,
@@ -103,10 +103,6 @@ import { execute, queryAll, queryOne } from '@/lib/database';
 const MAX_HISTORY = 20;
 
 export const maxDuration = 120;
-
-function sseFrame(data: unknown): string {
-  return `data: ${JSON.stringify(data)}\n\n`;
-}
 
 async function streamChatCompletion(options: {
   emit: (data: unknown) => void;
@@ -461,34 +457,17 @@ export async function POST(request: NextRequest) {
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
     async start(controller) {
-      let closed = false;
-      let stopKeepalive = () => {};
-      const emit = (data: unknown) => {
-        if (closed) return;
-        const type = data && typeof data === 'object' && 'type' in data ? (data as { type?: unknown }).type : undefined;
-        // A finished `done` frame still goes out if the abort flipped after the model completed.
-        if (signal.aborted && type !== 'done') return;
-        try {
-          controller.enqueue(encoder.encode(sseFrame(data)));
-        } catch {
-          closed = true;
-        }
-      };
-      const close = () => {
-        stopKeepalive();
-        if (closed) return;
-        closed = true;
-        try { controller.close(); } catch { /* client already cancelled the stream */ }
-      };
+      const session = openAiResearchSseSession({
+        write: frame => {
+          controller.enqueue(encoder.encode(frame));
+        },
+        close: () => {
+          controller.close();
+        },
+        isAborted: () => signal.aborted,
+      });
+      const emit = session.emit;
       try {
-        stopKeepalive = startSseKeepalive(frame => {
-          if (closed || signal.aborted) return;
-          try {
-            controller.enqueue(encoder.encode(frame));
-          } catch {
-            closed = true;
-          }
-        });
         throwIfResearchAborted(signal);
         const effectiveMode = compare ? 'fast' : mode;
         emit({ type: 'start', conversationId: convId, model, mode: effectiveMode });
@@ -652,7 +631,7 @@ export async function POST(request: NextRequest) {
             signal,
           });
           if (!streamed.ok) {
-            close();
+            session.close();
             return;
           }
 
@@ -704,9 +683,8 @@ export async function POST(request: NextRequest) {
             outputText: fullContent,
             reported: mergeGatewayUsage(planUsage, streamed.usage),
           });
-          emit({ type: 'done', conversationId: convId, model, mode: 'deep' });
+          session.complete({ type: 'done', conversationId: convId, model, mode: 'deep' });
           await memoryWrite;
-          close();
           return;
           }
         }
@@ -788,7 +766,7 @@ export async function POST(request: NextRequest) {
           signal,
         });
         if (!streamed.ok) {
-          close();
+          session.close();
           return;
         }
 
@@ -827,18 +805,17 @@ export async function POST(request: NextRequest) {
           reported: streamed.usage,
         });
 
-        emit({ type: 'done', conversationId: convId, model });
+        session.complete({ type: 'done', conversationId: convId, model });
         await memoryWrite;
-        close();
       } catch (error) {
         if (signal.aborted || isAbortError(error)) {
-          close();
+          session.close();
           return;
         }
         emit({ type: 'error', error: error instanceof Error ? error.message : 'Unknown error' });
-        close();
+        session.close();
       } finally {
-        stopKeepalive();
+        session.close();
       }
     },
     cancel() {

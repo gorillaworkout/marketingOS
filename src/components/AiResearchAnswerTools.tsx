@@ -9,7 +9,7 @@ import {
   type AiResearchHandoffTarget,
 } from '@/lib/ai-research-handoff';
 
-const chipClass = 'rounded-full border border-[var(--mos-border)] bg-[var(--mos-bg)] px-2.5 py-1 text-[10px] font-medium text-[var(--mos-text)] hover:bg-[var(--mos-hover)] disabled:opacity-40';
+const chipClass = 'inline-flex h-6 shrink-0 items-center whitespace-nowrap rounded-full border border-[var(--mos-border)] bg-[var(--mos-bg)] px-2 text-[10px] font-medium leading-none text-[var(--mos-text)] hover:bg-[var(--mos-hover)] disabled:opacity-40';
 
 export function AiResearchAnswerTools({
   query,
@@ -70,7 +70,7 @@ export function AiResearchAnswerTools({
   };
 
   return (
-    <div className="mt-2 space-y-2" data-testid="ai-research-answer-tools">
+    <div className="mt-1 space-y-1" data-testid="ai-research-answer-tools">
       {scan.flagged && (
         <div
           role="status"
@@ -87,7 +87,7 @@ export function AiResearchAnswerTools({
           </ul>
         </div>
       )}
-      <div className="flex flex-wrap gap-1.5">
+      <div className="flex flex-nowrap items-center gap-1 overflow-x-auto">
         <button
           type="button"
           data-testid="ai-research-share"

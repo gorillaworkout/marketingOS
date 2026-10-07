@@ -355,6 +355,10 @@ test('AI Research answer actions expose markdown copy and PDF and Word downloads
   assert.match(actions, /Download ZIP/);
   assert.match(actions, /deliverResearchFile/);
   assert.match(actions, /data-testid="ai-research-export"/);
+  assert.match(actions, /aria-label="Copy Markdown"/);
+  assert.match(actions, /aria-label="Download \.md"/);
+  assert.match(actions, /flex flex-nowrap items-center gap-1 overflow-x-auto/);
+  assert.doesNotMatch(actions, /flex-wrap/);
   assert.match(actions, /data-testid="ai-research-download-pdf"/);
   assert.match(actions, /data-testid="ai-research-download-word"/);
   assert.match(actions, /data-testid="ai-research-download-html"/);
@@ -370,6 +374,8 @@ test('AI Research answer actions expose markdown copy and PDF and Word downloads
   assert.match(chatFiles, /Research ZIP/);
   assert.match(chatFiles, /Download ZIP/);
   assert.match(chatFiles, /data-testid="ai-research-chat-files"/);
+  assert.match(chatFiles, /flex flex-nowrap items-center gap-1 overflow-x-auto/);
+  assert.doesNotMatch(chatFiles, /space-y-2/);
   assert.match(chatFiles, /data-testid="ai-research-open-pdf"/);
   assert.match(chatFiles, /data-testid="ai-research-open-html"/);
   assert.match(chatFiles, /data-testid="ai-research-chat-download-zip"/);
