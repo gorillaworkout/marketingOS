@@ -56,6 +56,19 @@ import {
 } from '@/lib/ai-research-inspector';
 import { buildCompareUserPrompt } from '@/lib/ai-research-compare';
 import { suggestAiResearchFollowUps } from '@/lib/ai-research-followups';
+import {
+  AI_RESEARCH_CONTINUE_USER_MESSAGE,
+  aiResearchSkillById,
+  clampSkillHighlight,
+  commitComposerSkill,
+  filterAiResearchSkills,
+  parseComposerSlash,
+  skillRemainderAfterSelect,
+  slashPickerOpen,
+  type AiResearchSkill,
+  type AiResearchSkillId,
+} from '@/lib/ai-research-skills';
+import { AiResearchSkillChip, AiResearchSkillPicker } from '@/components/AiResearchSkillControls';
 import { conversationBelongsToProject } from '@/lib/ai-research-projects';
 import {
   AI_RESEARCH_MAX_CONTEXT_URLS,
@@ -284,6 +297,10 @@ export default function AIResearchPage() {
   const [compareMode, setCompareMode] = useState(false);
   const [compareA, setCompareA] = useState('');
   const [compareB, setCompareB] = useState('');
+  const [activeSkill, setActiveSkill] = useState<AiResearchSkillId | null>(null);
+  const [pickerSuppressed, setPickerSuppressed] = useState(false);
+  const [skillHighlight, setSkillHighlight] = useState(0);
+  const [highlightToken, setHighlightToken] = useState('');
   const [activeConvoId, setActiveConvoId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
@@ -699,8 +716,14 @@ export default function AIResearchPage() {
     const compareRequest = !fromChip && compareMode
       ? { a: compareA.trim(), b: compareB.trim() }
       : null;
+    const continueWithoutDraft = !fromChip
+      && activeSkill === 'continue'
+      && !trimmed
+      && attachments.length === 0
+      && !compareRequest
+      && messages.some(message => message.role === 'assistant');
     if (compareRequest && (!compareRequest.a || !compareRequest.b)) return;
-    if ((!trimmed && attachments.length === 0 && !compareRequest) || loading || sendingRef.current) return;
+    if ((!trimmed && attachments.length === 0 && !compareRequest && !continueWithoutDraft) || loading || sendingRef.current) return;
     sendingRef.current = true;
     const token = ++runTokenRef.current;
     abortControllerRef.current?.abort();
@@ -737,9 +760,11 @@ export default function AIResearchPage() {
 
     const userMsg: Message = {
       role: 'user',
-      content: compareRequest
-        ? buildCompareUserPrompt(compareRequest.a, compareRequest.b, trimmed)
-        : (trimmed || defaultPromptForAttachments(images.length, files.length)),
+      content: continueWithoutDraft
+        ? AI_RESEARCH_CONTINUE_USER_MESSAGE
+        : compareRequest
+          ? buildCompareUserPrompt(compareRequest.a, compareRequest.b, trimmed)
+          : (trimmed || defaultPromptForAttachments(images.length, files.length)),
       images: images.length ? images : undefined,
       files: files.length ? files : undefined,
     };
@@ -775,6 +800,7 @@ export default function AIResearchPage() {
           mode: sentMode,
           projectId: activeProjectId,
           ...(compareRequest ? { compare: compareRequest } : {}),
+          ...(activeSkill ? { skill: activeSkill } : {}),
         }),
       });
       if (!stillCurrent()) return;
@@ -1082,10 +1108,6 @@ export default function AIResearchPage() {
     }
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
-  };
-
   const resizeComposer = () => {
     const el = inputRef.current;
     if (!el) return;
@@ -1094,7 +1116,17 @@ export default function AIResearchPage() {
   };
 
   const autoResize = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    setInput(e.target.value);
+    const nextValue = e.target.value;
+    const committed = commitComposerSkill(nextValue);
+    if (committed) {
+      setActiveSkill(committed.skillId);
+      setInput(committed.nextInput);
+      setPickerSuppressed(false);
+      requestAnimationFrame(resizeComposer);
+    } else {
+      setInput(nextValue);
+      setPickerSuppressed(false);
+    }
     const el = e.target;
     el.style.height = 'auto';
     el.style.height = Math.min(el.scrollHeight, 160) + 'px';
@@ -1155,11 +1187,58 @@ export default function AIResearchPage() {
     inputRef.current?.focus();
   };
 
+  const slash = parseComposerSlash(input);
+  const slashToken = slash?.token ?? '';
+  const pickerOpen = slashPickerOpen(input, pickerSuppressed);
+  const pickerSkills = filterAiResearchSkills(pickerOpen ? slashToken : '');
+  const skillHighlightIndex = clampSkillHighlight(
+    highlightToken === slashToken ? skillHighlight : 0,
+    pickerSkills.length,
+  );
+  const setSkillHighlightForToken = (index: number) => {
+    setHighlightToken(slashToken);
+    setSkillHighlight(index);
+  };
+  const activeSkillDef = activeSkill ? aiResearchSkillById(activeSkill) : undefined;
+  const continueReady = activeSkill === 'continue'
+    && !input.trim()
+    && pendingAttachments.length === 0
+    && !compareMode
+    && messages.some(message => message.role === 'assistant');
   const canSend = !loading && (
     compareMode
       ? Boolean(compareA.trim() && compareB.trim())
-      : Boolean(input.trim() || pendingAttachments.length)
+      : Boolean(input.trim() || pendingAttachments.length || continueReady)
   );
+
+  const selectSkill = (skill: AiResearchSkill) => {
+    setActiveSkill(skill.id);
+    setInput(skillRemainderAfterSelect(input));
+    setPickerSuppressed(false);
+    requestAnimationFrame(resizeComposer);
+    inputRef.current?.focus();
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (pickerOpen && pickerSkills.length > 0 && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
+      e.preventDefault();
+      const delta = e.key === 'ArrowDown' ? 1 : -1;
+      setSkillHighlightForToken(clampSkillHighlight(skillHighlightIndex + delta, pickerSkills.length));
+      return;
+    }
+    if (pickerOpen && pickerSkills.length > 0 && ((e.key === 'Enter' && !e.shiftKey) || e.key === 'Tab')) {
+      e.preventDefault();
+      const skill = pickerSkills[skillHighlightIndex];
+      if (skill) selectSkill(skill);
+      return;
+    }
+    if (e.key === 'Escape' && pickerOpen) {
+      e.preventDefault();
+      setPickerSuppressed(true);
+      return;
+    }
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+  };
   const activeProject = projects.find(item => item.id === activeProjectId) || null;
   const visibleConversations = conversations.filter(conv =>
     conversationBelongsToProject(conv.projectId ?? null, activeProjectId),
@@ -1557,6 +1636,7 @@ export default function AIResearchPage() {
                       ? `Research in the ${activeProject.name} project. Questions here remember this project's notes and conversations.`
                       : 'Ask anything — research a trading topic, analyze news, plan marketing, or attach an image, Excel, CSV, PDF, Word, or PowerPoint file for the AI to read.'}
                   </p>
+                  <p className="mt-3 text-xs text-[var(--mos-text-muted)]">Type / for a skill such as /brief, /sources, or /eli5.</p>
                   <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 gap-2 w-full max-w-lg">
                     {[
                       'Who is Sella Susriana at Dupoin?',
@@ -1790,6 +1870,19 @@ export default function AIResearchPage() {
           </div>
 
           {/* Composer stays in the column; tall attachment stacks scroll inside it */}
+          <div className="relative z-30 min-w-0 shrink">
+          {pickerOpen && (
+            <div className="absolute bottom-full left-0 right-0 z-30 px-4 pb-2">
+              <div className="mx-auto max-w-3xl">
+                <AiResearchSkillPicker
+                  skills={pickerSkills}
+                  highlight={skillHighlightIndex}
+                  onHighlight={setSkillHighlightForToken}
+                  onSelect={selectSkill}
+                />
+              </div>
+            </div>
+          )}
           <div
             data-testid="ai-research-composer"
             className="min-h-0 max-h-80 shrink overflow-y-auto overscroll-contain border-t border-[var(--mos-border)] bg-[var(--mos-bg)] px-4 py-3"
@@ -1959,6 +2052,11 @@ export default function AIResearchPage() {
                   ))}
                 </div>
               )}
+              {activeSkillDef && (
+                <div className="mb-2">
+                  <AiResearchSkillChip skill={activeSkillDef} onClear={() => setActiveSkill(null)} />
+                </div>
+              )}
               {voiceStatus && (
                 <p
                   role={voiceStatus.tone === 'error' ? 'alert' : 'status'}
@@ -2032,7 +2130,11 @@ export default function AIResearchPage() {
                   onPaste={handleComposerPaste}
                   placeholder={compareMode
                     ? 'Comparison focus (optional) — for example price, regulation, or risk'
-                    : 'Ask anything — drag, paste, or click to attach an image, Excel, CSV, PDF, Word, or PowerPoint file... Paste an http(s) link to use it as context.'}
+                    : activeSkillDef
+                      ? activeSkillDef.placeholder
+                      : 'Ask anything — type / for a skill, or drag, paste, or click to attach an image, Excel, CSV, PDF, Word, or PowerPoint file... Paste an http(s) link to use it as context.'}
+                  aria-controls={pickerOpen ? 'ai-research-skill-picker' : undefined}
+                  aria-activedescendant={pickerOpen && pickerSkills[skillHighlightIndex] ? `ai-research-skill-option-${pickerSkills[skillHighlightIndex].id}` : undefined}
                   disabled={loading}
                   rows={1}
                   className="flex-1 min-h-[24px] max-h-[160px] resize-none bg-transparent border-none text-sm text-[var(--mos-text)] placeholder-[var(--mos-text-muted)] focus:outline-none"
@@ -2066,9 +2168,10 @@ export default function AIResearchPage() {
                 )}
               </div>
               <p className="text-[9px] text-[var(--mos-text-faint)] text-center mt-2">
-                {AI_RESEARCH_ASSISTANT_NAME} may produce inaccurate information. Enter to send · Shift+Enter for a new line · The mic uses the browser Web Speech API (id-ID, or English if id-ID is not supported; Chrome, Edge, Safari). Drag, paste, or click the icon for images, Excel/CSV, PDF, Word, and PowerPoint (max 4 of each). The camera button takes a photo and attaches it. Paste http(s) links, up to {AI_RESEARCH_MAX_CONTEXT_URLS} per message.
+                {AI_RESEARCH_ASSISTANT_NAME} may produce inaccurate information. Type / for a skill · Enter to send · Shift+Enter for a new line · The mic uses the browser Web Speech API (id-ID, or English if id-ID is not supported; Chrome, Edge, Safari). Drag, paste, or click the icon for images, Excel/CSV, PDF, Word, and PowerPoint (max 4 of each). The camera button takes a photo and attaches it. Paste http(s) links, up to {AI_RESEARCH_MAX_CONTEXT_URLS} per message.
               </p>
             </div>
+          </div>
           </div>
         </div>
         <AiResearchWatchPanel open={watchOpen} seed={watchSeed} onClose={() => setWatchOpen(false)} />

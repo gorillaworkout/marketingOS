@@ -42,6 +42,7 @@ import {
   buildCompareSystemAddendum,
   mergeCompareResearch,
 } from '@/lib/ai-research-compare';
+import { withSkillSystemPrompt, type AiResearchSkillId } from '@/lib/ai-research-skills';
 import {
   AI_RESEARCH_INBOX_PROJECT,
   appendProjectSummary,
@@ -388,6 +389,7 @@ export async function POST(request: NextRequest) {
     pinnedSourceUrls: string[];
     mode: AiResearchMode;
     compare?: { a: string; b: string };
+    skill?: AiResearchSkillId;
   };
   try {
     parsed = parseChatRequest(await request.json());
@@ -399,7 +401,7 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const { messages, conversationId, mode, compare } = parsed;
+  const { messages, conversationId, mode, compare, skill } = parsed;
   const pinnedSourceUrls = parsePinnedSourceUrls(parsed.pinnedSourceUrls);
   let model: string;
   try {
@@ -600,7 +602,7 @@ export async function POST(request: NextRequest) {
           }));
 
           const apiMessages = buildAiResearchChatMessages({
-            systemPrompt: [
+            systemPrompt: withSkillSystemPrompt([
               AI_RESEARCH_SYSTEM_PROMPT,
               learned.profileBlock,
               learned.priorBlock,
@@ -609,7 +611,7 @@ export async function POST(request: NextRequest) {
               AI_RESEARCH_DEEP_SYSTEM_ADDENDUM,
               formatDeepResearchPlanNote(plan, gatherResult),
               projectMemoryBlock,
-            ].filter(Boolean).join('\n\n'),
+            ], skill),
             history: dbMessages,
             incoming: applyContextUrlsToIncoming(messages, urlContext.failures),
             maxHistory: MAX_HISTORY,
@@ -733,7 +735,7 @@ export async function POST(request: NextRequest) {
         const modelResearch = mergeContextUrlSources(pinnedResearch, urlContext.sources, query);
 
         const apiMessages = buildAiResearchChatMessages({
-          systemPrompt: [
+          systemPrompt: withSkillSystemPrompt([
             AI_RESEARCH_SYSTEM_PROMPT,
             learned.profileBlock,
             learned.priorBlock,
@@ -741,7 +743,7 @@ export async function POST(request: NextRequest) {
             internalDocsContext,
             projectMemoryBlock,
             compare ? buildCompareSystemAddendum(compare) : '',
-          ].filter(Boolean).join('\n\n'),
+          ], skill),
           history: dbMessages,
           incoming: applyContextUrlsToIncoming(messages, urlContext.failures),
           maxHistory: MAX_HISTORY,
