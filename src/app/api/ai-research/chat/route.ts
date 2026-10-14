@@ -89,6 +89,8 @@ import {
   throwIfResearchAborted,
 } from '@/lib/ai-research-abort';
 import { logTokenUsage } from '@/lib/token-log';
+import { streamWithModelFallback } from '@/lib/model-fallback';
+import { modelFallbackLogger } from '@/lib/model-fallback-log';
 import {
   consumeChatCompletionSseLines,
   gatewayMessagesText,
@@ -104,6 +106,143 @@ const MAX_HISTORY = 20;
 
 export const maxDuration = 120;
 
+/** No first token from a model within this window fails over to the next model. */
+const STREAM_FIRST_TOKEN_TIMEOUT_MS = 60_000;
+/** A stream that stalls this long between chunks fails over mid-stream. */
+const STREAM_IDLE_TIMEOUT_MS = 60_000;
+
+type StreamOnceResult =
+  | { ok: true; content: string; usage: GatewayTokenUsage | null }
+  | { ok: false; aborted: true; content: string }
+  | { ok: false; aborted?: false; error: string; content: string; usage: GatewayTokenUsage | null };
+
+/**
+ * One streaming attempt against one model. Forwards tokens to the client and
+ * reports failures (with any partial text) instead of emitting an error, so
+ * the fallback loop can switch models. Only a user abort is final.
+ */
+async function streamChatCompletionOnce(options: {
+  emit: (data: unknown) => void;
+  model: string;
+  apiMessages: GatewayMessage[];
+  temperature: number;
+  maxTokens?: number;
+  signal: AbortSignal;
+}): Promise<StreamOnceResult> {
+  if (options.signal.aborted) return { ok: false, aborted: true, content: '' };
+  const attemptAbort = linkAbortSignal(options.signal);
+  let timedOut: string | null = null;
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const arm = (ms: number, reason: string) => {
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(() => {
+      timedOut = reason;
+      attemptAbort.abort();
+    }, ms);
+  };
+  const userAborted = () => options.signal.aborted;
+  let fullContent = '';
+  let reportedUsage: GatewayTokenUsage | null = null;
+  const fail = (error: string): StreamOnceResult => ({ ok: false, error, content: fullContent, usage: reportedUsage });
+
+  try {
+    arm(STREAM_FIRST_TOKEN_TIMEOUT_MS, `No response from ${options.model} within ${STREAM_FIRST_TOKEN_TIMEOUT_MS / 1000}s`);
+    let response: Response;
+    try {
+      response = await fetch(`${GORILLAWORKOUT_API_BASE}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${GORILLAWORKOUT_API_KEY}`,
+          'HTTP-Referer': 'https://marketing-aws.gorillaworkout.id',
+          'X-Title': 'Dupoin AI Research',
+        },
+        body: JSON.stringify({
+          model: options.model,
+          messages: options.apiMessages,
+          stream: true,
+          stream_options: { include_usage: true },
+          temperature: options.temperature,
+          max_tokens: options.maxTokens ?? AI_RESEARCH_MAX_OUTPUT_TOKENS,
+        }),
+        signal: attemptAbort.signal,
+      });
+    } catch (error) {
+      if (userAborted()) return { ok: false, aborted: true, content: '' };
+      if (timedOut) return fail(timedOut);
+      return fail(error instanceof Error ? error.message : 'Stream request failed');
+    }
+
+    if (userAborted()) return { ok: false, aborted: true, content: '' };
+
+    if (!response.ok) {
+      const errText = await response.text().catch(() => '');
+      return fail(`API error ${response.status}: ${errText}`);
+    }
+
+    const reader = response.body?.getReader();
+    if (!reader) return fail('No stream body');
+
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let done = false;
+    let streamError: string | null = null;
+
+    while (!done) {
+      if (userAborted()) break;
+      try {
+        const { value, done: streamDone } = await reader.read();
+        if (streamDone) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+        const parsed = consumeChatCompletionSseLines(lines);
+        if (parsed.content) {
+          fullContent += parsed.content;
+          options.emit({ type: 'token', content: parsed.content });
+          arm(STREAM_IDLE_TIMEOUT_MS, `${options.model} stalled for ${STREAM_IDLE_TIMEOUT_MS / 1000}s mid-stream`);
+        }
+        if (parsed.usage) reportedUsage = parsed.usage;
+        if (parsed.reachedDone) done = true;
+      } catch (error) {
+        if (userAborted()) break;
+        streamError = timedOut || (error instanceof Error ? error.message : 'Stream read failed');
+        done = true;
+      }
+    }
+
+    if (userAborted()) {
+      await reader.cancel().catch(() => {});
+      return { ok: false, aborted: true, content: fullContent };
+    }
+    if (streamError) {
+      await reader.cancel().catch(() => {});
+      return fail(streamError);
+    }
+
+    buffer += decoder.decode();
+    if (buffer.trim()) {
+      const parsed = consumeChatCompletionSseLines([buffer]);
+      if (parsed.content) {
+        fullContent += parsed.content;
+        options.emit({ type: 'token', content: parsed.content });
+      }
+      if (parsed.usage) reportedUsage = parsed.usage;
+    }
+
+    if (!fullContent.trim()) return fail(`Empty response from ${options.model}`);
+    return { ok: true, content: fullContent, usage: reportedUsage };
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+/**
+ * Streams the answer with automatic model fallback. Before any text, the next
+ * model answers transparently. Mid-stream, the next model continues from the
+ * partial text and its output is appended to the same SSE stream. The error
+ * event is emitted only when every model fails.
+ */
 async function streamChatCompletion(options: {
   emit: (data: unknown) => void;
   model: string;
@@ -111,95 +250,42 @@ async function streamChatCompletion(options: {
   temperature: number;
   maxTokens?: number;
   signal: AbortSignal;
-}): Promise<{ ok: true; content: string; usage: GatewayTokenUsage | null } | { ok: false; aborted?: boolean }> {
-  if (options.signal.aborted) return { ok: false, aborted: true };
-  let response: Response;
-  try {
-    response = await fetch(`${GORILLAWORKOUT_API_BASE}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${GORILLAWORKOUT_API_KEY}`,
-        'HTTP-Referer': 'https://marketing-aws.gorillaworkout.id',
-        'X-Title': 'Dupoin AI Research',
-      },
-      body: JSON.stringify({
-        model: options.model,
-        messages: options.apiMessages,
-        stream: true,
-        stream_options: { include_usage: true },
-        temperature: options.temperature,
-        max_tokens: options.maxTokens ?? AI_RESEARCH_MAX_OUTPUT_TOKENS,
-      }),
-      signal: options.signal,
-    });
-  } catch (error) {
-    if (options.signal.aborted || isAbortError(error)) return { ok: false, aborted: true };
-    options.emit({ type: 'error', error: error instanceof Error ? error.message : 'Stream request failed' });
-    return { ok: false };
+  userId: string;
+}): Promise<
+  | { ok: true; content: string; usage: GatewayTokenUsage | null; model: string; fallbackLabel: string | null }
+  | { ok: false; aborted?: boolean }
+> {
+  const outcome = await streamWithModelFallback<GatewayMessage, GatewayTokenUsage>({
+    chosenModel: options.model,
+    messages: options.apiMessages,
+    attempt: (model, apiMessages) => streamChatCompletionOnce({
+      ...options,
+      model,
+      apiMessages: apiMessages as GatewayMessage[],
+    }),
+    mergeUsage: mergeGatewayUsage,
+    onSwitch: event => {
+      options.emit({
+        type: 'model-fallback',
+        failedModel: event.failedModel,
+        fallbackModel: event.fallbackModel,
+        afterPartial: event.afterPartial,
+      });
+    },
+    onFallback: modelFallbackLogger('ai-research', options.userId),
+  });
+  if (outcome.ok) {
+    return {
+      ok: true,
+      content: outcome.content,
+      usage: outcome.usage,
+      model: outcome.finalModel,
+      fallbackLabel: outcome.label,
+    };
   }
-
-  if (options.signal.aborted) return { ok: false, aborted: true };
-
-  if (!response.ok) {
-    const errText = await response.text();
-    options.emit({ type: 'error', error: `API error ${response.status}: ${errText}` });
-    return { ok: false };
-  }
-
-  const reader = response.body?.getReader();
-  if (!reader) {
-    options.emit({ type: 'error', error: 'No stream body' });
-    return { ok: false };
-  }
-
-  const decoder = new TextDecoder();
-  let buffer = '';
-  let fullContent = '';
-  let reportedUsage: GatewayTokenUsage | null = null;
-  let done = false;
-  let aborted = false;
-
-  while (!done) {
-    if (options.signal.aborted) {
-      aborted = true;
-      break;
-    }
-    try {
-      const { value, done: streamDone } = await reader.read();
-      if (streamDone) break;
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
-      buffer = lines.pop() || '';
-      const parsed = consumeChatCompletionSseLines(lines);
-      if (parsed.content) {
-        fullContent += parsed.content;
-        options.emit({ type: 'token', content: parsed.content });
-      }
-      if (parsed.usage) reportedUsage = parsed.usage;
-      if (parsed.reachedDone) done = true;
-    } catch (error) {
-      if (options.signal.aborted || isAbortError(error)) aborted = true;
-      done = true;
-    }
-  }
-
-  if (aborted || options.signal.aborted) {
-    await reader.cancel().catch(() => {});
-    return { ok: false, aborted: true };
-  }
-
-  buffer += decoder.decode();
-  if (buffer.trim()) {
-    const parsed = consumeChatCompletionSseLines([buffer]);
-    if (parsed.content) {
-      fullContent += parsed.content;
-      options.emit({ type: 'token', content: parsed.content });
-    }
-    if (parsed.usage) reportedUsage = parsed.usage;
-  }
-
-  return { ok: true, content: fullContent, usage: reportedUsage };
+  if (outcome.aborted) return { ok: false, aborted: true };
+  options.emit({ type: 'error', error: outcome.error.message });
+  return { ok: false };
 }
 
 async function requestDeepResearchPlan(
@@ -629,6 +715,7 @@ export async function POST(request: NextRequest) {
             apiMessages,
             temperature: resolveAiResearchTemperature(modelResearch),
             signal,
+            userId: auth.id,
           });
           if (!streamed.ok) {
             session.close();
@@ -653,6 +740,7 @@ export async function POST(request: NextRequest) {
             content: fullContent,
             mode: 'deep',
             sources: citedResearchEvent.sources,
+            fallbackLabel: streamed.fallbackLabel,
           })];
           await persistCompletedResearchAnswer({
             userId: auth.id,
@@ -678,12 +766,12 @@ export async function POST(request: NextRequest) {
           }
           await logAiResearchUsage({
             userId: auth.id,
-            model,
+            model: streamed.model,
             inputText: gatewayMessagesText(apiMessages),
             outputText: fullContent,
             reported: mergeGatewayUsage(planUsage, streamed.usage),
           });
-          session.complete({ type: 'done', conversationId: convId, model, mode: 'deep' });
+          session.complete({ type: 'done', conversationId: convId, model, mode: 'deep', answeredBy: streamed.model, fallbackLabel: streamed.fallbackLabel });
           await memoryWrite;
           return;
           }
@@ -764,6 +852,7 @@ export async function POST(request: NextRequest) {
           apiMessages,
           temperature: resolveAiResearchTemperature(modelResearch),
           signal,
+          userId: auth.id,
         });
         if (!streamed.ok) {
           session.close();
@@ -774,6 +863,7 @@ export async function POST(request: NextRequest) {
           content: streamed.content,
           mode: 'fast',
           sources: citedResearchEvent.sources,
+          fallbackLabel: streamed.fallbackLabel,
         })];
         await persistCompletedResearchAnswer({
           userId: auth.id,
@@ -799,13 +889,13 @@ export async function POST(request: NextRequest) {
         }
         await logAiResearchUsage({
           userId: auth.id,
-          model,
+          model: streamed.model,
           inputText: gatewayMessagesText(apiMessages),
           outputText: streamed.content,
           reported: streamed.usage,
         });
 
-        session.complete({ type: 'done', conversationId: convId, model });
+        session.complete({ type: 'done', conversationId: convId, model, answeredBy: streamed.model, fallbackLabel: streamed.fallbackLabel });
         await memoryWrite;
       } catch (error) {
         if (signal.aborted || isAbortError(error)) {

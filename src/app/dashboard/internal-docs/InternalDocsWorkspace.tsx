@@ -447,6 +447,7 @@ export function InternalDocsWorkspace() {
         content: data.answer || '',
         citations: Array.isArray(data.citations) ? data.citations : [],
         confidence,
+        fallbackLabel: typeof data.fallbackLabel === 'string' ? data.fallbackLabel : undefined,
       }]);
     } catch {
       setAskError('Could not answer that question.');

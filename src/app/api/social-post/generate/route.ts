@@ -276,7 +276,7 @@ Follow the SOP strictly. Output JSON format with: { "hook": "...", "caption": ".
               temperature: variant.temperature,
               taskType: 'social-post',
             });
-            return { variant, result: result.content, usage: result.usage };
+            return { variant, result: result.content, usage: result.usage, fallbackLabel: result.fallbackLabel || null };
           });
 
           const optionResults = await Promise.all(optionPromises);
@@ -394,6 +394,7 @@ Follow the SOP strictly. Output JSON format with: { "hook": "...", "caption": ".
               imagePrompt: imagePrompts[0].content,
               outputFile: `/outputs/social-posts/${fileName}`,
               usage: totalUsage,
+              fallbackLabel: optionResults.find(r => r.fallbackLabel)?.fallbackLabel || null,
               qcResults,
               dupoinFileName,
               researchPosts,

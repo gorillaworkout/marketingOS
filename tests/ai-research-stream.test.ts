@@ -176,8 +176,8 @@ test('chat route keeps SSE alive through gather and skips conversational web gat
   assert.match(route, /if \(skipWebGather\) return \{ research: null, failed: false \}/);
   assert.match(route, /if \(mode === 'deep' && !compare\)/);
   assert.match(route, /if \(skipWebGather\) \{\s*emit\(buildDeepStatusEvent\(\{ phase: 'synthesize', skippedSearch: true \}\)\)/);
-  assert.match(route, /session\.complete\(\{ type: 'done', conversationId: convId, model, mode: 'deep' \}\);\s*await memoryWrite;/);
-  assert.match(route, /session\.complete\(\{ type: 'done', conversationId: convId, model \}\);\s*await memoryWrite;/);
+  assert.match(route, /session\.complete\(\{ type: 'done', conversationId: convId, model, mode: 'deep', answeredBy: streamed\.model, fallbackLabel: streamed\.fallbackLabel \}\);\s*await memoryWrite;/);
+  assert.match(route, /session\.complete\(\{ type: 'done', conversationId: convId, model, answeredBy: streamed\.model, fallbackLabel: streamed\.fallbackLabel \}\);\s*await memoryWrite;/);
   assert.doesNotMatch(route, /if \(closed\) return/);
   assert.match(page, /resolveAiResearchAbruptStreamEnd/);
   assert.match(page, /end\.action === 'soft-complete'/);

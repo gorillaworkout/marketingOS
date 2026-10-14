@@ -28,6 +28,7 @@ export interface FaqAskMessage {
   content: string;
   citations?: FaqCitation[];
   confidence?: 'high' | 'low' | 'none';
+  fallbackLabel?: string;
 }
 
 const sourceLinkClass = 'inline-flex h-8 items-center rounded-[var(--mos-radius-control)] border border-[var(--mos-border)] bg-[var(--mos-raised)] px-3 text-xs font-medium text-[var(--mos-text)] hover:border-[var(--mos-border-strong)]';
@@ -149,6 +150,9 @@ export function FaqAskPanel({
               </p>
             )}
             <p className="whitespace-pre-wrap">{message.content}</p>
+            {message.fallbackLabel && (
+              <p data-testid="faq-ask-fallback-label" className="mt-1 text-[11px] text-[var(--mos-text-faint)]">{message.fallbackLabel}</p>
+            )}
             {message.citations && message.citations.length > 0 && (
               <div className="mt-3">
                 <p className="text-[11px] font-medium uppercase tracking-[0.14em] text-[var(--mos-text-faint)]">Sources</p>
