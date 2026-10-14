@@ -1582,6 +1582,9 @@ export default function SocialPostPage() {
                           <span className="ml-2 px-1.5 py-0.5 bg-indigo-500/15 text-indigo-300 rounded text-xs">GorillaWorkout LLM</span>
                         </p>
                       )}
+                      {typeof result?.fallbackLabel === 'string' && result.fallbackLabel && (
+                        <p data-testid="social-post-fallback-label" className="text-xs text-[var(--mos-text-faint)]">{result.fallbackLabel}</p>
+                      )}
                     </div>
                   )}
                 </div>

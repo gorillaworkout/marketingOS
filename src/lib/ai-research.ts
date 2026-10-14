@@ -96,6 +96,8 @@ export interface AiResearchChatMessage {
   files?: AiResearchFile[];
   researchMode?: 'deep';
   sources?: AiResearchSourceRef[];
+  /** English note when another model finished the answer, e.g. "Answered by X (Y unavailable)". */
+  fallbackLabel?: string;
 }
 
 export type GatewayContentPart =
@@ -442,6 +444,7 @@ export function buildStoredAssistantMessage(options: {
   content: string;
   mode?: AiResearchMode;
   sources?: unknown;
+  fallbackLabel?: string | null;
 }): AiResearchChatMessage {
   const message: AiResearchChatMessage = {
     role: 'assistant',
@@ -450,6 +453,7 @@ export function buildStoredAssistantMessage(options: {
   if (options.mode === 'deep') message.researchMode = 'deep';
   const sources = validateStoredSources(options.sources);
   if (sources.length) message.sources = sources;
+  if (options.fallbackLabel) message.fallbackLabel = options.fallbackLabel.slice(0, 200);
   return message;
 }
 
@@ -467,6 +471,7 @@ export function normalizeChatMessage(
     files?: unknown;
     researchMode?: unknown;
     sources?: unknown;
+    fallbackLabel?: unknown;
   };
   if (raw.role !== 'user' && raw.role !== 'assistant') {
     throw imageAttachmentError('Each message must have a user or assistant role.');
@@ -487,6 +492,9 @@ export function normalizeChatMessage(
     if (raw.researchMode === 'deep') message.researchMode = 'deep';
     const sources = validateStoredSources(raw.sources);
     if (sources.length) message.sources = sources;
+    if (typeof raw.fallbackLabel === 'string' && raw.fallbackLabel.trim()) {
+      message.fallbackLabel = raw.fallbackLabel.trim().slice(0, 200);
+    }
   }
   return message;
 }

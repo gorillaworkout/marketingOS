@@ -32,7 +32,7 @@ type GenerationEvent = {
   step?: string;
   progress?: number;
   message?: string;
-  result?: { success?: boolean; options?: EventPlanOption[]; usage?: { plan?: unknown } };
+  result?: { success?: boolean; options?: EventPlanOption[]; usage?: { plan?: unknown }; fallbackLabel?: string | null };
 };
 type TokenUsage = { inputTokens?: number; outputTokens?: number; model?: string };
 type ProgressState = { message: string; progress?: number; step?: string };
@@ -114,6 +114,7 @@ export default function EventPlanPage() {
   const [progress, setProgress] = useState<ProgressState | null>(null);
   const [error, setError] = useState('');
   const [tokenUsage, setTokenUsage] = useState<TokenUsage | null>(null);
+  const [fallbackLabel, setFallbackLabel] = useState('');
   const [recent, setRecent] = useState<EventPlanHistoryTask[]>([]);
   const [recentError, setRecentError] = useState('');
 
@@ -180,6 +181,7 @@ export default function EventPlanPage() {
     setOptions([]);
     setSelectedOption(0);
     setTokenUsage(null);
+    setFallbackLabel('');
     setProgress({ message: 'Starting event plan generation…', progress: 0, step: 'research' });
     try {
       const res = await fetch('/api/event-plan/generate', {
@@ -216,6 +218,7 @@ export default function EventPlanPage() {
                 setSelectedOption(0);
                 const usage = event.result.usage?.plan;
                 setTokenUsage(usage && typeof usage === 'object' ? usage as TokenUsage : null);
+                setFallbackLabel(typeof event.result.fallbackLabel === 'string' ? event.result.fallbackLabel : '');
                 void fetchRecent();
               }
             }
@@ -294,6 +297,7 @@ export default function EventPlanPage() {
             <ResearchPanel research={research} />
           </Panel>
           <Toolbar><div className="flex flex-wrap gap-2"><Button variant="primary" onClick={() => handleDownload('doc')}>Download event plan (.doc)</Button><Button onClick={() => handleDownload('json')}>Download JSON</Button></div>{tokenUsage && <div className="text-right"><p className="text-xs font-medium text-[var(--mos-text-secondary)]">{(tokenUsage.inputTokens || 0) + (tokenUsage.outputTokens || 0)} tokens</p>{tokenUsage.model && <p className="text-[11px] text-[var(--mos-text-faint)]">{tokenUsage.model}</p>}</div>}</Toolbar>
+          {fallbackLabel && <p data-testid="event-plan-fallback-label" className="text-[11px] text-[var(--mos-text-faint)]">{fallbackLabel}</p>}
         </div>
       )}
 

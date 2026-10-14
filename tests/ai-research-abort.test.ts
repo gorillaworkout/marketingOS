@@ -143,7 +143,8 @@ test('AI Research page shows Stop and the chat route aborts with the request', (
   assert.match(route, /linkAbortSignal\(request\.signal\)/);
   assert.match(route, /cancel\(\) \{\s*clientAbort\.abort\(\);/);
   assert.match(route, /throwIfResearchAborted\(signal\)/);
-  assert.match(route, /signal: options\.signal/);
+  assert.match(route, /linkAbortSignal\(options\.signal\)/);
+  assert.match(route, /signal: attemptAbort\.signal/);
   assert.match(route, /gatherAiResearchContext\(searchQuery, \{ timeoutMs, signal \}\)/);
   assert.match(route, /gatherResearchSide\(query, signal\)/);
   assert.match(route, /fetchAiResearchContextUrls\(query, \{ signal \}\)/);

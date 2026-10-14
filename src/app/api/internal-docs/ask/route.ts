@@ -77,6 +77,7 @@ export async function POST(request: NextRequest) {
       answer: presentInternalDocsAnswer(result.content, hits),
       citations,
       confidence: 'high',
+      fallbackLabel: result.fallbackLabel || null,
     });
   } catch (error) {
     console.error('Internal docs ask failed:', error);

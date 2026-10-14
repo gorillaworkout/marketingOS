@@ -102,6 +102,7 @@ interface Message {
   researchMode?: 'deep';
   sources?: Array<{ title: string; url: string }>;
   priorQuestions?: AiResearchPriorQuestion[];
+  fallbackLabel?: string;
 }
 
 function answerDeliverable(
@@ -796,7 +797,7 @@ export default function AIResearchPage() {
     let conversationBound = Boolean(activeConvoId);
     let attempt = 0;
     let answerCommitted = false;
-    const commitAssistant = (text: string) => {
+    const commitAssistant = (text: string, fallbackLabel?: string) => {
       answerCommitted = true;
       streamContentRef.current = '';
       setStreaming('');
@@ -806,6 +807,7 @@ export default function AIResearchPage() {
         researchMode: sentMode === 'deep' ? 'deep' : undefined,
         sources: sourcesRef.current.length ? [...sourcesRef.current] : undefined,
         priorQuestions: livePriorsRef.current.length ? [...livePriorsRef.current] : undefined,
+        fallbackLabel: fallbackLabel || undefined,
       }]);
       setLivePriors([]);
     };
@@ -855,6 +857,7 @@ export default function AIResearchPage() {
             content?: string;
             conversationId?: string;
             model?: string;
+            fallbackLabel?: string | null;
             error?: string;
             sourceCount?: number;
             grounding?: ResearchGatherStatus;
@@ -937,7 +940,7 @@ export default function AIResearchPage() {
           }
           else if (d.type === 'done') {
             streamCompleted = true;
-            commitAssistant(content);
+            commitAssistant(content, typeof d.fallbackLabel === 'string' ? d.fallbackLabel : undefined);
             setDeepProgress(null);
             if (d.conversationId && !conversationBound) {
               conversationBound = true;
@@ -1748,6 +1751,11 @@ export default function AIResearchPage() {
                           ? <AiResearchMarkdown text={msg.content} />
                           : msg.content}
                       </div>
+                      {msg.role === 'assistant' && msg.fallbackLabel && (
+                        <p data-testid="ai-research-fallback-label" className="mt-1 px-1 text-[10px] text-[var(--mos-text-muted)]">
+                          {msg.fallbackLabel}
+                        </p>
+                      )}
                       {msg.role === 'assistant' && msg.content.trim() && (
                         <>
                           <AiResearchChatFiles {...answerDeliverable(messages, i, inspectorSources)} />

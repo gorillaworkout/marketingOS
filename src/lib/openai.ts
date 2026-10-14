@@ -4,6 +4,7 @@ import { EVENT_PLAN_GROUNDED_BUDGET_RULES } from '@/lib/event-plan-budget';
 import { GORILLAWORKOUT_API_BASE, GORILLAWORKOUT_API_KEY } from '@/lib/gateway-config';
 import { parseStoredSourceUrls } from '@/lib/knowledge-pin';
 import { logTokenUsage } from '@/lib/token-log';
+import { runWithModelFallback, type FallbackEvent } from '@/lib/model-fallback';
 import {
   mergeGatewayUsage,
   parseGatewayResponseUsage,
@@ -139,16 +140,57 @@ export interface BrandGuidelines {
 /**
  * Core generation call through the single OpenAI-compatible gateway.
  */
+/** A gateway call that has not answered in this long fails over to the next model. */
+export const LLM_REQUEST_TIMEOUT_MS = 150_000;
+
+interface CallApiOptions {
+  model?: string;
+  responseFormat?: { type: 'json_object' } | undefined;
+  temperature?: number;
+  maxTokens?: number;
+  /** Feature key for fallback logging (for example "event-plan"). */
+  feature?: string;
+  userId?: string;
+}
+
+type CallApiResult = {
+  content: string;
+  model: string;
+  usage: GatewayTokenUsage | null;
+  fallbackLabel: string | null;
+  fallbackEvents: FallbackEvent[];
+};
+
+/**
+ * Gateway call with automatic model fallback: the chosen model first, then
+ * GLOBAL_FALLBACK_ORDER. Errors surface only when every model fails.
+ */
 async function callApi(
   messages: Array<{ role: string; content: string }>,
-  options: {
-    model?: string;
-    responseFormat?: { type: 'json_object' } | undefined;
-    temperature?: number;
-    maxTokens?: number;
-  } = {}
+  options: CallApiOptions = {}
+): Promise<CallApiResult> {
+  const chosenModel = options.model || PRIMARY_MODEL;
+  const feature = options.feature || 'unknown';
+  const outcome = await runWithModelFallback({
+    chosenModel,
+    attempt: model => callApiOnce(messages, { ...options, model }),
+    onFallback: async event => {
+      const { recordModelFallback } = await import('@/lib/model-fallback-log');
+      await recordModelFallback(feature, event, options.userId);
+    },
+  });
+  return {
+    ...outcome.result,
+    fallbackLabel: outcome.label,
+    fallbackEvents: outcome.events,
+  };
+}
+
+async function callApiOnce(
+  messages: Array<{ role: string; content: string }>,
+  options: CallApiOptions & { model: string },
 ): Promise<{ content: string; model: string; usage: GatewayTokenUsage | null }> {
-  const model = options.model || PRIMARY_MODEL;
+  const model = options.model;
   getModelProvider(model);
 
   const body: Record<string, unknown> = {
@@ -172,6 +214,7 @@ async function callApi(
       'X-Title': 'MarketingOS',
     },
     body: JSON.stringify(body),
+    signal: AbortSignal.timeout(LLM_REQUEST_TIMEOUT_MS),
   });
 
   if (!response.ok) {
@@ -182,6 +225,7 @@ async function callApi(
   const responseBody = await response.text();
   const contentType = response.headers.get('content-type');
   const content = parseGatewayCompletion(responseBody, contentType);
+  if (!content.trim()) throw new Error(`Empty response from ${model}`);
   return { content, model, usage: parseGatewayResponseUsage(responseBody, contentType) };
 }
 
@@ -190,15 +234,12 @@ async function callApi(
  */
 async function callApiWithRetry(
   messages: Array<{ role: string; content: string }>,
-  options: {
-    model?: string;
+  options: CallApiOptions & {
     responseFormat?: { type: 'json_object' };
-    temperature?: number;
-    maxTokens?: number;
     parseJson?: boolean;
     jsonRepairAttempts?: 0 | 1;
   } = {}
-): Promise<{ content: string; parsed?: unknown; model: string; retried: boolean; usage: GatewayTokenUsage | null }> {
+): Promise<CallApiResult & { parsed?: unknown; retried: boolean }> {
   const parseJson = options.parseJson ?? true;
   let retried = false;
   let usage: GatewayTokenUsage | null = null;
@@ -220,7 +261,8 @@ async function callApiWithRetry(
           { role: 'assistant', content: result.content },
           { role: 'user', content: 'Your response was not valid JSON. Please output ONLY valid JSON with no markdown formatting or code fences.' },
         ];
-        const retryResult = await callApi(retryMessages, options);
+        // Stay on the model that answered for the JSON repair turn.
+        const retryResult = await callApi(retryMessages, { ...options, model: result.model });
         usage = mergeGatewayUsage(usage, retryResult.usage);
         try {
           const parsed = JSON.parse(retryResult.content);
@@ -253,7 +295,7 @@ export async function generateContent(
     taskType?: string;
     jsonRepairAttempts?: 0 | 1;
   }
-): Promise<{ content: string; usage: TokenUsage }> {
+): Promise<{ content: string; usage: TokenUsage; fallbackLabel?: string | null }> {
   // Inject brand guidelines into system prompt if provided
   let enhancedSystemPrompt = systemPrompt;
   if (options?.brandGuidelines) {
@@ -275,6 +317,8 @@ export async function generateContent(
     maxTokens: options?.maxTokens,
     parseJson: !!options?.responseFormat,
     jsonRepairAttempts: options?.jsonRepairAttempts,
+    feature: options?.taskType,
+    userId,
   });
 
   const pricing = getPricing(result.model);
@@ -303,7 +347,7 @@ export async function generateContent(
     cost,
   });
 
-  return { content: result.content, usage };
+  return { content: result.content, usage, fallbackLabel: result.fallbackLabel };
 }
 
 /**
@@ -329,6 +373,7 @@ export async function generateMultiStep(
   content: string;
   drafts: Array<{ step: string; content: string; model: string }>;
   usage: TokenUsage;
+  fallbackLabel?: string | null;
 }> {
   const drafts: Array<{ step: string; content: string; model: string }> = [];
   const totalUsage: TokenUsage = { inputTokens: 0, outputTokens: 0, model: model || PRIMARY_MODEL, cost: 0 };
@@ -344,7 +389,7 @@ export async function generateMultiStep(
       { role: 'system', content: draftSystem },
       { role: 'user', content: userPrompt },
     ],
-    { model, responseFormat: { type: 'json_object' }, temperature: 0.8 }
+    { model, responseFormat: { type: 'json_object' }, temperature: 0.8, feature: module, userId }
   );
   drafts.push({ step: 'draft', content: draftResult.content, model: draftResult.model });
   onProgress?.({ step: 'draft', progress: 33, message: '✅ Draft complete' });
@@ -375,7 +420,7 @@ Output JSON: { "score": <1-10>, "issues": ["..."], "suggestions": ["..."], "pass
       { role: 'system', content: reviewSystem },
       { role: 'user', content: reviewPrompt },
     ],
-    { model, responseFormat: { type: 'json_object' }, temperature: 0.3 }
+    { model, responseFormat: { type: 'json_object' }, temperature: 0.3, feature: module, userId }
   );
   drafts.push({ step: 'review', content: reviewResult.content, model: reviewResult.model });
   onProgress?.({ step: 'review', progress: 66, message: '✅ Review complete' });
@@ -419,7 +464,7 @@ Output the same JSON structure as the draft, but improved. Output valid JSON onl
       { role: 'system', content: refineSystem },
       { role: 'user', content: refinePrompt },
     ],
-    { model, responseFormat: { type: 'json_object' }, temperature: 0.6 }
+    { model, responseFormat: { type: 'json_object' }, temperature: 0.6, feature: module, userId }
   );
   drafts.push({ step: 'refined', content: refineResult.content, model: refineResult.model });
   const refinePricing = getPricing(refineResult.model);
@@ -444,10 +489,14 @@ Output the same JSON structure as the draft, but improved. Output valid JSON onl
     cost: totalUsage.cost,
   });
 
+  totalUsage.model = refineResult.model;
+  const fallbackLabel = refineResult.fallbackLabel || reviewResult.fallbackLabel || draftResult.fallbackLabel || null;
+
   return {
     content: refineResult.content,
     drafts,
     usage: totalUsage,
+    fallbackLabel,
   };
 }
 

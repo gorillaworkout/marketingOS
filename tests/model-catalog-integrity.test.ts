@@ -111,6 +111,8 @@ test('every workflow allowlist includes Sol, Claude 5, and Claude 5.5 and drops 
     if (feature === 'article-market-news' || feature === 'market-research') {
       assert.equal(assignment.defaultModel, CLAUDE_SONNET_5_5_MODEL, `${feature} should default to Sonnet 5.5`);
       assert.ok(assignment.allowedModels.includes('lr/claude-sonnet-4.5'), `${feature} must keep Sonnet 4.5`);
+    } else if (feature === 'event-plan') {
+      assert.equal(assignment.defaultModel, CLAUDE_SONNET_5_5_MODEL, 'event-plan should default to Sonnet 5.5');
     } else {
       assert.notEqual(assignment.defaultModel, CLAUDE_SONNET_5_5_MODEL, `${feature} should keep its existing default`);
     }
@@ -260,7 +262,7 @@ test('migration 027 removes Codex Spark, keeps other defaults, and only writes c
   assert.equal(DEFAULT_FEATURE_ASSIGNMENTS['ai-research'].defaultModel, PREFERRED_CODEX_MODEL);
   assert.equal(DEFAULT_FEATURE_ASSIGNMENTS['social-post'].defaultModel, 'ag/gemini-3-flash');
   assert.equal(DEFAULT_FEATURE_ASSIGNMENTS['video-script'].defaultModel, 'ag/gemini-3-flash');
-  assert.equal(DEFAULT_FEATURE_ASSIGNMENTS['event-plan'].defaultModel, 'ag/gemini-3.1-pro-low');
+  assert.equal(DEFAULT_FEATURE_ASSIGNMENTS['event-plan'].defaultModel, CLAUDE_SONNET_5_5_MODEL);
   assert.equal(DEFAULT_FEATURE_ASSIGNMENTS['article-market-news'].defaultModel, CLAUDE_SONNET_5_5_MODEL);
   assert.equal(DEFAULT_FEATURE_ASSIGNMENTS['market-research'].defaultModel, CLAUDE_SONNET_5_5_MODEL);
 });
