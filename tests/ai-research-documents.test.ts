@@ -256,6 +256,6 @@ test('AI Research composer accepts documents from the picker, drop zone, and pas
   assert.match(page, /PDF, Word, or PowerPoint file\.\.\./);
   assert.match(page, /PDF, Word, and PowerPoint \(max 4 of each\)/);
   assert.match(page, /AI_RESEARCH_MAX_DOCUMENTS/);
-  assert.match(page, /AI_RESEARCH_MAX_DOCUMENT_BYTES/);
+  assert.match(page, /researchDocumentMaxBytes\(/);
   assert.match(read('src/app/api/ai-research/chat/route.ts'), /await hydrateMessageFiles/);
 });

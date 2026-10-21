@@ -35,7 +35,6 @@ import {
   AI_RESEARCH_FILE_ONLY_PROMPT,
   AI_RESEARCH_FILE_PICKER_ACCEPT,
   AI_RESEARCH_IMAGE_ONLY_PROMPT,
-  AI_RESEARCH_MAX_DOCUMENT_BYTES,
   AI_RESEARCH_MAX_DOCUMENTS,
   AI_RESEARCH_MAX_FILE_BYTES,
   AI_RESEARCH_MAX_FILES,
@@ -46,6 +45,9 @@ import {
   AI_RESEARCH_MAX_TOTAL_IMAGE_BYTES,
   classifyResearchAttachment,
   inferResearchFileType,
+  isHtmlAttachment,
+  researchDocumentMaxBytes,
+  type AiResearchExportAttachment,
 } from '@/lib/ai-research';
 import {
   RESEARCH_FAILED_BANNER,
@@ -76,6 +78,8 @@ import {
 } from '@/lib/ai-research-urls';
 import { appendVoiceTranscript } from '@/lib/ai-research-voice';
 import { AI_RESEARCH_STOPPED_STATUS, isAbortError } from '@/lib/ai-research-abort';
+import { AiResearchHtmlExcelActions } from '@/components/AiResearchHtmlExcelActions';
+import { AiResearchExcelAttachment } from '@/components/AiResearchExcelAttachment';
 import {
   AI_RESEARCH_CONNECTION_RETRYING_MESSAGE,
   resolveAiResearchAbruptStreamEnd,
@@ -103,6 +107,7 @@ interface Message {
   sources?: Array<{ title: string; url: string }>;
   priorQuestions?: AiResearchPriorQuestion[];
   fallbackLabel?: string;
+  attachments?: AiResearchExportAttachment[];
 }
 
 function answerDeliverable(
@@ -515,7 +520,7 @@ export default function AIResearchPage() {
       for (const file of incoming) {
         const kind = attachmentKind(file);
         if (!kind) {
-          setError('Unsupported attachment. Use JPEG, PNG, WebP, GIF, XLSX, XLS, CSV, PDF, DOCX, or PPTX.');
+          setError('Unsupported attachment. Use JPEG, PNG, WebP, GIF, XLSX, XLS, CSV, PDF, DOCX, PPTX, or HTML.');
           continue;
         }
         const images = next.filter(item => item.kind === 'image');
@@ -544,8 +549,9 @@ export default function AIResearchPage() {
           continue;
         }
         if (kind === 'document') {
-          if (file.size > AI_RESEARCH_MAX_DOCUMENT_BYTES) {
-            setError(`${file.name} is larger than ${AI_RESEARCH_MAX_DOCUMENT_BYTES / (1024 * 1024)} MB.`);
+          const maxDocumentBytes = researchDocumentMaxBytes({ mimeType: file.type, name: file.name });
+          if (file.size > maxDocumentBytes) {
+            setError(`${file.name} is larger than ${maxDocumentBytes / (1024 * 1024)} MB.`);
             continue;
           }
           if (documents.length >= AI_RESEARCH_MAX_DOCUMENTS) {
@@ -1742,6 +1748,19 @@ export default function AIResearchPage() {
                           ))}
                         </div>
                       )}
+                      {msg.role === 'user' && msg.files?.map((file, fileIndex) => (
+                        isHtmlAttachment(file) ? (
+                          <AiResearchHtmlExcelActions
+                            key={`html-excel-${fileIndex}`}
+                            conversationId={activeConvoId}
+                            messageIndex={i}
+                            fileIndex={fileIndex}
+                            fileName={file.name}
+                            disabled={loading}
+                            onExported={exported => setMessages(prev => [...prev, exported])}
+                          />
+                        ) : null
+                      ))}
                       <div className={`min-w-0 max-w-full px-4 py-2.5 text-sm leading-relaxed ${
                         msg.role === 'user'
                           ? 'bg-indigo-600 text-white rounded-2xl rounded-tr-md whitespace-pre-wrap'
@@ -1751,12 +1770,21 @@ export default function AIResearchPage() {
                           ? <AiResearchMarkdown text={msg.content} />
                           : msg.content}
                       </div>
+                      {msg.role === 'assistant' && msg.attachments?.map(attachment => (
+                        <AiResearchExcelAttachment
+                          key={attachment.exportId}
+                          exportId={attachment.exportId}
+                          filename={attachment.filename}
+                          sheetCount={attachment.sheetCount}
+                          rowCount={attachment.rowCount}
+                        />
+                      ))}
                       {msg.role === 'assistant' && msg.fallbackLabel && (
                         <p data-testid="ai-research-fallback-label" className="mt-1 px-1 text-[10px] text-[var(--mos-text-muted)]">
                           {msg.fallbackLabel}
                         </p>
                       )}
-                      {msg.role === 'assistant' && msg.content.trim() && (
+                      {msg.role === 'assistant' && msg.content.trim() && !msg.attachments?.length && (
                         <>
                           <AiResearchChatFiles {...answerDeliverable(messages, i, inspectorSources)} />
                           <AiResearchExportActions {...answerDeliverable(messages, i, inspectorSources)} />

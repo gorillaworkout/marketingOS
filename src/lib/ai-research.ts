@@ -7,6 +7,8 @@ export const AI_RESEARCH_MAX_FILE_BYTES = 2 * 1024 * 1024;
 export const AI_RESEARCH_MAX_TOTAL_FILE_BYTES = 4 * 1024 * 1024;
 export const AI_RESEARCH_MAX_DOCUMENTS = 4;
 export const AI_RESEARCH_MAX_DOCUMENT_BYTES = 8 * 1024 * 1024;
+/** HTML pages may be larger than other documents. */
+export const AI_RESEARCH_MAX_HTML_DOCUMENT_BYTES = 10 * 1024 * 1024;
 export const AI_RESEARCH_MAX_TOTAL_DOCUMENT_BYTES = 16 * 1024 * 1024;
 export const AI_RESEARCH_MAX_DOCUMENT_PAGES = 40;
 export const AI_RESEARCH_MAX_PRESENTATION_SLIDES = 40;
@@ -28,6 +30,7 @@ How to answer:
 - If the user attaches an image, read the text, numbers, charts, and visual details in that image and use them in the answer.
 - If the user attaches an Excel or CSV file, use the tables, columns, and figures from that file in the answer.
 - If the user attaches a PDF, Word document (DOCX), or PowerPoint presentation (PPTX), use the extracted text and structure (pages, headings, or slides). If a note says the text was truncated or pages/slides were dropped, say that only part of the document was read — do not invent content that is not in the extraction.
+- If the user attaches an HTML page, use its extracted text and tables (shown as Markdown tables). Scripts and styles were removed before you saw it.
 - If the user includes http(s) links and the context contains that page’s text, use that text as a source and cite its URL. If a note says the page text was truncated, say that only part of the page was read — do not invent content beyond the extraction. If a note says a link was not fetched, answer without inventing the contents of that page.
 
 Learned memory:
@@ -51,9 +54,10 @@ export const AI_RESEARCH_ALLOWED_DOCUMENT_TYPES = [
   'application/pdf',
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  'text/html',
 ] as const;
 export const AI_RESEARCH_FILE_EXTENSIONS = ['.xlsx', '.xls', '.csv'] as const;
-export const AI_RESEARCH_DOCUMENT_EXTENSIONS = ['.pdf', '.docx', '.pptx'] as const;
+export const AI_RESEARCH_DOCUMENT_EXTENSIONS = ['.pdf', '.docx', '.pptx', '.html', '.htm'] as const;
 export const AI_RESEARCH_FILE_PICKER_ACCEPT = [
   ...AI_RESEARCH_ALLOWED_IMAGE_TYPES,
   ...AI_RESEARCH_ALLOWED_FILE_TYPES,
@@ -61,7 +65,7 @@ export const AI_RESEARCH_FILE_PICKER_ACCEPT = [
   ...AI_RESEARCH_FILE_EXTENSIONS,
   ...AI_RESEARCH_DOCUMENT_EXTENSIONS,
 ].join(',');
-export const AI_RESEARCH_UNSUPPORTED_FILE_ERROR = 'Unsupported file type. Use XLSX, XLS, CSV, PDF, DOCX, or PPTX.';
+export const AI_RESEARCH_UNSUPPORTED_FILE_ERROR = 'Unsupported file type. Use XLSX, XLS, CSV, PDF, DOCX, PPTX, or HTML.';
 
 export type AiResearchImageType = (typeof AI_RESEARCH_ALLOWED_IMAGE_TYPES)[number];
 export type AiResearchFileType = (typeof AI_RESEARCH_ALLOWED_FILE_TYPES)[number];
@@ -75,11 +79,18 @@ export interface AiResearchImage {
   name?: string;
 }
 
+export interface AiResearchHtmlTable {
+  name: string;
+  rows: string[][];
+}
+
 export interface AiResearchFile {
   mimeType: string;
   dataUrl?: string;
   name?: string;
   extractedText?: string;
+  /** Tables detected in an uploaded HTML file, kept for Excel export. */
+  tables?: AiResearchHtmlTable[];
 }
 
 export type AiResearchMode = 'fast' | 'deep';
@@ -87,6 +98,38 @@ export type AiResearchMode = 'fast' | 'deep';
 export interface AiResearchSourceRef {
   title: string;
   url: string;
+}
+
+/** A generated file shown as an attachment message in the chat thread. */
+export interface AiResearchExportAttachment {
+  kind: 'xlsx';
+  exportId: string;
+  filename: string;
+  source: 'tables' | 'extract';
+  sheetCount: number;
+  rowCount: number;
+}
+
+export function validateExportAttachments(value: unknown): AiResearchExportAttachment[] {
+  if (!Array.isArray(value)) return [];
+  const attachments: AiResearchExportAttachment[] = [];
+  for (const item of value.slice(0, 8)) {
+    if (!item || typeof item !== 'object') continue;
+    const record = item as Record<string, unknown>;
+    if (record.kind !== 'xlsx') continue;
+    const exportId = typeof record.exportId === 'string' ? record.exportId.trim() : '';
+    const filename = typeof record.filename === 'string' ? record.filename.trim().slice(0, 160) : '';
+    if (!/^[A-Za-z0-9-]{8,64}$/.test(exportId) || !filename) continue;
+    attachments.push({
+      kind: 'xlsx',
+      exportId,
+      filename,
+      source: record.source === 'extract' ? 'extract' : 'tables',
+      sheetCount: Math.max(0, Math.trunc(Number(record.sheetCount) || 0)),
+      rowCount: Math.max(0, Math.trunc(Number(record.rowCount) || 0)),
+    });
+  }
+  return attachments;
 }
 
 export interface AiResearchChatMessage {
@@ -98,6 +141,8 @@ export interface AiResearchChatMessage {
   sources?: AiResearchSourceRef[];
   /** English note when another model finished the answer, e.g. "Answered by X (Y unavailable)". */
   fallbackLabel?: string;
+  /** Generated files (for example an Excel export) attached to an assistant message. */
+  attachments?: AiResearchExportAttachment[];
 }
 
 export type GatewayContentPart =
@@ -122,11 +167,14 @@ const DOCUMENT_EXT_MIME: Record<string, AiResearchDocumentType> = {
   '.pdf': 'application/pdf',
   '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  '.html': 'text/html',
+  '.htm': 'text/html',
 };
 
 const DOCUMENT_MIME_ALIASES: Record<string, AiResearchDocumentType> = {
   'application/x-pdf': 'application/pdf',
   'application/acrobat': 'application/pdf',
+  'application/xhtml+xml': 'text/html',
 };
 
 const GENERIC_FILE_MIMES = new Set([
@@ -188,6 +236,41 @@ export function classifyResearchAttachment(mimeType: string, name?: string): Res
 
 export function isResearchDocument(file: { mimeType?: string | null; name?: string | null }): boolean {
   return classifyResearchAttachment(file.mimeType || '', file.name || undefined) === 'document';
+}
+
+export function isHtmlAttachment(file: { mimeType?: string | null; name?: string | null }): boolean {
+  const ext = fileExtension(file.name || undefined);
+  if (ext === '.html' || ext === '.htm') return true;
+  return file.mimeType === 'text/html' || file.mimeType === 'application/xhtml+xml';
+}
+
+/** Per-file byte limit for a document attachment (HTML 10 MB, others 8 MB). */
+export function researchDocumentMaxBytes(file: { mimeType?: string | null; name?: string | null }): number {
+  return isHtmlAttachment(file) ? AI_RESEARCH_MAX_HTML_DOCUMENT_BYTES : AI_RESEARCH_MAX_DOCUMENT_BYTES;
+}
+
+const STORED_TABLE_LIMIT = 50;
+const STORED_TABLE_ROWS = 5_000;
+const STORED_TABLE_COLUMNS = 100;
+
+/** Validate stored HTML tables (shape and size caps). */
+export function validateStoredTables(value: unknown): AiResearchHtmlTable[] {
+  if (!Array.isArray(value)) return [];
+  const tables: AiResearchHtmlTable[] = [];
+  for (const item of value.slice(0, STORED_TABLE_LIMIT)) {
+    if (!item || typeof item !== 'object') continue;
+    const record = item as { name?: unknown; rows?: unknown };
+    if (!Array.isArray(record.rows)) continue;
+    const rows = record.rows.slice(0, STORED_TABLE_ROWS)
+      .filter((row): row is unknown[] => Array.isArray(row))
+      .map(row => row.slice(0, STORED_TABLE_COLUMNS).map(cell => (cell == null ? '' : String(cell).slice(0, 2_000))));
+    if (!rows.length) continue;
+    const name = typeof record.name === 'string' && record.name.trim()
+      ? record.name.trim().slice(0, 120)
+      : `Table ${tables.length + 1}`;
+    tables.push({ name, rows });
+  }
+  return tables;
 }
 
 export function imageAttachmentError(message: string): Error {
@@ -333,11 +416,14 @@ export function validateFileAttachment(
     const bytes = decodeBase64Length(parsed.base64);
     if (bytes <= 0) throw attachmentError(`File ${index + 1} is empty.`);
     const document = isResearchDocument({ mimeType: parsed.mimeType, name });
-    const maxBytes = document ? AI_RESEARCH_MAX_DOCUMENT_BYTES : AI_RESEARCH_MAX_FILE_BYTES;
+    const html = isHtmlAttachment({ mimeType: parsed.mimeType, name });
+    const maxBytes = document ? researchDocumentMaxBytes({ mimeType: parsed.mimeType, name }) : AI_RESEARCH_MAX_FILE_BYTES;
     if (bytes > maxBytes) {
-      throw attachmentError(document
-        ? 'Each document must be 8 MB or smaller.'
-        : 'Each spreadsheet must be 2 MB or smaller.');
+      throw attachmentError(html
+        ? 'Each HTML file must be 10 MB or smaller.'
+        : document
+          ? 'Each document must be 8 MB or smaller.'
+          : 'Each spreadsheet must be 2 MB or smaller.');
     }
     return {
       mimeType: parsed.mimeType,
@@ -351,11 +437,14 @@ export function validateFileAttachment(
       || (isAllowedFileType(file.mimeType) ? file.mimeType : null)
       || (isAllowedDocumentType(file.mimeType) ? file.mimeType : null)
       || 'text/csv';
-    return {
+    const stored: AiResearchFile = {
       mimeType,
       name: name || undefined,
       extractedText: file.extractedText.slice(0, AI_RESEARCH_MAX_EXTRACTED_CHARS),
     };
+    const tables = validateStoredTables((file as { tables?: unknown }).tables);
+    if (tables.length) stored.tables = tables;
+    return stored;
   }
 
   throw attachmentError(`File ${index + 1} is missing file data.`);
@@ -472,6 +561,7 @@ export function normalizeChatMessage(
     researchMode?: unknown;
     sources?: unknown;
     fallbackLabel?: unknown;
+    attachments?: unknown;
   };
   if (raw.role !== 'user' && raw.role !== 'assistant') {
     throw imageAttachmentError('Each message must have a user or assistant role.');
@@ -495,6 +585,8 @@ export function normalizeChatMessage(
     if (typeof raw.fallbackLabel === 'string' && raw.fallbackLabel.trim()) {
       message.fallbackLabel = raw.fallbackLabel.trim().slice(0, 200);
     }
+    const attachments = validateExportAttachments(raw.attachments);
+    if (attachments.length) message.attachments = attachments;
   }
   return message;
 }
@@ -565,7 +657,7 @@ export function buildMultimodalContent(text: string, images: AiResearchImage[] =
 
 function fileContextBlock(file: AiResearchFile): string {
   const document = isResearchDocument(file);
-  const noun = document ? 'document' : 'spreadsheet';
+  const noun = isHtmlAttachment(file) ? 'HTML page' : document ? 'document' : 'spreadsheet';
   const label = file.name || noun;
   const body = file.extractedText?.trim() || `[${label} was attached]`;
   return `Attached ${noun} (${label}):\n${body}`;

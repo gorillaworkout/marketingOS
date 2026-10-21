@@ -2,6 +2,7 @@ import JSZip from 'jszip';
 import mammoth from 'mammoth';
 import { extractText, getDocumentProxy } from 'unpdf';
 import * as XLSX from 'xlsx';
+import { extractHtmlBytes, formatHtmlForResearch } from './ai-research-html';
 import {
   AI_RESEARCH_MAX_DOCUMENT_PAGES,
   AI_RESEARCH_MAX_EXTRACTED_CHARS,
@@ -12,7 +13,9 @@ import {
   fileExtension,
   inferResearchFileType,
   inferSpreadsheetType,
+  isHtmlAttachment,
   isResearchDocument,
+  type AiResearchHtmlTable,
   splitFileDataUrl,
   type AiResearchChatMessage,
   type AiResearchFile,
@@ -291,7 +294,18 @@ async function extractPptxText(bytes: Uint8Array): Promise<string> {
   return truncateExtractedText(joined);
 }
 
+/** Sanitized readable text plus every table from an uploaded HTML file. */
+export function extractResearchHtml(bytes: Uint8Array): { text: string; tables: AiResearchHtmlTable[]; title: string } {
+  const extraction = extractHtmlBytes(bytes);
+  return {
+    text: truncateExtractedText(formatHtmlForResearch(extraction)),
+    tables: extraction.tables,
+    title: extraction.title,
+  };
+}
+
 export async function extractResearchFileText(bytes: Uint8Array, mimeType: string, name?: string): Promise<string> {
+  if (isHtmlAttachment({ mimeType, name })) return extractResearchHtml(bytes).text;
   const inferred = inferResearchFileType(mimeType, name) || mimeType;
   if (!isResearchDocument({ mimeType: inferred, name })) {
     return extractSpreadsheetText(bytes, inferred, name);
@@ -317,11 +331,13 @@ export async function hydrateMessageFiles(messages: AiResearchChatMessage[]): Pr
 
 async function hydrateOneFile(file: AiResearchFile, index: number): Promise<AiResearchFile> {
   if (file.extractedText?.trim() && !file.dataUrl) {
-    return {
+    const stored: AiResearchFile = {
       mimeType: file.mimeType,
       name: file.name,
       extractedText: file.extractedText.slice(0, AI_RESEARCH_MAX_EXTRACTED_CHARS),
     };
+    if (file.tables?.length) stored.tables = file.tables;
+    return stored;
   }
   if (!file.dataUrl) {
     throw attachmentError(`File ${index + 1} is missing file data.`);
@@ -331,6 +347,17 @@ async function hydrateOneFile(file: AiResearchFile, index: number): Promise<AiRe
     throw attachmentError(AI_RESEARCH_UNSUPPORTED_FILE_ERROR);
   }
   const document = isResearchDocument({ mimeType: parsed.mimeType, name: file.name });
+  if (isHtmlAttachment({ mimeType: parsed.mimeType, name: file.name })) {
+    try {
+      const html = extractResearchHtml(Buffer.from(parsed.base64, 'base64'));
+      const hydrated: AiResearchFile = { mimeType: 'text/html', name: file.name, extractedText: html.text };
+      if (html.tables.length) hydrated.tables = html.tables;
+      return hydrated;
+    } catch (error) {
+      const detail = attachmentFailureDetail(error, 'unreadable HTML');
+      throw attachmentError(`Could not read ${file.name || 'HTML file'}. Use a valid HTML file. (${detail})`);
+    }
+  }
   let extractedText: string;
   try {
     extractedText = await extractResearchFileText(
