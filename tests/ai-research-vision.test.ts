@@ -114,7 +114,7 @@ test('AI Research UI adds a file picker, previews, and sends images with the pro
   assert.match(page, /drag, paste, or click to attach/);
   assert.match(page, /Drag, paste, or click the icon for images, Excel\/CSV, PDF, Word, and PowerPoint/);
   assert.match(page, /onClick=\{\(\) => fileInputRef\.current\?\.click\(\)\}/);
-  assert.match(page, /Unsupported attachment\. Use JPEG, PNG, WebP, GIF, XLSX, XLS, CSV, PDF, DOCX, or PPTX\./);
+  assert.match(page, /Unsupported attachment\. Use JPEG, PNG, WebP, GIF, XLSX, XLS, CSV, PDF, DOCX, PPTX, or HTML\./);
 });
 
 test('AI Research chat route forwards multimodal content to the existing gateway', () => {

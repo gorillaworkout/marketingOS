@@ -13,6 +13,7 @@ import {
   type GatewayMessage,
 } from '@/lib/ai-research';
 import { hydrateMessageFiles } from '@/lib/ai-research-files';
+import { persistHtmlUploadsToKnowledge } from '@/lib/ai-research-html-knowledge';
 import { parseAiResearchChatBody as parseChatRequest } from '@/lib/ai-research-request';
 import {
   AI_RESEARCH_DEEP_PLAN_MAX_TOKENS,
@@ -538,6 +539,14 @@ export async function POST(request: NextRequest) {
     return jsonError(error instanceof Error ? error.message : 'Failed to save conversation', 500);
   }
 
+  // Uploaded HTML pages join the Knowledge Graph like other uploads. Never blocks the answer.
+  void persistHtmlUploadsToKnowledge({
+    userId: auth.id,
+    messages,
+    conversationId: convId,
+    projectId: activeProjectId,
+  }).catch(error => console.warn('[ai-research] HTML knowledge save failed:', error));
+
   const clientAbort = linkAbortSignal(request.signal);
   const signal = clientAbort.signal;
   const encoder = new TextEncoder();
@@ -989,7 +998,10 @@ export async function GET(request: NextRequest) {
 
   return new Response(JSON.stringify({
     id: row.id,
-    messages: parseStoredMessages(row.messages),
+    // HTML tables stay on the server for Excel export; the client only needs the text.
+    messages: parseStoredMessages(row.messages).map(message => (message.files?.some(file => file.tables)
+      ? { ...message, files: message.files.map(file => ({ mimeType: file.mimeType, name: file.name, extractedText: file.extractedText })) }
+      : message)),
     model: row.model,
     projectId: row.project_id,
   }));
