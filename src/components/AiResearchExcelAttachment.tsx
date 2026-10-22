@@ -6,6 +6,8 @@ const KIND_STYLE = {
   xlsx: { badge: 'XLSX', badgeClass: 'bg-emerald-600/20 text-emerald-300' },
   pdf: { badge: 'PDF', badgeClass: 'bg-red-600/20 text-red-300' },
   docx: { badge: 'DOCX', badgeClass: 'bg-sky-600/20 text-sky-300' },
+  csv: { badge: 'CSV', badgeClass: 'bg-teal-600/20 text-teal-300' },
+  zip: { badge: 'ZIP', badgeClass: 'bg-amber-600/20 text-amber-300' },
 } as const;
 
 function formatBytes(bytes: number): string {
@@ -26,7 +28,7 @@ export function AiResearchExcelAttachment({
   filename: string;
   sheetCount: number;
   rowCount: number;
-  kind?: 'xlsx' | 'pdf' | 'docx';
+  kind?: 'xlsx' | 'pdf' | 'docx' | 'csv' | 'zip';
   byteSize?: number;
 }) {
   const style = KIND_STYLE[kind] ?? KIND_STYLE.xlsx;
@@ -35,7 +37,11 @@ export function AiResearchExcelAttachment({
     ? `PDF document${size}`
     : kind === 'docx'
       ? `Word document${size}`
-      : `Excel workbook · ${sheetCount} ${sheetCount === 1 ? 'sheet' : 'sheets'} · ${rowCount} ${rowCount === 1 ? 'row' : 'rows'}${size}`;
+      : kind === 'csv'
+        ? `CSV file · ${rowCount} ${rowCount === 1 ? 'row' : 'rows'}${size}`
+        : kind === 'zip'
+          ? `ZIP of CSV files · ${sheetCount} ${sheetCount === 1 ? 'table' : 'tables'} · ${rowCount} ${rowCount === 1 ? 'row' : 'rows'}${size}`
+          : `Excel workbook · ${sheetCount} ${sheetCount === 1 ? 'sheet' : 'sheets'} · ${rowCount} ${rowCount === 1 ? 'row' : 'rows'}${size}`;
   const [copied, setCopied] = useState(false);
   const href = `/api/ai-research/exports/${encodeURIComponent(exportId)}`;
 

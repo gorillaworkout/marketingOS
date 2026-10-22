@@ -10,9 +10,9 @@ import {
   type AiResearchFile,
   type AiResearchHtmlTable,
 } from './ai-research';
-import { extractHtmlContent, formatHtmlForResearch, loadSanitizedHtml } from './ai-research-html';
+import { decodeHtmlBytes, extractHtmlContent, formatHtmlForResearch, loadSanitizedHtml } from './ai-research-html';
 import { truncateExtractedText } from './ai-research-files';
-import { CONVERT_LABEL, CONVERT_MIME, convertHtml, type HtmlConvertFormat } from './ai-research-html-convert';
+import { CONVERT_LABEL, CONVERT_MIME, convertHtml, type ConvertedFile, type HtmlConvertFormat } from './ai-research-html-convert';
 
 /** Thrown with a user-facing English message and an HTTP status. */
 export class HtmlFileError extends Error {
@@ -36,7 +36,7 @@ export interface HtmlUploadRecord {
   tables: AiResearchHtmlTable[];
 }
 
-export type ExportKind = 'tables' | 'extract' | 'convert-xlsx' | 'convert-pdf' | 'convert-docx';
+export type ExportKind = 'tables' | 'extract' | 'extract-csv' | 'convert-xlsx' | 'convert-pdf' | 'convert-docx' | 'convert-csv';
 
 /** Database and model access, injected so the flow is testable without Postgres. */
 export interface HtmlFileDeps {
@@ -70,16 +70,42 @@ export function readHtmlUploadBody(body: unknown): { name: string; dataUrl: stri
   return { name, dataUrl, conversationId };
 }
 
-/** Validate, sanitize, and extract an uploaded HTML file. */
-export function prepareHtmlUpload(input: { name: string; dataUrl: string }): Omit<HtmlUploadRecord, 'id' | 'userId' | 'conversationId'> {
-  const parsed = splitFileDataUrl(input.dataUrl, input.name);
-  if (!parsed || !isHtmlAttachment({ mimeType: parsed.mimeType, name: input.name })) {
-    throw new HtmlFileError('Only .html and .htm files can be converted.');
+/** An upload sent as a data URL (JSON) or as the raw request body. */
+export type HtmlUploadInput =
+  | { name: string; dataUrl: string }
+  | { name: string; bytes: Uint8Array; mimeType?: string | null };
+
+const GENERIC_UPLOAD_MIME = /^(application\/octet-stream|text\/plain|binary\/octet-stream)?$/i;
+
+/** Raw-body upload headers: the file name comes from ?name= (URL-encoded). */
+export function readRawUploadName(url: string): string {
+  const name = new URL(url, 'http://localhost').searchParams.get('name') || '';
+  return name.trim().replace(/[\\/]+/g, ' ').slice(0, 120);
+}
+
+function uploadBytes(input: HtmlUploadInput): Buffer {
+  if ('dataUrl' in input) {
+    const parsed = splitFileDataUrl(input.dataUrl, input.name);
+    if (!parsed || !isHtmlAttachment({ mimeType: parsed.mimeType, name: input.name })) {
+      throw new HtmlFileError('Only .html and .htm files can be converted.');
+    }
+    return Buffer.from(parsed.base64, 'base64');
   }
-  const bytes = Buffer.from(parsed.base64, 'base64');
+  const mime = (input.mimeType || '').split(';')[0].trim().toLowerCase();
+  // The name decides when the browser sends no type or a generic one (common for .htm on Windows/Android).
+  const html = isHtmlAttachment({ name: input.name, mimeType: mime })
+    || (GENERIC_UPLOAD_MIME.test(mime) && isHtmlAttachment({ name: input.name }));
+  if (!html) throw new HtmlFileError('Only .html and .htm files can be converted.');
+  return Buffer.from(input.bytes);
+}
+
+/** Validate, sanitize, and extract an uploaded HTML file. */
+export function prepareHtmlUpload(input: HtmlUploadInput): Omit<HtmlUploadRecord, 'id' | 'userId' | 'conversationId'> {
+  if (!input.name) throw new HtmlFileError('Attach an HTML file.');
+  const bytes = uploadBytes(input);
   if (!bytes.length) throw new HtmlFileError('The HTML file is empty.');
   if (bytes.length > AI_RESEARCH_MAX_HTML_DOCUMENT_BYTES) throw new HtmlFileError('Each HTML file must be 10 MB or smaller.', 413);
-  const html = new TextDecoder('utf-8', { fatal: false }).decode(bytes).replace(/^\uFEFF/, '');
+  const html = decodeHtmlBytes(bytes);
   const $ = loadSanitizedHtml(html);
   const sanitizedHtml = $.html() || '';
   const extraction = extractHtmlContent(sanitizedHtml);
@@ -95,7 +121,7 @@ export function prepareHtmlUpload(input: { name: string; dataUrl: string }): Omi
 
 export async function createHtmlUpload(
   userId: string,
-  input: { name: string; dataUrl: string; conversationId?: string | null },
+  input: HtmlUploadInput & { conversationId?: string | null },
   deps: HtmlFileDeps,
 ): Promise<HtmlUploadRecord> {
   const prepared = prepareHtmlUpload(input);
@@ -168,41 +194,81 @@ export async function deliverToThread(
   return { conversationId, appended, created };
 }
 
-export function readConvertBody(body: unknown): { uploadId: string; format: HtmlConvertFormat; conversationId: string | null; projectId: string | null } {
+export function readConvertBody(body: unknown): {
+  uploadId: string;
+  format: HtmlConvertFormat;
+  conversationId: string | null;
+  projectId: string | null;
+  tableIndex?: number;
+} {
   if (!body || typeof body !== 'object') throw new HtmlFileError('Invalid request.');
   const raw = body as Record<string, unknown>;
   const uploadId = readUploadId(raw.uploadId);
   if (!uploadId) throw new HtmlFileError('Re-upload this HTML file to convert it.', 409);
-  const format = raw.format === 'xlsx' || raw.format === 'pdf' || raw.format === 'docx' ? raw.format : null;
-  if (!format) throw new HtmlFileError('Choose Excel, PDF, or Word.');
+  const format = raw.format === 'xlsx' || raw.format === 'pdf' || raw.format === 'docx' || raw.format === 'csv' ? raw.format : null;
+  if (!format) throw new HtmlFileError('Choose Excel, CSV, PDF, or Word.');
   const text = (value: unknown) => (typeof value === 'string' && value.trim() ? value.trim() : null);
-  return { uploadId, format, conversationId: text(raw.conversationId), projectId: text(raw.projectId) };
+  const parsed: ReturnType<typeof readConvertBody> = { uploadId, format, conversationId: text(raw.conversationId), projectId: text(raw.projectId) };
+  if (raw.tableIndex != null && raw.tableIndex !== '') {
+    const tableIndex = Number(raw.tableIndex);
+    if (!Number.isInteger(tableIndex) || tableIndex < 0 || tableIndex > 200) throw new HtmlFileError('That table was not found in the page.');
+    if (format === 'csv') parsed.tableIndex = tableIndex;
+  }
+  return parsed;
 }
 
-export function convertedFilename(sourceName: string, format: HtmlConvertFormat): string {
+export function convertedFilename(sourceName: string, format: HtmlConvertFormat | 'zip', suffix?: string): string {
   const stem = (sourceName || 'page')
     .replace(/\.(html?)$/i, '')
     .replace(/[^A-Za-z0-9 _-]+/g, ' ')
     .replace(/\s+/g, '-')
     .replace(/^-+|-+$/g, '')
     .slice(0, 60) || 'page';
-  return `${stem}.${format}`;
+  const tail = suffix
+    ? `-${suffix.replace(/[^A-Za-z0-9 _-]+/g, ' ').trim().replace(/\s+/g, '-').slice(0, 40)}`.replace(/-+$/, '')
+    : '';
+  return `${stem}${tail}.${format}`;
 }
 
-/** Convert a stored upload to Excel, PDF, or Word and deliver it as an attachment message. */
+function plural(count: number, noun: string): string {
+  return `${count} ${noun}${count === 1 ? '' : 's'}`;
+}
+
+function convertDetail(format: HtmlConvertFormat, converted: ConvertedFile): string {
+  if (format !== 'xlsx' && format !== 'csv') return '';
+  if (converted.textBlocks) return ' The page has no tables, so each heading and paragraph is one row.';
+  if (format === 'xlsx') return ` ${plural(converted.sheetCount, 'table')}, one sheet each.`;
+  if (converted.extension === 'zip') return ` ${plural(converted.sheetCount, 'table')}, one CSV file each in a .zip.`;
+  return converted.tableName ? ` Table "${converted.tableName}", ${plural(converted.rowCount, 'row')}.` : '';
+}
+
+/** Convert a stored upload to Excel, CSV, PDF, or Word and deliver it as an attachment message. */
 export async function convertUpload(
   userId: string,
-  request: { uploadId: string; format: HtmlConvertFormat; conversationId?: string | null; projectId?: string | null },
+  request: {
+    uploadId: string;
+    format: HtmlConvertFormat;
+    conversationId?: string | null;
+    projectId?: string | null;
+    tableIndex?: number;
+  },
   deps: HtmlFileDeps,
 ): Promise<{ conversationId: string; appended: AiResearchChatMessage[]; created: boolean; attachment: AiResearchExportAttachment }> {
   const upload = await deps.loadUpload(userId, request.uploadId);
   if (!upload) throw new HtmlFileError('That HTML upload was not found. Upload it again.', 404);
-  const converted = await convertHtml(upload.sanitizedHtml, request.format, upload.filename);
+  let converted: ConvertedFile;
+  try {
+    converted = await convertHtml(upload.sanitizedHtml, request.format, upload.filename, { tableIndex: request.tableIndex });
+  } catch (error) {
+    if (error instanceof RangeError) throw new HtmlFileError(error.message, 422);
+    throw error;
+  }
   const id = (deps.newId ?? uuidv4)();
-  const filename = convertedFilename(upload.filename, request.format);
+  const extension = converted.extension === 'zip' ? 'zip' : request.format;
+  const filename = convertedFilename(upload.filename, extension, request.tableIndex != null ? converted.tableName : undefined);
   const conversationId = request.conversationId ?? null;
   const attachment: AiResearchExportAttachment = {
-    kind: request.format,
+    kind: extension,
     exportId: id,
     filename,
     source: 'convert',
@@ -210,11 +276,7 @@ export async function convertUpload(
     rowCount: converted.rowCount,
     byteSize: converted.data.length,
   };
-  const detail = request.format === 'xlsx'
-    ? converted.textBlocks
-      ? ' The page has no tables, so each heading and paragraph is one row.'
-      : ` ${converted.sheetCount} ${converted.sheetCount === 1 ? 'table' : 'tables'}, one sheet each.`
-    : '';
+  const detail = convertDetail(request.format, converted);
   const message: AiResearchChatMessage = {
     role: 'assistant',
     content: `Converted ${upload.filename} to ${CONVERT_LABEL[request.format]}.${detail}`,
@@ -227,7 +289,7 @@ export async function convertUpload(
     userId,
     conversationId: conversationId ?? newConversationId,
     filename,
-    mimeType: CONVERT_MIME[request.format],
+    mimeType: converted.mimeType ?? CONVERT_MIME[request.format],
     kind: `convert-${request.format}`,
     sheetCount: converted.sheetCount,
     rowCount: converted.rowCount,

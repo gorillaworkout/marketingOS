@@ -109,7 +109,8 @@ export interface AiResearchSourceRef {
 }
 
 /** A generated file shown as an attachment message in the chat thread. */
-export type AiResearchExportKind = 'xlsx' | 'pdf' | 'docx';
+export type AiResearchExportKind = 'xlsx' | 'pdf' | 'docx' | 'csv' | 'zip';
+const EXPORT_KINDS: readonly string[] = ['xlsx', 'pdf', 'docx', 'csv', 'zip'];
 
 export interface AiResearchExportAttachment {
   kind: AiResearchExportKind;
@@ -127,12 +128,12 @@ export function validateExportAttachments(value: unknown): AiResearchExportAttac
   for (const item of value.slice(0, 8)) {
     if (!item || typeof item !== 'object') continue;
     const record = item as Record<string, unknown>;
-    if (record.kind !== 'xlsx' && record.kind !== 'pdf' && record.kind !== 'docx') continue;
+    if (typeof record.kind !== 'string' || !EXPORT_KINDS.includes(record.kind)) continue;
     const exportId = typeof record.exportId === 'string' ? record.exportId.trim() : '';
     const filename = typeof record.filename === 'string' ? record.filename.trim().slice(0, 160) : '';
     if (!/^[A-Za-z0-9-]{8,64}$/.test(exportId) || !filename) continue;
     const attachment: AiResearchExportAttachment = {
-      kind: record.kind,
+      kind: record.kind as AiResearchExportKind,
       exportId,
       filename,
       source: record.source === 'extract' ? 'extract' : record.source === 'convert' ? 'convert' : 'tables',
@@ -464,6 +465,13 @@ export function validateFileAttachment(
     const uploadId = readUploadId((file as { uploadId?: unknown }).uploadId);
     if (uploadId) stored.uploadId = uploadId;
     return stored;
+  }
+
+  // An HTML file already stored by /api/ai-research/uploads can be sent by
+  // reference; the server loads its text and tables (owner-scoped) when hydrating.
+  const referencedUpload = readUploadId((file as { uploadId?: unknown }).uploadId);
+  if (referencedUpload && isHtmlAttachment({ mimeType: typeof file.mimeType === 'string' ? file.mimeType : '', name })) {
+    return { mimeType: 'text/html', name: name || undefined, uploadId: referencedUpload };
   }
 
   throw attachmentError(`File ${index + 1} is missing file data.`);

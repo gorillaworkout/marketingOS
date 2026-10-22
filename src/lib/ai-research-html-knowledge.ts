@@ -50,6 +50,8 @@ export async function persistHtmlUploadsToKnowledge(input: {
     if (message.role !== 'user' || !message.files?.length) continue;
     for (const file of message.files) {
       if (!isHtmlAttachment(file) || !file.extractedText) continue;
+      // Uploaded via /api/ai-research/uploads: already saved to the Knowledge Graph there.
+      if (file.uploadId) continue;
       const payload = htmlUploadKnowledgePayload({
         userId: input.userId,
         name: file.name,

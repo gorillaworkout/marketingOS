@@ -21,27 +21,40 @@ import {
 import { loadSanitizedHtml, extractHtmlTables } from './ai-research-html';
 import { htmlToBlocks, runsText, type HtmlBlock, type HtmlDocumentModel, type InlineRun } from './ai-research-html-blocks';
 import { buildWorkbook, htmlTablesToSheets, type WorkbookSheet } from './ai-research-excel';
+import { CSV_MIME, ZIP_MIME, csvZip, rowsToCsvBuffer } from './ai-research-csv';
 
-export type HtmlConvertFormat = 'xlsx' | 'pdf' | 'docx';
+export type HtmlConvertFormat = 'xlsx' | 'pdf' | 'docx' | 'csv';
 
 export const CONVERT_MIME: Record<HtmlConvertFormat, string> = {
   xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
   pdf: 'application/pdf',
   docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  csv: CSV_MIME,
 };
 
 export const CONVERT_LABEL: Record<HtmlConvertFormat, string> = {
   xlsx: 'Excel',
   pdf: 'PDF',
   docx: 'Word',
+  csv: 'CSV',
 };
 
 export interface ConvertedFile {
   data: Buffer;
   sheetCount: number;
   rowCount: number;
-  /** True when an Excel export fell back to text blocks because the page has no tables. */
+  /** True when an Excel/CSV export fell back to text blocks because the page has no tables. */
   textBlocks?: boolean;
+  /** Overrides the format's default MIME type and extension (CSV of several tables is a .zip). */
+  mimeType?: string;
+  extension?: string;
+  /** Name of the single table written, when one table was chosen. */
+  tableName?: string;
+}
+
+export interface ConvertOptions {
+  /** CSV only: write just this table (index into the detected tables). */
+  tableIndex?: number;
 }
 
 const BLOCK_LABEL: Record<string, string> = {
@@ -77,6 +90,36 @@ export async function convertHtmlToXlsx(html: string): Promise<ConvertedFile> {
   const sheet = textBlockSheet(htmlToBlocks($));
   if (sheet.rows.length === 1) sheet.rows.push(['Paragraph', '(This page has no readable content.)']);
   return { data: await buildWorkbook([sheet]), sheetCount: 1, rowCount: sheet.rows.length - 1, textBlocks: true };
+}
+
+/**
+ * CSV: one table gives one .csv; several give a .zip with one CSV per table
+ * (named after the sheets) unless a table is chosen; no tables gives a
+ * Type,Text CSV of the readable blocks. UTF-8 with BOM, RFC 4180 quoting.
+ */
+export async function convertHtmlToCsv(html: string, options: ConvertOptions = {}): Promise<ConvertedFile> {
+  const $ = loadSanitizedHtml(html);
+  const sheets = htmlTablesToSheets(extractHtmlTables($));
+  const rowCountOf = (sheet: WorkbookSheet) => Math.max(0, sheet.rows.length - 1);
+  if (sheets.length) {
+    const chosen = typeof options.tableIndex === 'number' && Number.isInteger(options.tableIndex)
+      ? sheets[options.tableIndex]
+      : sheets.length === 1 ? sheets[0] : undefined;
+    if (typeof options.tableIndex === 'number' && !chosen) throw new RangeError('That table was not found in the page.');
+    if (chosen) {
+      return { data: rowsToCsvBuffer(chosen.rows), sheetCount: 1, rowCount: rowCountOf(chosen), tableName: chosen.name };
+    }
+    return {
+      data: await csvZip(sheets),
+      sheetCount: sheets.length,
+      rowCount: sheets.reduce((sum, sheet) => sum + rowCountOf(sheet), 0),
+      mimeType: ZIP_MIME,
+      extension: 'zip',
+    };
+  }
+  const sheet = textBlockSheet(htmlToBlocks($));
+  if (sheet.rows.length === 1) sheet.rows.push(['Paragraph', '(This page has no readable content.)']);
+  return { data: rowsToCsvBuffer(sheet.rows), sheetCount: 1, rowCount: sheet.rows.length - 1, textBlocks: true };
 }
 
 // ---------- PDF (pdfkit, standard fonts; no browser) ----------
@@ -416,8 +459,14 @@ export async function convertHtmlToDocx(html: string, fallbackTitle = 'Document'
   return { data: await Packer.toBuffer(document), sheetCount: 0, rowCount: 0 };
 }
 
-export async function convertHtml(html: string, format: HtmlConvertFormat, fallbackTitle?: string): Promise<ConvertedFile> {
+export async function convertHtml(
+  html: string,
+  format: HtmlConvertFormat,
+  fallbackTitle?: string,
+  options: ConvertOptions = {},
+): Promise<ConvertedFile> {
   if (format === 'xlsx') return convertHtmlToXlsx(html);
+  if (format === 'csv') return convertHtmlToCsv(html, options);
   if (format === 'pdf') return convertHtmlToPdf(html, fallbackTitle);
   return convertHtmlToDocx(html, fallbackTitle);
 }

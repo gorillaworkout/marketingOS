@@ -13,6 +13,7 @@ import {
   type GatewayMessage,
 } from '@/lib/ai-research';
 import { hydrateMessageFiles } from '@/lib/ai-research-files';
+import { htmlFileStore } from '@/lib/ai-research-html-store';
 import { persistHtmlUploadsToKnowledge } from '@/lib/ai-research-html-knowledge';
 import { parseAiResearchChatBody as parseChatRequest } from '@/lib/ai-research-request';
 import {
@@ -482,7 +483,13 @@ export async function POST(request: NextRequest) {
   };
   try {
     parsed = parseChatRequest(await request.json());
-    parsed.messages = await hydrateMessageFiles(parsed.messages);
+    const uploads = htmlFileStore();
+    parsed.messages = await hydrateMessageFiles(parsed.messages, {
+      loadUpload: async uploadId => {
+        const upload = await uploads.loadUpload(auth.id, uploadId);
+        return upload ? { extractedText: upload.extractedText, tables: upload.tables } : null;
+      },
+    });
   } catch (error) {
     return jsonError(
       error instanceof SyntaxError ? 'Invalid JSON body' : error instanceof Error ? error.message : 'Invalid request',
@@ -1000,7 +1007,13 @@ export async function GET(request: NextRequest) {
     id: row.id,
     // HTML tables stay on the server for Excel export; the client only needs the text.
     messages: parseStoredMessages(row.messages).map(message => (message.files?.some(file => file.tables)
-      ? { ...message, files: message.files.map(file => ({ mimeType: file.mimeType, name: file.name, extractedText: file.extractedText, uploadId: file.uploadId })) }
+      ? { ...message, files: message.files.map(file => ({
+        mimeType: file.mimeType,
+        name: file.name,
+        extractedText: file.extractedText,
+        uploadId: file.uploadId,
+        tableNames: file.tables?.map(table => table.name),
+      })) }
       : message)),
     model: row.model,
     projectId: row.project_id,
