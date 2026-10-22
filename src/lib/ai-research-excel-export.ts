@@ -5,7 +5,9 @@ import {
   type AiResearchChatMessage,
   type AiResearchExportAttachment,
   type AiResearchFile,
+  readUploadId,
 } from './ai-research';
+import { deliverToThread, type HtmlFileDeps } from './ai-research-html-uploads';
 import {
   EXTRACTION_SYSTEM_PROMPT,
   ExtractionValidationError,
@@ -33,7 +35,11 @@ export class ExcelExportError extends Error {
 }
 
 export interface ExcelExportRequest {
-  conversationId: string;
+  /** Existing conversation; optional when exporting straight from an upload. */
+  conversationId: string | null;
+  /** Stored HTML upload (ai_research_uploads); works before any message is sent. */
+  uploadId?: string;
+  projectId?: string | null;
   messageIndex: number;
   fileIndex: number;
   fileName?: string;
@@ -45,7 +51,8 @@ export function parseExcelExportRequest(body: unknown): ExcelExportRequest {
   if (!body || typeof body !== 'object') throw new ExcelExportError('Invalid request.');
   const raw = body as Record<string, unknown>;
   const conversationId = typeof raw.conversationId === 'string' ? raw.conversationId.trim() : '';
-  if (!conversationId) throw new ExcelExportError('Send the message first, then export.');
+  const uploadId = readUploadId(raw.uploadId);
+  if (!conversationId && !uploadId) throw new ExcelExportError('Upload the HTML file again, then export.');
   const mode = raw.mode === 'extract' ? 'extract' : raw.mode === 'tables' ? 'tables' : null;
   if (!mode) throw new ExcelExportError('Choose "tables" or "extract".');
   const instruction = typeof raw.instruction === 'string' ? raw.instruction.trim() : '';
@@ -53,8 +60,11 @@ export function parseExcelExportRequest(body: unknown): ExcelExportRequest {
     throw new ExcelExportError('Describe what to extract, for example "product name, price, date".');
   }
   if (instruction.length > 1_000) throw new ExcelExportError('The instruction must be 1,000 characters or fewer.');
+  const projectId = typeof raw.projectId === 'string' && raw.projectId.trim() ? raw.projectId.trim() : null;
   return {
-    conversationId,
+    conversationId: conversationId || null,
+    uploadId,
+    projectId,
     messageIndex: Math.trunc(Number(raw.messageIndex)),
     fileIndex: Math.max(0, Math.trunc(Number(raw.fileIndex) || 0)),
     fileName: typeof raw.fileName === 'string' ? raw.fileName.trim().slice(0, 120) : undefined,
@@ -89,19 +99,7 @@ export function locateHtmlFile(
   return null;
 }
 
-export interface ExcelExportDeps {
-  loadConversation: (userId: string, conversationId: string) => Promise<{ messages: unknown } | null | undefined>;
-  saveConversationMessages: (userId: string, conversationId: string, messages: AiResearchChatMessage[]) => Promise<void>;
-  saveExport: (row: {
-    id: string;
-    userId: string;
-    conversationId: string;
-    filename: string;
-    kind: ExcelExportMode;
-    sheetCount: number;
-    rowCount: number;
-    data: Buffer;
-  }) => Promise<void>;
+export interface ExcelExportDeps extends HtmlFileDeps {
   /** Runs the extraction prompt through the routed model with fallback. */
   generateJson: (input: { userId: string; system: string; user: string }) => Promise<{ content: string; fallbackLabel?: string | null }>;
   newId?: () => string;
@@ -115,12 +113,30 @@ export async function createExcelExport(
   userId: string,
   request: ExcelExportRequest,
   deps: ExcelExportDeps,
-): Promise<{ message: AiResearchChatMessage; attachment: AiResearchExportAttachment }> {
-  const row = await deps.loadConversation(userId, request.conversationId);
-  if (!row) throw new ExcelExportError('Conversation not found.', 404);
-  const messages = parseStoredMessages(row.messages);
-  const file = locateHtmlFile(messages, request);
-  if (!file) throw new ExcelExportError('No HTML attachment was found in this conversation.', 404);
+): Promise<{
+  message: AiResearchChatMessage;
+  attachment: AiResearchExportAttachment;
+  conversationId: string;
+  appended: AiResearchChatMessage[];
+  created: boolean;
+}> {
+  let file: { name?: string; tables?: AiResearchFile['tables']; extractedText?: string };
+  let messages: AiResearchChatMessage[] = [];
+  const upload = request.uploadId ? await deps.loadUpload(userId, request.uploadId) : null;
+  if (request.uploadId && !upload && !request.conversationId) {
+    throw new ExcelExportError('That HTML upload was not found. Upload it again.', 404);
+  }
+  if (upload) {
+    file = { name: upload.filename, tables: upload.tables, extractedText: upload.extractedText };
+  } else {
+    if (!request.conversationId) throw new ExcelExportError('Conversation not found.', 404);
+    const row = await deps.loadConversation(userId, request.conversationId);
+    if (!row) throw new ExcelExportError('Conversation not found.', 404);
+    messages = parseStoredMessages(row.messages);
+    const located = locateHtmlFile(messages, request);
+    if (!located) throw new ExcelExportError('No HTML attachment was found in this conversation.', 404);
+    file = located;
+  }
   const sourceName = file.name || 'page.html';
 
   let sheets: WorkbookSheet[];
@@ -152,13 +168,15 @@ export async function createExcelExport(
 
   const data = await buildWorkbook(sheets);
   const id = (deps.newId ?? uuidv4)();
+  const newConversationId = upload ? (deps.newId ?? uuidv4)() : undefined;
   const rowCount = sheets.reduce((sum, sheet) => sum + Math.max(0, sheet.rows.length - 1), 0);
   const filename = xlsxFilename(sourceName, request.mode === 'tables' ? 'tables' : 'extract');
   await deps.saveExport({
     id,
     userId,
-    conversationId: request.conversationId,
+    conversationId: request.conversationId ?? newConversationId ?? '',
     filename,
+    mimeType: XLSX_MIME,
     kind: request.mode,
     sheetCount: sheets.length,
     rowCount,
@@ -171,11 +189,23 @@ export async function createExcelExport(
     source: request.mode,
     sheetCount: sheets.length,
     rowCount,
+    byteSize: data.length,
   };
   const message: AiResearchChatMessage = { role: 'assistant', content, attachments: [attachment] };
   if (fallbackLabel) message.fallbackLabel = fallbackLabel;
-  await deps.saveConversationMessages(userId, request.conversationId, [...messages, message]);
-  return { message, attachment };
+  if (upload) {
+    const delivered = await deliverToThread(userId, {
+      upload,
+      conversationId: request.conversationId,
+      projectId: request.projectId,
+      message,
+      newConversationId,
+    }, deps);
+    return { message, attachment, ...delivered };
+  }
+  const conversationId = request.conversationId as string;
+  await deps.saveConversationMessages(userId, conversationId, [...messages, message]);
+  return { message, attachment, conversationId, appended: [message], created: false };
 }
 
 export function exportDownloadPath(exportId: string): string {

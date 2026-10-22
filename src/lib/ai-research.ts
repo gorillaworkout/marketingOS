@@ -91,6 +91,14 @@ export interface AiResearchFile {
   extractedText?: string;
   /** Tables detected in an uploaded HTML file, kept for Excel export. */
   tables?: AiResearchHtmlTable[];
+  /** Stored sanitized HTML upload (ai_research_uploads) for convert/export. */
+  uploadId?: string;
+}
+
+const UPLOAD_ID_PATTERN = /^[A-Za-z0-9-]{8,64}$/;
+
+export function readUploadId(value: unknown): string | undefined {
+  return typeof value === 'string' && UPLOAD_ID_PATTERN.test(value.trim()) ? value.trim() : undefined;
 }
 
 export type AiResearchMode = 'fast' | 'deep';
@@ -101,13 +109,16 @@ export interface AiResearchSourceRef {
 }
 
 /** A generated file shown as an attachment message in the chat thread. */
+export type AiResearchExportKind = 'xlsx' | 'pdf' | 'docx';
+
 export interface AiResearchExportAttachment {
-  kind: 'xlsx';
+  kind: AiResearchExportKind;
   exportId: string;
   filename: string;
-  source: 'tables' | 'extract';
+  source: 'tables' | 'extract' | 'convert';
   sheetCount: number;
   rowCount: number;
+  byteSize?: number;
 }
 
 export function validateExportAttachments(value: unknown): AiResearchExportAttachment[] {
@@ -116,18 +127,21 @@ export function validateExportAttachments(value: unknown): AiResearchExportAttac
   for (const item of value.slice(0, 8)) {
     if (!item || typeof item !== 'object') continue;
     const record = item as Record<string, unknown>;
-    if (record.kind !== 'xlsx') continue;
+    if (record.kind !== 'xlsx' && record.kind !== 'pdf' && record.kind !== 'docx') continue;
     const exportId = typeof record.exportId === 'string' ? record.exportId.trim() : '';
     const filename = typeof record.filename === 'string' ? record.filename.trim().slice(0, 160) : '';
     if (!/^[A-Za-z0-9-]{8,64}$/.test(exportId) || !filename) continue;
-    attachments.push({
-      kind: 'xlsx',
+    const attachment: AiResearchExportAttachment = {
+      kind: record.kind,
       exportId,
       filename,
-      source: record.source === 'extract' ? 'extract' : 'tables',
+      source: record.source === 'extract' ? 'extract' : record.source === 'convert' ? 'convert' : 'tables',
       sheetCount: Math.max(0, Math.trunc(Number(record.sheetCount) || 0)),
       rowCount: Math.max(0, Math.trunc(Number(record.rowCount) || 0)),
-    });
+    };
+    const byteSize = Math.trunc(Number(record.byteSize) || 0);
+    if (byteSize > 0) attachment.byteSize = byteSize;
+    attachments.push(attachment);
   }
   return attachments;
 }
@@ -425,11 +439,14 @@ export function validateFileAttachment(
           ? 'Each document must be 8 MB or smaller.'
           : 'Each spreadsheet must be 2 MB or smaller.');
     }
-    return {
+    const validated: AiResearchFile = {
       mimeType: parsed.mimeType,
       dataUrl: `${DATA_URL_PREFIX}${parsed.mimeType}${BASE64_MARKER}${parsed.base64}`,
       name: name || undefined,
     };
+    const uploadId = readUploadId((file as { uploadId?: unknown }).uploadId);
+    if (uploadId && html) validated.uploadId = uploadId;
+    return validated;
   }
 
   if (options.allowStoredFiles && typeof file.extractedText === 'string') {
@@ -444,6 +461,8 @@ export function validateFileAttachment(
     };
     const tables = validateStoredTables((file as { tables?: unknown }).tables);
     if (tables.length) stored.tables = tables;
+    const uploadId = readUploadId((file as { uploadId?: unknown }).uploadId);
+    if (uploadId) stored.uploadId = uploadId;
     return stored;
   }
 

@@ -78,7 +78,7 @@ import {
 } from '@/lib/ai-research-urls';
 import { appendVoiceTranscript } from '@/lib/ai-research-voice';
 import { AI_RESEARCH_STOPPED_STATUS, isAbortError } from '@/lib/ai-research-abort';
-import { AiResearchHtmlExcelActions } from '@/components/AiResearchHtmlExcelActions';
+import { AiResearchHtmlExcelActions, type AiResearchHtmlFileResult } from '@/components/AiResearchHtmlExcelActions';
 import { AiResearchExcelAttachment } from '@/components/AiResearchExcelAttachment';
 import {
   AI_RESEARCH_CONNECTION_RETRYING_MESSAGE,
@@ -96,6 +96,7 @@ interface ChatFile {
   dataUrl?: string;
   name?: string;
   extractedText?: string;
+  uploadId?: string;
 }
 
 interface Message {
@@ -158,6 +159,14 @@ interface PendingAttachment {
   file: File;
   kind: 'image' | 'spreadsheet' | 'document';
   previewUrl?: string;
+  /** HTML only: stored on upload so Convert/Excel work before a question is sent. */
+  uploadState?: 'uploading' | 'ready' | 'error';
+  uploadId?: string;
+  uploadError?: string;
+}
+
+function isPendingHtml(item: PendingAttachment): boolean {
+  return item.kind === 'document' && isHtmlAttachment({ mimeType: item.file.type, name: item.file.name });
 }
 
 function attachmentKind(file: File): PendingAttachment['kind'] | null {
@@ -356,6 +365,7 @@ export default function AIResearchPage() {
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const skipNextLoadRef = useRef(false);
+  const htmlUploadStartedRef = useRef(new Set<string>());
   const sendingRef = useRef(false);
   const sourcesRef = useRef<Array<{ title: string; url: string }>>([]);
   const abortControllerRef = useRef<AbortController | null>(null);
@@ -678,6 +688,53 @@ export default function AIResearchPage() {
     addAttachments(files);
   };
 
+  const uploadPendingHtml = useCallback(async (item: PendingAttachment) => {
+    setPendingAttachments(prev => prev.map(entry => (entry.id === item.id ? { ...entry, uploadState: 'uploading' } : entry)));
+    try {
+      const dataUrl = await readFileAsDataUrl(item.file);
+      const response = await fetch('/api/ai-research/uploads', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: item.file.name, dataUrl }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || typeof data?.uploadId !== 'string') {
+        throw new Error(typeof data?.error === 'string' ? data.error : 'Could not prepare the file for conversion.');
+      }
+      setPendingAttachments(prev => prev.map(entry => (
+        entry.id === item.id ? { ...entry, uploadState: 'ready', uploadId: data.uploadId, uploadError: undefined } : entry
+      )));
+    } catch (e) {
+      setPendingAttachments(prev => prev.map(entry => (
+        entry.id === item.id
+          ? { ...entry, uploadState: 'error', uploadError: e instanceof Error ? e.message : 'Could not prepare the file for conversion.' }
+          : entry
+      )));
+    }
+  }, []);
+
+  // Store each new HTML attachment right away so Convert and Excel work immediately.
+  useEffect(() => {
+    for (const item of pendingAttachments) {
+      if (!isPendingHtml(item) || item.uploadState || htmlUploadStartedRef.current.has(item.id)) continue;
+      htmlUploadStartedRef.current.add(item.id);
+      void uploadPendingHtml(item);
+    }
+  }, [pendingAttachments, uploadPendingHtml]);
+
+  /** Show a convert/export result in the thread; a new conversation is opened when one was created. */
+  const applyHtmlFileResult = (result: AiResearchHtmlFileResult, pendingId?: string) => {
+    if (result.created) {
+      skipNextLoadRef.current = true;
+      setActiveConvoId(result.conversationId);
+      setMessages(result.messages as Message[]);
+      void loadConversations();
+    } else {
+      setMessages(prev => [...prev, ...(result.messages as Message[])]);
+    }
+    if (pendingId) removePendingAttachment(pendingId);
+  };
+
   const removePendingAttachment = (id: string) => {
     setPendingAttachments(prev => {
       const target = prev.find(item => item.id === id);
@@ -756,6 +813,7 @@ export default function AIResearchPage() {
         mimeType: inferResearchFileType(item.file.type, item.file.name) || item.file.type || 'application/octet-stream',
         dataUrl: await readFileAsDataUrl(item.file),
         name: item.file.name,
+        ...(item.uploadId ? { uploadId: item.uploadId } : {}),
       })));
       if (!stillCurrent()) return;
     } catch (e) {
@@ -1752,12 +1810,14 @@ export default function AIResearchPage() {
                         isHtmlAttachment(file) ? (
                           <AiResearchHtmlExcelActions
                             key={`html-excel-${fileIndex}`}
+                            uploadId={file.uploadId}
                             conversationId={activeConvoId}
+                            projectId={activeProjectId}
                             messageIndex={i}
                             fileIndex={fileIndex}
                             fileName={file.name}
                             disabled={loading}
-                            onExported={exported => setMessages(prev => [...prev, exported])}
+                            onResult={result => applyHtmlFileResult(result)}
                           />
                         ) : null
                       ))}
@@ -1777,6 +1837,8 @@ export default function AIResearchPage() {
                           filename={attachment.filename}
                           sheetCount={attachment.sheetCount}
                           rowCount={attachment.rowCount}
+                          kind={attachment.kind}
+                          byteSize={attachment.byteSize}
                         />
                       ))}
                       {msg.role === 'assistant' && msg.fallbackLabel && (
@@ -2128,6 +2190,24 @@ export default function AIResearchPage() {
                         onRemove={() => removePendingAttachment(item.id)}
                       />
                     )
+                  ))}
+                </div>
+              )}
+              {pendingAttachments.some(isPendingHtml) && (
+                <div className="mb-2 flex flex-col items-end gap-1" data-testid="ai-research-pending-html-actions">
+                  {pendingAttachments.filter(isPendingHtml).map(item => (
+                    <AiResearchHtmlExcelActions
+                      key={`pending-html-${item.id}`}
+                      uploadId={item.uploadId}
+                      conversationId={activeConvoId}
+                      projectId={activeProjectId}
+                      fileName={item.file.name}
+                      showName
+                      uploading={item.uploadState === 'uploading' || !item.uploadState}
+                      uploadError={item.uploadError}
+                      disabled={loading}
+                      onResult={result => applyHtmlFileResult(result, item.id)}
+                    />
                   ))}
                 </div>
               )}

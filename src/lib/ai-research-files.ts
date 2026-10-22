@@ -337,6 +337,7 @@ async function hydrateOneFile(file: AiResearchFile, index: number): Promise<AiRe
       extractedText: file.extractedText.slice(0, AI_RESEARCH_MAX_EXTRACTED_CHARS),
     };
     if (file.tables?.length) stored.tables = file.tables;
+    if (file.uploadId) stored.uploadId = file.uploadId;
     return stored;
   }
   if (!file.dataUrl) {
@@ -352,6 +353,7 @@ async function hydrateOneFile(file: AiResearchFile, index: number): Promise<AiRe
       const html = extractResearchHtml(Buffer.from(parsed.base64, 'base64'));
       const hydrated: AiResearchFile = { mimeType: 'text/html', name: file.name, extractedText: html.text };
       if (html.tables.length) hydrated.tables = html.tables;
+      if (file.uploadId) hydrated.uploadId = file.uploadId;
       return hydrated;
     } catch (error) {
       const detail = attachmentFailureDetail(error, 'unreadable HTML');

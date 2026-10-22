@@ -1000,7 +1000,7 @@ export async function GET(request: NextRequest) {
     id: row.id,
     // HTML tables stay on the server for Excel export; the client only needs the text.
     messages: parseStoredMessages(row.messages).map(message => (message.files?.some(file => file.tables)
-      ? { ...message, files: message.files.map(file => ({ mimeType: file.mimeType, name: file.name, extractedText: file.extractedText })) }
+      ? { ...message, files: message.files.map(file => ({ mimeType: file.mimeType, name: file.name, extractedText: file.extractedText, uploadId: file.uploadId })) }
       : message)),
     model: row.model,
     projectId: row.project_id,
