@@ -8,6 +8,7 @@ import {
   readUploadId,
 } from './ai-research';
 import { deliverToThread, type HtmlFileDeps } from './ai-research-html-uploads';
+import { CSV_MIME, rowsToCsvBuffer } from './ai-research-csv';
 import {
   EXTRACTION_SYSTEM_PROMPT,
   ExtractionValidationError,
@@ -45,6 +46,8 @@ export interface ExcelExportRequest {
   fileName?: string;
   mode: ExcelExportMode;
   instruction?: string;
+  /** Extract only: write the extracted rows as CSV instead of Excel. */
+  output?: 'xlsx' | 'csv';
 }
 
 export function parseExcelExportRequest(body: unknown): ExcelExportRequest {
@@ -70,6 +73,7 @@ export function parseExcelExportRequest(body: unknown): ExcelExportRequest {
     fileName: typeof raw.fileName === 'string' ? raw.fileName.trim().slice(0, 120) : undefined,
     mode,
     instruction: instruction || undefined,
+    output: mode === 'extract' && raw.output === 'csv' ? 'csv' : 'xlsx',
   };
 }
 
@@ -163,27 +167,29 @@ export async function createExcelExport(
     }
     fallbackLabel = generated.fallbackLabel || null;
     sheets = [{ name: extraction.sheetName, rows: [extraction.columns, ...extraction.rows] }];
-    content = `Extracted ${plural(extraction.rows.length, 'row')} (${extraction.columns.join(', ')}) from ${sourceName} to Excel.`;
+    content = `Extracted ${plural(extraction.rows.length, 'row')} (${extraction.columns.join(', ')}) from ${sourceName} to ${request.output === 'csv' ? 'CSV' : 'Excel'}.`;
   }
 
-  const data = await buildWorkbook(sheets);
+  const csv = request.mode === 'extract' && request.output === 'csv';
+  const data = csv ? rowsToCsvBuffer(sheets[0].rows) : await buildWorkbook(sheets);
   const id = (deps.newId ?? uuidv4)();
   const newConversationId = upload ? (deps.newId ?? uuidv4)() : undefined;
   const rowCount = sheets.reduce((sum, sheet) => sum + Math.max(0, sheet.rows.length - 1), 0);
-  const filename = xlsxFilename(sourceName, request.mode === 'tables' ? 'tables' : 'extract');
+  const xlsxName = xlsxFilename(sourceName, request.mode === 'tables' ? 'tables' : 'extract');
+  const filename = csv ? xlsxName.replace(/\.xlsx$/, '.csv') : xlsxName;
   await deps.saveExport({
     id,
     userId,
     conversationId: request.conversationId ?? newConversationId ?? '',
     filename,
-    mimeType: XLSX_MIME,
-    kind: request.mode,
+    mimeType: csv ? CSV_MIME : XLSX_MIME,
+    kind: csv ? 'extract-csv' : request.mode,
     sheetCount: sheets.length,
     rowCount,
     data,
   });
   const attachment: AiResearchExportAttachment = {
-    kind: 'xlsx',
+    kind: csv ? 'csv' : 'xlsx',
     exportId: id,
     filename,
     source: request.mode,

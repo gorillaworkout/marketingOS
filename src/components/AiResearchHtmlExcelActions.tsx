@@ -29,6 +29,8 @@ export function AiResearchHtmlExcelActions({
   uploading,
   uploadError,
   showName,
+  tableNames,
+  onRetryUpload,
   onResult,
 }: {
   uploadId?: string;
@@ -41,12 +43,17 @@ export function AiResearchHtmlExcelActions({
   uploading?: boolean;
   uploadError?: string;
   showName?: boolean;
+  /** Detected table names, for choosing one table when converting to CSV. */
+  tableNames?: string[];
+  /** Shown after a failed upload. */
+  onRetryUpload?: () => void;
   onResult: (result: AiResearchHtmlFileResult) => void;
 }) {
   const [busy, setBusy] = useState<'tables' | 'extract' | null>(null);
   const [error, setError] = useState('');
   const [extractOpen, setExtractOpen] = useState(false);
   const [instruction, setInstruction] = useState('');
+  const [extractOutput, setExtractOutput] = useState<'xlsx' | 'csv'>('xlsx');
   const unavailable = Boolean(disabled || uploading || (!uploadId && !conversationId));
 
   const run = async (mode: 'tables' | 'extract') => {
@@ -66,6 +73,7 @@ export function AiResearchHtmlExcelActions({
           fileName,
           mode,
           instruction: mode === 'extract' ? instruction : undefined,
+          output: mode === 'extract' ? extractOutput : undefined,
         }),
       });
       const data = await response.json().catch(() => ({}));
@@ -92,11 +100,17 @@ export function AiResearchHtmlExcelActions({
           <span className="max-w-[12rem] truncate text-[10px] text-[var(--mos-text-muted)]" title={fileName}>{fileName}</span>
         )}
         {uploading && <span className="text-[10px] text-[var(--mos-text-muted)]">Preparing…</span>}
+        {onRetryUpload && (
+          <button type="button" data-testid="ai-research-html-upload-retry" className={actionClass} onClick={onRetryUpload}>
+            Retry
+          </button>
+        )}
         <AiResearchHtmlConvertMenu
           uploadId={uploading ? undefined : uploadId}
           conversationId={conversationId}
           projectId={projectId}
           fileName={fileName}
+          tableNames={tableNames}
           disabled={disabled || uploading || busy !== null}
           onResult={onResult}
           onError={setError}
@@ -118,7 +132,7 @@ export function AiResearchHtmlExcelActions({
           disabled={unavailable || busy !== null}
           onClick={() => setExtractOpen(open => !open)}
         >
-          Extract to Excel…
+          Extract to Excel/CSV…
         </button>
       </div>
       {extractOpen && (
@@ -135,6 +149,16 @@ export function AiResearchHtmlExcelActions({
             aria-label="What to extract"
             className="h-7 min-w-0 flex-1 rounded-md border border-[var(--mos-border)] bg-[var(--mos-bg)] px-2 text-[11px] text-[var(--mos-text)]"
           />
+          <select
+            data-testid="ai-research-extract-output"
+            value={extractOutput}
+            onChange={event => setExtractOutput(event.target.value === 'csv' ? 'csv' : 'xlsx')}
+            aria-label="Output format"
+            className="h-7 rounded-md border border-[var(--mos-border)] bg-[var(--mos-bg)] px-1 text-[11px] text-[var(--mos-text)]"
+          >
+            <option value="xlsx">Excel</option>
+            <option value="csv">CSV</option>
+          </select>
           <button
             type="submit"
             data-testid="ai-research-extract-excel"

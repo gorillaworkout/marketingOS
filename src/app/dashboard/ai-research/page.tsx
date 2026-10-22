@@ -97,6 +97,8 @@ interface ChatFile {
   name?: string;
   extractedText?: string;
   uploadId?: string;
+  /** Detected table names (HTML), for the CSV table choice. */
+  tableNames?: string[];
 }
 
 interface Message {
@@ -163,6 +165,64 @@ interface PendingAttachment {
   uploadState?: 'uploading' | 'ready' | 'error';
   uploadId?: string;
   uploadError?: string;
+  tableNames?: string[];
+}
+
+/** Upload requests that hang would leave the chip on "Preparing…" forever. */
+const HTML_UPLOAD_TIMEOUT_MS = 90_000;
+
+/**
+ * Unique per add. Ids built from name/size/lastModified repeated when the same
+ * file was attached again (after removing it or converting from the chip), and
+ * the repeated id was skipped by the upload effect, so "Preparing…" never ended.
+ */
+function nextPendingAttachmentId(file: File): string {
+  const random = typeof crypto !== 'undefined' && 'randomUUID' in crypto
+    ? crypto.randomUUID()
+    : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+  return `${file.name}-${file.size}-${random}`;
+}
+
+/** Readable message for a failed request, including proxy errors that return HTML. */
+function requestErrorMessage(status: number, data: unknown, fallback: string): string {
+  const error = data && typeof data === 'object' && typeof (data as { error?: unknown }).error === 'string'
+    ? (data as { error: string }).error
+    : '';
+  if (error) return error;
+  if (status === 413) return 'The attachments are too large to send. Try a smaller file.';
+  if (status === 502 || status === 504) return `The server could not process the request (${status}). If you attached large files, try a smaller one.`;
+  return fallback;
+}
+
+/**
+ * Store an HTML file for Convert/Excel. Sends the raw file (no base64
+ * overhead, no reliance on the browser's MIME guess) and gives up after
+ * HTML_UPLOAD_TIMEOUT_MS so the chip cannot stay on "Preparing…".
+ */
+async function postHtmlUpload(file: File): Promise<{ uploadId: string; tableNames?: string[] }> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), HTML_UPLOAD_TIMEOUT_MS);
+  try {
+    const response = await fetch(`/api/ai-research/uploads?name=${encodeURIComponent(file.name)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': file.type || 'application/octet-stream', 'X-AI-Research-Upload': '1' },
+      body: file,
+      signal: controller.signal,
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || typeof data?.uploadId !== 'string') {
+      throw new Error(requestErrorMessage(response.status, data, 'Could not prepare the file for conversion.'));
+    }
+    const tableNames = Array.isArray(data.tableNames)
+      ? data.tableNames.filter((name: unknown): name is string => typeof name === 'string')
+      : undefined;
+    return { uploadId: data.uploadId, tableNames };
+  } catch (error) {
+    if (controller.signal.aborted) throw new Error('Preparing the file took too long. Retry, or send it with your question.');
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 function isPendingHtml(item: PendingAttachment): boolean {
@@ -551,7 +611,7 @@ export default function AIResearchPage() {
             break;
           }
           next.push({
-            id: `${file.name}-${file.size}-${file.lastModified}-${next.length}`,
+            id: nextPendingAttachmentId(file),
             file,
             kind,
             previewUrl: URL.createObjectURL(file),
@@ -574,7 +634,7 @@ export default function AIResearchPage() {
             break;
           }
           next.push({
-            id: `${file.name}-${file.size}-${file.lastModified}-${next.length}`,
+            id: nextPendingAttachmentId(file),
             file,
             kind,
           });
@@ -594,7 +654,7 @@ export default function AIResearchPage() {
           break;
         }
         next.push({
-          id: `${file.name}-${file.size}-${file.lastModified}-${next.length}`,
+          id: nextPendingAttachmentId(file),
           file,
           kind,
         });
@@ -689,20 +749,11 @@ export default function AIResearchPage() {
   };
 
   const uploadPendingHtml = useCallback(async (item: PendingAttachment) => {
-    setPendingAttachments(prev => prev.map(entry => (entry.id === item.id ? { ...entry, uploadState: 'uploading' } : entry)));
+    setPendingAttachments(prev => prev.map(entry => (entry.id === item.id ? { ...entry, uploadState: 'uploading', uploadError: undefined } : entry)));
     try {
-      const dataUrl = await readFileAsDataUrl(item.file);
-      const response = await fetch('/api/ai-research/uploads', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: item.file.name, dataUrl }),
-      });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok || typeof data?.uploadId !== 'string') {
-        throw new Error(typeof data?.error === 'string' ? data.error : 'Could not prepare the file for conversion.');
-      }
+      const uploaded = await postHtmlUpload(item.file);
       setPendingAttachments(prev => prev.map(entry => (
-        entry.id === item.id ? { ...entry, uploadState: 'ready', uploadId: data.uploadId, uploadError: undefined } : entry
+        entry.id === item.id ? { ...entry, uploadState: 'ready', uploadId: uploaded.uploadId, tableNames: uploaded.tableNames, uploadError: undefined } : entry
       )));
     } catch (e) {
       setPendingAttachments(prev => prev.map(entry => (
@@ -809,12 +860,22 @@ export default function AIResearchPage() {
     let files: ChatFile[] = [];
     try {
       images = await Promise.all(pendingImages.map(item => fileToChatImage(item.file)));
-      files = await Promise.all(pendingFiles.map(async item => ({
-        mimeType: inferResearchFileType(item.file.type, item.file.name) || item.file.type || 'application/octet-stream',
-        dataUrl: await readFileAsDataUrl(item.file),
-        name: item.file.name,
-        ...(item.uploadId ? { uploadId: item.uploadId } : {}),
-      })));
+      files = await Promise.all(pendingFiles.map(async (item): Promise<ChatFile> => {
+        // A stored HTML upload is sent by reference: the server already has its text and tables.
+        if (isPendingHtml(item) && item.uploadState === 'ready' && item.uploadId) {
+          return {
+            mimeType: 'text/html',
+            name: item.file.name,
+            uploadId: item.uploadId,
+            ...(item.tableNames?.length ? { tableNames: item.tableNames } : {}),
+          };
+        }
+        return {
+          mimeType: inferResearchFileType(item.file.type, item.file.name) || item.file.type || 'application/octet-stream',
+          dataUrl: await readFileAsDataUrl(item.file),
+          name: item.file.name,
+        };
+      }));
       if (!stillCurrent()) return;
     } catch (e) {
       if (!stillCurrent()) return;
@@ -900,7 +961,7 @@ export default function AIResearchPage() {
       if (!stillCurrent()) return;
       if (!res.ok) {
         const d = await res.json().catch(() => ({}));
-        throw new Error(d.error || `Server error (${res.status})`);
+        throw new Error(requestErrorMessage(res.status, d, `Server error (${res.status})`));
       }
       const reader = res.body!.getReader();
       const decoder = new TextDecoder();
@@ -1811,6 +1872,7 @@ export default function AIResearchPage() {
                           <AiResearchHtmlExcelActions
                             key={`html-excel-${fileIndex}`}
                             uploadId={file.uploadId}
+                            tableNames={file.tableNames}
                             conversationId={activeConvoId}
                             projectId={activeProjectId}
                             messageIndex={i}
@@ -2205,6 +2267,8 @@ export default function AIResearchPage() {
                       showName
                       uploading={item.uploadState === 'uploading' || !item.uploadState}
                       uploadError={item.uploadError}
+                      tableNames={item.tableNames}
+                      onRetryUpload={item.uploadState === 'error' ? () => { void uploadPendingHtml(item); } : undefined}
                       disabled={loading}
                       onResult={result => applyHtmlFileResult(result, item.id)}
                     />
@@ -2327,7 +2391,7 @@ export default function AIResearchPage() {
                 )}
               </div>
               <p className="text-[9px] text-[var(--mos-text-faint)] text-center mt-2">
-                {AI_RESEARCH_ASSISTANT_NAME} may produce inaccurate information. Type / for a skill · Enter to send · Shift+Enter for a new line · The mic uses the browser Web Speech API (id-ID, or English if id-ID is not supported; Chrome, Edge, Safari). Drag, paste, or click the icon for images, Excel/CSV, PDF, Word, and PowerPoint (max 4 of each). The camera button takes a photo and attaches it. Paste http(s) links, up to {AI_RESEARCH_MAX_CONTEXT_URLS} per message.
+                {AI_RESEARCH_ASSISTANT_NAME} may produce inaccurate information. Type / for a skill · Enter to send · Shift+Enter for a new line · The mic uses the browser Web Speech API (id-ID, or English if id-ID is not supported; Chrome, Edge, Safari). Drag, paste, or click the icon for images, Excel/CSV, PDF, Word, PowerPoint, and HTML (max 4 of each). The camera button takes a photo and attaches it. Paste http(s) links, up to {AI_RESEARCH_MAX_CONTEXT_URLS} per message.
               </p>
             </div>
           </div>

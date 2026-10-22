@@ -37,8 +37,79 @@ const BLOCK_SELECTOR = [
 const UNSAFE_URL = /^\s*(javascript|vbscript|data):/i;
 export const SAFE_IMAGE_DATA_URL = /^\s*data:image\/(png|jpe?g|gif|webp);base64,[A-Za-z0-9+/=\s]+$/i;
 
-function decodeHtmlBytes(bytes: Uint8Array): string {
-  return new TextDecoder('utf-8', { fatal: false }).decode(bytes).replace(/^\uFEFF/, '');
+function looksLikeUtf16(bytes: Uint8Array): 'utf-16le' | 'utf-16be' | null {
+  const sample = bytes.subarray(0, Math.min(bytes.length, 512));
+  if (sample.length < 8) return null;
+  let evenZeros = 0;
+  let oddZeros = 0;
+  for (let index = 0; index < sample.length; index += 1) {
+    if (sample[index] !== 0) continue;
+    if (index % 2 === 0) evenZeros += 1;
+    else oddZeros += 1;
+  }
+  const half = sample.length / 2;
+  if (oddZeros > half * 0.6 && evenZeros < half * 0.1) return 'utf-16le';
+  if (evenZeros > half * 0.6 && oddZeros < half * 0.1) return 'utf-16be';
+  return null;
+}
+
+// Windows-1252 0x80-0x9F (undefined bytes keep their C1 code point).
+const CP1252_HIGH = '\u20AC\u0081\u201A\u0192\u201E\u2026\u2020\u2021\u02C6\u2030\u0160\u2039\u0152\u008D\u017D\u008F'
+  + '\u0090\u2018\u2019\u201C\u201D\u2022\u2013\u2014\u02DC\u2122\u0161\u203A\u0153\u009D\u017E\u0178';
+
+/** Node's TextDecoder treats windows-1252 as plain Latin-1, so decode it by hand. */
+function decodeWindows1252(bytes: Uint8Array): string {
+  let out = '';
+  for (let index = 0; index < bytes.length; index += 1) {
+    const byte = bytes[index];
+    out += byte >= 0x80 && byte <= 0x9f ? CP1252_HIGH[byte - 0x80] : String.fromCharCode(byte);
+  }
+  return out;
+}
+
+function declaredCharset(bytes: Uint8Array): string | null {
+  const head = Buffer.from(bytes.subarray(0, Math.min(bytes.length, 4096))).toString('latin1');
+  const match = head.match(/<meta[^>]+charset\s*=\s*["']?\s*([A-Za-z0-9_.:-]+)/i);
+  if (!match) return null;
+  try {
+    return new TextDecoder(match[1].toLowerCase()).encoding;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Decode an uploaded HTML file. Honors a BOM (UTF-8/UTF-16), detects BOM-less
+ * UTF-16, and uses UTF-8 when the bytes are valid UTF-8. Otherwise it uses the
+ * <meta charset> (e.g. Excel/Word "Save as Web Page" files in windows-1252),
+ * falling back to windows-1252.
+ */
+export function decodeHtmlBytes(bytes: Uint8Array): string {
+  let encoding: string | null = null;
+  let start = 0;
+  if (bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) {
+    encoding = 'utf-8';
+    start = 3;
+  } else if (bytes[0] === 0xff && bytes[1] === 0xfe) {
+    encoding = 'utf-16le';
+    start = 2;
+  } else if (bytes[0] === 0xfe && bytes[1] === 0xff) {
+    encoding = 'utf-16be';
+    start = 2;
+  } else {
+    encoding = looksLikeUtf16(bytes);
+  }
+  const body = bytes.subarray(start);
+  if (encoding) return new TextDecoder(encoding, { fatal: false }).decode(body).replace(/^\uFEFF/, '');
+  try {
+    return new TextDecoder('utf-8', { fatal: true }).decode(body).replace(/^\uFEFF/, '');
+  } catch {
+    const declared = declaredCharset(body);
+    const legacy = declared && !/^utf-(8|16)/.test(declared) ? declared : 'windows-1252';
+    // WHATWG maps latin1/iso-8859-1/ascii labels to windows-1252 too.
+    if (legacy === 'windows-1252') return decodeWindows1252(body);
+    return new TextDecoder(legacy, { fatal: false }).decode(body);
+  }
 }
 
 function cleanText(value: string): string {

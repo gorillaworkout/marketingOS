@@ -321,15 +321,21 @@ function fileLooksLikeCsv(name?: string, mimeType?: string): boolean {
   return (name || '').toLowerCase().endsWith('.csv') || mimeType === 'text/csv' || mimeType === 'application/csv';
 }
 
-export async function hydrateMessageFiles(messages: AiResearchChatMessage[]): Promise<AiResearchChatMessage[]> {
+/** Loads a stored HTML upload owned by the current user (text and tables only). */
+export type HtmlUploadResolver = (uploadId: string) => Promise<{ extractedText: string; tables: AiResearchHtmlTable[] } | null>;
+
+export async function hydrateMessageFiles(
+  messages: AiResearchChatMessage[],
+  options: { loadUpload?: HtmlUploadResolver } = {},
+): Promise<AiResearchChatMessage[]> {
   return Promise.all(messages.map(async (message) => {
     if (!message.files?.length) return message;
-    const files = await Promise.all(message.files.map((file, index) => hydrateOneFile(file, index)));
+    const files = await Promise.all(message.files.map((file, index) => hydrateOneFile(file, index, options.loadUpload)));
     return { ...message, files };
   }));
 }
 
-async function hydrateOneFile(file: AiResearchFile, index: number): Promise<AiResearchFile> {
+async function hydrateOneFile(file: AiResearchFile, index: number, loadUpload?: HtmlUploadResolver): Promise<AiResearchFile> {
   if (file.extractedText?.trim() && !file.dataUrl) {
     const stored: AiResearchFile = {
       mimeType: file.mimeType,
@@ -339,6 +345,18 @@ async function hydrateOneFile(file: AiResearchFile, index: number): Promise<AiRe
     if (file.tables?.length) stored.tables = file.tables;
     if (file.uploadId) stored.uploadId = file.uploadId;
     return stored;
+  }
+  if (!file.dataUrl && file.uploadId && loadUpload && isHtmlAttachment(file)) {
+    const upload = await loadUpload(file.uploadId);
+    if (!upload) throw attachmentError(`${file.name || 'The HTML file'} is no longer available. Attach it again.`);
+    const hydrated: AiResearchFile = {
+      mimeType: 'text/html',
+      name: file.name,
+      extractedText: (upload.extractedText || '(no readable text)').slice(0, AI_RESEARCH_MAX_EXTRACTED_CHARS),
+      uploadId: file.uploadId,
+    };
+    if (upload.tables.length) hydrated.tables = upload.tables;
+    return hydrated;
   }
   if (!file.dataUrl) {
     throw attachmentError(`File ${index + 1} is missing file data.`);

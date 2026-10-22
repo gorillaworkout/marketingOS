@@ -255,7 +255,7 @@ test('convert request parsing and filenames', () => {
     uploadId: 'abcd-1234-efgh', format: 'docx', conversationId: null, projectId: null,
   });
   assert.throws(() => readConvertBody({ format: 'pdf' }), /Re-upload/);
-  assert.throws(() => readConvertBody({ uploadId: 'abcd-1234-efgh', format: 'rtf' }), /Excel, PDF, or Word/);
+  assert.throws(() => readConvertBody({ uploadId: 'abcd-1234-efgh', format: 'rtf' }), /Excel, CSV, PDF, or Word/);
   assert.equal(convertedFilename('Desk Report (final).html', 'pdf'), 'Desk-Report-final.pdf');
   assert.equal(convertedFilename('.html', 'docx'), 'page.docx');
 });
