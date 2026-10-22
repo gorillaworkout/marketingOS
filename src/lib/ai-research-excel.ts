@@ -12,6 +12,8 @@ export interface WorkbookSheet {
   name: string;
   /** First row is the header row. */
   rows: SheetCell[][];
+  /** Keep every cell as text (no number typing), e.g. for text blocks. */
+  textOnly?: boolean;
 }
 
 /**
@@ -129,7 +131,7 @@ export async function buildWorkbook(sheets: WorkbookSheet[]): Promise<Buffer> {
         if (rowIndex === 0) {
           cell.value = raw == null ? '' : String(raw);
         } else {
-          const typed = typedCell(raw);
+          const typed = sheet.textOnly ? { value: raw == null ? null : String(raw).slice(0, 32_000), percent: false } : typedCell(raw);
           cell.value = typed.value;
           if (typed.percent) cell.numFmt = '0.00%';
         }

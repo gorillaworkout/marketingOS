@@ -230,6 +230,10 @@ function fakeDeps(messages: AiResearchChatMessage[], json = '{}'): ExcelExportDe
     saveExport: async row => { exports.push({ filename: row.filename, data: row.data, kind: row.kind }); },
     generateJson: async ({ user }) => { prompts.push(user); return { content: json, fallbackLabel: null }; },
     newId: () => 'export-0001-abcd',
+    insertUpload: async () => {},
+    loadUpload: async () => null,
+    linkUpload: async () => {},
+    createConversation: async () => {},
   };
 }
 
@@ -283,7 +287,7 @@ test('export errors: no tables, invalid AI JSON, missing instruction, unknown fi
     (error: unknown) => error instanceof ExcelExportError && /not valid JSON/.test(error.message),
   );
   assert.throws(() => parseExcelExportRequest({ conversationId: 'c', mode: 'extract', instruction: '' }), /Describe what to extract/);
-  assert.throws(() => parseExcelExportRequest({ mode: 'tables' }), /Send the message first/);
+  assert.throws(() => parseExcelExportRequest({ mode: 'tables' }), /Upload the HTML file again/);
   assert.equal(locateHtmlFile(noTables, { messageIndex: 0, fileIndex: 0, fileName: 'other.html' }), null);
 });
 

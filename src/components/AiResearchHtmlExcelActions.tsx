@@ -1,37 +1,53 @@
 'use client';
 
 import { useState } from 'react';
+import type { AiResearchChatMessage } from '@/lib/ai-research';
+import { AiResearchHtmlConvertMenu } from '@/components/AiResearchHtmlConvertMenu';
 
-type ExcelMessage = {
-  role: 'assistant';
-  content: string;
-  attachments?: Array<{ kind: 'xlsx'; exportId: string; filename: string; source: 'tables' | 'extract'; sheetCount: number; rowCount: number }>;
-  fallbackLabel?: string;
-};
+/** What the convert/export endpoints return: messages to append, and the thread they went to. */
+export interface AiResearchHtmlFileResult {
+  conversationId: string;
+  messages: AiResearchChatMessage[];
+  created: boolean;
+}
 
 const actionClass = 'inline-flex h-6 shrink-0 items-center rounded-md border border-[var(--mos-border)] bg-[var(--mos-bg)] px-1.5 text-[10px] font-medium leading-none text-[var(--mos-text)] hover:bg-[var(--mos-hover)] disabled:opacity-40';
 
-/** Excel actions under an uploaded HTML file: export detected tables, or AI extraction. */
+/**
+ * Actions on an uploaded HTML file: Convert (Excel/PDF/Word), export detected
+ * tables, or AI extraction. With an uploadId they work right after upload,
+ * before any question is sent.
+ */
 export function AiResearchHtmlExcelActions({
+  uploadId,
   conversationId,
+  projectId,
   messageIndex,
   fileIndex,
   fileName,
   disabled,
-  onExported,
+  uploading,
+  uploadError,
+  showName,
+  onResult,
 }: {
+  uploadId?: string;
   conversationId: string | null;
-  messageIndex: number;
-  fileIndex: number;
+  projectId?: string | null;
+  messageIndex?: number;
+  fileIndex?: number;
   fileName?: string;
   disabled?: boolean;
-  onExported: (message: ExcelMessage) => void;
+  uploading?: boolean;
+  uploadError?: string;
+  showName?: boolean;
+  onResult: (result: AiResearchHtmlFileResult) => void;
 }) {
   const [busy, setBusy] = useState<'tables' | 'extract' | null>(null);
   const [error, setError] = useState('');
   const [extractOpen, setExtractOpen] = useState(false);
   const [instruction, setInstruction] = useState('');
-  const unavailable = !conversationId || disabled;
+  const unavailable = Boolean(disabled || uploading || (!uploadId && !conversationId));
 
   const run = async (mode: 'tables' | 'extract') => {
     if (busy || unavailable) return;
@@ -41,14 +57,23 @@ export function AiResearchHtmlExcelActions({
       const response = await fetch('/api/ai-research/excel', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ conversationId, messageIndex, fileIndex, fileName, mode, instruction: mode === 'extract' ? instruction : undefined }),
+        body: JSON.stringify({
+          uploadId,
+          conversationId,
+          projectId: projectId ?? null,
+          messageIndex: messageIndex ?? -1,
+          fileIndex: fileIndex ?? 0,
+          fileName,
+          mode,
+          instruction: mode === 'extract' ? instruction : undefined,
+        }),
       });
       const data = await response.json().catch(() => ({}));
-      if (!response.ok || !data?.message) {
+      if (!response.ok || !data?.conversationId || !Array.isArray(data?.messages)) {
         setError(typeof data?.error === 'string' ? data.error : 'Could not create the Excel file.');
         return;
       }
-      onExported(data.message as ExcelMessage);
+      onResult({ conversationId: data.conversationId, messages: data.messages, created: Boolean(data.created) });
       if (mode === 'extract') {
         setExtractOpen(false);
         setInstruction('');
@@ -63,12 +88,25 @@ export function AiResearchHtmlExcelActions({
   return (
     <div className="mt-1 flex flex-col items-end gap-1" data-testid="ai-research-html-excel">
       <div className="flex flex-wrap items-center justify-end gap-1">
+        {showName && fileName && (
+          <span className="max-w-[12rem] truncate text-[10px] text-[var(--mos-text-muted)]" title={fileName}>{fileName}</span>
+        )}
+        {uploading && <span className="text-[10px] text-[var(--mos-text-muted)]">Preparing…</span>}
+        <AiResearchHtmlConvertMenu
+          uploadId={uploading ? undefined : uploadId}
+          conversationId={conversationId}
+          projectId={projectId}
+          fileName={fileName}
+          disabled={disabled || uploading || busy !== null}
+          onResult={onResult}
+          onError={setError}
+        />
         <button
           type="button"
           data-testid="ai-research-export-tables-excel"
           className={actionClass}
           disabled={unavailable || busy !== null}
-          title={unavailable ? 'Available after the answer is saved' : `Export every table in ${fileName || 'this HTML file'} to Excel`}
+          title={uploading ? 'Preparing the file…' : `Export every table in ${fileName || 'this HTML file'} to Excel`}
           onClick={() => { void run('tables'); }}
         >
           {busy === 'tables' ? 'Exporting…' : 'Export tables to Excel'}
@@ -107,7 +145,7 @@ export function AiResearchHtmlExcelActions({
           </button>
         </form>
       )}
-      {error && <p className="text-[10px] text-red-300" role="alert">{error}</p>}
+      {(error || uploadError) && <p className="text-[10px] text-red-300" role="alert">{error || uploadError}</p>}
     </div>
   );
 }

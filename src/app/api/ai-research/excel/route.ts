@@ -1,13 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireFeature } from '@/lib/auth';
-import { execute, queryOne } from '@/lib/database';
+import { htmlFileStore } from '@/lib/ai-research-html-store';
 import { generateContent } from '@/lib/openai';
 import { resolveFeatureModel } from '@/lib/model-routing';
 import { rateLimit } from '@/lib/rate-limit';
 import {
   EXTRACTION_MAX_OUTPUT_TOKENS,
   ExcelExportError,
-  XLSX_MIME,
   createExcelExport,
   parseExcelExportRequest,
 } from '@/lib/ai-research-excel-export';
@@ -33,24 +32,7 @@ export async function POST(request: NextRequest) {
 
   try {
     const result = await createExcelExport(auth.id, parsed, {
-      loadConversation: (userId, conversationId) => queryOne<{ messages: unknown }>(
-        'SELECT messages FROM ai_research_conversations WHERE id = ? AND user_id = ?',
-        [conversationId, userId],
-      ),
-      saveConversationMessages: async (userId, conversationId, messages) => {
-        await execute(
-          'UPDATE ai_research_conversations SET messages = ?, updated_at = NOW() WHERE id = ? AND user_id = ?',
-          [JSON.stringify(messages), conversationId, userId],
-        );
-      },
-      saveExport: async row => {
-        await execute(
-          `INSERT INTO ai_research_exports
-             (id, user_id, conversation_id, filename, mime_type, kind, sheet_count, row_count, byte_size, data, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
-          [row.id, row.userId, row.conversationId, row.filename, XLSX_MIME, row.kind, row.sheetCount, row.rowCount, row.data.length, row.data],
-        );
-      },
+      ...htmlFileStore(),
       generateJson: async ({ userId, system, user }) => {
         const model = await resolveFeatureModel(userId, 'ai-research');
         const generated = await generateContent(system, user, userId, undefined, {
@@ -63,7 +45,13 @@ export async function POST(request: NextRequest) {
         return { content: generated.content, fallbackLabel: generated.fallbackLabel };
       },
     });
-    return NextResponse.json({ message: result.message, attachment: result.attachment });
+    return NextResponse.json({
+      message: result.message,
+      attachment: result.attachment,
+      conversationId: result.conversationId,
+      messages: result.appended,
+      created: result.created,
+    });
   } catch (error) {
     if (error instanceof ExcelExportError) {
       return NextResponse.json({ error: error.message }, { status: error.status });

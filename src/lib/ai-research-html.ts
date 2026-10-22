@@ -35,6 +35,7 @@ const BLOCK_SELECTOR = [
 ].join(',');
 
 const UNSAFE_URL = /^\s*(javascript|vbscript|data):/i;
+export const SAFE_IMAGE_DATA_URL = /^\s*data:image\/(png|jpe?g|gif|webp);base64,[A-Za-z0-9+/=\s]+$/i;
 
 function decodeHtmlBytes(bytes: Uint8Array): string {
   return new TextDecoder('utf-8', { fatal: false }).decode(bytes).replace(/^\uFEFF/, '');
@@ -64,7 +65,9 @@ export function loadSanitizedHtml(html: string): cheerio.CheerioAPI {
       if (lower.startsWith('on') || lower === 'style' || lower === 'srcdoc') {
         $(element).removeAttr(name);
       } else if ((lower === 'href' || lower === 'src' || lower === 'action' || lower === 'formaction' || lower === 'xlink:href') && UNSAFE_URL.test(value)) {
-        $(element).removeAttr(name);
+        // Embedded raster images stay so PDF and Word conversion can render them.
+        const embeddedImage = lower === 'src' && element.tagName?.toLowerCase() === 'img' && SAFE_IMAGE_DATA_URL.test(value);
+        if (!embeddedImage) $(element).removeAttr(name);
       }
     }
   });
@@ -97,7 +100,7 @@ function nearestHeading($: cheerio.CheerioAPI, table: Element): string {
   return '';
 }
 
-function tableRows($: cheerio.CheerioAPI, table: Element): string[][] {
+export function tableRows($: cheerio.CheerioAPI, table: Element): string[][] {
   const rows: string[][] = [];
   const pending: Array<{ text: string; remaining: number } | undefined> = [];
   const rowElements = $(table).find('tr').filter((_, tr) => $(tr).closest('table')[0] === table);
