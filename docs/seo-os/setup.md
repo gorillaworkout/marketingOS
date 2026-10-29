@@ -1,0 +1,138 @@
+# SEO OS setup (Phase 1: Search Console)
+
+SEO OS pulls Google Search Console (GSC) Search Analytics into PostgreSQL and
+shows it at **Dashboard → SEO OS → SEO overview** (`/dashboard/seo`).
+
+- Access: departments with the **SEO OS** feature (`seo`). Admins always have access.
+  Migration 035 creates the **Operations** department with `seo` and `internal-docs`.
+  Admins can also enable SEO OS for any other department in **Accounts**.
+- Sites: migration 035 seeds **ICA Cheerleading** (`https://indonesiancheer.org/`, active,
+  property `sc-domain:indonesiancheer.org`) and **Dupoin** (`https://dupoin.co.id/`,
+  inactive, property not set). The dashboard opens on the first active site.
+- Auth: one Google Cloud **service account** with the read-only scope
+  `https://www.googleapis.com/auth/webmasters.readonly`. The JSON key stays on the
+  server outside the repo. The app reads its path from `GSC_SA_KEY_PATH` and never
+  logs or returns the key.
+
+## 1. Enable the API in the existing Google Cloud project
+
+Use the existing project. Do not create a new one.
+
+1. Open Google Cloud Console and select the project.
+2. **APIs & Services → Library → "Google Search Console API" → Enable.**
+
+## 2. Create the service account and JSON key
+
+1. **IAM & Admin → Service Accounts → Create service account**, for example
+   `marketingos-seo`. It needs no project roles.
+2. Open it, then go to **Keys → Add key → Create new key → JSON**. The file downloads once.
+3. Note the email, for example `marketingos-seo@<project-id>.iam.gserviceaccount.com`.
+
+If the organization policy `iam.disableServiceAccountKeyCreation` blocks key
+creation, a project or org admin must allow it for this project.
+
+## 3. Put the key on the VPS (never in git)
+
+```bash
+# from your machine
+scp ./key.json ubuntu@16.78.68.56:/tmp/gsc-sa.json
+# on the VPS
+mkdir -p /home/ubuntu/secrets && chmod 700 /home/ubuntu/secrets
+mv /tmp/gsc-sa.json /home/ubuntu/secrets/gsc-sa.json
+chmod 600 /home/ubuntu/secrets/gsc-sa.json
+```
+
+Delete the downloaded copy from your machine afterwards. `.gitignore` also ignores
+`gsc-sa*.json` and `*service-account*.json`.
+
+## 4. Set `GSC_SA_KEY_PATH` for the app
+
+Add this to the app's `.env` on the VPS (the file the PM2 process and the npm
+scripts load):
+
+```bash
+GSC_SA_KEY_PATH=/home/ubuntu/secrets/gsc-sa.json
+```
+
+Then restart with the new environment:
+
+```bash
+pm2 restart marketingos --update-env
+```
+
+If PM2 gets its env from an ecosystem file instead, add `GSC_SA_KEY_PATH` to that
+app's `env` block and run `pm2 restart marketingos --update-env`.
+
+## 5. Give the service account access in Search Console
+
+A **property Owner** opens Search Console → the property → **Settings → Users and
+permissions → Add user**, enters the service account email, and picks
+**Restricted** permission. Read-only access is enough.
+
+- ICA Cheerleading: Domain property `sc-domain:indonesiancheer.org`.
+- Dupoin: confirm the property type first (`sc-domain:dupoin.co.id` for a Domain
+  property, or `https://dupoin.co.id/` for a URL-prefix property).
+
+## 6. Check or set the property in SEO settings
+
+As an admin, open **SEO OS → SEO settings** (`/dashboard/seo/settings`):
+
+- The service account card should show **Key loaded** and the email from step 2.
+- Each site has a **GSC property** field. It accepts `sc-domain:example.com` or a
+  URL prefix ending in `/` (for example `https://example.com/`). Leave it empty for
+  "Not connected". **Active** sites are included in the daily sync.
+
+## 7. Backfill 16 months
+
+On the VPS:
+
+```bash
+cd /home/ubuntu/apps/marketingos
+npm run seo:sync -- --backfill                                            # all active sites with a property
+npm run seo:sync -- --backfill --site=00000000-0000-0000-0000-000000000101   # ICA only
+```
+
+The backfill runs one day at a time: about 486 days, three API queries per day,
+with startRow pagination and retry/backoff on HTTP 429. Expect several minutes per
+site. The **Recent sync runs** table in SEO settings shows the result. Only one
+run per site can run at a time. A second one gets "already running", HTTP 409 in
+the UI.
+
+## 8. Daily sync (cron, not installed automatically)
+
+Each incremental run re-pulls the last 5 days and upserts them, because GSC data
+for the last 2–3 days is still provisional. Install the cron with `crontab -e` as
+`ubuntu`:
+
+```cron
+30 1 * * * cd /home/ubuntu/apps/marketingos && npm run seo:sync >> /home/ubuntu/logs/seo-sync.log 2>&1
+```
+
+This runs at 01:30 UTC, which is 08:30 WIB. Create `/home/ubuntu/logs` first if it
+does not exist. Admins can also press **Sync now** on the SEO overview, which runs
+the same incremental pull for the selected site.
+
+## Troubleshooting (messages shown to admins)
+
+| Message | Fix |
+| --- | --- |
+| `GSC_SA_KEY_PATH is not set on the server` | Do step 4 and restart with `--update-env`. |
+| `key file at GSC_SA_KEY_PATH cannot be read` | Check the path, then make the file owned by `ubuntu` with mode 600. |
+| `not a Google service account JSON key` | Upload the JSON key file itself, not a P12 key or a client secret. |
+| `Google rejected the service account token request` | The key was deleted or disabled, or the API is not enabled (step 1). |
+| `has no access to Search Console property` | Do step 5 for that exact property. |
+| `property ... was not found` | Wrong type: `sc-domain:` vs `https://.../` (step 6). |
+| `set its GSC property in SEO OS settings` | Step 6. |
+
+## Data model (migration 035)
+
+- `seo_sites`: sites, `gsc_property` (nullable), `active`, `last_synced_at`.
+- `seo_gsc_site_daily` (site, date), `seo_gsc_page_daily` (site, date, page),
+  `seo_gsc_daily` (site, date, query, page): clicks, impressions, CTR, position.
+  Site totals include anonymized queries, so they are the source for headline
+  numbers when no query filter is set.
+- `seo_sync_runs`: run history. A partial unique index allows only one `running`
+  row per site, and a run stuck for more than 3 hours is released automatically.
+
+Rollback: SEO OS only adds tables, a department, and a feature value. To hide it,
+untick SEO OS on departments. The tables can stay.

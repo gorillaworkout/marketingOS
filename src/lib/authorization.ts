@@ -11,12 +11,15 @@ export type GenerationFeature = typeof GENERATION_FEATURES[number];
 /** Accounts feature that is not a model-routed generation workflow. */
 export const INTERNAL_DOCS_FEATURE = 'internal-docs' as const;
 
+/** SEO OS (Search Console dashboard and later SEO tools). Not a generation workflow. */
+export const SEO_FEATURE = 'seo' as const;
+
 /**
  * Features an admin can assign per department on Accounts.
  * Generation workflows stay in GENERATION_FEATURES so model routing is unchanged.
  * FAQ & Guides (`internal-docs`) is first so it sits at the top of the Accounts list.
  */
-export const ACCOUNT_FEATURES = [INTERNAL_DOCS_FEATURE, ...GENERATION_FEATURES] as const;
+export const ACCOUNT_FEATURES = [INTERNAL_DOCS_FEATURE, ...GENERATION_FEATURES, SEO_FEATURE] as const;
 export type AccountFeature = typeof ACCOUNT_FEATURES[number];
 
 export const ACCOUNT_FEATURE_LABELS: Record<AccountFeature, string> = {
@@ -27,6 +30,7 @@ export const ACCOUNT_FEATURE_LABELS: Record<AccountFeature, string> = {
   'market-research': 'Market Research',
   'ai-research': 'AI Research',
   'internal-docs': 'FAQ & Guides',
+  seo: 'SEO OS',
 };
 
 /** Dashboard href for each account feature. Last path segment is not always the feature id. */
@@ -38,6 +42,7 @@ export const DASHBOARD_FEATURE_HREFS = {
   'market-research': '/dashboard/market-research',
   'ai-research': '/dashboard/ai-research',
   'internal-docs': '/dashboard/internal-docs',
+  seo: '/dashboard/seo',
 } as const satisfies Record<AccountFeature, string>;
 
 export interface FeaturePrincipal {
@@ -82,12 +87,15 @@ export function generationFeatureFromPath(pathname: string): GenerationFeature |
   return feature && isGenerationFeature(feature) ? feature : undefined;
 }
 
-/** Exact href match, plus nested Internal Docs document routes. */
+/** Features whose whole route tree (href and every nested path) belongs to the feature. */
+const PREFIX_MATCHED_FEATURES = [INTERNAL_DOCS_FEATURE, SEO_FEATURE] as const;
+
+/** Exact href match, plus nested routes for prefix-matched features (Internal Docs, SEO OS). */
 export function accountFeatureFromPath(pathname: string): AccountFeature | undefined {
   const normalized = normalizeDashboardPath(pathname);
-  const internalDocsHref = DASHBOARD_FEATURE_HREFS[INTERNAL_DOCS_FEATURE];
-  if (normalized === internalDocsHref || normalized.startsWith(`${internalDocsHref}/`)) {
-    return INTERNAL_DOCS_FEATURE;
+  for (const feature of PREFIX_MATCHED_FEATURES) {
+    const href = DASHBOARD_FEATURE_HREFS[feature];
+    if (normalized === href || normalized.startsWith(`${href}/`)) return feature;
   }
   for (const feature of GENERATION_FEATURES) {
     if (DASHBOARD_FEATURE_HREFS[feature] === normalized) return feature;

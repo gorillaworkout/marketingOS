@@ -55,3 +55,7 @@ docs/API.md
 backups/
 
 .worktrees/
+
+# SEO OS: Google service account keys live on the server only (GSC_SA_KEY_PATH)
+gsc-sa*.json
+*service-account*.json

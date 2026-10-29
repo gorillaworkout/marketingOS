@@ -2,9 +2,11 @@
 import { useEffect, useState, useCallback } from 'react';
 import { passwordInputType } from '@/lib/password-visibility';
 import { Button, DataTableFrame, EmptyState, LoadingState, MetricCard, Panel, PageHeader, PageStack, SectionHeader, StatusBadge, TextInput } from '@/components/ui/dashboard';
-import { ACCOUNT_FEATURES, ACCOUNT_FEATURE_LABELS, type AccountFeature } from '@/lib/authorization';
+import { ACCOUNT_FEATURES, ACCOUNT_FEATURE_LABELS, SEO_FEATURE, type AccountFeature } from '@/lib/authorization';
 
 const ASSIGNABLE_FEATURES: readonly AccountFeature[] = ACCOUNT_FEATURES;
+/** SEO OS is opt-in: a new department starts with every feature except SEO OS. */
+const NEW_DEPARTMENT_FEATURES: readonly AccountFeature[] = ASSIGNABLE_FEATURES.filter(feature => feature !== SEO_FEATURE);
 
 interface User {
   id: string;
@@ -33,7 +35,7 @@ export default function AccountsClient() {
   const [users, setUsers] = useState<User[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
   const [departmentName, setDepartmentName] = useState('');
-  const [departmentFeatures, setDepartmentFeatures] = useState<AccountFeature[]>([...ASSIGNABLE_FEATURES]);
+  const [departmentFeatures, setDepartmentFeatures] = useState<AccountFeature[]>([...NEW_DEPARTMENT_FEATURES]);
   const [loading, setLoading] = useState(true);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [showAddModal, setShowAddModal] = useState(false);
@@ -216,7 +218,7 @@ export default function AccountsClient() {
     const response = await fetch('/api/admin/departments', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: departmentName, features: departmentFeatures }) });
     const data = await response.json();
     if (!response.ok) return showToast(data.error || 'Failed to create department', 'error');
-    setDepartmentName(''); setDepartmentFeatures([...ASSIGNABLE_FEATURES]); fetchDepartments(); showToast('Department created', 'success');
+    setDepartmentName(''); setDepartmentFeatures([...NEW_DEPARTMENT_FEATURES]); fetchDepartments(); showToast('Department created', 'success');
   };
   const toggleDepartmentFeature = async (department: Department, feature: string) => {
     const features = department.permitted_features.includes(feature) ? department.permitted_features.filter(value => value !== feature) : [...department.permitted_features, feature];

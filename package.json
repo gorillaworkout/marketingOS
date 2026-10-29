@@ -9,6 +9,7 @@
     "lint": "eslint",
     "db:migrate": "tsx scripts/migrate.ts",
     "research:watches": "tsx scripts/run-ai-research-watches.ts",
+    "seo:sync": "tsx scripts/seo-sync.ts",
     "db:import-sqlite": "tsx scripts/migrate-sqlite-to-postgres.ts"
   },
   "dependencies": {
