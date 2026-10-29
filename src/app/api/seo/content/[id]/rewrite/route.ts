@@ -4,6 +4,8 @@ import { resolveBrandGuideline, rewriteSeoDraft } from '@/lib/seo/content-ai';
 import { MAX_INSTRUCTIONS_LENGTH } from '@/lib/seo/content-prompt';
 import { editResetsStatus } from '@/lib/seo/content-status';
 import { VersionConflictError, getDraft, saveVersion } from '@/lib/seo/content-store';
+import { getSop } from '@/lib/seo/sop-store';
+import { sopInstructions } from '@/lib/seo/sops';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 300;
@@ -27,10 +29,13 @@ export async function POST(request: NextRequest, context: RouteContext) {
 
   // Reuse the guideline the article was started with; fall back to the default if it was deleted.
   const guideline = await resolveBrandGuideline(null, draft.brand_guideline_id) ?? await resolveBrandGuideline(null, null);
+  // The SOP the article was started with (if it still exists) keeps applying to rewrites.
+  const sop = draft.sop_id ? await getSop(draft.sop_id) : undefined;
   let result;
   try {
     result = await rewriteSeoDraft(auth.id, {
       keyword: draft.keyword, title: draft.title, metaDescription: draft.meta_description, bodyMarkdown: draft.body_markdown, instruction,
+      sop: sop ? sopInstructions(sop) : null,
     }, guideline!);
   } catch (error) {
     console.error('SEO content rewrite failed:', error instanceof Error ? error.message : error);

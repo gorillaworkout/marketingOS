@@ -6,6 +6,8 @@ import { isContentStatus } from '@/lib/seo/content-status';
 import { QueueItemTakenError, countDraftsByStatus, createDraft, draftForQueueItem, getPendingQueueItem, listDrafts } from '@/lib/seo/content-store';
 import { siteRootHost, validateTargetUrl } from '@/lib/seo/keywords';
 import { getSeoSite } from '@/lib/seo/sites';
+import { getSop } from '@/lib/seo/sop-store';
+import { sopInstructions } from '@/lib/seo/sops';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 300;
@@ -46,6 +48,8 @@ export async function POST(request: NextRequest) {
   if ('error' in target) return NextResponse.json({ error: target.error }, { status: 400 });
   const guideline = await resolveBrandGuideline(auth.id, parsed.brandGuidelineId);
   if (!guideline) return NextResponse.json({ error: 'Brand guideline not found' }, { status: 400 });
+  const sop = parsed.sopId ? await getSop(parsed.sopId) : undefined;
+  if (parsed.sopId && !sop) return NextResponse.json({ error: 'SOP not found' }, { status: 400 });
 
   let content = { title: parsed.keyword, slug: slugify(parsed.keyword), metaDescription: '', bodyMarkdown: '' };
   let model: string | null = null;
@@ -60,7 +64,11 @@ export async function POST(request: NextRequest) {
         targetPageUrl: target.url,
         opportunityType: queueItem?.opportunity_type ?? null,
         metrics: (queueItem?.metrics ?? null) as Record<string, number> | null,
-        instructions: [parsed.instructions, queueItem?.note ? `Note from SEO OS: ${queueItem.note}` : null].filter(Boolean).join('\n') || null,
+        instructions: [
+          parsed.instructions,
+          queueItem?.note ? `Note from SEO OS: ${queueItem.note}` : null,
+          sop ? sopInstructions(sop) : null,
+        ].filter(Boolean).join('\n\n') || null,
       }, guideline);
       content = { title: draft.title, slug: draft.slug, metaDescription: draft.metaDescription, bodyMarkdown: draft.bodyMarkdown };
       model = draft.model;
@@ -86,6 +94,7 @@ export async function POST(request: NextRequest) {
       model,
       fallbackLabel,
       userId: auth.id,
+      sopId: sop?.id ?? null,
     });
     return NextResponse.json({ id, model, fallbackLabel }, { status: 201 });
   } catch (error) {
