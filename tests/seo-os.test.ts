@@ -447,3 +447,9 @@ test('no service account key material is committed or logged', () => {
   }
   assert.match(read('.gitignore'), /^gsc-sa\*\.json$/m);
 });
+
+test('SEO migrations contain no "?" because scripts/migrate.ts rewrites ? into $n placeholders', () => {
+  for (const file of ['db/migrations/035_seo_os.sql']) {
+    assert.doesNotMatch(read(file), /\?/, file);
+  }
+});

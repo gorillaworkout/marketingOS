@@ -45,7 +45,7 @@ CREATE TABLE IF NOT EXISTS seo_sites (
   created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT seo_sites_gsc_property_format CHECK (
-    gsc_property IS NULL OR gsc_property ~ '^(sc-domain:[a-z0-9.-]+|https?://[^[:space:]]+/)$'
+    gsc_property IS NULL OR gsc_property ~ '^(sc-domain:[a-z0-9.-]+|(http|https)://[^[:space:]]+/)$'
   )
 );
 
