@@ -8,6 +8,7 @@ export const GENERATION_FEATURES = [
   'article-market-news',
   'market-research',
   'ai-research',
+  'seo-content',
 ] as const;
 
 export type GenerationFeature = typeof GENERATION_FEATURES[number];
@@ -56,7 +57,21 @@ export const FEATURE_METADATA: Record<GenerationFeature, FeatureMetadata> = {
     description: 'Ask anything — research, analysis, and Q&A powered by GorillaWorkout LLM.',
     adminOnly: false,
   },
+  'seo-content': {
+    key: 'seo-content',
+    label: 'SEO Content Studio',
+    description: 'SEO article drafts and AI rewrites in SEO OS Content Studio.',
+    adminOnly: false,
+  },
 };
+
+/**
+ * Account feature that unlocks a generation feature's model preference.
+ * Most map to themselves; SEO Content Studio lives inside SEO OS.
+ */
+export function accountFeatureForGeneration(feature: GenerationFeature): string {
+  return feature === 'seo-content' ? 'seo' : feature;
+}
 
 // Every id here must exist in AVAILABLE_MODELS and pass scripts/probe-gateway-models.ts.
 export const DEFAULT_FEATURE_ASSIGNMENTS: Record<GenerationFeature, {
@@ -98,6 +113,10 @@ export const DEFAULT_FEATURE_ASSIGNMENTS: Record<GenerationFeature, {
       CLAUDE_OPUS_5_5_MODEL,
     ],
     defaultModel: PREFERRED_CODEX_MODEL,
+  },
+  'seo-content': {
+    allowedModels: ['ag/gemini-3-flash', PREFERRED_CODEX_MODEL, CLAUDE_SONNET_5_MODEL, CLAUDE_OPUS_5_MODEL, CLAUDE_SONNET_5_5_MODEL, CLAUDE_OPUS_5_5_MODEL],
+    defaultModel: CLAUDE_SONNET_5_5_MODEL,
   },
 };
 

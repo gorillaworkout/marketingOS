@@ -156,3 +156,27 @@ Migration `036_seo_opportunities.sql` adds `seo_keywords` and `seo_content_queue
 API: `GET /api/seo/opportunities`, `GET|POST|DELETE /api/seo/keywords` (`format=csv` to export, `dryRun=1` to validate), `GET|POST|PATCH /api/seo/content-queue`. All require the `seo` feature.
 
 Rollback: 036 only adds two tables and one index on `seo_gsc_daily`; reverting the code leaves them unused.
+
+## Phase 3: Content Studio (migration 037)
+
+No new environment variables or dependencies. Content Studio lives at **SEO OS → Content Studio** (`/dashboard/seo/content`) and is visible to anyone with the `seo` feature.
+
+**Flow**
+
+1. Start an article from a keyword plus a case study (first-hand material the AI may use), or click **Start draft** on an item sent from Opportunities. Starting from the queue moves the item to `in-progress`; publishing the article moves it to `done`.
+2. **Generate AI draft** writes title, slug, meta description and a Markdown article through the normal model fallback chain. **Start blank** skips the AI.
+3. Edit in the editor (Write / Preview). Every save, AI draft, AI rewrite and restore becomes a numbered version with author, model and fallback label. Any version can be diffed against the current one and restored (restoring creates a new version, nothing is overwritten).
+4. Status flow: `draft → review → approved → queued (publish queue) → published`. **Request changes** sends review/approved back to draft; **Remove from queue** sends queued back to approved. Editing a reviewed, approved or queued article sends it back to draft. Authors cannot approve their own article; another `seo` user or an admin must.
+5. Export Markdown (with YAML front matter) or a standalone HTML file, publish it in the site's CMS, then **Mark published** with the live URL (must be on the site's domain).
+
+**Models and brand voice**
+
+- Feature key `seo-content` (Admin → Model settings). Default `cc/claude-sonnet-5-5`; users can pick their own preference in Settings. Token usage is logged to `token_logs` with task type `seo-content`; fallbacks are recorded in `model_fallback_events` and shown as a label on the version.
+- Brand guideline picker per article: **Dupoin Futures (default)** or any guideline the user created in Brand Guidelines. Rewrites reuse the article's guideline (or the default if it was deleted). Guidelines are per-user, so there is no per-site default yet.
+
+**Data model (migration 037)**
+
+- `seo_content_drafts`: one row per article (site, optional queue item, keyword, brief, brand guideline, current content, status, current version, model/fallback, approval and publish info).
+- `seo_content_versions`: immutable history, unique `(draft_id, version)`.
+- Extends `task_model_preferences_task_type_check` with `seo-content` and seeds `feature_model_assignments` for `seo-content` (`ON CONFLICT DO NOTHING`, so admin changes are kept).
+- Rollback: `DROP TABLE seo_content_versions, seo_content_drafts;`, `DELETE FROM feature_model_assignments WHERE feature_key = 'seo-content';`, `DELETE FROM task_model_preferences WHERE task_type = 'seo-content';` and re-add the previous CHECK list without `seo-content`.
