@@ -18,6 +18,8 @@ export interface CreateRequest {
   brandGuidelineId: string | null;
   targetPageUrl: string;
   mode: 'ai' | 'blank';
+  /** Optional SEO OS SOP whose body is added to the AI instructions. */
+  sopId: string | null;
 }
 
 function text(value: unknown, max: number, label: string): string | null | { error: string } {
@@ -46,6 +48,7 @@ export function parseCreateRequest(body: unknown): CreateRequest | { error: stri
     brandGuidelineId: guideline && guideline !== DEFAULT_GUIDELINE_ID ? guideline : null,
     targetPageUrl: typeof input.targetPageUrl === 'string' ? input.targetPageUrl.trim() : '',
     mode: input.mode === 'blank' ? 'blank' : 'ai',
+    sopId: typeof input.sopId === 'string' && input.sopId.trim() ? input.sopId.trim() : null,
   };
 }
 
@@ -123,12 +126,15 @@ export interface RewritePromptInput {
   metaDescription: string;
   bodyMarkdown: string;
   instruction: string;
+  /** SOP block (see sopInstructions) the article follows, if any. */
+  sop?: string | null;
 }
 
 export function buildRewritePrompt(input: RewritePromptInput): { system: string; user: string } {
   const user = [
     `Target keyword: ${input.keyword}`,
     `Rewrite instruction: ${input.instruction}`,
+    ...(input.sop ? ['', input.sop] : []),
     '',
     'Current title:', input.title,
     'Current meta description:', input.metaDescription,

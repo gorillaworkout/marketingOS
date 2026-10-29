@@ -31,6 +31,8 @@ export interface DraftRow {
   published_at: string | null;
   approved_by_name: string | null;
   approved_at: string | null;
+  sop_id: string | null;
+  sop_title: string | null;
   created_by: string | null;
   created_by_name: string | null;
   updated_by_name: string | null;
@@ -67,12 +69,13 @@ export class QueueItemTakenError extends Error {
 const DRAFT_COLUMNS = `d.id, d.site_id, s.name AS site_name, s.site_url, d.queue_item_id, d.keyword, d.target_page_url,
   d.brand_guideline_id, d.brand_guideline_name, d.title, d.slug, d.meta_description, d.status, d.current_version,
   d.model, d.fallback_label, d.published_url, d.published_at, ua.name AS approved_by_name, d.approved_at,
-  d.created_by, uc.name AS created_by_name, uu.name AS updated_by_name, d.created_at, d.updated_at`;
+  d.sop_id, so.title AS sop_title, d.created_by, uc.name AS created_by_name, uu.name AS updated_by_name, d.created_at, d.updated_at`;
 const DRAFT_FROM = `FROM seo_content_drafts d
   JOIN seo_sites s ON s.id = d.site_id
   LEFT JOIN users uc ON uc.id = d.created_by
   LEFT JOIN users uu ON uu.id = d.updated_by
-  LEFT JOIN users ua ON ua.id = d.approved_by`;
+  LEFT JOIN users ua ON ua.id = d.approved_by
+  LEFT JOIN seo_sops so ON so.id = d.sop_id`;
 
 export interface NewDraft {
   siteId: string;
@@ -88,6 +91,7 @@ export interface NewDraft {
   model: string | null;
   fallbackLabel: string | null;
   userId: string;
+  sopId?: string | null;
 }
 
 /** Inserts the draft with version 1 and marks the queue item in-progress, atomically. */
@@ -96,11 +100,11 @@ export async function createDraft(input: NewDraft, newId: () => string = uuidv4)
   await executeTransaction(async tx => {
     await tx.execute(
       `INSERT INTO seo_content_drafts (id, site_id, queue_item_id, keyword, case_study, instructions, target_page_url, brand_guideline_id,
-         brand_guideline_name, title, slug, meta_description, body_markdown, status, current_version, model, fallback_label, created_by, updated_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', 1, ?, ?, ?, ?)`,
+         brand_guideline_name, title, slug, meta_description, body_markdown, status, current_version, model, fallback_label, created_by, updated_by, sop_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', 1, ?, ?, ?, ?, ?)`,
       [id, input.siteId, input.queueItemId, input.keyword, input.caseStudy, input.instructions, input.targetPageUrl, input.brandGuidelineId,
         input.brandGuidelineName, input.content.title, input.content.slug, input.content.metaDescription, input.content.bodyMarkdown,
-        input.model, input.fallbackLabel, input.userId, input.userId],
+        input.model, input.fallbackLabel, input.userId, input.userId, input.sopId ?? null],
     );
     await tx.execute(
       `INSERT INTO seo_content_versions (id, draft_id, version, source, title, slug, meta_description, body_markdown, model, fallback_label, created_by)

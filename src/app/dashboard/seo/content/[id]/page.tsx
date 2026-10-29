@@ -14,7 +14,7 @@ import { markdownToHtml } from '@/lib/seo/markdown';
 
 type Draft = {
   id: string; site_id: string; site_name: string; site_url: string; queue_item_id: string | null; keyword: string; case_study: string | null;
-  instructions: string | null; target_page_url: string | null; brand_guideline_name: string | null; title: string; slug: string;
+  instructions: string | null; target_page_url: string | null; brand_guideline_name: string | null; sop_id?: string | null; sop_title?: string | null; title: string; slug: string;
   meta_description: string; body_markdown: string; status: ContentStatus; current_version: number; model: string | null;
   fallback_label: string | null; published_url: string | null; published_at: string | null; approved_by_name: string | null;
   approved_at: string | null; created_by_name: string | null; updated_by_name: string | null; created_at: string; updated_at: string;
@@ -139,6 +139,7 @@ export default function ContentEditorPage() {
             Model: {draft.model ?? '—'}
             {draft.fallback_label && <StatusBadge tone="warning">{draft.fallback_label}</StatusBadge>}
             · Brand: {draft.brand_guideline_name ?? 'Dupoin Futures (default)'}
+            {draft.sop_title && <>· Follows SOP: <Link href="/dashboard/seo/sops" className="text-[var(--mos-accent-soft)] hover:underline">{draft.sop_title}</Link></>}
           </span>
           {draft.approved_by_name && <span>Approved by {draft.approved_by_name} · {formatTime(draft.approved_at)}</span>}
           {draft.published_url && <span>Live at <a href={draft.published_url} target="_blank" rel="noreferrer" className="text-[var(--mos-accent-soft)] hover:underline">{draft.published_url}</a> · {formatTime(draft.published_at)}</span>}

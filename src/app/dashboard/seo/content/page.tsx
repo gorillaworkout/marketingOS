@@ -16,9 +16,10 @@ type Draft = {
 };
 type QueueItem = { id: string; keyword: string; opportunity_type: string; target_page_url: string | null; note: string | null; requested_by_name: string | null; created_at: string };
 type Guideline = { id: string; brand_name: string };
+type Sop = { id: string; title: string; category: string };
 type Filter = ContentStatus | 'all';
 
-const EMPTY_FORM = { keyword: '', targetPageUrl: '', caseStudy: '', instructions: '', brandGuidelineId: 'default', queueItemId: '' };
+const EMPTY_FORM = { keyword: '', targetPageUrl: '', caseStudy: '', instructions: '', brandGuidelineId: 'default', queueItemId: '', sopId: '' };
 
 export default function ContentStudioPage() {
   const router = useRouter();
@@ -28,6 +29,7 @@ export default function ContentStudioPage() {
   const [list, setList] = useState<{ key: string; drafts: Draft[]; counts: Record<string, number>; error: string } | null>(null);
   const [queue, setQueue] = useState<{ key: string; items: QueueItem[] } | null>(null);
   const [guidelines, setGuidelines] = useState<Guideline[]>([]);
+  const [sops, setSops] = useState<Sop[]>([]);
   const [form, setForm] = useState(EMPTY_FORM);
   const [busy, setBusy] = useState<'' | 'ai' | 'blank'>('');
   const [message, setMessage] = useState('');
@@ -51,6 +53,9 @@ export default function ContentStudioPage() {
     fetchJson<{ guidelines: Guideline[] }>('/api/brand-guidelines').then(({ ok, data }) => {
       if (!cancelled && ok) setGuidelines(data.guidelines);
     }).catch(() => undefined);
+    fetchJson<{ sops: Sop[] }>('/api/seo/sops').then(({ ok, data }) => {
+      if (!cancelled && ok) setSops(data.sops);
+    }).catch(() => undefined);
     return () => { cancelled = true; };
   }, []);
 
@@ -70,7 +75,7 @@ export default function ContentStudioPage() {
     try {
       const { ok, status, data } = await fetchJson<{ id: string; draftId?: string | null }>('/api/seo/content', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ siteId: site.id, mode, ...form, queueItemId: form.queueItemId || undefined }),
+        body: JSON.stringify({ siteId: site.id, mode, ...form, queueItemId: form.queueItemId || undefined, sopId: form.sopId || undefined }),
       });
       if (ok) { router.push(`/dashboard/seo/content/${data.id}`); return; }
       if (status === 409 && data.draftId) { router.push(`/dashboard/seo/content/${data.draftId}`); return; }
@@ -123,6 +128,12 @@ export default function ContentStudioPage() {
           <Select value={form.brandGuidelineId} onChange={set('brandGuidelineId')}>
             <option value="default">Dupoin Futures (default)</option>
             {guidelines.map(item => <option key={item.id} value={item.id}>{item.brand_name}</option>)}
+          </Select>
+        </label>
+        <label className="grid gap-1 text-xs text-[var(--mos-text-muted)]">Follow SOP (optional)
+          <Select value={form.sopId} onChange={set('sopId')}>
+            <option value="">No SOP</option>
+            {sops.map(item => <option key={item.id} value={item.id}>{item.title}</option>)}
           </Select>
         </label>
       </div>

@@ -180,3 +180,102 @@ No new environment variables or dependencies. Content Studio lives at **SEO OS �
 - `seo_content_versions`: immutable history, unique `(draft_id, version)`.
 - Extends `task_model_preferences_task_type_check` with `seo-content` and seeds `feature_model_assignments` for `seo-content` (`ON CONFLICT DO NOTHING`, so admin changes are kept).
 - Rollback: `DROP TABLE seo_content_versions, seo_content_drafts;`, `DELETE FROM feature_model_assignments WHERE feature_key = 'seo-content';`, `DELETE FROM task_model_preferences WHERE task_type = 'seo-content';` and re-add the previous CHECK list without `seo-content`.
+
+## Phase 4: AI Visibility + SOPs (migration 038)
+
+No new environment variables or dependencies. Checks go through the existing llmdupoin gateway (`generateContent`) with the normal retry and model fallback.
+
+### AI Visibility (`/dashboard/seo/visibility`)
+
+> Model answers via API, not what ChatGPT.com, Perplexity or Google AI Overviews show users.
+
+The page always shows this label. API answers have no live web search or personalisation, so treat the numbers as a trend signal, not a copy of what users see.
+
+**Flow**
+
+1. Add prompts per site: the questions a customer would ask an AI assistant. Each prompt has **brand terms** and **competitors** (`Name` or `Name|alias|alias`). You can add them one by one or import a CSV with the columns `prompt, brand_terms, competitors, active`. Put several terms in one cell separated by `;`. **Check file** is a dry run; re-importing a prompt updates it. Limits: 500 prompts per site, 20 terms per list.
+2. A run asks every selected prompt on every configured model and stores one row per answer in `seo_ai_checks`. Each row holds the response, `mentioned`, `rank_in_answer`, `cited_urls`, `site_cited`, competitors mentioned, tokens, cost, the answering model and the fallback label.
+3. Mention detection:
+   - Brand terms are matched as whole words, case-insensitively. Empty terms fall back to the site name. The site's domain always counts, and so does any link to it.
+   - Rank is the position in the answer's numbered or bulleted list. Without a list, it is the order of first mention among the brand and competitors.
+   - The optional **LLM classifier** (off by default) runs only when no term matched. It must quote evidence from the answer, and its verdict is rejected if the quote is not in the answer.
+4. Report:
+   - Mention rate per model, by week (Asia/Jakarta weeks).
+   - Share of voice: the brand vs competitors, as a share of all entity mentions.
+   - A latest-answer matrix (prompt × model). Click a cell to read the full answer and its cited URLs.
+   - Answers that the gateway served from a fallback model, and failed calls, are counted separately. They are left out of the rates so model comparisons stay honest.
+
+**Settings (admin, per site)**
+
+- Models: default `cc/claude-sonnet-5-5`, `cx/gpt-5.6-sol`, `ag/gemini-3-flash`. You can pick any model in the catalog, up to 10.
+- Classifier on/off and classifier model (default `ag/gemini-3-flash`).
+- Max checks per run: default 60, hard cap 300.
+- Config lives in `seo_ai_visibility_settings`, not in Admin → Model settings. A check list is a set of models to compare, not a fallback chain.
+
+**Runs, lock and cap**
+
+- **Run now** (admin only) starts a background run and returns at once. The page refreshes every 5 s while the run is going.
+- One run per site at a time. A unique partial index on `seo_ai_runs (site_id) WHERE status = 'running'` enforces this. A second start gets HTTP 409.
+- A run still marked `running` after 3 hours (for example, after a server restart) is marked failed when the next run starts.
+- Cap: checks = prompts × models, up to the cap. If there are too many prompts, the least recently checked prompts go first. The rest wait for the next run and are shown as "prompts left for the next run".
+- Run status: `succeeded`, `partial` (some checks failed), or `failed` (no answers).
+
+**Weekly cron (not installed automatically)**
+
+```bash
+# Every Monday 07:00 WIB (00:00 UTC). Runs every active site that has active prompts.
+0 0 * * 1 cd /home/ubuntu/apps/marketingos && npm run seo:visibility >> /home/ubuntu/logs/seo-visibility.log 2>&1
+```
+
+Options:
+- `--site <id>` runs one site.
+- `--max-checks <n>` overrides the cap for this run (1 to 300).
+- `--user <id|username>` sets the user that `token_logs` are recorded under. The default is the oldest admin.
+
+A site that is already running, or that has no active prompts, is skipped.
+
+**Cost notes**
+
+- One check is one gateway call: up to 1,500 output tokens at temperature 0.7, and the system prompt is neutral. The classifier, when enabled, adds one short call (200 tokens, temperature 0) only for answers with no term match.
+- Worst case per run = cap (60) × one answer, plus up to 60 classifier calls.
+- Example: 20 prompts × 3 models = 60 checks per week, about 52 runs a year.
+- Cost is stored per check, summed per run and shown in the runs table. Token usage also goes to `token_logs` with task type `seo-visibility`, and fallbacks go to `model_fallback_events`.
+- To spend less, lower the cap, use fewer models, or pause prompts.
+
+API (all require the `seo` feature; admin-only routes are marked):
+- `GET|POST /api/seo/visibility/prompts` (`import=1` with a CSV body, `dryRun=1`)
+- `PUT|DELETE /api/seo/visibility/prompts/[id]`
+- `GET|PUT /api/seo/visibility/settings` (PUT is admin only)
+- `GET|POST /api/seo/visibility/runs` (POST is admin only)
+- `GET /api/seo/visibility/report?weeks=12`
+- `GET /api/seo/visibility/checks/[id]`
+
+### SOPs (`/dashboard/seo/sops`)
+
+- These are Markdown playbooks shared by all sites. Anyone with the `seo` feature can create and edit them, with Write / Preview. Only admins can delete them.
+- Migration 038 seeds five templates: on-page SEO checklist, content refresh, internal linking, schema and structured data, and keyword research from Search Console. Seeds use fixed ids with `ON CONFLICT DO NOTHING`, so edits are kept when migrations run again.
+- Content Studio: pick **Follow SOP** on a new article. The SOP (first 6,000 characters) is added to the AI instructions, and rewrites of that article use it too. The editor shows "Follows SOP: …". Deleting an SOP keeps the articles and clears their link.
+
+### Data model (migration 038)
+
+- `seo_ai_prompts`: unique per site on `lower(btrim(prompt))`.
+- `seo_ai_visibility_settings`: one row per site.
+- `seo_ai_runs`: one-running lock index.
+- `seo_ai_checks`: deleting a prompt keeps its checks, with `prompt_id` set to null.
+- `seo_sops`, plus `seo_content_drafts.sop_id` (`ON DELETE SET NULL`).
+
+### Rollback
+
+1. Revert the PR. The tables can stay; nothing else reads them.
+2. To remove the data as well, run:
+
+```sql
+BEGIN;
+DROP TABLE IF EXISTS seo_ai_checks, seo_ai_runs, seo_ai_prompts, seo_ai_visibility_settings;
+ALTER TABLE seo_content_drafts DROP COLUMN IF EXISTS sop_id;
+DROP TABLE IF EXISTS seo_sops;
+DELETE FROM schema_migrations WHERE name = '038_seo_ai_visibility_sops.sql';
+COMMIT;
+```
+
+3. If you installed the cron line, remove it.
