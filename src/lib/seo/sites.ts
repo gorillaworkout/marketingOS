@@ -1,4 +1,4 @@
-import { queryAll } from '@/lib/database';
+import { queryAll, queryOne } from '@/lib/database';
 
 export interface SeoSiteRow {
   id: string;
@@ -27,4 +27,12 @@ export function connectionStatus(site: Pick<SeoSiteRow, 'gsc_property' | 'last_s
 
 export function defaultSiteId(sites: Array<Pick<SeoSiteRow, 'id' | 'active'>>): string | null {
   return sites.find(site => site.active)?.id ?? null;
+}
+
+export async function getSeoSite(siteId: string | null | undefined): Promise<SeoSiteRow | undefined> {
+  if (!siteId) return undefined;
+  return queryOne<SeoSiteRow & Record<string, unknown>>(
+    'SELECT id, name, site_url, gsc_property, active, last_synced_at FROM seo_sites WHERE id = ?',
+    [siteId],
+  );
 }

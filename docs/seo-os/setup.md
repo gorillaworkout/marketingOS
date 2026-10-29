@@ -136,3 +136,23 @@ the same incremental pull for the selected site.
 
 Rollback: SEO OS only adds tables, a department, and a feature value. To hide it,
 untick SEO OS on departments. The tables can stay.
+
+## Phase 2: Opportunities, keywords, and the Content Studio hand-off
+
+Migration `036_seo_opportunities.sql` adds `seo_keywords` and `seo_content_queue`. It is idempotent and needs no new environment variables or packages.
+
+- **Opportunities** (`/dashboard/seo/opportunities`, `seo` feature): per site, last 28 days by default (7 days to 16 months, or a custom range), with a minimum-impressions filter.
+  - **Push**: queries at position 11-20 (impression-weighted, rounded the way Search Console shows it: 10.5 ≤ position < 20.5).
+  - **Re-optimize**: position 21-30 (20.5 ≤ position < 30.5).
+  - **No page**: tracked keywords with no `target_page_url` and no Search Console impressions in the range, plus queries whose best page (most clicks, then impressions) is the homepage.
+  - Search Console only reports queries with at least one impression, so zero-impression keywords can only come from the keyword list. The page says so.
+- **Keywords** (`/dashboard/seo/keywords`, `seo` feature): CSV import with columns `keyword`, `target_page_url` (optional), `intent` (optional: informational, commercial, transactional, navigational; `info`/`comm`/`trans`/`nav` accepted).
+  - UTF-8 with or without BOM, UTF-16 LE/BE (Excel "Unicode text"), and comma, semicolon, or tab separators. Max 2 MB and 5,000 rows.
+  - "Check file" validates without saving. Duplicates in a file are merged (first wins). Re-importing updates the keyword; empty cells keep the saved target and intent.
+  - Target pages must be on the site's domain (subdomains allowed for `sc-domain:` properties).
+  - Export is formula-safe (cells starting with `=`, `+`, `-`, `@` get a leading apostrophe) and re-imports unchanged.
+- **Send to Content Studio** writes a `pending` row to `seo_content_queue` (one pending item per keyword per site). Phase 3 Content Studio consumes it. Pending items can be removed (`dismissed`) from the Opportunities page.
+
+API: `GET /api/seo/opportunities`, `GET|POST|DELETE /api/seo/keywords` (`format=csv` to export, `dryRun=1` to validate), `GET|POST|PATCH /api/seo/content-queue`. All require the `seo` feature.
+
+Rollback: 036 only adds two tables and one index on `seo_gsc_daily`; reverting the code leaves them unused.
