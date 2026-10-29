@@ -23,7 +23,7 @@ type IconName =
   | 'home' | 'social' | 'video' | 'event' | 'article' | 'research'
   | 'brand' | 'image' | 'calendar' | 'template' | 'knowledge' | 'history'
   | 'graph' | 'tokens' | 'analytics' | 'accounts' | 'models' | 'docs'
-  | 'seo' | 'settings';
+  | 'seo' | 'settings' | 'target' | 'keyword';
 
 type IconCircle = { cx: number; cy: number; r: number };
 type IconMark = string | IconCircle;
@@ -47,6 +47,8 @@ const iconPaths: Record<IconName, readonly IconMark[]> = {
   accounts: ['M16 20v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2m7-10a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm8 2a4 4 0 0 1 4 4v2m-4-10a4 4 0 0 0 0-8'],
   models: ['M12 3 4 7v10l8 4 8-4V7l-8-4Zm-8 4 8 4 8-4m-8 4v10'],
   seo: ['M3 17l6-6 4 4 8-8M15 7h6v6'],
+  target: [{ cx: 12, cy: 12, r: 9 }, { cx: 12, cy: 12, r: 5 }, { cx: 12, cy: 12, r: 1 }],
+  keyword: ['M4 7V4h16v3M9 20h6M12 4v16'],
   settings: ['M4 6h10m4 0h2M4 12h4m4 0h8M4 18h12', { cx: 16, cy: 6, r: 2 }, { cx: 10, cy: 12, r: 2 }, { cx: 18, cy: 18, r: 2 }],
   // Lucide circle-help: a question mark, readable at nav size beside the document and book icons.
   docs: [
@@ -142,6 +144,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       label: 'SEO OS',
       items: [
         { href: '/dashboard/seo', label: 'SEO overview', icon: 'seo', feature: 'seo' },
+        { href: '/dashboard/seo/opportunities', label: 'Opportunities', icon: 'target', feature: 'seo' },
+        { href: '/dashboard/seo/keywords', label: 'Keywords', icon: 'keyword', feature: 'seo' },
         { href: '/dashboard/seo/settings', label: 'SEO settings', icon: 'settings', adminOnly: true },
       ],
     },

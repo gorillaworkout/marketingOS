@@ -449,7 +449,7 @@ test('no service account key material is committed or logged', () => {
 });
 
 test('SEO migrations contain no "?" because scripts/migrate.ts rewrites ? into $n placeholders', () => {
-  for (const file of ['db/migrations/035_seo_os.sql']) {
+  for (const file of ['db/migrations/035_seo_os.sql', 'db/migrations/036_seo_opportunities.sql']) {
     assert.doesNotMatch(read(file), /\?/, file);
   }
 });
