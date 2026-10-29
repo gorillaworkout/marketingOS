@@ -78,3 +78,20 @@ export async function requireFeature(request: NextRequest, feature: AccountFeatu
   if (!canAccessFeature(user, feature)) return { error: `Forbidden: your department does not allow ${ACCOUNT_FEATURE_LABELS[feature]}`, status: 403 };
   return user;
 }
+
+/**
+ * Server Component variant of getAuthorizedUser: resolves a session id read
+ * with `cookies()` to the same principal. Returns null for a missing or
+ * expired session.
+ */
+export async function getAuthorizedUserBySessionId(sessionId: string | undefined): Promise<AuthorizedUser | null> {
+  if (!sessionId) return null;
+  const user = await queryOne<{ id: string; role: string; department_id: string | null; department_name: string | null; permitted_features: string[] | null }>(`
+    SELECT u.id, u.role, u.department_id, d.name AS department_name, d.permitted_features
+    FROM sessions s JOIN users u ON u.id = s.user_id LEFT JOIN departments d ON d.id = u.department_id
+    WHERE s.id = ? AND s.expires_at > CURRENT_TIMESTAMP
+  `, [sessionId]);
+  if (!user) return null;
+  const features = enabledFeaturesForUser({ role: user.role, features: user.permitted_features || [] });
+  return { id: user.id, role: user.role, departmentId: user.department_id, departmentName: user.department_name, features };
+}

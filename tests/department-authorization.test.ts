@@ -26,3 +26,13 @@ test('Internal Docs alone does not count as a generation feature', () => {
   assert.equal(hasGenerationFeature({ role: 'member', features: ['social-post', 'internal-docs'] }), true);
   assert.equal(hasGenerationFeature({ role: 'admin', features: [] }), true);
 });
+
+test('SEO OS is a department feature that does not grant generation', () => {
+  const operations = { role: 'member' as const, features: ['seo', 'internal-docs'] };
+  assert.ok(ACCOUNT_FEATURES.includes('seo'));
+  assert.equal(canAccessFeature(operations, 'seo'), true);
+  assert.equal(canAccessFeature({ role: 'member', features: ['social-post'] }, 'seo'), false);
+  assert.equal(canAccessFeature({ role: 'admin', features: [] }, 'seo'), true);
+  assert.equal(hasGenerationFeature(operations), false);
+  assert.deepEqual(enabledFeaturesForUser(operations), ['internal-docs', 'seo']);
+});

@@ -22,7 +22,8 @@ interface User {
 type IconName =
   | 'home' | 'social' | 'video' | 'event' | 'article' | 'research'
   | 'brand' | 'image' | 'calendar' | 'template' | 'knowledge' | 'history'
-  | 'graph' | 'tokens' | 'analytics' | 'accounts' | 'models' | 'docs';
+  | 'graph' | 'tokens' | 'analytics' | 'accounts' | 'models' | 'docs'
+  | 'seo' | 'settings';
 
 type IconCircle = { cx: number; cy: number; r: number };
 type IconMark = string | IconCircle;
@@ -45,6 +46,8 @@ const iconPaths: Record<IconName, readonly IconMark[]> = {
   analytics: ['M4 20V10m6 10V4m6 16v-7m4 7H2'],
   accounts: ['M16 20v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2m7-10a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm8 2a4 4 0 0 1 4 4v2m-4-10a4 4 0 0 0 0-8'],
   models: ['M12 3 4 7v10l8 4 8-4V7l-8-4Zm-8 4 8 4 8-4m-8 4v10'],
+  seo: ['M3 17l6-6 4 4 8-8M15 7h6v6'],
+  settings: ['M4 6h10m4 0h2M4 12h4m4 0h8M4 18h12', { cx: 16, cy: 6, r: 2 }, { cx: 10, cy: 12, r: 2 }, { cx: 18, cy: 18, r: 2 }],
   // Lucide circle-help: a question mark, readable at nav size beside the document and book icons.
   docs: [
     { cx: 12, cy: 12, r: 10 },
@@ -99,7 +102,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       const data = await response.json();
       if (data.authenticated) {
         setUser(data.user);
-        const adminOnlyPages = ['/dashboard/tokens', '/dashboard/analytics', '/dashboard/accounts', '/dashboard/templates', '/dashboard/calendar', '/dashboard/knowledge', '/dashboard/knowledge-graph', '/dashboard/brand-guidelines', '/dashboard/history', '/dashboard/ai-research/admin'];
+        const adminOnlyPages = ['/dashboard/tokens', '/dashboard/analytics', '/dashboard/accounts', '/dashboard/templates', '/dashboard/calendar', '/dashboard/knowledge', '/dashboard/knowledge-graph', '/dashboard/brand-guidelines', '/dashboard/history', '/dashboard/ai-research/admin', '/dashboard/seo/settings'];
         const principal = { role: data.user.role, features: data.user.enabledFeatures || [] };
         if (data.user.role !== 'admin' && (adminOnlyPages.includes(pathname) || shouldBlockDashboardGenerationPath(principal, pathname))) {
           router.replace('/dashboard');
@@ -134,6 +137,13 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     {
       label: 'Create',
       items: generateItems,
+    },
+    {
+      label: 'SEO OS',
+      items: [
+        { href: '/dashboard/seo', label: 'SEO overview', icon: 'seo', feature: 'seo' },
+        { href: '/dashboard/seo/settings', label: 'SEO settings', icon: 'settings', adminOnly: true },
+      ],
     },
     {
       label: 'Library',

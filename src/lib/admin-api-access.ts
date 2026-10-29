@@ -6,6 +6,8 @@ const ADMIN_ONLY_API_PREFIXES = [
   '/api/calendar',
   '/api/knowledge',
   '/api/brand-guidelines',
+  '/api/seo/sync',
+  '/api/seo/settings',
 ];
 
 /** Exact paths a signed-in member may call even when the prefix is admin-only. */
