@@ -3,6 +3,7 @@ import { execute } from '@/lib/database';
 import { getAuthorizedUser } from '@/lib/auth';
 import {
   GENERATION_FEATURES,
+  accountFeatureForGeneration,
   getFeatureModelOptions,
   isGenerationFeature,
   resolveFeatureModel,
@@ -16,7 +17,7 @@ export async function GET(request: NextRequest) {
   const visibleFeatures = GENERATION_FEATURES.filter(feature => (
     auth.role === 'admin'
     || (!['article-market-news', 'market-research'].includes(feature)
-      && auth.features.some(enabledFeature => enabledFeature === feature))
+      && auth.features.some(enabledFeature => enabledFeature === accountFeatureForGeneration(feature)))
   ));
 
   const features = await Promise.all(visibleFeatures.map(async feature => {
@@ -43,7 +44,7 @@ export async function PUT(request: NextRequest) {
   if (!isGenerationFeature(feature)) {
     return NextResponse.json({ error: 'Invalid feature' }, { status: 400 });
   }
-  if (auth.role !== 'admin' && !auth.features.some(enabledFeature => enabledFeature === feature)) {
+  if (auth.role !== 'admin' && !auth.features.some(enabledFeature => enabledFeature === accountFeatureForGeneration(feature))) {
     return NextResponse.json({ error: 'Forbidden: feature is not enabled for this user' }, { status: 403 });
   }
 

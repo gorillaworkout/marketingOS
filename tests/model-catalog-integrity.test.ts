@@ -111,6 +111,8 @@ test('every workflow allowlist includes Sol, Claude 5, and Claude 5.5 and drops 
     if (feature === 'article-market-news' || feature === 'market-research') {
       assert.equal(assignment.defaultModel, CLAUDE_SONNET_5_5_MODEL, `${feature} should default to Sonnet 5.5`);
       assert.ok(assignment.allowedModels.includes('lr/claude-sonnet-4.5'), `${feature} must keep Sonnet 4.5`);
+    } else if (feature === 'seo-content') {
+      assert.equal(assignment.defaultModel, CLAUDE_SONNET_5_5_MODEL, 'seo-content should default to Sonnet 5.5');
     } else if (feature === 'event-plan') {
       assert.equal(assignment.defaultModel, CLAUDE_SONNET_5_5_MODEL, 'event-plan should default to Sonnet 5.5');
     } else {
