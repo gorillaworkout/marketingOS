@@ -148,6 +148,52 @@ export interface GscClientOptions {
   serviceAccountEmail?: string;
 }
 
+export const MAX_GOOGLE_ERROR_LENGTH = 400;
+const MAX_GOOGLE_MESSAGE_LENGTH = 300;
+
+/** Strips anything that looks like a credential before Google's text is stored or shown. */
+function redactSecrets(text: string): string {
+  return text
+    .replace(/-----BEGIN [^-]*-----[\s\S]*?(-----END [^-]*-----|$)/g, '[redacted]')
+    .replace(/\bBearer\s+\S+/gi, 'Bearer [redacted]')
+    .replace(/\bya29\.[\w.-]+/g, '[redacted]')
+    .replace(/\bAIza[\w-]{20,}/g, '[redacted]')
+    .replace(/\beyJ[\w-]+\.[\w-]+(\.[\w-]+)?/g, '[redacted]');
+}
+
+function clip(text: string, max: number): string {
+  return text.length > max ? `${text.slice(0, max - 1).trimEnd()}…` : text;
+}
+
+/**
+ * Turns a Google API error body into a short, safe summary such as
+ * "PERMISSION_DENIED (SERVICE_DISABLED, accessNotConfigured): <message>".
+ * Returns '' for empty, non-JSON or unrelated bodies (their raw text is never echoed).
+ */
+export function describeGoogleError(bodyText: string): string {
+  let parsed: unknown;
+  try { parsed = JSON.parse(bodyText); } catch { return ''; }
+  const raw = parsed && typeof parsed === 'object' ? (parsed as { error?: unknown }).error : undefined;
+  if (typeof raw === 'string') return clip(redactSecrets(raw.replace(/\s+/g, ' ').trim()), MAX_GOOGLE_ERROR_LENGTH);
+  if (!raw || typeof raw !== 'object') return '';
+  const error = raw as { status?: unknown; message?: unknown; errors?: unknown; details?: unknown };
+  const word = (value: unknown) => (typeof value === 'string' && /^[\w.-]{1,64}$/.test(value) ? value : '');
+  const reasons: string[] = [];
+  for (const list of [error.details, error.errors]) {
+    if (!Array.isArray(list)) continue;
+    for (const item of list) {
+      const reason = word(item && typeof item === 'object' ? (item as { reason?: unknown }).reason : undefined);
+      if (reason && !reasons.includes(reason)) reasons.push(reason);
+    }
+  }
+  const status = word(error.status);
+  const message = typeof error.message === 'string'
+    ? clip(redactSecrets(error.message.replace(/\s+/g, ' ').trim()), MAX_GOOGLE_MESSAGE_LENGTH)
+    : '';
+  const head = [status, reasons.length ? `(${reasons.slice(0, 4).join(', ')})` : ''].filter(Boolean).join(' ');
+  return clip([head, message].filter(Boolean).join(': '), MAX_GOOGLE_ERROR_LENGTH);
+}
+
 const RETRYABLE_STATUSES = new Set([429, 500, 502, 503, 504]);
 
 function retryDelayMs(attempt: number, baseDelayMs: number, retryAfter: string | null): number {
@@ -193,15 +239,16 @@ export function createGscClient(tokens: AccessTokenProvider, options: GscClientO
           await sleep(retryDelayMs(attempt, baseDelayMs, response.headers.get('retry-after')));
           continue;
         }
-        const detail = await response.json().catch(() => ({})) as { error?: { message?: string } };
+        const google = describeGoogleError(await response.text().catch(() => ''));
         if (response.status === 403) {
           const who = options.serviceAccountEmail ? ` (${options.serviceAccountEmail})` : '';
-          throw new SeoConfigError(`The service account${who} has no access to Search Console property "${property}". Ask a property Owner to add it as a Restricted user, or check that the Search Console API is enabled.`, 'no-access');
+          const reason = google ? ` Google said: ${google}` : '';
+          throw new SeoConfigError(`The service account${who} has no access to Search Console property "${property}". Ask a property Owner to add it as a Restricted user, or check that the Search Console API is enabled.${reason}`, 'no-access');
         }
         if (response.status === 404) {
           throw new SeoConfigError(`Search Console property "${property}" was not found. Check the property type (sc-domain:example.com vs https://example.com/).`, 'property-not-found');
         }
-        throw new GscApiError(`Search Console API error ${response.status}: ${detail.error?.message || response.statusText}`, response.status);
+        throw new GscApiError(`Search Console API error ${response.status}: ${google || response.statusText}`, response.status);
       }
     },
   };

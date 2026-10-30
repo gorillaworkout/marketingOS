@@ -1,6 +1,7 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { useAutoRefresh } from '@/components/seo/autoRefresh';
 import { Button, DataTableFrame, FormField, LoadingState, PageHeader, PageStack, Panel, StatusBadge, TextInput } from '@/components/ui/dashboard';
 
 type Site = { id: string; name: string; site_url: string; gsc_property: string | null; active: boolean; last_synced_at: string | null };
@@ -11,22 +12,42 @@ export default function SeoSettingsPage() {
   const [settings, setSettings] = useState<Settings | null>(null);
   const [error, setError] = useState('');
 
-  const [version, setVersion] = useState(0);
-  const reload = useCallback(async () => { setVersion(current => current + 1); }, []);
+  // One in-flight request at a time; a reload requested mid-flight (e.g. after saving) runs once more afterwards.
+  const inFlight = useRef<Promise<void> | null>(null);
+  const again = useRef(false);
+  const mounted = useRef(true);
+  const load = useCallback((): Promise<void> => {
+    if (inFlight.current) return inFlight.current;
+    const run = async () => {
+      do {
+        again.current = false;
+        try {
+          const response = await fetch('/api/seo/settings', { cache: 'no-store' });
+          const data = await response.json().catch(() => ({}));
+          if (!mounted.current) return;
+          if (!response.ok) { setError(data.error || 'Could not load SEO settings.'); continue; }
+          setError('');
+          setSettings(data);
+        } catch {
+          if (mounted.current) setError('Could not load SEO settings.');
+        }
+      } while (again.current && mounted.current);
+    };
+    const request = run().finally(() => { inFlight.current = null; });
+    inFlight.current = request;
+    return request;
+  }, []);
+  const reload = useCallback(async () => { if (inFlight.current) again.current = true; await load(); }, [load]);
 
   useEffect(() => {
-    let cancelled = false;
-    fetch('/api/seo/settings')
-      .then(async response => ({ ok: response.ok, data: await response.json().catch(() => ({})) }))
-      .then(({ ok, data }) => {
-        if (cancelled) return;
-        if (!ok) { setError(data.error || 'Could not load SEO settings.'); return; }
-        setError('');
-        setSettings(data);
-      })
-      .catch(() => { if (!cancelled) setError('Could not load SEO settings.'); });
-    return () => { cancelled = true; };
-  }, [version]);
+    mounted.current = true;
+    void load();
+    return () => { mounted.current = false; };
+  }, [load]);
+
+  // Refetch on tab focus/visibility, after Sync now (any tab), and every ~60s while a run is still running.
+  const anyRunning = Boolean(settings?.runs.some(run => run.status === 'running'));
+  useAutoRefresh(load, { poll: anyRunning, intervalMs: 60_000 });
 
   if (!settings && !error) return <LoadingState label="Loading SEO settings" />;
 
