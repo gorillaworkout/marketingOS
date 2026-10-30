@@ -1,10 +1,11 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Button, DataTableFrame, EmptyState, FilterGroup, LoadingState, MetricCard, PageHeader, PageStack, Panel, Select, StatusBadge, TextInput, Toolbar,
 } from '@/components/ui/dashboard';
+import { notifySeoSyncFinished, useAutoRefresh } from '@/components/seo/autoRefresh';
 import { changeLabel, formatCtr, formatInteger, formatPosition, sparklinePoints } from '@/lib/seo/format';
 
 type ConnectionStatus = 'not-configured' | 'missing-key' | 'never-synced' | 'connected';
@@ -33,8 +34,8 @@ const STATUS_BADGE: Record<ConnectionStatus, { label: string; tone: 'neutral' | 
   connected: { label: 'Connected', tone: 'success' },
 };
 
-async function fetchJson(url: string): Promise<{ ok: boolean; data: Record<string, unknown> }> {
-  const response = await fetch(url);
+async function fetchJson(url: string, init?: RequestInit): Promise<{ ok: boolean; data: Record<string, unknown> }> {
+  const response = await fetch(url, init);
   const data = await response.json().catch(() => ({}));
   return { ok: response.ok, data };
 }
@@ -69,6 +70,15 @@ export default function SeoOverviewPage() {
 
   const site = sitesData?.sites.find(item => item.id === siteId) ?? null;
 
+  // Refresh site status (not the report) when the tab regains focus or a sync finishes in another tab.
+  const syncingRef = useRef(false);
+  const refreshStatus = useCallback(async () => {
+    if (syncingRef.current) return; // syncNow refreshes everything when it finishes
+    const { ok, data } = await fetchJson('/api/seo/sites', { cache: 'no-store' });
+    if (ok) setSitesData(data as unknown as SitesResponse);
+  }, []);
+  useAutoRefresh(refreshStatus);
+
   const reportQuery = useMemo(() => {
     if (!site || site.status !== 'connected') return null;
     const params = new URLSearchParams({ siteId: site.id });
@@ -101,14 +111,19 @@ export default function SeoOverviewPage() {
 
   const syncNow = async () => {
     if (!site) return;
-    setSyncing(true); setSyncMessage('');
+    setSyncing(true); setSyncMessage(''); syncingRef.current = true;
     try {
       const response = await fetch('/api/seo/sync', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ siteId: site.id }) });
-      const data = await response.json();
+      const data = await response.json().catch(() => ({}));
       setSyncMessage(response.ok ? `Synced ${data.daysSynced} days (${data.rangeStart} to ${data.rangeEnd}).` : data.error || 'Sync failed.');
-      setSitesVersion(version => version + 1);
+    } catch {
+      setSyncMessage('Sync failed.');
     } finally {
+      syncingRef.current = false;
       setSyncing(false);
+      // Refresh this page's status/report and tell other tabs (e.g. SEO settings → Recent sync runs).
+      setSitesVersion(version => version + 1);
+      notifySeoSyncFinished();
     }
   };
 
