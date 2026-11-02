@@ -44,53 +44,138 @@ export interface ModelInfo {
 // returned HTTP 200 with 51 ids. Codex `cx/*` below were on that list.
 // Migration 011 had removed them after a 401 on llm.gorillaworkout.id —
 // re-probe with scripts/probe-gateway-models.ts before removing them again.
-// Do not dump every `*-review` variant unless a short completion is verified.
-//
-// Claude Sonnet 5 / Opus 5 (VPS GET /v1/models on llmdupoin, 2026-09-21):
-//   cc/claude-sonnet-5, cc/claude-opus-5. Migration 011 retired cc/* after a
-//   401 on llm.gorillaworkout.id. cc/* may work again on llmdupoin —
-//   re-probe with scripts/probe-gateway-models.ts before removing.
-//   Keep Claude Sonnet 4.5 (`lr/claude-sonnet-4.5`).
-//
-// Claude Sonnet 5.5 / Opus 5.5 (VPS GET /v1/models on llmdupoin, 2026-10-02,
-// 9router 0.5.95): cc/claude-sonnet-5-5, cc/claude-opus-5-5. Catalog only —
-// chat/completions was not verified (Claude OAuth returned 503 on 2026-10-02).
-// Article Market News and Market Research default to Sonnet 5.5. Other
-// feature defaults stay put. Keep Sonnet 5 / Opus 5.
+// `*-review` variants are cataloged only when a short completion is verified
+// (the 2026-11-02 probe verified the GPT-5.6 review variants).
 //
 // Still out (do not re-add):
 //   kimi/*, tr/moonshotai/*              — retired; no Kimi API key.
 //   cmc/moonshotai/Kimi-K2.5, Kimi-K2.6  — listed on the gateway; do not catalog.
-//   cc/claude-fable-5, cc/claude-haiku-4-5-20251001 — listed; not cataloged.
-//   ag/claude-sonnet-4-6                 — Claude Sonnet 4.6 no longer exists on the gateway.
-//   ag/claude-opus-4-6-thinking, lr/claude-sonnet-4-6 — listed earlier; not cataloged.
-//   ag/gemini-3.7-*                      — 404, never existed upstream.
-//   ag/gemini-3.5-*, ag/gemini-3-flash-agent — retired (HTTP 200 retirement notice).
+//   cc/claude-fable-5-1                  — needs usage credits.
+//   cc/claude-fable-5, cc/claude-haiku-4-5-20251001 — untested; not cataloged.
 //   pecut-free                           — upstream 400 "Unsupported model mimo-auto".
 //   cx/gpt-5.3-codex-spark               — unsupported on a ChatGPT-account Codex login.
 //     A call returns 400 and 9router cools down the whole Codex account for
 //     about 30 minutes, which takes down AI Research (default cx/gpt-5.6-sol).
+//   Everything in RETIRED_MODEL_REPLACEMENTS below (dead, retirement notice,
+//   or unsupported on this account; migration 039 repoints stored rows).
+//
+// 9router v0.5.95 live probe, 2026-11-02 16:38-16:40 WIB: every id in
+// WORKING_TEXT_MODELS answered a short chat completion with HTTP 200. Ids
+// keep the exact 9router spelling, including the `[1m]` suffix on the
+// 1M-context Codex variants. Model ids only ever travel in JSON bodies and
+// <option value>, never in a URL path or query string, so the brackets are
+// safe; encode them with encodeURIComponent if that ever changes.
+const m = (id: string, name: string, tier: ModelInfo['tier']): ModelInfo =>
+  ({ id, name, tier, provider: 'gorillaworkout', input: 0, output: 0 });
+
 export const AVAILABLE_MODELS: ModelInfo[] = [
-  { id: 'ag/gemini-3-flash', name: 'Gemini 3 Flash', tier: 'budget', provider: 'gorillaworkout', input: 0, output: 0 },
-  { id: 'ag/gemini-3.6-flash-low', name: 'Gemini 3.6 Flash Low', tier: 'budget', provider: 'gorillaworkout', input: 0, output: 0 },
-  { id: 'ag/gemini-3.6-flash-medium', name: 'Gemini 3.6 Flash Medium', tier: 'balanced', provider: 'gorillaworkout', input: 0, output: 0 },
-  { id: 'ag/gemini-3.6-flash-high', name: 'Gemini 3.6 Flash High', tier: 'balanced', provider: 'gorillaworkout', input: 0, output: 0 },
-  { id: 'ag/gemini-3.1-pro-low', name: 'Gemini 3.1 Pro Low', tier: 'balanced', provider: 'gorillaworkout', input: 0, output: 0 },
-  { id: 'ag/gemini-pro-agent', name: 'Gemini Pro Agent', tier: 'balanced', provider: 'gorillaworkout', input: 0, output: 0 },
-  { id: 'lr/claude-sonnet-4.5', name: 'Claude Sonnet 4.5', tier: 'balanced', provider: 'gorillaworkout', input: 0, output: 0 },
-  { id: CLAUDE_SONNET_5_MODEL, name: 'Claude Sonnet 5', tier: 'balanced', provider: 'gorillaworkout', input: 0, output: 0 },
-  { id: CLAUDE_SONNET_5_5_MODEL, name: 'Claude Sonnet 5.5', tier: 'balanced', provider: 'gorillaworkout', input: 0, output: 0 },
-  { id: CLAUDE_OPUS_5_MODEL, name: 'Claude Opus 5', tier: 'premium', provider: 'gorillaworkout', input: 0, output: 0 },
-  { id: CLAUDE_OPUS_5_5_MODEL, name: 'Claude Opus 5.5', tier: 'premium', provider: 'gorillaworkout', input: 0, output: 0 },
-  { id: 'ag/gpt-oss-120b-medium', name: 'GPT OSS 120B Medium', tier: 'balanced', provider: 'gorillaworkout', input: 0, output: 0 },
-  // Codex chat models restored for llmdupoin. Re-probe before removing again.
-  { id: 'cx/gpt-5.6-sol', name: 'GPT-5.6 Sol', tier: 'premium', provider: 'gorillaworkout', input: 0, output: 0 },
-  { id: 'cx/gpt-5.6-terra', name: 'GPT-5.6 Terra', tier: 'balanced', provider: 'gorillaworkout', input: 0, output: 0 },
-  { id: 'cx/gpt-5.6-luna', name: 'GPT-5.6 Luna', tier: 'budget', provider: 'gorillaworkout', input: 0, output: 0 },
-  { id: 'cx/gpt-5.5', name: 'GPT-5.5', tier: 'balanced', provider: 'gorillaworkout', input: 0, output: 0 },
-  { id: 'cx/gpt-5.4', name: 'GPT-5.4', tier: 'balanced', provider: 'gorillaworkout', input: 0, output: 0 },
-  { id: 'cx/gpt-5.4-mini', name: 'GPT-5.4 Mini', tier: 'budget', provider: 'gorillaworkout', input: 0, output: 0 },
+  // Claude Code (cc/)
+  m(CLAUDE_SONNET_5_5_MODEL, 'Claude Sonnet 5.5', 'balanced'),
+  m(CLAUDE_OPUS_5_5_MODEL, 'Claude Opus 5.5', 'premium'),
+  m(CLAUDE_SONNET_5_MODEL, 'Claude Sonnet 5', 'balanced'),
+  m(CLAUDE_OPUS_5_MODEL, 'Claude Opus 5', 'premium'),
+  // Antigravity (ag/)
+  m('ag/gemini-3-flash', 'Gemini 3 Flash', 'budget'),
+  m('ag/gemini-3.8-flash', 'Gemini 3.8 Flash', 'budget'),
+  m('ag/gemini-3.8-flash-high', 'Gemini 3.8 Flash High', 'balanced'),
+  m('ag/gemini-3.8-flash-medium', 'Gemini 3.8 Flash Medium', 'budget'),
+  m('ag/gemini-3.8-flash-low', 'Gemini 3.8 Flash Low', 'budget'),
+  // Untested on 2026-11-02; kept as before but not added to any allowlist.
+  m('ag/gpt-oss-120b-medium', 'GPT OSS 120B Medium', 'balanced'),
+  // OpenAI Codex (cx/)
+  m('cx/gpt-6.1-sol', 'GPT-6.1 Sol', 'premium'),
+  m('cx/gpt-6-sol', 'GPT-6 Sol', 'premium'),
+  m('cx/gpt-6-sol[1m]', 'GPT-6 Sol (1M context)', 'premium'),
+  m('cx/gpt-6-astra', 'GPT-6 Astra', 'balanced'),
+  m('cx/gpt-6-astra[1m]', 'GPT-6 Astra (1M context)', 'balanced'),
+  m('cx/gpt-6-luna', 'GPT-6 Luna', 'budget'),
+  m('cx/gpt-6-luna[1m]', 'GPT-6 Luna (1M context)', 'budget'),
+  m('cx/gpt-5.6-sol', 'GPT-5.6 Sol', 'premium'),
+  m('cx/gpt-5.6-sol[1m]', 'GPT-5.6 Sol (1M context)', 'premium'),
+  m('cx/gpt-5.6-sol-review', 'GPT-5.6 Sol Review', 'premium'),
+  m('cx/gpt-5.6-terra', 'GPT-5.6 Terra', 'balanced'),
+  m('cx/gpt-5.6-terra[1m]', 'GPT-5.6 Terra (1M context)', 'balanced'),
+  m('cx/gpt-5.6-terra-review', 'GPT-5.6 Terra Review', 'balanced'),
+  m('cx/gpt-5.6-luna', 'GPT-5.6 Luna', 'budget'),
+  m('cx/gpt-5.6-luna[1m]', 'GPT-5.6 Luna (1M context)', 'budget'),
+  m('cx/gpt-5.6-luna-review', 'GPT-5.6 Luna Review', 'budget'),
+  m('cx/gpt-reserve', 'GPT Reserve', 'balanced'),
+  m('cx/codex-auto-review', 'Codex Auto Review', 'balanced'),
+  // Not in the 2026-11-02 probe; kept as before but not added to any allowlist.
+  m('cx/gpt-5.4', 'GPT-5.4', 'balanced'),
+  m('cx/gpt-5.4-mini', 'GPT-5.4 Mini', 'budget'),
 ];
+
+/**
+ * Text models verified working through 9router on 2026-11-02. Every text
+ * feature allows all of them (migration 039 adds them to stored allowlists).
+ */
+export const WORKING_TEXT_MODELS: readonly string[] = [
+  CLAUDE_SONNET_5_5_MODEL,
+  CLAUDE_OPUS_5_5_MODEL,
+  CLAUDE_SONNET_5_MODEL,
+  CLAUDE_OPUS_5_MODEL,
+  'ag/gemini-3-flash',
+  'ag/gemini-3.8-flash',
+  'ag/gemini-3.8-flash-high',
+  'ag/gemini-3.8-flash-medium',
+  'ag/gemini-3.8-flash-low',
+  'cx/gpt-6.1-sol',
+  'cx/gpt-6-sol',
+  'cx/gpt-6-sol[1m]',
+  'cx/gpt-6-astra',
+  'cx/gpt-6-astra[1m]',
+  'cx/gpt-6-luna',
+  'cx/gpt-6-luna[1m]',
+  'cx/gpt-5.6-sol',
+  'cx/gpt-5.6-sol[1m]',
+  'cx/gpt-5.6-sol-review',
+  'cx/gpt-5.6-terra',
+  'cx/gpt-5.6-terra[1m]',
+  'cx/gpt-5.6-terra-review',
+  'cx/gpt-5.6-luna',
+  'cx/gpt-5.6-luna[1m]',
+  'cx/gpt-5.6-luna-review',
+  'cx/gpt-reserve',
+  'cx/codex-auto-review',
+];
+
+/**
+ * Chat model ids that are dead or unsupported upstream, mapped to the live id
+ * that replaces them. They must never be offered again. Migration 039
+ * rewrites stored allowlists, defaults, and preferences that still name them
+ * (it also maps any other lr/*, ag/gemini-3.5-* and ag/gemini-3.7-* id).
+ */
+export const RETIRED_MODEL_REPLACEMENTS: Readonly<Record<string, string>> = {
+  // 9router 503 / upstream 404 (2026-11-02)
+  'ag/gemini-3.1-pro-low': 'ag/gemini-3-flash',
+  'ag/gemini-3.6-flash-high': 'ag/gemini-3-flash',
+  'ag/gemini-3.6-flash-medium': 'ag/gemini-3-flash',
+  'ag/gemini-3.6-flash-low': 'ag/gemini-3-flash',
+  'ag/gemini-3.7-flash-high': 'ag/gemini-3-flash',
+  'ag/gemini-3.7-flash-medium': 'ag/gemini-3-flash',
+  'ag/gemini-3.7-flash-low': 'ag/gemini-3-flash',
+  'ag/gemini-3.5-flash-high': 'ag/gemini-3-flash',
+  'ag/gemini-pro-agent': 'ag/gemini-3-flash',
+  // HTTP 200 with only a retirement notice
+  'ag/gemini-3-flash-agent': 'ag/gemini-3-flash',
+  'ag/gemini-3.5-flash-low': 'ag/gemini-3-flash',
+  'ag/gemini-3.5-flash-extra-low': 'ag/gemini-3-flash',
+  'ag/claude-sonnet-4-6': CLAUDE_SONNET_5_MODEL,
+  'ag/claude-opus-4-6-thinking': CLAUDE_SONNET_5_MODEL,
+  // Unsupported on this Codex account
+  'cx/gpt-5.5': PREFERRED_CODEX_MODEL,
+  'cx/gpt-5.5-review': PREFERRED_CODEX_MODEL,
+  'cx/gpt-daybreak-blue-latest': PREFERRED_CODEX_MODEL,
+  // The whole lr provider returns 404
+  'lr/claude-sonnet-4.5': CLAUDE_SONNET_5_MODEL,
+  'lr/claude-sonnet-4-6': CLAUDE_SONNET_5_MODEL,
+};
+
+/** Stored ids that are spelled differently from the catalog id that works. */
+export const LEGACY_MODEL_ALIASES: Readonly<Record<string, string>> = {
+  'gpt-5.6-luna': 'cx/gpt-5.6-luna',
+};
 
 export function getModelProvider(modelId: string): ModelProvider {
   if (!AVAILABLE_MODELS.some(model => model.id === modelId)) {

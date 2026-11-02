@@ -1,5 +1,5 @@
 import { queryOne } from '@/lib/database';
-import { AVAILABLE_MODELS, CLAUDE_OPUS_5_5_MODEL, CLAUDE_OPUS_5_MODEL, CLAUDE_SONNET_5_5_MODEL, CLAUDE_SONNET_5_MODEL, PREFERRED_CODEX_MODEL, type ModelInfo } from '@/lib/openai';
+import { AVAILABLE_MODELS, CLAUDE_OPUS_5_5_MODEL, CLAUDE_OPUS_5_MODEL, CLAUDE_SONNET_5_5_MODEL, CLAUDE_SONNET_5_MODEL, PREFERRED_CODEX_MODEL, WORKING_TEXT_MODELS, type ModelInfo } from '@/lib/openai';
 
 export const GENERATION_FEATURES = [
   'social-post',
@@ -73,49 +73,56 @@ export function accountFeatureForGeneration(feature: GenerationFeature): string 
   return feature === 'seo-content' ? 'seo' : feature;
 }
 
+/**
+ * The feature's historical lead models first (kept so the stored order does
+ * not churn), then every other model in WORKING_TEXT_MODELS, without
+ * duplicates. Migration 039 appends the same ids to stored allowlists.
+ */
+function withAllWorkingModels(lead: string[]): string[] {
+  return [...new Set([...lead, ...WORKING_TEXT_MODELS])];
+}
+
 // Every id here must exist in AVAILABLE_MODELS and pass scripts/probe-gateway-models.ts.
+// Every text feature allows every working text model (9router probe, 2026-11-02).
 export const DEFAULT_FEATURE_ASSIGNMENTS: Record<GenerationFeature, {
   allowedModels: string[];
   defaultModel: string;
 }> = {
   'social-post': {
-    allowedModels: ['ag/gemini-3-flash', 'ag/gemini-3.6-flash-medium', PREFERRED_CODEX_MODEL, CLAUDE_SONNET_5_MODEL, CLAUDE_OPUS_5_MODEL, CLAUDE_SONNET_5_5_MODEL, CLAUDE_OPUS_5_5_MODEL],
+    allowedModels: withAllWorkingModels(['ag/gemini-3-flash', PREFERRED_CODEX_MODEL, CLAUDE_SONNET_5_MODEL, CLAUDE_OPUS_5_MODEL, CLAUDE_SONNET_5_5_MODEL, CLAUDE_OPUS_5_5_MODEL]),
     defaultModel: 'ag/gemini-3-flash',
   },
   'video-script': {
-    allowedModels: ['ag/gemini-3-flash', 'ag/gemini-3.6-flash-medium', PREFERRED_CODEX_MODEL, CLAUDE_SONNET_5_MODEL, CLAUDE_OPUS_5_MODEL, CLAUDE_SONNET_5_5_MODEL, CLAUDE_OPUS_5_5_MODEL],
+    allowedModels: withAllWorkingModels(['ag/gemini-3-flash', PREFERRED_CODEX_MODEL, CLAUDE_SONNET_5_MODEL, CLAUDE_OPUS_5_MODEL, CLAUDE_SONNET_5_5_MODEL, CLAUDE_OPUS_5_5_MODEL]),
     defaultModel: 'ag/gemini-3-flash',
   },
   'event-plan': {
-    allowedModels: ['ag/gemini-3-flash', 'ag/gemini-3.1-pro-low', PREFERRED_CODEX_MODEL, CLAUDE_SONNET_5_MODEL, CLAUDE_OPUS_5_MODEL, CLAUDE_SONNET_5_5_MODEL, CLAUDE_OPUS_5_5_MODEL],
-    // ag/gemini-3.1-pro-low answers 503 on 9router; Sonnet 5.5 is the default.
+    allowedModels: withAllWorkingModels(['ag/gemini-3-flash', PREFERRED_CODEX_MODEL, CLAUDE_SONNET_5_MODEL, CLAUDE_OPUS_5_MODEL, CLAUDE_SONNET_5_5_MODEL, CLAUDE_OPUS_5_5_MODEL]),
     defaultModel: CLAUDE_SONNET_5_5_MODEL,
   },
   'article-market-news': {
-    allowedModels: ['lr/claude-sonnet-4.5', 'ag/gemini-3.1-pro-low', PREFERRED_CODEX_MODEL, CLAUDE_SONNET_5_MODEL, CLAUDE_OPUS_5_MODEL, CLAUDE_SONNET_5_5_MODEL, CLAUDE_OPUS_5_5_MODEL],
+    allowedModels: withAllWorkingModels([CLAUDE_SONNET_5_MODEL, 'ag/gemini-3-flash', PREFERRED_CODEX_MODEL, CLAUDE_OPUS_5_MODEL, CLAUDE_SONNET_5_5_MODEL, CLAUDE_OPUS_5_5_MODEL]),
     defaultModel: CLAUDE_SONNET_5_5_MODEL,
   },
   'market-research': {
-    allowedModels: ['lr/claude-sonnet-4.5', 'ag/gemini-3.1-pro-low', PREFERRED_CODEX_MODEL, CLAUDE_SONNET_5_MODEL, CLAUDE_OPUS_5_MODEL, CLAUDE_SONNET_5_5_MODEL, CLAUDE_OPUS_5_5_MODEL],
+    allowedModels: withAllWorkingModels([CLAUDE_SONNET_5_MODEL, 'ag/gemini-3-flash', PREFERRED_CODEX_MODEL, CLAUDE_OPUS_5_MODEL, CLAUDE_SONNET_5_5_MODEL, CLAUDE_OPUS_5_5_MODEL]),
     defaultModel: CLAUDE_SONNET_5_5_MODEL,
   },
   'ai-research': {
-    allowedModels: [
+    allowedModels: withAllWorkingModels([
       PREFERRED_CODEX_MODEL,
       'cx/gpt-5.6-terra',
       'cx/gpt-5.6-luna',
       'ag/gemini-3-flash',
-      'ag/gemini-3.6-flash-high',
       CLAUDE_SONNET_5_MODEL,
       CLAUDE_OPUS_5_MODEL,
-      'ag/gemini-3.1-pro-low',
       CLAUDE_SONNET_5_5_MODEL,
       CLAUDE_OPUS_5_5_MODEL,
-    ],
+    ]),
     defaultModel: PREFERRED_CODEX_MODEL,
   },
   'seo-content': {
-    allowedModels: ['ag/gemini-3-flash', PREFERRED_CODEX_MODEL, CLAUDE_SONNET_5_MODEL, CLAUDE_OPUS_5_MODEL, CLAUDE_SONNET_5_5_MODEL, CLAUDE_OPUS_5_5_MODEL],
+    allowedModels: withAllWorkingModels(['ag/gemini-3-flash', PREFERRED_CODEX_MODEL, CLAUDE_SONNET_5_MODEL, CLAUDE_OPUS_5_MODEL, CLAUDE_SONNET_5_5_MODEL, CLAUDE_OPUS_5_5_MODEL]),
     defaultModel: CLAUDE_SONNET_5_5_MODEL,
   },
 };

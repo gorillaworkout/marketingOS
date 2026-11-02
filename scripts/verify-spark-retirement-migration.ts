@@ -28,10 +28,12 @@ const SPARK = 'cx/gpt-5.3-codex-spark';
 
 async function main() {
   const { execute, queryAll, closeDb } = await import('../src/lib/database');
-  const { AVAILABLE_MODELS, PREFERRED_CODEX_MODEL, CLAUDE_SONNET_5_5_MODEL } = await import('../src/lib/openai');
+  const { AVAILABLE_MODELS, PREFERRED_CODEX_MODEL, CLAUDE_SONNET_5_5_MODEL, RETIRED_MODEL_REPLACEMENTS } = await import('../src/lib/openai');
   const live = new Set(AVAILABLE_MODELS.map(model => model.id));
   assert.ok(!live.has(SPARK), 'catalog must not offer Codex Spark');
   assert.ok(live.has(PREFERRED_CODEX_MODEL));
+  // Migration 039 later retires the ids in RETIRED_MODEL_REPLACEMENTS; they were live when this migration ran.
+  const liveWhen027Ran = (model: string) => live.has(model) || model in RETIRED_MODEL_REPLACEMENTS;
 
   const sql = await readFile(path.join(process.cwd(), 'db/migrations/027_retire_codex_spark.sql'), 'utf8');
 
@@ -85,7 +87,7 @@ async function main() {
     assert.ok(row.allowed_models.includes(PREFERRED_CODEX_MODEL), `${row.feature_key} dropped Sol`);
     assert.equal(new Set(row.allowed_models).size, row.allowed_models.length, `${row.feature_key} duplicated an allowlist id`);
     for (const model of row.allowed_models) {
-      assert.ok(live.has(model), `${row.feature_key} allows unknown model ${model}`);
+      assert.ok(liveWhen027Ran(model), `${row.feature_key} allows unknown model ${model}`);
     }
   }
 
@@ -110,7 +112,7 @@ async function main() {
   assert.equal(preferences.length, 3, 'preferences are rewritten, never deleted');
   for (const row of preferences) {
     assert.notEqual(row.model, SPARK, `${row.task_type} preference still names Codex Spark`);
-    assert.ok(live.has(row.model), `${row.task_type} preference is not a catalog model`);
+    assert.ok(liveWhen027Ran(row.model), `${row.task_type} preference is not a catalog model`);
   }
   assert.equal(preferences.find(row => row.task_type === 'ai-research')?.model, PREFERRED_CODEX_MODEL);
   assert.equal(preferences.find(row => row.task_type === 'social-post')?.model, 'ag/gemini-3-flash');

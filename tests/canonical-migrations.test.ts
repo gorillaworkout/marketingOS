@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
-import { AVAILABLE_MODELS, CLAUDE_OPUS_5_5_MODEL, CLAUDE_OPUS_5_MODEL, CLAUDE_SONNET_5_5_MODEL, CLAUDE_SONNET_5_MODEL } from '../src/lib/openai';
-import { IMAGE_MODELS, DEFAULT_IMAGE_MODEL } from '../src/lib/image-models';
+import { AVAILABLE_MODELS, CLAUDE_OPUS_5_5_MODEL, CLAUDE_OPUS_5_MODEL, CLAUDE_SONNET_5_5_MODEL, CLAUDE_SONNET_5_MODEL, RETIRED_MODEL_REPLACEMENTS } from '../src/lib/openai';
+import { IMAGE_MODELS, DEFAULT_IMAGE_MODEL, RETIRED_IMAGE_MODEL_REPLACEMENTS } from '../src/lib/image-models';
 import { GENERATION_FEATURES } from '../src/lib/authorization';
 
 const migrate = readFileSync('scripts/migrate.ts', 'utf8');
@@ -13,7 +13,7 @@ const RETIRED_SONNET_46 = 'ag/claude-sonnet-4-6';
 const RETIRED_SPARK = 'cx/gpt-5.3-codex-spark';
 
 function missingFromCurrentCatalog(ids: string[]): string[] {
-  return ids.filter(id => id !== RETIRED_SONNET_46 && id !== RETIRED_SPARK && !catalog.has(id));
+  return ids.filter(id => id !== RETIRED_SONNET_46 && id !== RETIRED_SPARK && !(id in RETIRED_MODEL_REPLACEMENTS) && !catalog.has(id));
 }
 
 function withoutSqlComments(sql: string): string {
@@ -154,7 +154,7 @@ test('025 removes Claude Sonnet 4.6, keeps Sonnet 5.5 and Opus 5.5, and is idemp
   }
   const quoted = [...executable.matchAll(/'((?:ag|cc|cx|kimi|tr|lr)\/[^']+|pecut-free)'/g)]
     .map(match => match[1])
-    .filter(id => !id.includes('%') && !IMAGE_MODELS.includes(id));
+    .filter(id => !id.includes('%') && !IMAGE_MODELS.includes(id) && !(id in RETIRED_IMAGE_MODEL_REPLACEMENTS));
   assert.ok(quoted.includes(CLAUDE_SONNET_5_5_MODEL));
   assert.ok(quoted.includes(CLAUDE_OPUS_5_5_MODEL));
   assert.ok(quoted.includes(RETIRED_SONNET_46));

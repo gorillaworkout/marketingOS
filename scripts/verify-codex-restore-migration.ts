@@ -24,12 +24,14 @@ process.env.DATABASE_URL = TEST_DATABASE_URL;
 
 async function main() {
   const { execute, queryAll, closeDb } = await import('../src/lib/database');
-  const { AVAILABLE_MODELS, PREFERRED_CODEX_MODEL } = await import('../src/lib/openai');
+  const { AVAILABLE_MODELS, PREFERRED_CODEX_MODEL, RETIRED_MODEL_REPLACEMENTS } = await import('../src/lib/openai');
   const live = new Set(AVAILABLE_MODELS.map(model => model.id));
   // 014 still writes ag/claude-sonnet-4-6 (removed from the catalog by 025)
   // and cx/gpt-5.3-codex-spark (removed from the catalog by 027).
+  // Migration 039 later retires the ids in RETIRED_MODEL_REPLACEMENTS; they were live when this migration ran.
   const historicallyLive = (model: string) =>
-    live.has(model) || model === 'ag/claude-sonnet-4-6' || model === 'cx/gpt-5.3-codex-spark';
+    live.has(model) || model === 'ag/claude-sonnet-4-6' || model === 'cx/gpt-5.3-codex-spark'
+    || model in RETIRED_MODEL_REPLACEMENTS;
 
   const sql = await readFile(path.join(process.cwd(), 'db/migrations/014_restore_codex_ai_research.sql'), 'utf8');
 

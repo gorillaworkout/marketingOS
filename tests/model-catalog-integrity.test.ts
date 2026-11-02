@@ -1,9 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
-import { AVAILABLE_MODELS, CLAUDE_OPUS_5_5_MODEL, CLAUDE_OPUS_5_MODEL, CLAUDE_SONNET_5_5_MODEL, CLAUDE_SONNET_5_MODEL, PREFERRED_CODEX_MODEL } from '../src/lib/openai';
+import { AVAILABLE_MODELS, CLAUDE_OPUS_5_5_MODEL, CLAUDE_OPUS_5_MODEL, CLAUDE_SONNET_5_5_MODEL, CLAUDE_SONNET_5_MODEL, PREFERRED_CODEX_MODEL, RETIRED_MODEL_REPLACEMENTS } from '../src/lib/openai';
 import { DEFAULT_FEATURE_ASSIGNMENTS } from '../src/lib/model-routing';
-import { IMAGE_MODELS } from '../src/lib/image-models';
+import { IMAGE_MODELS, RETIRED_IMAGE_MODEL_REPLACEMENTS } from '../src/lib/image-models';
 
 /**
  * Guards against the failure that broke AI Research: code shipped defaults
@@ -29,7 +29,7 @@ const RETIRED_SONNET_46 = 'ag/claude-sonnet-4-6';
 const RETIRED_SPARK = 'cx/gpt-5.3-codex-spark';
 
 function missingFromCurrentCatalog(ids: string[]): string[] {
-  return ids.filter(id => id !== RETIRED_SONNET_46 && id !== RETIRED_SPARK && !catalog.has(id));
+  return ids.filter(id => id !== RETIRED_SONNET_46 && id !== RETIRED_SPARK && !(id in RETIRED_MODEL_REPLACEMENTS) && !catalog.has(id));
 }
 
 function quotedModelIds(source: string): string[] {
@@ -110,7 +110,7 @@ test('every workflow allowlist includes Sol, Claude 5, and Claude 5.5 and drops 
     assert.notEqual(assignment.defaultModel, RETIRED_SONNET_46, `${feature} should not default to Sonnet 4.6`);
     if (feature === 'article-market-news' || feature === 'market-research') {
       assert.equal(assignment.defaultModel, CLAUDE_SONNET_5_5_MODEL, `${feature} should default to Sonnet 5.5`);
-      assert.ok(assignment.allowedModels.includes('lr/claude-sonnet-4.5'), `${feature} must keep Sonnet 4.5`);
+      assert.ok(!assignment.allowedModels.some(id => id.startsWith('lr/')), `${feature} must not allow the dead lr provider`);
     } else if (feature === 'seo-content') {
       assert.equal(assignment.defaultModel, CLAUDE_SONNET_5_5_MODEL, 'seo-content should default to Sonnet 5.5');
     } else if (feature === 'event-plan') {
@@ -197,7 +197,8 @@ test('migration 025 removes Sonnet 4.6, keeps Claude 5.5, and only writes catalo
   assert.ok(referenced.includes(CLAUDE_OPUS_5_MODEL));
   assert.ok(referenced.includes('lr/claude-sonnet-4.5'));
   assert.ok(referenced.includes(RETIRED_SONNET_46), '025 must name Sonnet 4.6 in order to remove it');
-  const imageIds = new Set<string>(IMAGE_MODELS);
+  // Image ids (live or retired by 039) are not chat models.
+  const imageIds = new Set<string>([...IMAGE_MODELS, ...Object.keys(RETIRED_IMAGE_MODEL_REPLACEMENTS)]);
   const missing = missingFromCurrentCatalog(referenced.filter(id => !imageIds.has(id)));
   assert.deepEqual(missing, [], '025 would write models that are not in AVAILABLE_MODELS');
   const executable = retire46.replace(/--.*$/gm, '');
@@ -230,12 +231,13 @@ test('catalog itself contains Codex, Claude 5, Claude 5.5, and excludes Spark, K
   assert.ok(catalog.has(CLAUDE_OPUS_5_5_MODEL));
   assert.ok(!catalog.has(RETIRED_SONNET_46));
   assert.ok(![...catalog].some(id => id.includes('claude-opus-4-6') || id.includes('claude-sonnet-4-6')));
-  assert.ok(catalog.has('lr/claude-sonnet-4.5'));
+  assert.ok(![...catalog].some(id => id.startsWith('lr/')), 'the lr provider 404s upstream; migration 039 retires it');
   assert.ok([...catalog].some(id => id.startsWith('cx/')));
   assert.ok(![...catalog].some(id =>
     id.startsWith('kimi/') || id.startsWith('tr/') || id.startsWith('cmc/moonshotai/') || id.toLowerCase().includes('kimi')));
   assert.ok(![...catalog].some(id => id.startsWith('cc/') && id !== CLAUDE_SONNET_5_MODEL && id !== CLAUDE_OPUS_5_MODEL && id !== CLAUDE_SONNET_5_5_MODEL && id !== CLAUDE_OPUS_5_5_MODEL), 'unrequested cc/* stay out');
-  assert.ok(![...catalog].some(id => id.endsWith('-review')), 'do not dump unverified *-review Codex ids');
+  // Only the *-review ids probed as working on 2026-11-02 are offered.
+  assert.deepEqual([...catalog].filter(id => id.endsWith('-review')).sort(), ['cx/codex-auto-review', 'cx/gpt-5.6-luna-review', 'cx/gpt-5.6-sol-review', 'cx/gpt-5.6-terra-review']);
 });
 
 test('migration 027 removes Codex Spark, keeps other defaults, and only writes catalog models', () => {

@@ -152,7 +152,7 @@ test('AI Research routing restores Codex and Claude 5 and never reintroduces Kim
   assert.ok(AVAILABLE_MODELS.some(model => model.id === 'cc/claude-opus-5-5'));
   assert.ok(!AVAILABLE_MODELS.some(model => model.id === 'ag/claude-sonnet-4-6' || model.id.includes('claude-opus-4-6') || model.id.includes('claude-sonnet-4-6')));
   assert.doesNotMatch(routing, /ag\/claude-sonnet-4-6/);
-  assert.ok(AVAILABLE_MODELS.some(model => model.id === 'lr/claude-sonnet-4.5'));
+  assert.ok(!AVAILABLE_MODELS.some(model => model.id.startsWith('lr/')), 'the lr provider 404s upstream');
   assert.match(openai, /cx\/gpt-5\.6-sol/);
   assert.match(openai, /cc\/claude-sonnet-5/);
   assert.match(openai, /cc\/claude-opus-5/);

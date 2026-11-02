@@ -84,6 +84,7 @@ import {
   AI_RESEARCH_CONNECTION_RETRYING_MESSAGE,
   resolveAiResearchAbruptStreamEnd,
 } from '@/lib/ai-research-stream';
+import { groupModelsByProvider } from '@/lib/model-groups';
 
 interface ChatImage {
   mimeType: string;
@@ -1475,7 +1476,7 @@ export default function AIResearchPage() {
             aria-label="AI Research model"
             className="min-h-7 rounded-lg border border-[var(--mos-border)] bg-[var(--mos-raised)] px-2 py-1 text-[11px] text-[var(--mos-text)] outline-none focus:border-indigo-400/60 max-w-[140px] sm:max-w-[160px] truncate"
           >
-            {allowedModels.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+            {groupModelsByProvider(allowedModels).map(group => <optgroup key={group.label} label={group.label}>{group.models.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}</optgroup>)}
           </select>
           <button
             type="button"

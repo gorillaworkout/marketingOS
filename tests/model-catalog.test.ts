@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import { AVAILABLE_MODELS, CLAUDE_OPUS_5_5_MODEL, CLAUDE_OPUS_5_MODEL, CLAUDE_SONNET_5_5_MODEL, CLAUDE_SONNET_5_MODEL, PREFERRED_CODEX_MODEL } from '../src/lib/openai';
 
 /**
- * Catalog contract. Gemini 3.6 ids were verified with a real completion via
+ * Catalog contract. Re-probed through 9router on 2026-11-02 (see
+ * WORKING_TEXT_MODELS in src/lib/openai.ts). Older note: Gemini 3.6 ids were verified with a real completion via
  * scripts/probe-gateway-models.ts. Codex `cx/*` is restored from the VPS
  * llmdupoin GET /v1/models probe (HTTP 200, 51 ids, 2026-09-18) so
  * /dashboard/models is not empty of GPT-5.6 Sol. Re-probe before removing.
@@ -13,16 +14,23 @@ const ids = AVAILABLE_MODELS.map(model => model.id);
 
 assert(!ids.some(id => id.includes('gemini-3.5')), 'retired Gemini 3.5 models must not be offered');
 assert(!ids.some(id => id.includes('gemini-3.7')), 'Gemini 3.7 does not exist on the gateway (404)');
+assert(!ids.includes('ag/gemini-pro-agent') && !ids.includes('ag/gemini-3-flash-agent'), 'agent Gemini ids are dead upstream');
 
-assert(ids.includes('ag/gemini-3.6-flash-low'), 'Gemini 3.6 Flash Low must be offered');
-assert(ids.includes('ag/gemini-3.6-flash-medium'), 'Gemini 3.6 Flash Medium must be offered');
-assert(ids.includes('ag/gemini-3.6-flash-high'), 'Gemini 3.6 Flash High must be offered');
+assert(!ids.some(id => id.includes('gemini-3.6')), 'every Gemini 3.6 id is dead upstream (2026-11-02); migration 039 retires them');
+assert(ids.includes('ag/gemini-3-flash'), 'Gemini 3 Flash must be offered');
+for (const id of ['ag/gemini-3.8-flash', 'ag/gemini-3.8-flash-high', 'ag/gemini-3.8-flash-medium', 'ag/gemini-3.8-flash-low']) {
+  assert(ids.includes(id), `${id} must be offered`);
+}
+// Dead upstream on 2026-11-02 (9router 503, upstream 404). Migration 039 retires them.
+assert(!ids.includes('ag/gemini-3.6-flash-medium'), 'Gemini 3.6 Flash Medium is dead upstream and must not be offered');
+assert(!ids.includes('ag/gemini-3.6-flash-high'), 'Gemini 3.6 Flash High is dead upstream and must not be offered');
+assert(!ids.includes('ag/gemini-3.1-pro-low'), 'Gemini 3.1 Pro Low is dead upstream and must not be offered');
 
 assert.equal(PREFERRED_CODEX_MODEL, 'cx/gpt-5.6-sol');
 assert(ids.includes('cx/gpt-5.6-sol'), 'GPT-5.6 Sol must be offered');
 assert(ids.includes('cx/gpt-5.6-terra'), 'GPT-5.6 Terra must be offered');
 assert(ids.includes('cx/gpt-5.6-luna'), 'GPT-5.6 Luna must be offered');
-assert(ids.includes('cx/gpt-5.5'), 'GPT-5.5 must be offered');
+assert(!ids.includes('cx/gpt-5.5'), 'GPT-5.5 is dead upstream (2026-11-02); migration 039 retires it');
 assert(ids.includes('cx/gpt-5.4'), 'GPT-5.4 must be offered');
 assert(ids.includes('cx/gpt-5.4-mini'), 'GPT-5.4 Mini must be offered');
 assert(!ids.includes('cx/gpt-5.3-codex-spark'), 'GPT-5.3 Codex Spark is unsupported on a ChatGPT-account Codex login');
@@ -37,7 +45,7 @@ assert(ids.includes(CLAUDE_SONNET_5_5_MODEL), 'Claude Sonnet 5.5 must be offered
 assert(ids.includes(CLAUDE_OPUS_5_5_MODEL), 'Claude Opus 5.5 must be offered');
 assert(!ids.includes('ag/claude-sonnet-4-6'), 'Claude Sonnet 4.6 is gone from the gateway and must not be offered');
 assert(!ids.some(id => id.includes('claude-opus-4-6') || id.includes('claude-sonnet-4-6')), 'Claude 4.6 ids must stay out of the catalog');
-assert(ids.includes('lr/claude-sonnet-4.5'), 'Claude Sonnet 4.5 must stay offered');
+assert(!ids.some(id => id.startsWith('lr/')), 'the lr provider returns 404 upstream; no lr/* id may be offered');
 assert.equal(AVAILABLE_MODELS.find(model => model.id === CLAUDE_SONNET_5_MODEL)?.name, 'Claude Sonnet 5');
 assert.equal(AVAILABLE_MODELS.find(model => model.id === CLAUDE_OPUS_5_MODEL)?.name, 'Claude Opus 5');
 assert.equal(AVAILABLE_MODELS.find(model => model.id === CLAUDE_SONNET_5_5_MODEL)?.name, 'Claude Sonnet 5.5');
@@ -49,7 +57,8 @@ assert.equal(AVAILABLE_MODELS.find(model => model.id === CLAUDE_OPUS_5_5_MODEL)?
 
 assert(!ids.some(id => id.startsWith('kimi/') || id.startsWith('tr/') || id.startsWith('cmc/moonshotai/') || id.toLowerCase().includes('kimi')), 'Kimi / moonshot must stay removed');
 assert(!ids.some(id => id.startsWith('cc/') && id !== CLAUDE_SONNET_5_MODEL && id !== CLAUDE_OPUS_5_MODEL && id !== CLAUDE_SONNET_5_5_MODEL && id !== CLAUDE_OPUS_5_5_MODEL), 'unrequested cc/* stay out');
-assert(!ids.some(id => id.endsWith('-review')), 'unverified Codex *-review ids stay out');
+assert.deepEqual(ids.filter(id => id.endsWith('-review')).sort(), ['cx/codex-auto-review', 'cx/gpt-5.6-luna-review', 'cx/gpt-5.6-sol-review', 'cx/gpt-5.6-terra-review'], 'only probed *-review ids are offered');
+assert(!ids.includes('cx/gpt-5.5-review'), 'GPT-5.5 Review is dead upstream');
 assert(!ids.includes('pecut-free'), 'pecut-free must stay retired');
 
 console.log('model catalog contract passed');

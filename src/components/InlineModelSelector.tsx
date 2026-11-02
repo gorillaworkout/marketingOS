@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Button, Panel, StatusBadge } from '@/components/ui/dashboard';
 import { getModelGuidance, MODEL_GUIDANCE_DISCLAIMER } from '@/lib/model-guidance';
 import type { GenerationFeature } from '@/lib/model-routing';
+import { groupModelsByProvider } from '@/lib/model-groups';
 
 interface ModelInfo {
   id: string;
@@ -85,7 +86,7 @@ export default function InlineModelSelector({ feature }: { feature: GenerationFe
             onChange={event => void save(event.target.value)}
             className="mt-2 min-h-11 w-full rounded-[7px] border border-[var(--mos-border)] bg-[var(--mos-raised)] px-3 text-sm text-[var(--mos-text)] outline-none focus:border-indigo-400/60"
           >
-            {preference.allowedModels.map(model => <option key={model.id} value={model.id}>{model.name}</option>)}
+            {groupModelsByProvider(preference.allowedModels).map(group => <optgroup key={group.label} label={group.label}>{group.models.map(model => <option key={model.id} value={model.id}>{model.name}</option>)}</optgroup>)}
           </select>
         </label>
         <div className="mt-3 flex flex-wrap items-center gap-3">
