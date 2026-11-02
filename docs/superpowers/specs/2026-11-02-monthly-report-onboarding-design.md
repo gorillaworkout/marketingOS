@@ -1,0 +1,136 @@
+# Monthly Report: Onboarding (design)
+
+Date: 2026-11-02 · Branch: `feat/monthly-report-onboarding` · Migration: `041_monthly_report.sql`
+
+## Goal
+Replace the hand-made monthly Onboarding PPT with a live MarketingOS page. A new sidebar menu
+**Monthly Report** has an **Onboarding** tab (real data) and a **Settlement** tab placeholder
+("Coming soon — upload not available yet"). Data arrives by Excel upload today and by an API sync
+later. Both write the same tables.
+
+## Access
+- New account feature `monthly-report` (label "Monthly Report"). It reuses the existing department
+  mechanism, so an admin can grant it to whole departments on **Accounts**.
+- Per-user grants: table `monthly_report_access (user_id, can_upload)`. Admins manage them on the
+  **Access** tab of Monthly Report. A grant adds `monthly-report` to that user's enabled features
+  (sidebar, route guard, API checks), whatever the department.
+- View = admin, OR department has `monthly-report`, OR the user has a grant row.
+- Upload = admin, OR a grant row with `can_upload = true`. A department grant alone never allows upload.
+- Everyone with view access sees the same full report. Row-level drill-down masks UID and
+  trading account numbers (`18***65`).
+
+
+## Data model (migration 041, idempotent, forward-only, no deletes)
+Every data table has `source` (`upload` | `api`) so a future API sync writes the same rows.
+- `departments_permitted_features_valid` CHECK gains `monthly-report`.
+- `monthly_report_access`: `user_id` PK → users (cascade), `can_upload`, `granted_by`, timestamps.
+- `monthly_report_uploads`: history. `kind` (`onboarding` | `ftd` | `rejection_reasons`), `file_name`,
+  `source_utc_offset`, `uploaded_by` (+ name snapshot), `rows_total/inserted/updated/skipped`,
+  `data_from/data_to`, `created_at`.
+- `onboarding_events`: one row per onboarding step event. PK `document_id`. `event_at timestamptz`,
+  `uid`, `is_first_account`, `trading_account_no`, `approval_method`, `step`, `step_status`,
+  `account_status`, `remarks`, `source`, `upload_id`, timestamps.
+- `onboarding_ftd`: PK `account_no`. `account_type` (micro/standard), `join_date`, `ftd_at timestamptz`,
+  `amount numeric(16,2)`, `source`, `upload_id`, timestamps.
+- `onboarding_rejection_reasons`: `document_id` or `uid` (at least one), `reason_date`, `reason`,
+  `source`, `upload_id`. Unique on (document_id, uid, date, reason). **No parser yet** — the UI
+  shows "Rejection reasons — Coming soon".
+
+## Upload 1: onboarding export
+- Sheet `Query result` (else the first sheet), headers `Date Time, UID, Document ID, is First Account,
+  Trading Account No., Approval Method, Steps, Step Status, Account Status, Remarks` (order free, case
+  and spacing ignored). A missing header rejects the file.
+- Source timezone: explicit choice on the form, else the offset in the file name
+  (`…+08_00.xlsx` → `+08:00`), else the default `+08:00`. Times are stored as `timestamptz`; days are
+  bucketed in WIB (UTC+7).
+- **Preview** (parse, validate, WIB date range, invalid rows, in-file duplicates, conflicts with stored
+  rows grouped by Step Status: new / changed / unchanged, plus stored→incoming Step Status changes,
+  masked sample) then **Commit** (same file re-sent).
+- Upsert by Document ID; identical rows count as unchanged, so a re-upload never duplicates.
+
+## Upload 2: FTD report
+- Accepts the monthly FTD CSV as exported (messy layout): only the **MONTHLY** block (columns B–H) is
+  read; the DAILY block and the summary block are ignored; Year/Month come from B1:C2 and rows outside
+  that month raise a warning. Also accepts a clean table (`Account, Type, Join Date, FTD Time, Amount`).
+- Upsert by Account. FTD time uses the same offset rule as onboarding.
+- The registrations template upload was removed (steering 2): registrations come from the export.
+
+## Metric definitions
+Day = calendar day in Asia/Jakarta (WIB) of `event_at` / `ftd_at`.
+
+| Metric | Definition | Oct 2026 (at +07:00) |
+|---|---|---|
+| **Registrations** | every onboarding row in the period, all 6 steps, repeats counted (tooltip in the UI) | 24,737 |
+| KYC Rejected | `manual_kyc` + `Rejected` | 7,343 |
+| Manual / Auto KYC approved | `manual_kyc` / `auto_kyc` + `Approved` | 936 / 6,135 |
+| **Real Account Approved** | distinct trading accounts with an activated add-account row | 7,162 |
+| — first account / additional | activated with `is_first_account` true / false | 5,930 / 1,232 |
+| **FTD** | FTD rows by `ftd_at` (micro / standard split) | 2,734 (2,303 / 431) |
+| **Pending** | Registrations − Real Account Approved (unique) − KYC Rejected | 10,232 |
+
+"Activated" = `auto_add_account`/`manual_add_account`, Step Status `Approved`, Account Status
+`Real Account Activated`. Step `Approved` + Account Status `Add USD Bank Info / NPWP Failed` rows are not
+rejections: they show as "Approved, bank info / NPWP pending" with the CRM remark in the drill-down.
+
+FTD panel: count is the headline (2,734, daily avg 88.2, peak 219 on Oct 30). Ratios are labelled:
+- **FTD ÷ Real Account Approved** — the deck method. The PPT's 33.8% = 2,734 ÷ 8,096 (8,096 is the
+  non-unique approved count); with unique approvals it is 38.2%.
+- **Real → FTD (same accounts)** — accounts activated in the period that made an FTD (2,467 / 7,162 = 34.4%).
+  Joined on Trading Account No.: 2,467 FTDs from period activations, 267 from earlier accounts.
+- **FTD ÷ Registrations** — PPT 10.8% = 2,734 ÷ 25,283; ours 11.1%.
+- Amount ("Amount", currency not stated in the source) is a secondary line only, never a KPI card.
+
+### Known gap vs the PPT (documented, not forced)
+Our registrations come from the export: 24,737 vs the deck's 25,283 (−2.2%). Per day: Oct 1 815 vs
+822, Oct 5 856 vs 860, Oct 30 994 vs 994. Tests assert our numbers. The FTD daily array matches the
+deck exactly at +07:00.
+
+### Timezone finding
+At +07:00 the FTD daily array and the per-day registrations above match the deck; at the default
++08:00 six FTD days shift (total unchanged) and registrations become 24,724. The default stays +08:00
+as decided; **open question** whether the exports are really in WIB.
+
+Funnel: Registration → KYC approved → Real account → FTD (same accounts), step % and overall %.
+Comparison: every KPI shows the change vs the previous period of the same length.
+
+## Periods and navigation
+Presets **Day, Week, Month, 3 Months, Year, Custom**. Prev/next moves one period (custom: by its own
+length). The page opens on the previous calendar month.
+- Week = the report week (below) containing the anchor. 3 Months = anchor month + two before.
+- Granularity: Day/Week → daily; Month/3 Months/Custom → weekly (switchable); Year → monthly.
+
+### Report weeks
+Built **inside each calendar month**; weeks end on Sunday.
+1. The first partial week merges forward (Oct 2026: 1–4 + 5–11 → **1–11**).
+2. Tail rule: a last partial week of **4+ days stays** (Oct 2026: **26–31**); shorter tails merge
+   back into the previous week (Nov 2026 ends Monday 30 → 23–30).
+3. A week never crosses a month boundary. Cross-month ranges (3 Months, Year weekly, Custom) get
+   each month's own weeks, clipped to the range (custom from Oct 15 → first bucket 15–18).
+
+Oct 2026 → I 1–11, II 12–18, III 19–25, IV 26–31.
+
+## Architecture
+- Pure functions in `src/lib/monthly-report/`: `periods.ts`, `xlsx-read.ts`, `onboarding-parse.ts`,
+  `ftd-parse.ts`, `metrics.ts`, `conflicts.ts`, `export.ts`, `access.ts`, `upload-offset.ts`.
+  DB in `store.ts`; route glue in `service.ts`.
+- API (`/api/monthly-report/*`); the UI reads only aggregation routes:
+  - `GET report` · `GET details?kind=` (masked drill-down) · `GET export` (.xlsx: Summary, Daily, KPIs)
+  - `POST uploads/onboarding`, `POST uploads/ftd` (raw body, `mode=preview|commit`, `fileName`, `offset`)
+  - `GET uploads` (history, upload rights) · `GET/PUT access` (admin only)
+- UI: `/dashboard/monthly-report` (Onboarding), `/settlement` (Coming soon), `/uploads`, `/access`.
+  Sidebar section "Reports". Dupoin teal `#2EB5C4` / `#1A8A96` inside these pages.
+
+## Import CLI (admin)
+`npx tsx scripts/monthly-report-import.ts --onboarding=<xlsx> --ftd=<csv> [--offset=+07:00]`
+Same parsers and upsert as the upload routes, writes upload history, idempotent (a rerun reports
+everything unchanged). Production load only after the deploy is approved.
+
+## Tests
+- `tests/monthly-report-*.test.ts` with synthetic fixtures (`tests/fixtures/`), no real personal data.
+- `tests/monthly-report-real-files.test.ts` runs only when `MONTHLY_REPORT_DATA_DIR` holds the real
+  files (never committed) and asserts the October numbers above.
+- `scripts/verify-monthly-report-migration.ts` (needs `TEST_DATABASE_URL`) applies 041 twice and checks
+  SQL aggregations against the pure functions.
+
+## Out of scope / later
+Settlement data, rejection-reason parser, API sync, per-user data scoping.

@@ -23,7 +23,7 @@ type IconName =
   | 'home' | 'social' | 'video' | 'event' | 'article' | 'research'
   | 'brand' | 'image' | 'calendar' | 'template' | 'knowledge' | 'history'
   | 'graph' | 'tokens' | 'analytics' | 'accounts' | 'models' | 'docs'
-  | 'seo' | 'settings' | 'target' | 'keyword' | 'content' | 'visibility' | 'sop';
+  | 'seo' | 'settings' | 'target' | 'keyword' | 'content' | 'visibility' | 'sop' | 'report';
 
 type IconCircle = { cx: number; cy: number; r: number };
 type IconMark = string | IconCircle;
@@ -52,6 +52,7 @@ const iconPaths: Record<IconName, readonly IconMark[]> = {
   content: ['M4 20h4L19 9l-4-4L4 16v4Zm9-13 4 4M13 20h7'],
   visibility: ['M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z', { cx: 12, cy: 12, r: 3 }],
   sop: ['M9 4h6v3H9zM7 5H5v16h14V5h-2M9 12l2 2 4-4M9 17h6'],
+  report: ['M6 3h9l4 4v14H6V3Zm9 0v5h4M9 17v-3m3 3v-6m3 6v-4'],
   settings: ['M4 6h10m4 0h2M4 12h4m4 0h8M4 18h12', { cx: 16, cy: 6, r: 2 }, { cx: 10, cy: 12, r: 2 }, { cx: 18, cy: 18, r: 2 }],
   // Lucide circle-help: a question mark, readable at nav size beside the document and book icons.
   docs: [
@@ -154,6 +155,10 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         { href: '/dashboard/seo/sops', label: 'SOPs', icon: 'sop', feature: 'seo' },
         { href: '/dashboard/seo/settings', label: 'SEO settings', icon: 'settings', adminOnly: true },
       ],
+    },
+    {
+      label: 'Reports',
+      items: [{ href: '/dashboard/monthly-report', label: 'Monthly Report', icon: 'report', feature: 'monthly-report' }],
     },
     {
       label: 'Library',

@@ -1,0 +1,381 @@
+/**
+ * Onboarding metric definitions. These pure functions are the single source
+ * of truth; the SQL in store.ts mirrors `classifyEvent` and
+ * tests/monthly-report-store.test.ts checks that both agree.
+ */
+import type { FtdRow } from './ftd-parse';
+import type { OnboardingRow } from './onboarding-parse';
+import { wibDate } from './onboarding-parse';
+import {
+  describeRange, reportBuckets, type Bucket, type DateRange, type Granularity, type ResolvedPeriod,
+} from './periods';
+
+export const ADD_ACCOUNT_STEPS = ['auto_add_account', 'manual_add_account'];
+export const ACTIVATED_STATUS = 'Real Account Activated';
+export const BANK_INFO_FAILED_STATUS = 'Add USD Bank Info / NPWP Failed';
+export const VIDEO_FAILED_STATUS = 'Video Verification Failed';
+
+export type EventKind =
+  | 'first_account' | 'additional_account' | 'activated_unclassified'
+  | 'manual_kyc_approved' | 'auto_kyc_approved' | 'kyc_rejected'
+  | 'approved_bank_info_pending' | 'pending_video_failed' | 'other';
+
+type EventLike = Pick<OnboardingRow, 'step' | 'stepStatus' | 'accountStatus' | 'isFirstAccount'>;
+
+/** Conflicting rows are classified by Step Status first, then Account Status. */
+export function classifyEvent(row: EventLike): EventKind {
+  const isAddAccount = ADD_ACCOUNT_STEPS.includes(row.step);
+  if (isAddAccount && row.stepStatus === 'Approved') {
+    if (row.accountStatus === ACTIVATED_STATUS) {
+      if (row.isFirstAccount === true) return 'first_account';
+      if (row.isFirstAccount === false) return 'additional_account';
+      return 'activated_unclassified';
+    }
+    if (row.accountStatus === BANK_INFO_FAILED_STATUS) return 'approved_bank_info_pending';
+  }
+  if (row.step === 'manual_kyc' && row.stepStatus === 'Approved') return 'manual_kyc_approved';
+  if (row.step === 'auto_kyc' && row.stepStatus === 'Approved') return 'auto_kyc_approved';
+  if (row.step === 'manual_kyc' && row.stepStatus === 'Rejected') return 'kyc_rejected';
+  if (row.stepStatus === 'Pending' && row.accountStatus === VIDEO_FAILED_STATUS) return 'pending_video_failed';
+  return 'other';
+}
+
+export function isActivation(kind: EventKind): boolean {
+  return kind === 'first_account' || kind === 'additional_account' || kind === 'activated_unclassified';
+}
+
+export interface DailyOnboarding {
+  date: string;
+  kycRejected: number;
+  manualKycApproved: number;
+  autoKycApproved: number;
+  firstAccount: number;
+  additionalAccount: number;
+  activated: number; // distinct trading accounts activated that day
+  approvedBankInfoPending: number;
+  pendingVideoFailed: number;
+  events: number;
+}
+
+export interface DailyFtd { date: string; count: number; amount: number; micro: number; standard: number; other: number }
+
+/**
+ * Links FTDs to onboarding on the trading account number, for one range:
+ *  - activatedWithFtd: accounts activated in the range that have an FTD (any date)
+ *  - ftdFromPeriodActivations: FTDs in the range whose account was activated in the range
+ */
+export interface FtdCohort { activatedWithFtd: number; ftdFromPeriodActivations: number }
+
+export const DAILY_COUNT_KEYS = [
+  'kycRejected', 'manualKycApproved', 'autoKycApproved', 'firstAccount', 'additionalAccount',
+  'activated', 'approvedBankInfoPending', 'pendingVideoFailed', 'events',
+] as const;
+type DailyCountKey = typeof DAILY_COUNT_KEYS[number];
+
+function emptyDay(date: string): DailyOnboarding {
+  return { date, kycRejected: 0, manualKycApproved: 0, autoKycApproved: 0, firstAccount: 0, additionalAccount: 0, activated: 0, approvedBankInfoPending: 0, pendingVideoFailed: 0, events: 0 };
+}
+
+function accountKey(row: Pick<OnboardingRow, 'tradingAccountNo' | 'documentId'>): string {
+  return row.tradingAccountNo ? `acct:${row.tradingAccountNo}` : `doc:${row.documentId}`;
+}
+
+const KIND_TO_KEY: Partial<Record<EventKind, DailyCountKey>> = {
+  kyc_rejected: 'kycRejected',
+  manual_kyc_approved: 'manualKycApproved',
+  auto_kyc_approved: 'autoKycApproved',
+  first_account: 'firstAccount',
+  additional_account: 'additionalAccount',
+  approved_bank_info_pending: 'approvedBankInfoPending',
+  pending_video_failed: 'pendingVideoFailed',
+};
+
+export function aggregateEventsByDay(rows: OnboardingRow[]): DailyOnboarding[] {
+  const days = new Map<string, DailyOnboarding>();
+  const activatedPerDay = new Map<string, Set<string>>();
+  for (const row of rows) {
+    const date = wibDate(row.eventAt);
+    const day = days.get(date) ?? emptyDay(date);
+    days.set(date, day);
+    day.events += 1;
+    const kind = classifyEvent(row);
+    const key = KIND_TO_KEY[kind];
+    if (key) day[key] += 1;
+    if (isActivation(kind)) {
+      const set = activatedPerDay.get(date) ?? new Set<string>();
+      set.add(accountKey(row));
+      activatedPerDay.set(date, set);
+    }
+  }
+  for (const [date, set] of activatedPerDay) days.get(date)!.activated = set.size;
+  return [...days.values()].sort((a, b) => a.date.localeCompare(b.date));
+}
+
+export function distinctActivatedAccounts(rows: OnboardingRow[]): number {
+  const accounts = new Set<string>();
+  for (const row of rows) if (isActivation(classifyEvent(row))) accounts.add(accountKey(row));
+  return accounts.size;
+}
+
+export function aggregateFtdByDay(rows: FtdRow[]): DailyFtd[] {
+  const days = new Map<string, DailyFtd & { cents: number }>();
+  for (const row of rows) {
+    const date = wibDate(row.ftdAt);
+    const day = days.get(date) ?? { date, count: 0, amount: 0, micro: 0, standard: 0, other: 0, cents: 0 };
+    days.set(date, day);
+    day.count += 1;
+    day.cents += Math.round(row.amount * 100);
+    if (row.accountType === 'micro') day.micro += 1;
+    else if (row.accountType === 'standard') day.standard += 1;
+    else day.other += 1;
+  }
+  return [...days.values()]
+    .map(({ cents, ...day }) => ({ ...day, amount: cents / 100 }))
+    .sort((a, b) => a.date.localeCompare(b.date));
+}
+
+const inRange = (date: string, range: DateRange) => date >= range.from && date <= range.to;
+
+export function dateCoverage(dates: string[]): DateRange | null {
+  if (!dates.length) return null;
+  const sorted = [...dates].sort();
+  return { from: sorted[0], to: sorted[sorted.length - 1] };
+}
+
+export function ftdCohortStats(onboarding: OnboardingRow[], ftd: FtdRow[], range: DateRange): FtdCohort {
+  const activated = new Set<string>();
+  for (const row of onboarding) {
+    if (row.tradingAccountNo && isActivation(classifyEvent(row)) && inRange(wibDate(row.eventAt), range)) activated.add(row.tradingAccountNo);
+  }
+  const withFtd = new Set(ftd.map(row => row.accountNo));
+  return {
+    activatedWithFtd: [...activated].filter(account => withFtd.has(account)).length,
+    ftdFromPeriodActivations: ftd.filter(row => inRange(wibDate(row.ftdAt), range) && activated.has(row.accountNo)).length,
+  };
+}
+
+export function sumDaily(days: DailyOnboarding[]): Omit<DailyOnboarding, 'date'> {
+  const total = emptyDay('');
+  for (const day of days) for (const key of DAILY_COUNT_KEYS) total[key] += day[key];
+  const { date: _date, ...rest } = total;
+  return rest;
+}
+
+export function maskIdentifier(value: string | null | undefined): string | null {
+  if (value === null || value === undefined || value === '') return null;
+  if (value.length <= 4) return '***';
+  return `${value.slice(0, 2)}***${value.slice(-2)}`;
+}
+
+const round1 = (value: number) => Math.round(value * 10) / 10;
+const pct = (part: number | null, whole: number | null) => (part === null || whole === null || whole === 0 ? null : round1((part / whole) * 100));
+
+export interface BucketValues {
+  registrations: number | null;
+  kycRejected: number;
+  realAccountApproved: number;
+  manualKycApproved: number;
+  autoKycApproved: number;
+  firstAccount: number;
+  additionalAccount: number;
+  kycApproved: number;
+  ftd: number | null;
+  ftdAmount: number | null;
+  approvedBankInfoPending: number;
+  pendingVideoFailed: number;
+}
+
+export interface ReportBucket extends Bucket { values: BucketValues }
+
+export type KpiKey = 'registrations' | 'kycRejected' | 'realAccountApproved' | 'ftd' | 'pending';
+
+export interface Kpi {
+  key: KpiKey;
+  label: string;
+  note: string;
+  value: number | null;
+  previous: number | null;
+  change: number | null;
+  changePct: number | null;
+}
+
+export interface FunnelStep { key: string; label: string; value: number | null; stepPct: number | null; overallPct: number | null }
+
+export interface PeriodData {
+  daily: DailyOnboarding[];
+  ftd: DailyFtd[];
+  /** First and last WIB day covered by FTD data overall; FTD shows "no data" outside it. */
+  ftdCoverage: DateRange | null;
+  uniqueActivated: number;
+  ftdCohort: FtdCohort;
+}
+
+export interface FtdSummary {
+  count: number;
+  amountTotal: number;
+  amountAverage: number | null;
+  byType: { micro: number; standard: number; other: number };
+  fromPeriodActivations: number;
+  fromEarlierAccounts: number;
+  /** FTD count ÷ days in the period (the PPT's "daily average"). */
+  dailyAverage: number | null;
+  /** FTD count ÷ Real Account Approved — the method the monthly PPT used (33.8% in Oct with 8,096). */
+  ftdPerApprovedPct: number | null;
+  /** FTD count ÷ Registrations — the PPT's "overall" conversion. */
+  ftdPerRegistrationPct: number | null;
+  /** Accounts activated in the period that made an FTD ÷ Real Account Approved. */
+  realToFtdPct: number | null;
+  activatedWithFtd: number;
+}
+
+export interface OnboardingReport {
+  range: DateRange;
+  previousRange: DateRange;
+  rangeLabel: string;
+  previousLabel: string;
+  granularity: Granularity;
+  kpis: Kpi[];
+  breakdown: Array<{ key: string; label: string; note: string; value: number }>;
+  buckets: ReportBucket[];
+  daily: ReportBucket[];
+  total: BucketValues;
+  funnel: FunnelStep[];
+  ftd: FtdSummary;
+  dataQuality: { approvedBankInfoPending: number; pendingVideoFailed: number };
+  peaks: { activations: { date: string; value: number } | null; registrations: { date: string; value: number } | null; ftd: { date: string; value: number } | null };
+  hasOnboardingData: boolean;
+  /** False when the previous period has no onboarding rows, so "change vs previous" means nothing. */
+  hasPreviousData: boolean;
+  hasFtd: boolean;
+}
+
+/**
+ * Registrations = every onboarding row (all steps: KYC, video verification,
+ * add account …) in the period, repeats included — a user rejected and then
+ * registering again counts twice. This is the business owner's definition
+ * ("all KYC and video verification entries in CRM OBD").
+ */
+export const REGISTRATIONS_DEFINITION = 'Every onboarding entry in the CRM export (all steps, repeats counted: a user rejected and re-registering counts twice).';
+
+function valuesFor(range: DateRange, data: Pick<PeriodData, 'daily' | 'ftd' | 'ftdCoverage'>): BucketValues {
+  const days = data.daily.filter(day => inRange(day.date, range));
+  const ftd = data.ftd.filter(day => inRange(day.date, range));
+  const sum = sumDaily(days);
+  const ftdCount = ftd.reduce((total, day) => total + day.count, 0);
+  const ftdCents = ftd.reduce((total, day) => total + Math.round(day.amount * 100), 0);
+  const covered = data.ftdCoverage !== null && data.ftdCoverage.from <= range.to && data.ftdCoverage.to >= range.from;
+  return {
+    registrations: sum.events,
+    kycRejected: sum.kycRejected,
+    realAccountApproved: sum.activated,
+    manualKycApproved: sum.manualKycApproved,
+    autoKycApproved: sum.autoKycApproved,
+    firstAccount: sum.firstAccount,
+    additionalAccount: sum.additionalAccount,
+    kycApproved: sum.manualKycApproved + sum.autoKycApproved,
+    ftd: covered ? ftdCount : null,
+    ftdAmount: covered ? ftdCents / 100 : null,
+    approvedBankInfoPending: sum.approvedBankInfoPending,
+    pendingVideoFailed: sum.pendingVideoFailed,
+  };
+}
+
+function pending(values: BucketValues): number | null {
+  return !values.registrations ? null : values.registrations - values.realAccountApproved - values.kycRejected;
+}
+
+function kpi(key: KpiKey, label: string, note: string, value: number | null, previous: number | null): Kpi {
+  const change = value !== null && previous !== null ? value - previous : null;
+  return { key, label, note, value, previous, change, changePct: change !== null && previous ? round1((change / previous) * 100) : null };
+}
+
+function peak<T extends { date: string }>(rows: T[], pick: (row: T) => number | null) {
+  let best: { date: string; value: number } | null = null;
+  for (const row of rows) {
+    const value = pick(row);
+    if (value !== null && value > 0 && (!best || value > best.value)) best = { date: row.date, value };
+  }
+  return best;
+}
+
+export function buildOnboardingReport(input: {
+  period: ResolvedPeriod;
+  granularity: Granularity;
+  current: PeriodData;
+  previous: PeriodData;
+}): OnboardingReport {
+  const { period, granularity, current, previous } = input;
+  const total = { ...valuesFor(period.range, current), realAccountApproved: current.uniqueActivated };
+  const prev = { ...valuesFor(period.previous, previous), realAccountApproved: previous.uniqueActivated };
+  const toBuckets = (buckets: Bucket[]) => buckets.map(bucket => ({ ...bucket, values: valuesFor(bucket, current) }));
+  const ftdDays = current.ftd.filter(day => inRange(day.date, period.range));
+  const ftdCount = total.ftd ?? 0;
+  const ftdSummary: FtdSummary = {
+    count: ftdCount,
+    amountTotal: total.ftdAmount ?? 0,
+    amountAverage: ftdCount ? Math.round(((total.ftdAmount ?? 0) / ftdCount) * 100) / 100 : null,
+    byType: {
+      micro: ftdDays.reduce((n, day) => n + day.micro, 0),
+      standard: ftdDays.reduce((n, day) => n + day.standard, 0),
+      other: ftdDays.reduce((n, day) => n + day.other, 0),
+    },
+    fromPeriodActivations: current.ftdCohort.ftdFromPeriodActivations,
+    fromEarlierAccounts: Math.max(0, ftdCount - current.ftdCohort.ftdFromPeriodActivations),
+    dailyAverage: total.ftd === null ? null : Math.round((total.ftd / period.days) * 10) / 10,
+    ftdPerApprovedPct: total.ftd === null ? null : pct(total.ftd, total.realAccountApproved),
+    ftdPerRegistrationPct: total.ftd === null ? null : pct(total.ftd, total.registrations),
+    realToFtdPct: total.ftd === null ? null : pct(current.ftdCohort.activatedWithFtd, total.realAccountApproved),
+    activatedWithFtd: current.ftdCohort.activatedWithFtd,
+  };
+
+  const kpis: Kpi[] = [
+    kpi('registrations', 'Registrations', REGISTRATIONS_DEFINITION, total.registrations, prev.registrations),
+    kpi('kycRejected', 'KYC Rejected', 'Manual KYC step rejected', total.kycRejected, prev.kycRejected),
+    kpi('realAccountApproved', 'Real Account Approved', 'Unique trading accounts activated', total.realAccountApproved, prev.realAccountApproved),
+    kpi('ftd', 'FTD', 'First-time deposits made in the period', total.ftd, prev.ftd),
+    kpi('pending', 'Pending', 'Registrations − Real Account Approved (unique) − KYC Rejected', pending(total), pending(prev)),
+  ];
+
+  const kycApproved = total.kycApproved;
+  const registrations = total.registrations;
+  const funnel: FunnelStep[] = [
+    { key: 'registrations', label: 'Registration', value: registrations, stepPct: null, overallPct: registrations ? 100 : null },
+    { key: 'kycApproved', label: 'KYC approved', value: kycApproved, stepPct: pct(kycApproved, registrations), overallPct: pct(kycApproved, registrations) },
+    { key: 'realAccountApproved', label: 'Real account', value: total.realAccountApproved, stepPct: pct(total.realAccountApproved, kycApproved), overallPct: pct(total.realAccountApproved, registrations) },
+    {
+      key: 'ftd', label: 'FTD (same accounts)',
+      value: total.ftd === null ? null : current.ftdCohort.activatedWithFtd,
+      stepPct: total.ftd === null ? null : pct(current.ftdCohort.activatedWithFtd, total.realAccountApproved),
+      overallPct: total.ftd === null ? null : pct(current.ftdCohort.activatedWithFtd, registrations),
+    },
+  ];
+
+  return {
+    range: period.range,
+    previousRange: period.previous,
+    rangeLabel: describeRange(period.range),
+    previousLabel: describeRange(period.previous),
+    granularity,
+    kpis,
+    breakdown: [
+      { key: 'firstAccount', label: 'First account activation (auto)', note: 'Activated accounts flagged as the client’s first account', value: total.firstAccount },
+      { key: 'additionalAccount', label: 'Additional account', note: 'Activated accounts for clients who already had one', value: total.additionalAccount },
+      { key: 'manualKycApproved', label: 'Manual KYC approved', note: 'KYC step approved by the team (not an account count)', value: total.manualKycApproved },
+      { key: 'autoKycApproved', label: 'Auto KYC approved', note: 'KYC step approved automatically (not an account count)', value: total.autoKycApproved },
+    ],
+    buckets: toBuckets(reportBuckets(period.range.from, period.range.to, granularity)),
+    daily: toBuckets(reportBuckets(period.range.from, period.range.to, 'day')),
+    total,
+    funnel,
+    ftd: ftdSummary,
+    dataQuality: { approvedBankInfoPending: total.approvedBankInfoPending, pendingVideoFailed: total.pendingVideoFailed },
+    peaks: {
+      activations: peak(current.daily.filter(d => d.date >= period.range.from && d.date <= period.range.to), d => d.activated),
+      registrations: peak(current.daily.filter(d => inRange(d.date, period.range)), d => d.events),
+      ftd: peak(current.ftd.filter(d => inRange(d.date, period.range)), d => d.count),
+    },
+    hasOnboardingData: current.daily.some(day => day.events > 0),
+    hasPreviousData: previous.daily.some(day => inRange(day.date, period.previous) && day.events > 0),
+    hasFtd: total.ftd !== null,
+  };
+}
