@@ -92,18 +92,19 @@ export async function GET(request: NextRequest) {
 async function runImageJob(job: ImageJob, prompt: string, brief: string, type: string, model: string, taskId: string | null, aspectRatio: ImageAspectRatio, includeSwipeLeft: boolean, dupoinAcademy: boolean) {
   const cwd = process.cwd() || '/Users/bayudarmawan/marketingos';
   const sopName = generateSOPFileName(brief || prompt, type);
+  // Retired ids (e.g. cx/gpt-5.5-image) map to their replacement and unknown ids
+  // fall back to the default image model, before anything is shown or sent.
+  const safeModel = resolveImageModel(model);
 
   try {
     imageJobs.update(job.id, job.ownerId, {
-      status: 'generating', progress: 30, message: `🤖 Generating image with ${model} (30-90s)...`,
+      status: 'generating', progress: 30, message: `🤖 Generating image with ${imageModelLabel(safeModel)} (30-90s)...`,
     });
 
     if (!GORILLAWORKOUT_API_KEY) {
       throw new Error('GORILLAWORKOUT_API_KEY is not configured.');
     }
 
-    // Fall back to the gateway's default image model when an unknown one is requested.
-    const safeModel = resolveImageModel(model);
     const generationSpec = getImageGenerationSpec(aspectRatio);
     const swipeLeft = type === 'social-post' && includeSwipeLeft;
     const academy = type === 'social-post' && dupoinAcademy;
@@ -190,7 +191,7 @@ async function runImageJob(job: ImageJob, prompt: string, brief: string, type: s
     // Report WHY it failed. A blanket "please try again" sent users retrying a
     // quota or an expired upstream token forever, with the real cause only ever
     // visible in the server log.
-    const explained = explainImageFailure(reason, model);
+    const explained = explainImageFailure(reason, safeModel);
     imageJobs.update(job.id, job.ownerId, {
       status: 'error', progress: 0, message: `❌ ${explained}`, error: explained,
     });
@@ -257,7 +258,9 @@ export function explainImageFailure(reason: string, model: string): string {
     // Wrapped 502s and Antigravity models get the explicit quota message so users
     // do not think the whole image service is down.
     if (model.startsWith('ag/') || status >= 500) {
-      return `Antigravity image quota/rate limit is full — try again in a moment, or switch to ${imageModelLabel(DEFAULT_IMAGE_MODEL)} (\`${DEFAULT_IMAGE_MODEL}\`).`;
+      // No other verified image model exists right now (ANTIGRAVITY_IMAGE_FALLBACK_MODEL
+      // is null), so do not suggest switching to one.
+      return `Antigravity image quota/rate limit is full for ${imageModelLabel(model)}.${waitHint} No other image model is available as a fallback right now.`;
     }
     return `Usage limit reached for ${model}.${waitHint} You can also pick a different image model.`;
   }

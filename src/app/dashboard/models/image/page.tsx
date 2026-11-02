@@ -161,9 +161,8 @@ export default function ImageModelsPage() {
           when someone generates an image.
         </p>
         <ul className="mt-3 space-y-1 text-xs text-[var(--mos-text-muted)]">
-          <li>• <strong>GPT-5.5 Image:</strong> Codex (ChatGPT) T2I — default, highest quality</li>
-          <li>• <strong>Gemini 3.1 Flash Image:</strong> Antigravity Gemini 3.1 Flash T2I</li>
-          <li>• <strong>Note:</strong> GPT-5.4 Image is rejected by the ChatGPT account, so it is not offered.</li>
+          <li>• <strong>Gemini 3.1 Flash Image:</strong> Antigravity Gemini 3.1 Flash T2I — default</li>
+          <li>• <strong>Note:</strong> GPT-5.5 Image and GPT-5.4 Image are rejected by the ChatGPT account, so they are not offered.</li>
         </ul>
       </Panel>
 

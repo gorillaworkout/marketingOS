@@ -16,7 +16,7 @@ import {
 import InlineModelSelector from '@/components/InlineModelSelector';
 import { DEFAULT_IMAGE_ASPECT_RATIO, IMAGE_ASPECT_RATIOS, type ImageAspectRatio } from '@/lib/image-aspect-ratio';
 import { applyDupoinImagePromptLocks } from '@/lib/dupoin-image-prompt';
-import { AVAILABLE_IMAGE_MODELS, DEFAULT_IMAGE_MODEL } from '@/lib/image-models';
+import { AVAILABLE_IMAGE_MODELS, DEFAULT_IMAGE_MODEL, imageModelLabel, selectableImageModel } from '@/lib/image-models';
 import { AI_RESEARCH_HANDOFF_QUERY, AI_RESEARCH_HANDOFF_VALUE, readAiResearchHandoff } from '@/lib/ai-research-handoff';
 import {
   mergeConfirmedSocialPostStatus,
@@ -842,11 +842,11 @@ export default function SocialPostPage() {
       const restoredModelId = latest?.usedModel || latest?.model;
       if (typeof restoredModelId === 'string' && restoredModelId) {
         imageModelLocked.current = true;
-        setImageModel(restoredModelId);
+        setImageModel(selectableImageModel(restoredModelId, availableImageModels));
       }
       setGeneratedImageModel(
         restoredModelId
-          ? (availableImageModels.find(item => item.id === restoredModelId)?.name || restoredModelId)
+          ? (availableImageModels.find(item => item.id === restoredModelId)?.name || imageModelLabel(restoredModelId))
           : null,
       );
       setImageNotice(typeof latest?.fallbackMessage === 'string' ? latest.fallbackMessage : '');
@@ -866,7 +866,7 @@ export default function SocialPostPage() {
     if (remix.brief) setBrief(remix.brief);
     if (remix.model) {
       imageModelLocked.current = true;
-      setImageModel(remix.model);
+      setImageModel(selectableImageModel(remix.model, availableImageModels));
     }
     if (remix.imageUrl) setGeneratedImage(remix.imageUrl);
     setPromptEditorOpen(true);
