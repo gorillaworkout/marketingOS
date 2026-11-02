@@ -31,6 +31,7 @@ async function main() {
   const { execute, queryAll, closeDb } = await import('../src/lib/database');
   const {
     AVAILABLE_MODELS,
+    RETIRED_MODEL_REPLACEMENTS,
     CLAUDE_OPUS_5_5_MODEL,
     CLAUDE_OPUS_5_MODEL,
     CLAUDE_SONNET_5_5_MODEL,
@@ -41,9 +42,12 @@ async function main() {
   // 015 and 024 still write ag/claude-sonnet-4-6 (removed by 025) and
   // cx/gpt-5.3-codex-spark (removed from the catalog by 027). 025 still
   // leaves Spark on allowlists; 027 is what drops it.
+  // Migration 039 later retires the ids in RETIRED_MODEL_REPLACEMENTS; they were live when this migration ran.
   const historicallyLive = (model: string) =>
-    live.has(model) || model === 'ag/claude-sonnet-4-6' || model === 'cx/gpt-5.3-codex-spark';
-  const liveAfter025 = (model: string) => live.has(model) || model === 'cx/gpt-5.3-codex-spark';
+    live.has(model) || model === 'ag/claude-sonnet-4-6' || model === 'cx/gpt-5.3-codex-spark'
+    || model in RETIRED_MODEL_REPLACEMENTS;
+  const liveAfter025 = (model: string) =>
+    live.has(model) || model === 'cx/gpt-5.3-codex-spark' || model in RETIRED_MODEL_REPLACEMENTS;
 
   const sql = await readFile(path.join(process.cwd(), 'db/migrations/015_add_claude_sonnet5_opus5.sql'), 'utf8');
   const sql55 = await readFile(path.join(process.cwd(), 'db/migrations/024_add_claude_sonnet55_opus55.sql'), 'utf8');

@@ -24,10 +24,12 @@ process.env.DATABASE_URL = TEST_DATABASE_URL;
 
 async function main() {
   const { execute, queryAll, closeDb } = await import('../src/lib/database');
-  const { AVAILABLE_MODELS } = await import('../src/lib/openai');
+  const { AVAILABLE_MODELS, RETIRED_MODEL_REPLACEMENTS } = await import('../src/lib/openai');
   const live = new Set(AVAILABLE_MODELS.map(model => model.id));
   // 011 still writes ag/claude-sonnet-4-6. Migration 025 removes it from the catalog.
-  const historicallyLive = (model: string) => live.has(model) || model === 'ag/claude-sonnet-4-6';
+  // Migration 039 later retires the ids in RETIRED_MODEL_REPLACEMENTS; they were live when this migration ran.
+  const historicallyLive = (model: string) =>
+    live.has(model) || model === 'ag/claude-sonnet-4-6' || model in RETIRED_MODEL_REPLACEMENTS;
 
   const sql = await readFile(path.join(process.cwd(), 'db/migrations/011_retire_dead_gateway_models.sql'), 'utf8');
 

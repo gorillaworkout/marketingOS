@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
-import { AVAILABLE_MODELS, CLAUDE_OPUS_5_5_MODEL, CLAUDE_OPUS_5_MODEL, CLAUDE_SONNET_5_5_MODEL, CLAUDE_SONNET_5_MODEL } from '../src/lib/openai';
+import { AVAILABLE_MODELS, CLAUDE_OPUS_5_5_MODEL, CLAUDE_OPUS_5_MODEL, CLAUDE_SONNET_5_5_MODEL, CLAUDE_SONNET_5_MODEL, RETIRED_MODEL_REPLACEMENTS } from '../src/lib/openai';
 import { IMAGE_MODELS, DEFAULT_IMAGE_MODEL } from '../src/lib/image-models';
 import { GENERATION_FEATURES } from '../src/lib/authorization';
 
@@ -13,7 +13,7 @@ const RETIRED_SONNET_46 = 'ag/claude-sonnet-4-6';
 const RETIRED_SPARK = 'cx/gpt-5.3-codex-spark';
 
 function missingFromCurrentCatalog(ids: string[]): string[] {
-  return ids.filter(id => id !== RETIRED_SONNET_46 && id !== RETIRED_SPARK && !catalog.has(id));
+  return ids.filter(id => id !== RETIRED_SONNET_46 && id !== RETIRED_SPARK && !(id in RETIRED_MODEL_REPLACEMENTS) && !catalog.has(id));
 }
 
 function withoutSqlComments(sql: string): string {

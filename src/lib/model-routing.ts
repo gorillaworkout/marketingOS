@@ -79,24 +79,23 @@ export const DEFAULT_FEATURE_ASSIGNMENTS: Record<GenerationFeature, {
   defaultModel: string;
 }> = {
   'social-post': {
-    allowedModels: ['ag/gemini-3-flash', 'ag/gemini-3.6-flash-medium', PREFERRED_CODEX_MODEL, CLAUDE_SONNET_5_MODEL, CLAUDE_OPUS_5_MODEL, CLAUDE_SONNET_5_5_MODEL, CLAUDE_OPUS_5_5_MODEL],
+    allowedModels: ['ag/gemini-3-flash', PREFERRED_CODEX_MODEL, CLAUDE_SONNET_5_MODEL, CLAUDE_OPUS_5_MODEL, CLAUDE_SONNET_5_5_MODEL, CLAUDE_OPUS_5_5_MODEL],
     defaultModel: 'ag/gemini-3-flash',
   },
   'video-script': {
-    allowedModels: ['ag/gemini-3-flash', 'ag/gemini-3.6-flash-medium', PREFERRED_CODEX_MODEL, CLAUDE_SONNET_5_MODEL, CLAUDE_OPUS_5_MODEL, CLAUDE_SONNET_5_5_MODEL, CLAUDE_OPUS_5_5_MODEL],
+    allowedModels: ['ag/gemini-3-flash', PREFERRED_CODEX_MODEL, CLAUDE_SONNET_5_MODEL, CLAUDE_OPUS_5_MODEL, CLAUDE_SONNET_5_5_MODEL, CLAUDE_OPUS_5_5_MODEL],
     defaultModel: 'ag/gemini-3-flash',
   },
   'event-plan': {
-    allowedModels: ['ag/gemini-3-flash', 'ag/gemini-3.1-pro-low', PREFERRED_CODEX_MODEL, CLAUDE_SONNET_5_MODEL, CLAUDE_OPUS_5_MODEL, CLAUDE_SONNET_5_5_MODEL, CLAUDE_OPUS_5_5_MODEL],
-    // ag/gemini-3.1-pro-low answers 503 on 9router; Sonnet 5.5 is the default.
+    allowedModels: ['ag/gemini-3-flash', PREFERRED_CODEX_MODEL, CLAUDE_SONNET_5_MODEL, CLAUDE_OPUS_5_MODEL, CLAUDE_SONNET_5_5_MODEL, CLAUDE_OPUS_5_5_MODEL],
     defaultModel: CLAUDE_SONNET_5_5_MODEL,
   },
   'article-market-news': {
-    allowedModels: ['lr/claude-sonnet-4.5', 'ag/gemini-3.1-pro-low', PREFERRED_CODEX_MODEL, CLAUDE_SONNET_5_MODEL, CLAUDE_OPUS_5_MODEL, CLAUDE_SONNET_5_5_MODEL, CLAUDE_OPUS_5_5_MODEL],
+    allowedModels: [CLAUDE_SONNET_5_MODEL, 'ag/gemini-3-flash', PREFERRED_CODEX_MODEL, CLAUDE_OPUS_5_MODEL, CLAUDE_SONNET_5_5_MODEL, CLAUDE_OPUS_5_5_MODEL],
     defaultModel: CLAUDE_SONNET_5_5_MODEL,
   },
   'market-research': {
-    allowedModels: ['lr/claude-sonnet-4.5', 'ag/gemini-3.1-pro-low', PREFERRED_CODEX_MODEL, CLAUDE_SONNET_5_MODEL, CLAUDE_OPUS_5_MODEL, CLAUDE_SONNET_5_5_MODEL, CLAUDE_OPUS_5_5_MODEL],
+    allowedModels: [CLAUDE_SONNET_5_MODEL, 'ag/gemini-3-flash', PREFERRED_CODEX_MODEL, CLAUDE_OPUS_5_MODEL, CLAUDE_SONNET_5_5_MODEL, CLAUDE_OPUS_5_5_MODEL],
     defaultModel: CLAUDE_SONNET_5_5_MODEL,
   },
   'ai-research': {
@@ -105,10 +104,8 @@ export const DEFAULT_FEATURE_ASSIGNMENTS: Record<GenerationFeature, {
       'cx/gpt-5.6-terra',
       'cx/gpt-5.6-luna',
       'ag/gemini-3-flash',
-      'ag/gemini-3.6-flash-high',
       CLAUDE_SONNET_5_MODEL,
       CLAUDE_OPUS_5_MODEL,
-      'ag/gemini-3.1-pro-low',
       CLAUDE_SONNET_5_5_MODEL,
       CLAUDE_OPUS_5_5_MODEL,
     ],

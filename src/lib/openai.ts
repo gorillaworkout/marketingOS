@@ -50,7 +50,6 @@ export interface ModelInfo {
 //   cc/claude-sonnet-5, cc/claude-opus-5. Migration 011 retired cc/* after a
 //   401 on llm.gorillaworkout.id. cc/* may work again on llmdupoin —
 //   re-probe with scripts/probe-gateway-models.ts before removing.
-//   Keep Claude Sonnet 4.5 (`lr/claude-sonnet-4.5`).
 //
 // Claude Sonnet 5.5 / Opus 5.5 (VPS GET /v1/models on llmdupoin, 2026-10-02,
 // 9router 0.5.95): cc/claude-sonnet-5-5, cc/claude-opus-5-5. Catalog only —
@@ -63,7 +62,13 @@ export interface ModelInfo {
 //   cmc/moonshotai/Kimi-K2.5, Kimi-K2.6  — listed on the gateway; do not catalog.
 //   cc/claude-fable-5, cc/claude-haiku-4-5-20251001 — listed; not cataloged.
 //   ag/claude-sonnet-4-6                 — Claude Sonnet 4.6 no longer exists on the gateway.
-//   ag/claude-opus-4-6-thinking, lr/claude-sonnet-4-6 — listed earlier; not cataloged.
+//   ag/claude-opus-4-6-thinking          — listed earlier; not cataloged.
+//   Dead upstream on 2026-11-02 (9router 503, upstream 404); migration 039
+//   repoints them (see RETIRED_MODEL_REPLACEMENTS below):
+//   ag/gemini-3.1-pro-low, ag/gemini-3.6-flash-high, ag/gemini-3.6-flash-medium
+//                                        — replaced by ag/gemini-3-flash.
+//   lr/* (lr/claude-sonnet-4.5, lr/claude-sonnet-4-6) — the whole lr provider
+//                                          returns 404; replaced by cc/claude-sonnet-5.
 //   ag/gemini-3.7-*                      — 404, never existed upstream.
 //   ag/gemini-3.5-*, ag/gemini-3-flash-agent — retired (HTTP 200 retirement notice).
 //   pecut-free                           — upstream 400 "Unsupported model mimo-auto".
@@ -73,11 +78,7 @@ export interface ModelInfo {
 export const AVAILABLE_MODELS: ModelInfo[] = [
   { id: 'ag/gemini-3-flash', name: 'Gemini 3 Flash', tier: 'budget', provider: 'gorillaworkout', input: 0, output: 0 },
   { id: 'ag/gemini-3.6-flash-low', name: 'Gemini 3.6 Flash Low', tier: 'budget', provider: 'gorillaworkout', input: 0, output: 0 },
-  { id: 'ag/gemini-3.6-flash-medium', name: 'Gemini 3.6 Flash Medium', tier: 'balanced', provider: 'gorillaworkout', input: 0, output: 0 },
-  { id: 'ag/gemini-3.6-flash-high', name: 'Gemini 3.6 Flash High', tier: 'balanced', provider: 'gorillaworkout', input: 0, output: 0 },
-  { id: 'ag/gemini-3.1-pro-low', name: 'Gemini 3.1 Pro Low', tier: 'balanced', provider: 'gorillaworkout', input: 0, output: 0 },
   { id: 'ag/gemini-pro-agent', name: 'Gemini Pro Agent', tier: 'balanced', provider: 'gorillaworkout', input: 0, output: 0 },
-  { id: 'lr/claude-sonnet-4.5', name: 'Claude Sonnet 4.5', tier: 'balanced', provider: 'gorillaworkout', input: 0, output: 0 },
   { id: CLAUDE_SONNET_5_MODEL, name: 'Claude Sonnet 5', tier: 'balanced', provider: 'gorillaworkout', input: 0, output: 0 },
   { id: CLAUDE_SONNET_5_5_MODEL, name: 'Claude Sonnet 5.5', tier: 'balanced', provider: 'gorillaworkout', input: 0, output: 0 },
   { id: CLAUDE_OPUS_5_MODEL, name: 'Claude Opus 5', tier: 'premium', provider: 'gorillaworkout', input: 0, output: 0 },
@@ -91,6 +92,19 @@ export const AVAILABLE_MODELS: ModelInfo[] = [
   { id: 'cx/gpt-5.4', name: 'GPT-5.4', tier: 'balanced', provider: 'gorillaworkout', input: 0, output: 0 },
   { id: 'cx/gpt-5.4-mini', name: 'GPT-5.4 Mini', tier: 'budget', provider: 'gorillaworkout', input: 0, output: 0 },
 ];
+
+/**
+ * Chat model ids that died upstream, mapped to the live id that replaces
+ * them. They must never be offered again. Migration 039 rewrites stored
+ * allowlists, defaults, and preferences that still name them.
+ */
+export const RETIRED_MODEL_REPLACEMENTS: Readonly<Record<string, string>> = {
+  'ag/gemini-3.1-pro-low': 'ag/gemini-3-flash',
+  'ag/gemini-3.6-flash-high': 'ag/gemini-3-flash',
+  'ag/gemini-3.6-flash-medium': 'ag/gemini-3-flash',
+  'lr/claude-sonnet-4.5': CLAUDE_SONNET_5_MODEL,
+  'lr/claude-sonnet-4-6': CLAUDE_SONNET_5_MODEL,
+};
 
 export function getModelProvider(modelId: string): ModelProvider {
   if (!AVAILABLE_MODELS.some(model => model.id === modelId)) {

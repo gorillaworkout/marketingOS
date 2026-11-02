@@ -13,7 +13,12 @@ export const GLOBAL_FALLBACK_ORDER = [
   'cc/claude-opus-5-5',
 ] as const;
 
-/** Display names for fallback labels. Unknown ids fall back to the raw id. */
+/**
+ * Display names for fallback labels. Unknown ids fall back to the raw id.
+ * Retired ids (lr/claude-sonnet-4.5, ag/gemini-3.6-flash-*, ag/gemini-3.1-pro-low)
+ * stay here only so historical fallback events and saved results keep a
+ * readable label. They are not offered anywhere (see RETIRED_MODEL_REPLACEMENTS).
+ */
 const MODEL_DISPLAY_NAMES: Record<string, string> = {
   'cc/claude-sonnet-5-5': 'Claude Sonnet 5.5',
   'cc/claude-opus-5-5': 'Claude Opus 5.5',

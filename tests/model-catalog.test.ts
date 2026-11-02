@@ -15,8 +15,10 @@ assert(!ids.some(id => id.includes('gemini-3.5')), 'retired Gemini 3.5 models mu
 assert(!ids.some(id => id.includes('gemini-3.7')), 'Gemini 3.7 does not exist on the gateway (404)');
 
 assert(ids.includes('ag/gemini-3.6-flash-low'), 'Gemini 3.6 Flash Low must be offered');
-assert(ids.includes('ag/gemini-3.6-flash-medium'), 'Gemini 3.6 Flash Medium must be offered');
-assert(ids.includes('ag/gemini-3.6-flash-high'), 'Gemini 3.6 Flash High must be offered');
+// Dead upstream on 2026-11-02 (9router 503, upstream 404). Migration 039 retires them.
+assert(!ids.includes('ag/gemini-3.6-flash-medium'), 'Gemini 3.6 Flash Medium is dead upstream and must not be offered');
+assert(!ids.includes('ag/gemini-3.6-flash-high'), 'Gemini 3.6 Flash High is dead upstream and must not be offered');
+assert(!ids.includes('ag/gemini-3.1-pro-low'), 'Gemini 3.1 Pro Low is dead upstream and must not be offered');
 
 assert.equal(PREFERRED_CODEX_MODEL, 'cx/gpt-5.6-sol');
 assert(ids.includes('cx/gpt-5.6-sol'), 'GPT-5.6 Sol must be offered');
@@ -37,7 +39,7 @@ assert(ids.includes(CLAUDE_SONNET_5_5_MODEL), 'Claude Sonnet 5.5 must be offered
 assert(ids.includes(CLAUDE_OPUS_5_5_MODEL), 'Claude Opus 5.5 must be offered');
 assert(!ids.includes('ag/claude-sonnet-4-6'), 'Claude Sonnet 4.6 is gone from the gateway and must not be offered');
 assert(!ids.some(id => id.includes('claude-opus-4-6') || id.includes('claude-sonnet-4-6')), 'Claude 4.6 ids must stay out of the catalog');
-assert(ids.includes('lr/claude-sonnet-4.5'), 'Claude Sonnet 4.5 must stay offered');
+assert(!ids.some(id => id.startsWith('lr/')), 'the lr provider returns 404 upstream; no lr/* id may be offered');
 assert.equal(AVAILABLE_MODELS.find(model => model.id === CLAUDE_SONNET_5_MODEL)?.name, 'Claude Sonnet 5');
 assert.equal(AVAILABLE_MODELS.find(model => model.id === CLAUDE_OPUS_5_MODEL)?.name, 'Claude Opus 5');
 assert.equal(AVAILABLE_MODELS.find(model => model.id === CLAUDE_SONNET_5_5_MODEL)?.name, 'Claude Sonnet 5.5');

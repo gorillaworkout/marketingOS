@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
-import { AVAILABLE_MODELS, CLAUDE_OPUS_5_5_MODEL, CLAUDE_OPUS_5_MODEL, CLAUDE_SONNET_5_5_MODEL, CLAUDE_SONNET_5_MODEL, PREFERRED_CODEX_MODEL } from '../src/lib/openai';
+import { AVAILABLE_MODELS, CLAUDE_OPUS_5_5_MODEL, CLAUDE_OPUS_5_MODEL, CLAUDE_SONNET_5_5_MODEL, CLAUDE_SONNET_5_MODEL, PREFERRED_CODEX_MODEL, RETIRED_MODEL_REPLACEMENTS } from '../src/lib/openai';
 import { DEFAULT_FEATURE_ASSIGNMENTS } from '../src/lib/model-routing';
 import { IMAGE_MODELS } from '../src/lib/image-models';
 
@@ -29,7 +29,7 @@ const RETIRED_SONNET_46 = 'ag/claude-sonnet-4-6';
 const RETIRED_SPARK = 'cx/gpt-5.3-codex-spark';
 
 function missingFromCurrentCatalog(ids: string[]): string[] {
-  return ids.filter(id => id !== RETIRED_SONNET_46 && id !== RETIRED_SPARK && !catalog.has(id));
+  return ids.filter(id => id !== RETIRED_SONNET_46 && id !== RETIRED_SPARK && !(id in RETIRED_MODEL_REPLACEMENTS) && !catalog.has(id));
 }
 
 function quotedModelIds(source: string): string[] {
@@ -110,7 +110,7 @@ test('every workflow allowlist includes Sol, Claude 5, and Claude 5.5 and drops 
     assert.notEqual(assignment.defaultModel, RETIRED_SONNET_46, `${feature} should not default to Sonnet 4.6`);
     if (feature === 'article-market-news' || feature === 'market-research') {
       assert.equal(assignment.defaultModel, CLAUDE_SONNET_5_5_MODEL, `${feature} should default to Sonnet 5.5`);
-      assert.ok(assignment.allowedModels.includes('lr/claude-sonnet-4.5'), `${feature} must keep Sonnet 4.5`);
+      assert.ok(!assignment.allowedModels.some(id => id.startsWith('lr/')), `${feature} must not allow the dead lr provider`);
     } else if (feature === 'seo-content') {
       assert.equal(assignment.defaultModel, CLAUDE_SONNET_5_5_MODEL, 'seo-content should default to Sonnet 5.5');
     } else if (feature === 'event-plan') {
@@ -230,7 +230,7 @@ test('catalog itself contains Codex, Claude 5, Claude 5.5, and excludes Spark, K
   assert.ok(catalog.has(CLAUDE_OPUS_5_5_MODEL));
   assert.ok(!catalog.has(RETIRED_SONNET_46));
   assert.ok(![...catalog].some(id => id.includes('claude-opus-4-6') || id.includes('claude-sonnet-4-6')));
-  assert.ok(catalog.has('lr/claude-sonnet-4.5'));
+  assert.ok(![...catalog].some(id => id.startsWith('lr/')), 'the lr provider 404s upstream; migration 039 retires it');
   assert.ok([...catalog].some(id => id.startsWith('cx/')));
   assert.ok(![...catalog].some(id =>
     id.startsWith('kimi/') || id.startsWith('tr/') || id.startsWith('cmc/moonshotai/') || id.toLowerCase().includes('kimi')));
