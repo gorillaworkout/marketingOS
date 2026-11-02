@@ -28,7 +28,7 @@ export function buildReportWorkbook(report: OnboardingReport): Buffer {
   const workbook = XLSX.utils.book_new();
   const header = [...EXPORT_COLUMNS];
   const summary = XLSX.utils.aoa_to_sheet([
-    [`Monthly Report — Onboarding, ${report.rangeLabel} (WIB)`],
+    [`Onboarding Reports — ${report.rangeLabel} (WIB)`],
     [],
     header,
     ...reportTableRows(report),
