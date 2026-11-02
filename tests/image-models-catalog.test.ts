@@ -5,6 +5,7 @@ import {
   DEFAULT_IMAGE_MODEL,
   IMAGE_MODELS,
   isAllowedImageModel,
+  RETIRED_IMAGE_MODEL_REPLACEMENTS,
   resolveAssignedImageModels,
   resolveImageModel,
 } from '../src/lib/image-models';
@@ -14,16 +15,23 @@ const ids = AVAILABLE_IMAGE_MODELS.map(model => model.id);
 assert.equal(DEFAULT_IMAGE_MODEL, 'cx/gpt-5.5-image');
 assert.deepEqual(ids, [
   'cx/gpt-5.5-image',
-  'ag/nano-banana',
-  'ag/nano-banana-pro',
   'ag/gemini-3.1-flash-image',
 ]);
+// Not exposed by 9router (2026-11-02); migration 039 repoints stored assignments.
+assert.equal(ids.includes('ag/nano-banana'), false);
+assert.equal(ids.includes('ag/nano-banana-pro'), false);
+assert.deepEqual({ ...RETIRED_IMAGE_MODEL_REPLACEMENTS }, {
+  'ag/nano-banana': 'ag/gemini-3.1-flash-image',
+  'ag/nano-banana-pro': 'ag/gemini-3.1-flash-image',
+});
 assert.equal(ids.includes('cx/gpt-5.4-image'), false);
 assert.equal(ids.includes('ag/nanobanana'), false);
-assert.equal(isAllowedImageModel('ag/nano-banana-pro'), true);
+assert.equal(isAllowedImageModel('ag/nano-banana-pro'), false);
+assert.equal(isAllowedImageModel('ag/nano-banana'), false);
 assert.equal(isAllowedImageModel('ag/gemini-3.1-flash-image'), true);
 assert.equal(isAllowedImageModel('ag/nanobanana'), false);
-assert.equal(resolveImageModel('ag/nano-banana'), 'ag/nano-banana');
+assert.equal(resolveImageModel('ag/nano-banana'), 'ag/gemini-3.1-flash-image', 'stale nano-banana requests use the live Gemini image model');
+assert.equal(resolveImageModel('ag/nano-banana-pro'), 'ag/gemini-3.1-flash-image');
 assert.equal(resolveImageModel('ag/gemini-3.1-flash-image'), 'ag/gemini-3.1-flash-image');
 assert.equal(resolveImageModel('unknown'), DEFAULT_IMAGE_MODEL);
 assert.equal(resolveImageModel(undefined), DEFAULT_IMAGE_MODEL);
@@ -44,5 +52,5 @@ assert.match(socialPost, /AVAILABLE_IMAGE_MODELS/);
 assert.match(socialPost, /DEFAULT_IMAGE_MODEL/);
 assert.doesNotMatch(socialPost, /gpt-5\.4-image|ag\/nanobanana/);
 
-assert.equal(IMAGE_MODELS.length, 4);
+assert.equal(IMAGE_MODELS.length, 2);
 console.log('image models catalog contract passed');

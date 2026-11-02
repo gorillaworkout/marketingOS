@@ -15,29 +15,50 @@ export const GLOBAL_FALLBACK_ORDER = [
 
 /**
  * Display names for fallback labels. Unknown ids fall back to the raw id.
- * Retired ids (lr/claude-sonnet-4.5, ag/gemini-3.6-flash-*, ag/gemini-3.1-pro-low)
- * stay here only so historical fallback events and saved results keep a
- * readable label. They are not offered anywhere (see RETIRED_MODEL_REPLACEMENTS).
+ * Every AVAILABLE_MODELS id must be here with the same name (a test checks).
+ * Retired ids (see RETIRED_MODEL_REPLACEMENTS) stay here only so historical
+ * fallback events and saved results keep a readable label; they are not
+ * offered anywhere.
  */
 const MODEL_DISPLAY_NAMES: Record<string, string> = {
   'cc/claude-sonnet-5-5': 'Claude Sonnet 5.5',
   'cc/claude-opus-5-5': 'Claude Opus 5.5',
   'cc/claude-sonnet-5': 'Claude Sonnet 5',
   'cc/claude-opus-5': 'Claude Opus 5',
-  'lr/claude-sonnet-4.5': 'Claude Sonnet 4.5',
+  'ag/gemini-3-flash': 'Gemini 3 Flash',
+  'ag/gemini-3.8-flash': 'Gemini 3.8 Flash',
+  'ag/gemini-3.8-flash-high': 'Gemini 3.8 Flash High',
+  'ag/gemini-3.8-flash-medium': 'Gemini 3.8 Flash Medium',
+  'ag/gemini-3.8-flash-low': 'Gemini 3.8 Flash Low',
+  'ag/gpt-oss-120b-medium': 'GPT OSS 120B Medium',
+  'cx/gpt-6.1-sol': 'GPT-6.1 Sol',
+  'cx/gpt-6-sol': 'GPT-6 Sol',
+  'cx/gpt-6-sol[1m]': 'GPT-6 Sol (1M context)',
+  'cx/gpt-6-astra': 'GPT-6 Astra',
+  'cx/gpt-6-astra[1m]': 'GPT-6 Astra (1M context)',
+  'cx/gpt-6-luna': 'GPT-6 Luna',
+  'cx/gpt-6-luna[1m]': 'GPT-6 Luna (1M context)',
   'cx/gpt-5.6-sol': 'GPT-5.6 Sol',
+  'cx/gpt-5.6-sol[1m]': 'GPT-5.6 Sol (1M context)',
+  'cx/gpt-5.6-sol-review': 'GPT-5.6 Sol Review',
   'cx/gpt-5.6-terra': 'GPT-5.6 Terra',
+  'cx/gpt-5.6-terra[1m]': 'GPT-5.6 Terra (1M context)',
+  'cx/gpt-5.6-terra-review': 'GPT-5.6 Terra Review',
   'cx/gpt-5.6-luna': 'GPT-5.6 Luna',
-  'cx/gpt-5.5': 'GPT-5.5',
+  'cx/gpt-5.6-luna[1m]': 'GPT-5.6 Luna (1M context)',
+  'cx/gpt-5.6-luna-review': 'GPT-5.6 Luna Review',
+  'cx/gpt-reserve': 'GPT Reserve',
+  'cx/codex-auto-review': 'Codex Auto Review',
   'cx/gpt-5.4': 'GPT-5.4',
   'cx/gpt-5.4-mini': 'GPT-5.4 Mini',
-  'ag/gemini-3-flash': 'Gemini 3 Flash',
+  // Retired; labels for history only.
+  'lr/claude-sonnet-4.5': 'Claude Sonnet 4.5',
+  'cx/gpt-5.5': 'GPT-5.5',
   'ag/gemini-3.6-flash-low': 'Gemini 3.6 Flash Low',
   'ag/gemini-3.6-flash-medium': 'Gemini 3.6 Flash Medium',
   'ag/gemini-3.6-flash-high': 'Gemini 3.6 Flash High',
   'ag/gemini-3.1-pro-low': 'Gemini 3.1 Pro Low',
   'ag/gemini-pro-agent': 'Gemini Pro Agent',
-  'ag/gpt-oss-120b-medium': 'GPT OSS 120B Medium',
 };
 
 export function modelDisplayName(modelId: string): string {

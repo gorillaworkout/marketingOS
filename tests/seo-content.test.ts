@@ -59,7 +59,13 @@ test('037 seeds the seo-content assignment without overwriting admin changes', (
   assert.match(executable, /INSERT INTO feature_model_assignments[\s\S]*'seo-content'[\s\S]*ON CONFLICT \(feature_key\) DO NOTHING/);
   assert.match(executable, /'cc\/claude-sonnet-5-5'/);
   const allowed = JSON.parse(executable.match(/'(\[[^\]]*\])'::jsonb/i)?.[1] ?? '[]') as string[];
-  assert.deepEqual([...allowed].sort(), [...DEFAULT_FEATURE_ASSIGNMENTS['seo-content'].allowedModels].sort());
+  // 037 seeded the original short list; 039 appends every working model, so
+  // the 037 seed is a subset of today's default, led by the same ids.
+  assert.ok(allowed.length > 0);
+  for (const id of allowed) {
+    assert.ok(DEFAULT_FEATURE_ASSIGNMENTS['seo-content'].allowedModels.includes(id), `037 seeded ${id}, which the code default no longer allows`);
+  }
+  assert.deepEqual(DEFAULT_FEATURE_ASSIGNMENTS['seo-content'].allowedModels.slice(0, allowed.length), allowed);
 });
 
 test('037 draft statuses match the app', () => {

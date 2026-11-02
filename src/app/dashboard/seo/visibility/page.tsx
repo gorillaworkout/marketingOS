@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Button, DataTableFrame, EmptyState, LoadingState, PageHeader, PageStack, Panel, Select, StatusBadge, TextArea, TextInput } from '@/components/ui/dashboard';
 import { fetchJson, useSeoSites } from '@/components/seo/useSeoSites';
 import { VISIBILITY_DISCLAIMER } from '@/lib/seo/visibility-copy';
+import { groupModelsByProvider } from '@/lib/model-groups';
 
 type Prompt = { id: string; prompt: string; brand_terms: string[]; competitors: string[]; active: boolean; last_checked_at: string | null; checks: number; mentions: number };
 type Run = { id: string; status: 'running' | 'succeeded' | 'partial' | 'failed'; models: string[]; checks_planned: number; checks_done: number; checks_failed: number; prompts_skipped: number; cost: number; error: string | null; trigger: string; triggered_by_name: string | null; started_at: string; finished_at: string | null };
@@ -332,13 +333,16 @@ export default function SeoVisibilityPage() {
       {isAdmin && current.settings && settings && <Panel>
         <div className="flex flex-col gap-3 text-sm">
           <p className="font-medium text-[var(--mos-text)]">Run settings (admin)</p>
-          <div className="flex flex-wrap gap-3">
-            {current.settings.availableModels.map(model => <label key={model.id} className="flex items-center gap-2 text-[var(--mos-text-secondary)]">
-              <input type="checkbox" checked={settings.models.includes(model.id)} onChange={event => setDraftSettings({
-                ...settings, models: event.target.checked ? [...settings.models, model.id] : settings.models.filter(id => id !== model.id),
-              })} /> {model.id}
-            </label>)}
-          </div>
+          {groupModelsByProvider(current.settings.availableModels).map(group => <div key={group.label} className="flex flex-col gap-1">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.11em] text-[var(--mos-text-faint)]">{group.label}</p>
+            <div className="flex flex-wrap gap-3">
+              {group.models.map(model => <label key={model.id} title={model.id} className="flex items-center gap-2 text-[var(--mos-text-secondary)]">
+                <input type="checkbox" checked={settings.models.includes(model.id)} onChange={event => setDraftSettings({
+                  ...settings, models: event.target.checked ? [...settings.models, model.id] : settings.models.filter(id => id !== model.id),
+                })} /> {model.name}
+              </label>)}
+            </div>
+          </div>)}
           <div className="flex flex-wrap items-center gap-3">
             <label className="flex items-center gap-2 text-[var(--mos-text-secondary)]">Max checks per run
               <TextInput type="number" min={1} max={current.settings.hardMaxChecks} value={settings.maxChecksPerRun} onChange={event => setDraftSettings({ ...settings, maxChecksPerRun: Number(event.target.value) })} className="w-24" />
@@ -347,7 +351,7 @@ export default function SeoVisibilityPage() {
               <input type="checkbox" checked={settings.classifierEnabled} onChange={event => setDraftSettings({ ...settings, classifierEnabled: event.target.checked })} /> LLM classifier when no term matches
             </label>
             <Select aria-label="Classifier model" value={settings.classifierModel} onChange={event => setDraftSettings({ ...settings, classifierModel: event.target.value })} className="w-auto">
-              {current.settings.availableModels.map(model => <option key={model.id} value={model.id}>{model.id}</option>)}
+              {groupModelsByProvider(current.settings.availableModels).map(group => <optgroup key={group.label} label={group.label}>{group.models.map(model => <option key={model.id} value={model.id}>{model.name}</option>)}</optgroup>)}
             </Select>
           </div>
           <p className="text-xs text-[var(--mos-text-muted)]">Each check is one gateway call (up to about 1,500 output tokens); the classifier adds one short call for answers with no term match. Prompts over the cap wait for the next run, least recently checked first.</p>
