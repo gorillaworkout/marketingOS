@@ -55,7 +55,8 @@ const unique = (ids: string[]) => [...new Set(ids)];
 
 async function main() {
   const { execute, queryAll, queryOne, closeDb } = await import('../src/lib/database');
-  const { AVAILABLE_MODELS, RETIRED_MODEL_REPLACEMENTS, WORKING_TEXT_MODELS } = await import('../src/lib/openai');
+  // 039 appends the frozen v0.5.95 list; migration 040 appends the v0.5.112 ids.
+  const { AVAILABLE_MODELS, RETIRED_MODEL_REPLACEMENTS, WORKING_TEXT_MODELS_V0_5_95: WORKING_TEXT_MODELS, WORKING_TEXT_MODELS_V0_5_112 } = await import('../src/lib/openai');
   const { DEFAULT_FEATURE_ASSIGNMENTS } = await import('../src/lib/model-routing');
   const live = new Set(AVAILABLE_MODELS.map(model => model.id));
   for (const id of DEAD) {
@@ -174,7 +175,11 @@ async function main() {
   assert.equal(byKey['market-research'].default_model, 'cc/claude-sonnet-5', 'lr default moves to cc/claude-sonnet-5');
   assert.deepEqual(byKey['ai-research'].allowed_models, expected(['cx/gpt-5.6-sol', 'cx/gpt-5.6-terra', 'cx/gpt-5.6-luna', 'ag/gemini-3-flash', 'cc/claude-sonnet-5', 'cc/claude-opus-5', 'cc/claude-sonnet-5-5', 'cc/claude-opus-5-5']));
   assert.equal(byKey['ai-research'].default_model, 'cx/gpt-5.6-sol');
-  assert.deepEqual(byKey['seo-content'].allowed_models, DEFAULT_FEATURE_ASSIGNMENTS['seo-content'].allowedModels, 'missing row is seeded from the code default');
+  assert.deepEqual(
+    byKey['seo-content'].allowed_models,
+    DEFAULT_FEATURE_ASSIGNMENTS['seo-content'].allowedModels.filter(model => !WORKING_TEXT_MODELS_V0_5_112.includes(model)),
+    'missing row is seeded from the code default (minus the 040 additions)',
+  );
   assert.equal(byKey['seo-content'].default_model, DEFAULT_FEATURE_ASSIGNMENTS['seo-content'].defaultModel);
 
   const preferences = await queryAll<{ user_id: string; task_type: string; model: string }>(

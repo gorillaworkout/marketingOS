@@ -162,7 +162,6 @@ export default function ImageModelsPage() {
         </p>
         <ul className="mt-3 space-y-1 text-xs text-[var(--mos-text-muted)]">
           <li>• <strong>GPT-5.5 Image:</strong> Codex (ChatGPT) T2I — default, highest quality</li>
-          <li>• <strong>Nano Banana / Nano Banana Pro:</strong> Antigravity Gemini T2I</li>
           <li>• <strong>Gemini 3.1 Flash Image:</strong> Antigravity Gemini 3.1 Flash T2I</li>
           <li>• <strong>Note:</strong> GPT-5.4 Image is rejected by the ChatGPT account, so it is not offered.</li>
         </ul>

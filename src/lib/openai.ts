@@ -80,10 +80,23 @@ export const AVAILABLE_MODELS: ModelInfo[] = [
   m('ag/gemini-3.8-flash-high', 'Gemini 3.8 Flash High', 'balanced'),
   m('ag/gemini-3.8-flash-medium', 'Gemini 3.8 Flash Medium', 'budget'),
   m('ag/gemini-3.8-flash-low', 'Gemini 3.8 Flash Low', 'budget'),
+  // 9router v0.5.112 (2026-11-02). Argon High took ~52s for a tiny reply.
+  m('ag/gemini-4-argon-low', 'Gemini 4 Argon Low', 'budget'),
+  m('ag/gemini-4-argon-medium', 'Gemini 4 Argon Medium', 'balanced'),
+  m('ag/gemini-4-argon-high', 'Gemini 4 Argon High (slow)', 'premium'),
+  // Claude served through Antigravity, distinct from the cc/ Claude Code ids.
+  m('ag/claude-sonnet-5-5', 'Claude Sonnet 5.5 (Antigravity)', 'balanced'),
+  m('ag/claude-sonnet-5-5-low', 'Claude Sonnet 5.5 Low (Antigravity)', 'balanced'),
+  m('ag/claude-sonnet-5-5-medium', 'Claude Sonnet 5.5 Medium (Antigravity)', 'balanced'),
+  m('ag/claude-opus-5-5', 'Claude Opus 5.5 (Antigravity)', 'premium'),
+  m('ag/claude-opus-5-5-low', 'Claude Opus 5.5 Low (Antigravity)', 'premium'),
+  m('ag/claude-opus-5-5-medium', 'Claude Opus 5.5 Medium (Antigravity)', 'premium'),
+  m('ag/claude-opus-5-5-high', 'Claude Opus 5.5 High (Antigravity)', 'premium'),
   // Untested on 2026-11-02; kept as before but not added to any allowlist.
   m('ag/gpt-oss-120b-medium', 'GPT OSS 120B Medium', 'balanced'),
   // OpenAI Codex (cx/)
   m('cx/gpt-6.1-sol', 'GPT-6.1 Sol', 'premium'),
+  m('cx/gpt-6.1-terra', 'GPT-6.1 Terra', 'balanced'),
   m('cx/gpt-6-sol', 'GPT-6 Sol', 'premium'),
   m('cx/gpt-6-sol[1m]', 'GPT-6 Sol (1M context)', 'premium'),
   m('cx/gpt-6-astra', 'GPT-6 Astra', 'balanced'),
@@ -107,10 +120,10 @@ export const AVAILABLE_MODELS: ModelInfo[] = [
 ];
 
 /**
- * Text models verified working through 9router on 2026-11-02. Every text
- * feature allows all of them (migration 039 adds them to stored allowlists).
+ * Text models verified working through 9router v0.5.95 on 2026-11-02.
+ * Frozen: migration 039 appends exactly this list to stored allowlists.
  */
-export const WORKING_TEXT_MODELS: readonly string[] = [
+export const WORKING_TEXT_MODELS_V0_5_95: readonly string[] = [
   CLAUDE_SONNET_5_5_MODEL,
   CLAUDE_OPUS_5_5_MODEL,
   CLAUDE_SONNET_5_MODEL,
@@ -141,6 +154,37 @@ export const WORKING_TEXT_MODELS: readonly string[] = [
 ];
 
 /**
+ * New working text models in 9router v0.5.112 (probed 2026-11-02).
+ * Frozen: migration 040 appends exactly this list to stored allowlists.
+ * Not added: ag/claude-sonnet-5-5-high (empty completion, unverified) and
+ * ag/gemini-3.1-pro-high (404, see RETIRED_MODEL_REPLACEMENTS).
+ * v0.5.112 no longer lists ag/gemini-3-flash in GET /v1/models, but it still
+ * answers by id, so it stays cataloged and remains a default.
+ */
+export const WORKING_TEXT_MODELS_V0_5_112: readonly string[] = [
+  'cx/gpt-6.1-terra',
+  'ag/gemini-4-argon-low',
+  'ag/gemini-4-argon-medium',
+  'ag/gemini-4-argon-high',
+  'ag/claude-sonnet-5-5',
+  'ag/claude-sonnet-5-5-low',
+  'ag/claude-sonnet-5-5-medium',
+  'ag/claude-opus-5-5',
+  'ag/claude-opus-5-5-low',
+  'ag/claude-opus-5-5-medium',
+  'ag/claude-opus-5-5-high',
+];
+
+/**
+ * Every working text model. Every text feature allows all of them
+ * (migrations 039 and 040 add them to stored allowlists).
+ */
+export const WORKING_TEXT_MODELS: readonly string[] = [
+  ...WORKING_TEXT_MODELS_V0_5_95,
+  ...WORKING_TEXT_MODELS_V0_5_112,
+];
+
+/**
  * Chat model ids that are dead or unsupported upstream, mapped to the live id
  * that replaces them. They must never be offered again. Migration 039
  * rewrites stored allowlists, defaults, and preferences that still name them
@@ -157,6 +201,8 @@ export const RETIRED_MODEL_REPLACEMENTS: Readonly<Record<string, string>> = {
   'ag/gemini-3.7-flash-low': 'ag/gemini-3-flash',
   'ag/gemini-3.5-flash-high': 'ag/gemini-3-flash',
   'ag/gemini-pro-agent': 'ag/gemini-3-flash',
+  // 9router v0.5.112: 404 (2026-11-02); migration 040 repoints stored rows
+  'ag/gemini-3.1-pro-high': 'ag/gemini-3-flash',
   // HTTP 200 with only a retirement notice
   'ag/gemini-3-flash-agent': 'ag/gemini-3-flash',
   'ag/gemini-3.5-flash-low': 'ag/gemini-3-flash',

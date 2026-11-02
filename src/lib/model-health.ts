@@ -1,6 +1,9 @@
 import { GORILLAWORKOUT_API_BASE, GORILLAWORKOUT_API_KEY } from '@/lib/gateway-config';
+import { isSlowTextModel } from '@/lib/model-groups';
 
 export const MODEL_HEALTH_TIMEOUT_MS = 18_000;
+/** For SLOW_TEXT_MODELS; stays under the health route's 60s maxDuration. */
+export const MODEL_HEALTH_SLOW_TIMEOUT_MS = 55_000;
 export const MODEL_HEALTH_MAX_TOKENS = 48;
 export const MODEL_HEALTH_PROMPT = 'ping';
 export const MODEL_HEALTH_ERROR_MAX_LENGTH = 180;
@@ -211,7 +214,7 @@ export async function probeGatewayModel(
   const now = options.now || (() => new Date());
   const apiBase = (options.apiBase || GORILLAWORKOUT_API_BASE).replace(/\/+$/, '');
   const apiKey = options.apiKey ?? GORILLAWORKOUT_API_KEY;
-  const timeoutMs = options.timeoutMs ?? MODEL_HEALTH_TIMEOUT_MS;
+  const timeoutMs = options.timeoutMs ?? (isSlowTextModel(modelId) ? MODEL_HEALTH_SLOW_TIMEOUT_MS : MODEL_HEALTH_TIMEOUT_MS);
   const fetchImpl = options.fetchImpl || fetch;
   const secrets = [apiKey].filter(secret => secret.length >= 4);
   const startedAt = Date.now();
