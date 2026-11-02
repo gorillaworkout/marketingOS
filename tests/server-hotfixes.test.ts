@@ -20,7 +20,9 @@ test('gateway-wrapped Antigravity capacity 502s are quota messages, not outages'
   const wrapped = 'Image API error 502: {"error":{"message":"You have exhausted your capacity on this mode"}}';
   const explained = explainImageFailure(wrapped, antigravity);
   assert.match(explained, /quota\/rate limit is full/);
-  assert.match(explained, /cx\/gpt-5\.5-image/);
+  // No working fallback image model exists, so do not suggest the broken cx/gpt-5.5-image.
+  assert.match(explained, /No other image model is available/);
+  assert.doesNotMatch(explained, /cx\/gpt-5\.5-image/);
   assert.doesNotMatch(explained, /temporarily down/);
 
   const quotaWrapped = explainImageFailure('Image API error 502: rate limit / quota exceeded', antigravity);
@@ -29,7 +31,7 @@ test('gateway-wrapped Antigravity capacity 502s are quota messages, not outages'
 
   const real429 = explainImageFailure('Image API error 429: You have exhausted your capacity on this mode', antigravity);
   assert.match(real429, /quota\/rate limit is full/);
-  assert.match(real429, /cx\/gpt-5\.5-image/);
+  assert.doesNotMatch(real429, /cx\/gpt-5\.5-image/);
 });
 
 test('saved video scripts restore into a visible result step', async () => {

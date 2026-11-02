@@ -143,13 +143,14 @@ test('pickers group models by provider in a fixed order', () => {
   for (const file of pickers) assert.match(readFileSync(file, 'utf8'), /groupModelsByProvider/, `${file} must group models by provider`);
 });
 
-test('image catalog drops nano-banana and keeps the image default', () => {
+test('image catalog drops nano-banana and (since 042) cx/gpt-5.5-image', () => {
   const ids = AVAILABLE_IMAGE_MODELS.map(model => model.id);
-  assert.deepEqual(ids, ['cx/gpt-5.5-image', 'ag/gemini-3.1-flash-image']);
-  assert.equal(DEFAULT_IMAGE_MODEL, 'cx/gpt-5.5-image');
+  assert.deepEqual(ids, ['ag/gemini-3.1-flash-image']);
+  assert.equal(DEFAULT_IMAGE_MODEL, 'ag/gemini-3.1-flash-image');
   assert.deepEqual({ ...RETIRED_IMAGE_MODEL_REPLACEMENTS }, {
     'ag/nano-banana': 'ag/gemini-3.1-flash-image',
     'ag/nano-banana-pro': 'ag/gemini-3.1-flash-image',
+    'cx/gpt-5.5-image': 'ag/gemini-3.1-flash-image',
   });
 });
 

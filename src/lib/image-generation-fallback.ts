@@ -1,7 +1,27 @@
-import { DEFAULT_IMAGE_MODEL, imageModelLabel } from './image-models';
+import { imageModelLabel, isAllowedImageModel } from './image-models';
 
-/** Codex T2I used when an Antigravity (`ag/…`) image model is capacity-limited. */
-export const ANTIGRAVITY_IMAGE_FALLBACK_MODEL = DEFAULT_IMAGE_MODEL;
+/**
+ * Image model retried once when an Antigravity (`ag/…`) image model is
+ * capacity-limited, or `null` for no fallback.
+ *
+ * It is `null` on purpose (2026-11-02): the previous fallback,
+ * `cx/gpt-5.5-image`, now answers 400 on our ChatGPT-account Codex connection,
+ * and `ag/gemini-3.1-flash-image` is the only verified-working image model, so
+ * there is nothing different to fall back to. Retrying the same Antigravity
+ * quota would just fail twice. A capacity failure therefore surfaces the clear
+ * "Antigravity image quota/rate limit is full" error from
+ * `explainImageFailure`. Set this to a verified, catalogued, non-`ag/` image
+ * id to re-enable the retry.
+ */
+export const ANTIGRAVITY_IMAGE_FALLBACK_MODEL: string | null = null;
+
+/** The configured fallback, only when it is a different catalogued model. */
+export function antigravityImageFallbackFor(model: string): string | null {
+  const fallback = ANTIGRAVITY_IMAGE_FALLBACK_MODEL;
+  if (!fallback || fallback === model) return null;
+  if (!isAllowedImageModel(fallback)) return null;
+  return fallback;
+}
 
 export function parseImageApiErrorStatus(reason: string): number {
   return Number(/Image API error (\d{3})/.exec(reason)?.[1] ?? 0);
@@ -31,17 +51,18 @@ export function isAntigravityImageModel(model: string): boolean {
  *
  * We do **not** fallback on auth, 403/404, billing, timeouts, empty images,
  * or a true 5xx outage without capacity text — those need a different fix,
- * and sending the same prompt to GPT-5.5 Image would hide the real cause.
+ * and sending the same prompt to another model would hide the real cause.
+ * Returns false while no fallback model is configured.
  */
 export function shouldFallbackAntigravityImage(model: string, reason: string): boolean {
   if (!isAntigravityImageModel(model)) return false;
-  if (model === ANTIGRAVITY_IMAGE_FALLBACK_MODEL) return false;
+  if (!antigravityImageFallbackFor(model)) return false;
   return isCapacityOrRateLimitFailure(reason);
 }
 
 export function antigravityCapacityFallbackMessage(
   _fromModel: string,
-  toModel: string = ANTIGRAVITY_IMAGE_FALLBACK_MODEL,
+  toModel: string,
 ): string {
   return `Antigravity quota full — used ${imageModelLabel(toModel)} instead`;
 }
@@ -55,9 +76,10 @@ export interface ImageGenerationFallbackResult<T> {
 }
 
 /**
- * Try `requestedModel` once. If it is an Antigravity image id and the failure
- * is capacity/quota/rate-limit, retry exactly once with
- * `ANTIGRAVITY_IMAGE_FALLBACK_MODEL` (`cx/gpt-5.5-image`).
+ * Try `requestedModel` once. If it is an Antigravity image id, the failure is
+ * capacity/quota/rate-limit, and a fallback is configured
+ * (`ANTIGRAVITY_IMAGE_FALLBACK_MODEL`, currently `null`), retry exactly once
+ * with it. With no fallback the first error propagates unchanged.
  *
  * When the retry also fails, rethrow the original Antigravity error so
  * `explainImageFailure` keeps the quota copy. Non-capacity first failures
@@ -68,6 +90,8 @@ export async function generateWithAntigravityCapacityFallback<T>(
   generate: (model: string) => Promise<T>,
   options?: {
     onRetry?: (fallbackModel: string, fromModel: string) => void | Promise<void>;
+    /** Override the configured fallback (tests). `null` disables the retry. */
+    fallbackModel?: string | null;
   },
 ): Promise<ImageGenerationFallbackResult<T>> {
   try {
@@ -75,11 +99,18 @@ export async function generateWithAntigravityCapacityFallback<T>(
     return { payload, requestedModel, usedModel: requestedModel };
   } catch (error) {
     const reason = error instanceof Error ? error.message : 'unknown error';
-    if (!shouldFallbackAntigravityImage(requestedModel, reason)) {
+    const fallbackModel = options && 'fallbackModel' in options
+      ? options.fallbackModel ?? null
+      : antigravityImageFallbackFor(requestedModel);
+    if (
+      !fallbackModel
+      || fallbackModel === requestedModel
+      || !isAntigravityImageModel(requestedModel)
+      || !isCapacityOrRateLimitFailure(reason)
+    ) {
       throw error;
     }
 
-    const fallbackModel = ANTIGRAVITY_IMAGE_FALLBACK_MODEL;
     await options?.onRetry?.(fallbackModel, requestedModel);
 
     try {
