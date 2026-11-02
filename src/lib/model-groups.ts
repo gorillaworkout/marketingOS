@@ -4,7 +4,7 @@
  */
 export const MODEL_PROVIDER_GROUPS = [
   { prefix: 'cc/', label: 'Claude Code' },
-  { prefix: 'ag/', label: 'Antigravity (Gemini)' },
+  { prefix: 'ag/', label: 'Antigravity' },
   { prefix: 'cx/', label: 'OpenAI Codex' },
 ] as const;
 
@@ -25,4 +25,15 @@ export function groupModelsByProvider<T extends { id: string }>(models: readonly
   return labels
     .map(label => ({ label, models: models.filter(model => modelProviderLabel(model.id) === label) }))
     .filter(group => group.models.length > 0);
+}
+
+/**
+ * Models that answer correctly but slowly (9router v0.5.112, 2026-11-02:
+ * ag/gemini-4-argon-high took ~52s for a tiny reply). Health checks give
+ * them a longer timeout; the catalog name carries "(slow)".
+ */
+export const SLOW_TEXT_MODELS: readonly string[] = ['ag/gemini-4-argon-high'];
+
+export function isSlowTextModel(modelId: string): boolean {
+  return SLOW_TEXT_MODELS.includes(modelId);
 }

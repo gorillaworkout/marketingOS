@@ -9,12 +9,15 @@
  *   GORILLAWORKOUT_API_KEY=... \
  *     npx tsx scripts/probe-gateway-models.ts
  *
- * Optional extra ids: pass them as argv (probed even if /models omitted them).
+ * Every WORKING_TEXT_MODELS id is always probed, even when GET /models omits
+ * it (9router v0.5.112 stopped listing ag/gemini-3-flash, which still answers
+ * by id). Optional extra ids: pass them as argv.
  */
 import { config } from 'dotenv';
 import { parseGatewayCompletion } from '../src/lib/gateway-response';
 import { resolveGorillaWorkoutApiBase, resolveGorillaWorkoutApiKey } from '../src/lib/gateway-config';
 import { GATEWAY_BROWSER_USER_AGENT } from '../src/lib/model-health';
+import { WORKING_TEXT_MODELS } from '../src/lib/openai';
 
 config({ path: '.env.local' });
 config();
@@ -83,7 +86,7 @@ async function main() {
     .catch(() => [] as string[]);
 
   const extra = process.argv.slice(2);
-  const models = [...new Set([...listed, ...extra])];
+  const models = [...new Set([...listed, ...WORKING_TEXT_MODELS, ...extra])];
   console.log(`probing ${models.length} models against ${BASE}`);
   console.log(`listed by gateway /models: ${listed.length}\n`);
 
@@ -117,7 +120,8 @@ async function main() {
   console.log(JSON.stringify(alive, null, 2));
   console.log(`\n=== DEAD (${dead.length}) ===`);
   for (const entry of dead) console.log(`${entry.model.padEnd(38)} ${entry.note}`);
-  console.log(`\nNOT LISTED BY GATEWAY: ${extra.filter(m => !listed.includes(m)).join(', ') || '(none)'}`);
+  const unlisted = [...new Set([...WORKING_TEXT_MODELS, ...extra])].filter(m => !listed.includes(m));
+  console.log(`\nNOT LISTED BY GATEWAY /models (probed by id anyway): ${unlisted.join(', ') || '(none)'}`);
 }
 
 main();

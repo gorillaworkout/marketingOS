@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { AVAILABLE_MODELS, LEGACY_MODEL_ALIASES, RETIRED_MODEL_REPLACEMENTS, WORKING_TEXT_MODELS } from '../src/lib/openai';
+import { AVAILABLE_MODELS, LEGACY_MODEL_ALIASES, RETIRED_MODEL_REPLACEMENTS, WORKING_TEXT_MODELS, WORKING_TEXT_MODELS_V0_5_95, WORKING_TEXT_MODELS_V0_5_112 } from '../src/lib/openai';
 import { DEFAULT_FEATURE_ASSIGNMENTS, GENERATION_FEATURES } from '../src/lib/model-routing';
 import { GLOBAL_FALLBACK_ORDER, modelDisplayName } from '../src/lib/model-fallback';
 import { AVAILABLE_IMAGE_MODELS, DEFAULT_IMAGE_MODEL, RETIRED_IMAGE_MODEL_REPLACEMENTS } from '../src/lib/image-models';
@@ -22,6 +22,13 @@ const WORKING = [
   'cx/gpt-5.6-luna', 'cx/gpt-5.6-luna[1m]', 'cx/gpt-5.6-luna-review',
   'cx/gpt-reserve', 'cx/codex-auto-review',
 ];
+// 9router v0.5.112 additions (migration 040); see tests/router-0-5-112-models.test.ts.
+const WORKING_V0_5_112 = [
+  'cx/gpt-6.1-terra',
+  'ag/gemini-4-argon-low', 'ag/gemini-4-argon-medium', 'ag/gemini-4-argon-high',
+  'ag/claude-sonnet-5-5', 'ag/claude-sonnet-5-5-low', 'ag/claude-sonnet-5-5-medium',
+  'ag/claude-opus-5-5', 'ag/claude-opus-5-5-low', 'ag/claude-opus-5-5-medium', 'ag/claude-opus-5-5-high',
+];
 const DEAD_MODELS: Record<string, string> = {
   'ag/gemini-3.1-pro-low': 'ag/gemini-3-flash',
   'ag/gemini-3.6-flash-high': 'ag/gemini-3-flash',
@@ -32,6 +39,7 @@ const DEAD_MODELS: Record<string, string> = {
   'ag/gemini-3.7-flash-low': 'ag/gemini-3-flash',
   'ag/gemini-3.5-flash-high': 'ag/gemini-3-flash',
   'ag/gemini-pro-agent': 'ag/gemini-3-flash',
+  'ag/gemini-3.1-pro-high': 'ag/gemini-3-flash',
   'ag/gemini-3-flash-agent': 'ag/gemini-3-flash',
   'ag/gemini-3.5-flash-low': 'ag/gemini-3-flash',
   'ag/gemini-3.5-flash-extra-low': 'ag/gemini-3-flash',
@@ -52,9 +60,11 @@ const catalog = new Set(AVAILABLE_MODELS.map(model => model.id));
 const migration = readFileSync('db/migrations/039_retire_dead_upstream_models.sql', 'utf8');
 const executable = migration.replace(/--.*$/gm, '');
 
-test('WORKING_TEXT_MODELS is exactly the probed working list, all in the catalog', () => {
-  assert.deepEqual([...WORKING_TEXT_MODELS].sort(), [...WORKING].sort());
-  for (const id of WORKING) assert.ok(catalog.has(id), `${id} must be in AVAILABLE_MODELS`);
+test('WORKING_TEXT_MODELS is exactly the probed working lists, all in the catalog', () => {
+  assert.deepEqual([...WORKING_TEXT_MODELS_V0_5_95].sort(), [...WORKING].sort());
+  assert.deepEqual([...WORKING_TEXT_MODELS_V0_5_112], WORKING_V0_5_112);
+  assert.deepEqual([...WORKING_TEXT_MODELS], [...WORKING_TEXT_MODELS_V0_5_95, ...WORKING_TEXT_MODELS_V0_5_112]);
+  for (const id of WORKING_TEXT_MODELS) assert.ok(catalog.has(id), `${id} must be in AVAILABLE_MODELS`);
 });
 
 test('every text feature offers every working model, with defaults unchanged', () => {
@@ -118,11 +128,11 @@ test('every catalog model has a clean English display name used by fallback labe
 
 test('pickers group models by provider in a fixed order', () => {
   assert.equal(modelProviderLabel('cc/claude-sonnet-5-5'), 'Claude Code');
-  assert.equal(modelProviderLabel('ag/gemini-3-flash'), 'Antigravity (Gemini)');
+  assert.equal(modelProviderLabel('ag/gemini-3-flash'), 'Antigravity');
   assert.equal(modelProviderLabel('cx/gpt-6-luna[1m]'), 'OpenAI Codex');
   assert.equal(modelProviderLabel('something-else'), 'Other');
   const groups = groupModelsByProvider([{ id: 'cx/gpt-5.6-sol' }, { id: 'ag/gemini-3-flash' }, { id: 'cc/claude-opus-5' }, { id: 'cx/gpt-reserve' }]);
-  assert.deepEqual(groups.map(group => group.label), ['Claude Code', 'Antigravity (Gemini)', 'OpenAI Codex']);
+  assert.deepEqual(groups.map(group => group.label), ['Claude Code', 'Antigravity', 'OpenAI Codex']);
   assert.deepEqual(groups[2].models.map(model => model.id), ['cx/gpt-5.6-sol', 'cx/gpt-reserve']);
   const pickers = [
     'src/components/InlineModelSelector.tsx',
@@ -149,6 +159,7 @@ test('the global fallback order is unchanged and has no dead ids', () => {
 
 test('migration 039 repoints every dead id, appends working ids, dedupes, and is forward-only', () => {
   for (const [dead, replacement] of Object.entries(DEAD_MODELS)) {
+    if (dead === 'ag/gemini-3.1-pro-high') continue; // retired later, by migration 040
     assert.ok(executable.includes(`'${dead}'`), `039 must name ${dead}`);
     assert.ok(executable.includes(`'${replacement}'`), `039 must name ${replacement}`);
   }
@@ -161,7 +172,7 @@ test('migration 039 repoints every dead id, appends working ids, dedupes, and is
   assert.match(executable, /NOT current_row\.allowed_models @> pg_temp\.mos_working_models\(\)/, 'rows already complete are skipped');
   const working = executable.split(/FUNCTION pg_temp\.mos_working_models\(\)/)[1]?.split(/\$\$;/)[0] ?? '';
   const workingIds = [...working.matchAll(/'([^']+)'/g)].map(match => match[1]);
-  assert.deepEqual(workingIds, [...WORKING_TEXT_MODELS], '039 working list must match WORKING_TEXT_MODELS in order');
+  assert.deepEqual(workingIds, [...WORKING_TEXT_MODELS_V0_5_95], '039 working list must match WORKING_TEXT_MODELS_V0_5_95 in order');
   for (const table of ['feature_model_assignments', 'task_model_preferences', 'user_preferences', 'seo_ai_visibility_settings', 'image_model_assignments']) {
     assert.match(executable, new RegExp(`UPDATE ${table}\\b`), `039 must update ${table}`);
   }
@@ -183,7 +194,12 @@ test('migration 039 seeds match the code defaults and name no dead ids', () => {
   assert.deepEqual(rows.map(row => row[1]).sort(), [...TEXT_FEATURES].sort());
   for (const [, feature, allowed, defaultModel] of rows) {
     const code = DEFAULT_FEATURE_ASSIGNMENTS[feature as (typeof TEXT_FEATURES)[number]];
-    assert.deepEqual(JSON.parse(allowed), code.allowedModels, `${feature} seed must match DEFAULT_FEATURE_ASSIGNMENTS`);
+    // 039 predates the v0.5.112 ids; migration 040 appends them.
+    assert.deepEqual(
+      JSON.parse(allowed),
+      code.allowedModels.filter(model => !WORKING_TEXT_MODELS_V0_5_112.includes(model)),
+      `${feature} seed must match DEFAULT_FEATURE_ASSIGNMENTS minus the 040 additions`,
+    );
     assert.equal(defaultModel, code.defaultModel);
   }
 });
