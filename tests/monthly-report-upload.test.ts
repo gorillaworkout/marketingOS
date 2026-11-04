@@ -38,6 +38,14 @@ test('report export has the summary table, daily rows and KPI definitions', () =
   assert.deepEqual(summary[2], [...EXPORT_COLUMNS]);
   assert.deepEqual(summary.slice(3, 8).map(r => r[0]), ['Week I (01-11)', 'Week II (12-18)', 'Week III (19-25)', 'Week IV (26-31)', 'Total']);
   assert.equal(summary[7][3], rows.length);
+  const col = (name: string) => EXPORT_COLUMNS.indexOf(name as typeof EXPORT_COLUMNS[number]);
+  // Total row: Total Real Account = unique activated (4) + manual KYC approved (1); Pending = 11 − 5 − 2.
+  assert.deepEqual([summary[7][col('Total Real Account')], summary[7][col('Real Account Activated')], summary[7][col('Manual Approved Demo Not Done')], summary[7][col('Pending')]], [5, 4, 1, 4]);
+  const kpiSheet = XLSX.utils.sheet_to_json<unknown[]>(workbook.Sheets.KPIs, { header: 1, defval: null });
+  assert.deepEqual(kpiSheet.find(r => r[0] === 'Total Real Account')?.slice(0, 2), ['Total Real Account', 5]);
+  assert.deepEqual(kpiSheet.filter(r => String(r[0]).includes('of which')).map(r => [String(r[0]).trim(), r[1]]), [
+    ['of which Real Account Activated', 4], ['of which Manual Approved Demo Not Done', 1],
+  ]);
   const daily = XLSX.utils.sheet_to_json<unknown[]>(workbook.Sheets.Daily, { header: 1 });
   assert.equal(daily.length, 32);
   // FTD per day is zero-filled across the covered month, so the series has a value for every day.

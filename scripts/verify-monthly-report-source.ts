@@ -39,7 +39,8 @@ console.table({
   'Auto KYC approved': total.autoKycApproved,
   'First account activation': total.firstAccount,
   'Additional account': total.additionalAccount,
-  'Real Account Approved (unique)': distinctActivatedAccounts(inMonth),
+  'Real Account Activated (unique)': distinctActivatedAccounts(inMonth),
+  'Total Real Account (activated + manual KYC approved)': distinctActivatedAccounts(inMonth) + total.manualKycApproved,
   'Approved, bank info / NPWP pending': total.approvedBankInfoPending,
   'Pending video, marked failed': total.pendingVideoFailed,
 });
@@ -74,8 +75,8 @@ if (ftdFile) {
     'FTD from accounts activated this month': cohort.ftdFromPeriodActivations,
     'FTD from earlier accounts': ftdInMonth.length - cohort.ftdFromPeriodActivations,
     'Activated this month with an FTD': cohort.activatedWithFtd,
-    'FTD ÷ Real Account Approved %': Math.round((ftdInMonth.length / activated) * 1000) / 10,
-    'Real → FTD (same accounts) %': Math.round((cohort.activatedWithFtd / activated) * 1000) / 10,
+    'FTD ÷ Total Real Account %': Math.round((ftdInMonth.length / (activated + total.manualKycApproved)) * 1000) / 10,
+    'Activated → FTD (same accounts) %': Math.round((cohort.activatedWithFtd / activated) * 1000) / 10,
   });
   const byDay = Object.fromEntries(daily.map(d => [d.date, d.count]));
   console.log('FTD per day:', Object.entries(byDay).map(([d, n]) => `${d.slice(5)}=${n}`).join(' '));

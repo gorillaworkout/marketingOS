@@ -63,22 +63,31 @@ Day = calendar day in Asia/Jakarta (WIB) of `event_at` / `ftd_at`.
 | **Registrations** | every onboarding row in the period, all 6 steps, repeats counted (tooltip in the UI) | 24,737 |
 | KYC Rejected | `manual_kyc` + `Rejected` | 7,343 |
 | Manual / Auto KYC approved | `manual_kyc` / `auto_kyc` + `Approved` | 936 / 6,135 |
-| **Real Account Approved** | distinct trading accounts with an activated add-account row | 7,162 |
+| **Total Real Account** | Real Account Activated + Manual KYC approved (demo not done) — see below | 8,098 |
+| — Real Account Activated | distinct trading accounts with an activated add-account row | 7,162 |
+| — Manual Approved Demo Not Done | `manual_kyc` + `Approved` | 936 |
 | — first account / additional | activated with `is_first_account` true / false | 5,930 / 1,232 |
 | **FTD** | FTD rows by `ftd_at` (micro / standard split) | 2,734 (2,303 / 431) |
-| **Pending** | Registrations − Real Account Approved (unique) − KYC Rejected | 10,232 |
+| **Pending** | Registrations − Total Real Account − KYC Rejected | 9,296 |
 
 "Activated" = `auto_add_account`/`manual_add_account`, Step Status `Approved`, Account Status
 `Real Account Activated`. Step `Approved` + Account Status `Add USD Bank Info / NPWP Failed` rows are not
 rejections: they show as "Approved, bank info / NPWP pending" with the CRM remark in the drill-down.
 
 FTD panel: count is the headline (2,734, daily avg 88.2, peak 219 on Oct 30). Ratios are labelled:
-- **FTD ÷ Real Account Approved** — the deck method. The PPT's 33.8% = 2,734 ÷ 8,096 (8,096 is the
-  non-unique approved count); with unique approvals it is 38.2%.
-- **Real → FTD (same accounts)** — accounts activated in the period that made an FTD (2,467 / 7,162 = 34.4%).
+- **FTD ÷ Total Real Account** — the deck method. The PPT's 33.8% = 2,734 ÷ 8,096; ours 2,734 ÷ 8,098 = 33.8%.
+- **Activated → FTD (same accounts)** — accounts activated in the period that made an FTD (2,467 / 7,162 = 34.4%).
   Joined on Trading Account No.: 2,467 FTDs from period activations, 267 from earlier accounts.
 - **FTD ÷ Registrations** — PPT 10.8% = 2,734 ÷ 25,283; ours 11.1%.
 - Amount ("Amount", currency not stated in the source) is a secondary line only, never a KPI card.
+
+### Total Real Account (owner definition, Nov 2026)
+Total Real Account = TOTAL REAL ACCOUNT (unique activated, 7,162) + "KYC Manual Approved Demo Not Done"
+(`manual_kyc` + `Approved`, 936) = 8,098 for October. Checked per WIB day against the owner's reference
+sheet: activated, manual KYC approved and KYC rejected match on all 31 days. The reference sheet's
+"Total Cases Registration" (24,712) leaves out its "KYC Auto Rejected" column (25 rows: `auto_kyc` +
+`Pending` + `Registration Failed`; 1 on Oct 30, 24 on Oct 31); its category columns add up to our 24,737.
+We keep the owner's registrations definition (every row).
 
 ### Known gap vs the PPT (documented, not forced)
 Our registrations come from the export: 24,737 vs the deck's 25,283 (−2.2%). Per day: Oct 1 815 vs
@@ -90,7 +99,9 @@ At +07:00 the FTD daily array and the per-day registrations above match the deck
 +08:00 six FTD days shift (total unchanged) and registrations become 24,724. The default stays +08:00
 as decided; **open question** whether the exports are really in WIB.
 
-Funnel: Registration → KYC approved → Real account → FTD (same accounts), step % and overall %.
+Funnel: Registration → KYC approved → Real account activated (unique) → FTD (same accounts), step % and overall %.
+The funnel and the FTD cohort use unique activated accounts, not Total Real Account, so manual KYC
+approvals are not counted twice against "KYC approved".
 Comparison: every KPI shows the change vs the previous period of the same length.
 
 ## Periods and navigation

@@ -13,8 +13,12 @@ import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
 import { parseFtdFile } from '../src/lib/monthly-report/ftd-parse';
-import { aggregateEventsByDay, aggregateFtdByDay, distinctActivatedAccounts, ftdCohortStats, sumDaily } from '../src/lib/monthly-report/metrics';
+import * as XLSX from 'xlsx';
+import {
+  aggregateEventsByDay, aggregateFtdByDay, buildOnboardingReport, dateCoverage, distinctActivatedAccounts, ftdCohortStats, sumDaily,
+} from '../src/lib/monthly-report/metrics';
 import { parseOnboardingWorkbook, wibDate } from '../src/lib/monthly-report/onboarding-parse';
+import { resolvePeriod } from '../src/lib/monthly-report/periods';
 
 const dir = process.env.MONTHLY_REPORT_DATA_DIR ?? '/workspace/monthly-report';
 const onboardingFile = path.join(dir, 'source.xlsx');
@@ -65,6 +69,50 @@ test('onboarding export: October numbers (computed, PPT gap documented)', { skip
   assert.equal(sum.additionalAccount, 1232);
   const approved = distinctActivatedAccounts(inOctober);
   assert.equal(approved, 7162);
-  assert.equal(sum.events - approved - sum.kycRejected, 10232); // Pending
+  assert.equal(sum.events - approved - sum.kycRejected, 10232); // Registrations − unique activated − rejected (old Pending)
   assert.deepEqual(ftdCohortStats(inOctober, ftd, october), { activatedWithFtd: 2467, ftdFromPeriodActivations: 2467 });
+
+  // Total Real Account (owner definition) = unique activated + manual KYC approved (demo not done).
+  const ftdDaily = aggregateFtdByDay(ftd);
+  const report = buildOnboardingReport({
+    period: resolvePeriod({ preset: 'month', anchor: '2026-10-15' }),
+    granularity: 'week',
+    current: { daily, ftd: ftdDaily, ftdCoverage: dateCoverage(ftdDaily.map(d => d.date)), uniqueActivated: approved, ftdCohort: ftdCohortStats(inOctober, ftd, october) },
+    previous: { daily: [], ftd: [], ftdCoverage: null, uniqueActivated: 0, ftdCohort: { activatedWithFtd: 0, ftdFromPeriodActivations: 0 } },
+  });
+  const kpi = Object.fromEntries(report.kpis.map(k => [k.key, k.value]));
+  assert.equal(kpi.realAccountApproved, 8098); // 7,162 + 936 (PPT 8,096)
+  assert.equal(kpi.pending, 24737 - 8098 - 7343); // 9,296
+  assert.equal(report.ftd.ftdPerApprovedPct, 33.8); // 2,734 ÷ 8,098, the deck method (PPT 33.8%)
+  assert.equal(report.ftd.realToFtdPct, 34.4); // 2,467 ÷ 7,162 unique activated
+  assert.deepEqual(report.funnel.map(s => [s.key, s.value]), [['registrations', 24737], ['kycApproved', 7071], ['realAccountActivated', 7162], ['ftd', 2467]]);
+});
+
+const referenceFile = path.join(dir, 'reference-total-real-account.xlsx');
+const skipReference = skip || (!existsSync(referenceFile) ? 'reference sheet not available' : false);
+
+/**
+ * The owner's reference sheet (daily TOTAL REAL ACCOUNT, KYC Manual Approved Demo Not Done …).
+ * Every day matches. Its "Total Cases Registration" (24,712) leaves out the "KYC Auto Rejected"
+ * column (auto_kyc + Pending + Registration Failed: 25 rows, all on Oct 30–31); its category columns
+ * add up to our 24,737.
+ */
+test('onboarding export matches the Total Real Account reference sheet per WIB day', { skip: skipReference }, () => {
+  const rows = parseOnboardingWorkbook(readFileSync(onboardingFile), { offset: '+07:00' }).rows.filter(row => wibDate(row.eventAt).startsWith('2026-10'));
+  const daily = new Map(aggregateEventsByDay(rows).map(d => [d.date, d]));
+  const sheet = XLSX.read(readFileSync(referenceFile), { type: 'buffer' });
+  const [header, ...body] = XLSX.utils.sheet_to_json<unknown[]>(sheet.Sheets[sheet.SheetNames[0]], { header: 1 });
+  const at = (name: string) => (header as string[]).indexOf(name);
+  const days = body.filter(r => /^2026-10-\d\d$/.test(String(r[0])));
+  assert.equal(days.length, 31);
+  for (const r of days) {
+    const date = String(r[0]);
+    const day = daily.get(date)!;
+    const autoRejected = rows.filter(row => wibDate(row.eventAt) === date && row.step === 'auto_kyc' && row.stepStatus === 'Pending').length;
+    assert.equal(day.activated, Number(r[at('TOTAL REAL ACCOUNT')]), `${date} activated`);
+    assert.equal(day.manualKycApproved, Number(r[at('KYC Manual Approved Demo Not Done')]), `${date} manual KYC approved`);
+    assert.equal(day.kycRejected, Number(r[at('KYC Manual Rejected')]), `${date} KYC rejected`);
+    assert.equal(autoRejected, Number(r[at('KYC Auto Rejected')]), `${date} auto rejected`);
+    assert.equal(day.events - autoRejected, Number(r[at('Total Cases Registration')]), `${date} registrations`);
+  }
 });
