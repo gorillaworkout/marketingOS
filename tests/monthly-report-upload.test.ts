@@ -12,15 +12,20 @@ import { resolvePeriod } from '../src/lib/monthly-report/periods';
 const rows = parseOnboardingWorkbook(syntheticOnboardingWorkbook(), { offset: '+07:00' }).rows;
 const ftd = parseFtdFile(Buffer.from(syntheticFtdReportCsv()), { fileName: 'ftd.csv', offset: '+07:00' }).rows;
 
-test('upload preview classifies new, changed and unchanged rows by Step Status', () => {
+test('upload preview classifies rows by event key: new vs already stored (skipped)', () => {
   const stored = rows.slice(0, 4).map(row => ({ ...row }));
+  // Same event, re-exported with another status: still a duplicate, the stored row is kept.
   stored[2] = { ...stored[2], stepStatus: 'Pending', accountStatus: 'KYC Pending' };
+  // Same instant written differently is the same event.
   stored[3] = { ...stored[3], eventAt: new Date(stored[3].eventAt).toISOString().replace('.000Z', 'Z') };
+  // Same Document ID as row 5 but an earlier event (e.g. last month's): the incoming row is new.
+  stored.push({ ...rows[4], eventAt: '2026-09-20T03:00:00.000Z', step: 'manual_kyc', stepStatus: 'Pending' });
   const summary = classifyConflicts(rows, stored);
-  assert.deepEqual([summary.new, summary.changed, summary.unchanged], [7, 1, 3]);
+  assert.deepEqual([summary.new, summary.duplicate, summary.duplicateDiffers, summary.newEventForKnownDocument], [7, 4, 1, 1]);
   assert.deepEqual(summary.statusChanges, [{ from: 'Pending', to: 'Rejected', count: 1 }]);
-  assert.deepEqual(summary.byStepStatus.find(g => g.stepStatus === 'Rejected'), { stepStatus: 'Rejected', new: 1, changed: 1, unchanged: 0 });
-  assert.equal(classifyConflicts(rows, rows).unchanged, rows.length);
+  assert.deepEqual(summary.byStepStatus.find(g => g.stepStatus === 'Rejected'), { stepStatus: 'Rejected', new: 1, duplicate: 1 });
+  const again = classifyConflicts(rows, rows);
+  assert.deepEqual([again.new, again.duplicate, again.duplicateDiffers], [0, rows.length, 0]);
 });
 
 test('report export has the summary table, daily rows and KPI definitions', () => {

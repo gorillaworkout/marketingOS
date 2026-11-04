@@ -6,19 +6,19 @@ import { formatAmount, formatDateTimeWib, formatInteger } from '@/components/mon
 import { ReportTabs } from '@/components/monthly-report/ReportTabs';
 
 type Kind = 'onboarding' | 'ftd';
-type Upload = { id: string; kind: string; file_name: string; source_utc_offset: string | null; uploaded_by_name: string | null; rows_total: number; rows_inserted: number; rows_updated: number; rows_skipped: number; data_from: string | null; data_to: string | null; created_at: string };
+type Upload = { id: string; kind: string; file_name: string; source_utc_offset: string | null; uploaded_by_name: string | null; rows_total: number; rows_inserted: number; rows_updated: number; rows_skipped: number; rows_duplicate?: number; data_from: string | null; data_to: string | null; created_at: string };
 type Preview = {
-  ok: boolean; error?: string; fileName: string; offset: string; offsetFrom: string; errors: string[]; warnings?: string[];
+  ok: boolean; error?: string; fileName: string; offset: string; offsetFrom: string; fileNameOffset?: string | null; errors: string[]; warnings?: string[];
   issues: Array<{ row: number; message: string }>; issueCount: number; layout?: string; reportMonth?: { year: number; month: number } | null;
-  summary: { rows: number; invalid: number; duplicatesInFile: number; wibRange: { from: string; to: string } | null; byStepStatus?: Record<string, number>; byStep?: Record<string, number>; amountTotal?: number; byType?: Record<string, number> };
-  conflicts?: { new: number; changed?: number; unchanged?: number; existing?: number; byStepStatus?: Array<{ stepStatus: string; new: number; changed: number; unchanged: number }>; statusChanges?: Array<{ from: string; to: string; count: number }> };
-  counts?: { total: number; inserted: number; updated: number; unchanged: number; skipped: number };
+  summary: { rows: number; invalid: number; duplicatesInFile: number; conflictingDuplicatesInFile?: number; wibRange: { from: string; to: string } | null; byStepStatus?: Record<string, number>; byStep?: Record<string, number>; amountTotal?: number; byType?: Record<string, number> };
+  conflicts?: { new: number; duplicate?: number; duplicateDiffers?: number; newEventForKnownDocument?: number; existing?: number; byStepStatus?: Array<{ stepStatus: string; new: number; duplicate: number }>; statusChanges?: Array<{ from: string; to: string; count: number }> };
+  counts?: { total: number; inserted: number; updated?: number; unchanged?: number; skipped?: number; skippedDuplicate?: number; duplicatesInFile?: number; invalid?: number };
 };
 
 const CARDS: Record<Kind, { title: string; description: string; accept: string; endpoint: string }> = {
   onboarding: {
     title: 'Onboarding export',
-    description: 'CRM export (.xlsx, sheet "Query result") with Date Time, UID, Document ID, is First Account, Trading Account No., Approval Method, Steps, Step Status, Account Status, Remarks. Rows are matched by Document ID, so uploading the same file again changes nothing.',
+    description: 'CRM export (.xlsx, sheet "Query result") with Date Time, UID, Document ID, is First Account, Trading Account No., Approval Method, Steps, Step Status, Account Status, Remarks. Each row is one event, matched by Document ID + Date Time + Steps: events already stored (or repeated in the file) are skipped, so uploading the same file again adds nothing. A Document ID can have events in several months.',
     accept: '.xlsx,.xls,.csv',
     endpoint: '/api/monthly-report/uploads/onboarding',
   },
@@ -59,7 +59,7 @@ export default function MonthlyReportUploadsPage() {
           <EmptyState title="No uploads yet" description="Uploads will be listed here with who uploaded them and what changed." />
         ) : (
           <table className="w-full text-left text-xs">
-            <thead className="text-[var(--mos-text-faint)]"><tr>{['When', 'Type', 'File', 'Source offset', 'Data (WIB)', 'Rows', 'New', 'Updated', 'Skipped', 'By'].map(h => <th key={h} className="px-4 py-2.5 font-medium">{h}</th>)}</tr></thead>
+            <thead className="text-[var(--mos-text-faint)]"><tr>{['When', 'Type', 'File', 'Source offset', 'Data (WIB)', 'Rows', 'New', 'Updated', 'Duplicate', 'Invalid', 'By'].map(h => <th key={h} className="px-4 py-2.5 font-medium">{h}</th>)}</tr></thead>
             <tbody>
               {uploads.map(u => (
                 <tr key={u.id} className="border-t border-[var(--mos-border-subtle)] text-[var(--mos-text-secondary)]">
@@ -71,6 +71,7 @@ export default function MonthlyReportUploadsPage() {
                   <td className="px-4 py-2">{formatInteger(u.rows_total)}</td>
                   <td className="px-4 py-2">{formatInteger(u.rows_inserted)}</td>
                   <td className="px-4 py-2">{formatInteger(u.rows_updated)}</td>
+                  <td className="px-4 py-2">{formatInteger(u.rows_duplicate ?? 0)}</td>
                   <td className="px-4 py-2">{formatInteger(u.rows_skipped)}</td>
                   <td className="px-4 py-2">{u.uploaded_by_name ?? '—'}</td>
                 </tr>
@@ -128,9 +129,8 @@ function UploadCard({ kind, onDone }: { kind: Kind; onDone: () => void }) {
         </FormField>
         <FormField label="Time zone of the export" hint="WIB = +07:00">
           <Select value={offsetChoice} onChange={e => setOffsetChoice(e.target.value)} className="w-56">
-            <option value="auto">From file name, else +08:00</option>
+            <option value="auto">Default: UTC+7 (WIB)</option>
             <option value="+08:00">UTC+8</option>
-            <option value="+07:00">UTC+7 (WIB)</option>
             <option value="custom">Other…</option>
           </Select>
         </FormField>
@@ -144,7 +144,9 @@ function UploadCard({ kind, onDone }: { kind: Kind; onDone: () => void }) {
       {preview && <PreviewDetails kind={kind} preview={preview} />}
       {result?.counts && (
         <p className="mt-4 rounded-[var(--mos-radius-control)] border border-emerald-400/20 bg-emerald-400/10 px-3 py-2 text-xs text-emerald-200">
-          Saved: {formatInteger(result.counts.inserted)} new, {formatInteger(result.counts.updated)} updated, {formatInteger(result.counts.unchanged)} unchanged, {formatInteger(result.counts.skipped)} skipped (offset {result.offset}).
+          {kind === 'onboarding'
+            ? <>Saved: {formatInteger(result.counts.inserted)} new, {formatInteger(result.counts.skippedDuplicate)} skipped as duplicate{result.counts.duplicatesInFile ? ` (${formatInteger(result.counts.duplicatesInFile)} repeated within the file)` : ''}, {formatInteger(result.counts.invalid)} invalid (offset {result.offset}).</>
+            : <>Saved: {formatInteger(result.counts.inserted)} new, {formatInteger(result.counts.updated)} updated, {formatInteger(result.counts.unchanged)} unchanged, {formatInteger(result.counts.skipped)} skipped (offset {result.offset}).</>}
         </p>
       )}
     </Panel>
@@ -165,24 +167,28 @@ function PreviewDetails({ kind, preview }: { kind: Kind; preview: Preview }) {
         <div><dt>Valid rows</dt><dd className="font-semibold text-[var(--mos-text)]">{formatInteger(summary.rows)}</dd></div>
         <div><dt>Invalid rows</dt><dd className="font-semibold text-[var(--mos-text)]">{formatInteger(summary.invalid)}</dd></div>
         <div><dt>Duplicates in file</dt><dd className="font-semibold text-[var(--mos-text)]">{formatInteger(summary.duplicatesInFile)}</dd></div>
+        {kind === 'onboarding' && conflicts && <div><dt>Already stored (skipped)</dt><dd className="font-semibold text-[var(--mos-text)]">{formatInteger(conflicts.duplicate)}</dd></div>}
         <div><dt>Dates (WIB)</dt><dd className="font-semibold text-[var(--mos-text)]">{summary.wibRange ? `${summary.wibRange.from} → ${summary.wibRange.to}` : '—'}</dd></div>
-        <div><dt>Time zone</dt><dd className="font-semibold text-[var(--mos-text)]">{preview.offset} <span className="font-normal">({preview.offsetFrom})</span></dd></div>
+        <div><dt>Time zone</dt><dd className="font-semibold text-[var(--mos-text)]">{preview.offset} <span className="font-normal">({preview.offsetFrom}{preview.fileNameOffset && preview.fileNameOffset !== preview.offset ? `; file name says ${preview.fileNameOffset}, ignored` : ''})</span></dd></div>
         {kind === 'ftd' && <div><dt>Amount total</dt><dd className="font-semibold text-[var(--mos-text)]">{formatAmount(summary.amountTotal)}</dd></div>}
       </dl>
       {kind === 'onboarding' && conflicts?.byStepStatus && (
         <table className="w-full text-left">
-          <thead className="text-[var(--mos-text-faint)]"><tr><th className="py-1.5 font-medium">Step Status</th><th className="py-1.5 text-right font-medium">New</th><th className="py-1.5 text-right font-medium">Changed</th><th className="py-1.5 text-right font-medium">Unchanged</th></tr></thead>
+          <thead className="text-[var(--mos-text-faint)]"><tr><th className="py-1.5 font-medium">Step Status</th><th className="py-1.5 text-right font-medium">New</th><th className="py-1.5 text-right font-medium">Duplicate (skipped)</th></tr></thead>
           <tbody>
             {conflicts.byStepStatus.map(g => (
               <tr key={g.stepStatus} className="border-t border-[var(--mos-border-subtle)] text-[var(--mos-text-secondary)]">
-                <td className="py-1.5">{g.stepStatus}</td><td className="py-1.5 text-right">{formatInteger(g.new)}</td><td className="py-1.5 text-right">{formatInteger(g.changed)}</td><td className="py-1.5 text-right">{formatInteger(g.unchanged)}</td>
+                <td className="py-1.5">{g.stepStatus}</td><td className="py-1.5 text-right">{formatInteger(g.new)}</td><td className="py-1.5 text-right">{formatInteger(g.duplicate)}</td>
               </tr>
             ))}
           </tbody>
         </table>
       )}
-      {kind === 'onboarding' && (conflicts?.statusChanges?.length ?? 0) > 0 && (
-        <p className="text-[var(--mos-text-muted)]">Status changes for existing Document IDs (the upload overwrites them): {conflicts!.statusChanges!.map(c => `${c.from} → ${c.to}: ${formatInteger(c.count)}`).join(' · ')}</p>
+      {kind === 'onboarding' && (conflicts?.newEventForKnownDocument ?? 0) > 0 && (
+        <p className="text-[var(--mos-text-muted)]">{formatInteger(conflicts!.newEventForKnownDocument)} new events belong to Document IDs that already have other events stored (e.g. from another month); they are added as separate events.</p>
+      )}
+      {kind === 'onboarding' && (conflicts?.duplicateDiffers ?? 0) > 0 && (
+        <p className="text-amber-200">{formatInteger(conflicts!.duplicateDiffers)} already-stored events differ in other columns; the stored values are kept.{(conflicts?.statusChanges?.length ?? 0) > 0 ? ` Step Status stored → file: ${conflicts!.statusChanges!.map(c => `${c.from} → ${c.to}: ${formatInteger(c.count)}`).join(' · ')}` : ''}</p>
       )}
       {kind === 'ftd' && conflicts && (
         <p className="text-[var(--mos-text-muted)]">{formatInteger(conflicts.new)} new accounts · {formatInteger(conflicts.existing)} already stored (they will be updated if anything changed). Micro {formatInteger(summary.byType?.micro)} · Standard {formatInteger(summary.byType?.standard)}</p>

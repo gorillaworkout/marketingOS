@@ -11,8 +11,9 @@ export const maxDuration = 120;
 
 /**
  * Onboarding export upload. Body = the raw .xlsx/.csv file.
- * ?mode=preview (default) validates and compares with stored rows; ?mode=commit upserts by Document ID.
- * ?fileName= is the original name (used for the UTC offset suffix), ?offset= overrides it.
+ * ?mode=preview (default) validates and compares with stored rows; ?mode=commit inserts the
+ * events that are not stored yet (key: Document ID + event time + Steps) and skips duplicates.
+ * ?fileName= is the original name; ?offset= is the export's UTC offset (default +07:00 WIB).
  */
 export async function POST(request: NextRequest) {
   const user = await requireMonthlyReport(request, { upload: true });
@@ -33,7 +34,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: `Could not read the file: ${error instanceof Error ? error.message : 'unknown error'}` }, { status: 400 });
   }
   const base = {
-    fileName, offset: resolved.offset, offsetFrom: resolved.from, sheetName: parsed.sheetName,
+    fileName, offset: resolved.offset, offsetFrom: resolved.from, fileNameOffset: resolved.fileNameOffset, sheetName: parsed.sheetName,
     errors: parsed.errors, issues: parsed.issues.slice(0, 50), issueCount: parsed.issues.length, summary: parsed.summary,
   };
   if (parsed.errors.length) return NextResponse.json({ ...base, ok: false }, { status: commit ? 400 : 200 });
@@ -48,6 +49,6 @@ export async function POST(request: NextRequest) {
       sample: parsed.rows.slice(0, 8).map(row => ({ ...row, documentId: maskIdentifier(row.documentId), uid: maskIdentifier(row.uid), tradingAccountNo: maskIdentifier(row.tradingAccountNo) })),
     });
   }
-  const saved = await saveOnboardingEvents(parsed.rows, { fileName, offset: resolved.offset, actor: await uploadActor(user), skipped: parsed.issues.length, range: parsed.summary.wibRange });
+  const saved = await saveOnboardingEvents(parsed.rows, { fileName, offset: resolved.offset, actor: await uploadActor(user), skipped: parsed.issues.length, duplicatesInFile: parsed.summary.duplicatesInFile, range: parsed.summary.wibRange });
   return NextResponse.json({ ...base, ok: true, uploadId: saved.uploadId, counts: saved.counts });
 }

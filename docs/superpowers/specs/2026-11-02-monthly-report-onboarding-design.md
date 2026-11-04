@@ -25,9 +25,10 @@ Every data table has `source` (`upload` | `api`) so a future API sync writes the
 - `departments_permitted_features_valid` CHECK gains `monthly-report`.
 - `monthly_report_access`: `user_id` PK → users (cascade), `can_upload`, `granted_by`, timestamps.
 - `monthly_report_uploads`: history. `kind` (`onboarding` | `ftd` | `rejection_reasons`), `file_name`,
-  `source_utc_offset`, `uploaded_by` (+ name snapshot), `rows_total/inserted/updated/skipped`,
+  `source_utc_offset`, `uploaded_by` (+ name snapshot), `rows_total/inserted/updated/skipped`, `rows_duplicate` (043),
   `data_from/data_to`, `created_at`.
-- `onboarding_events`: one row per onboarding step event. PK `document_id`. `event_at timestamptz`,
+- `onboarding_events`: one row per onboarding step event. PK `(document_id, event_at, step)` since
+  migration 043 (was `document_id`; see "Event identity" below). `event_at timestamptz`,
   `uid`, `is_first_account`, `trading_account_no`, `approval_method`, `step`, `step_status`,
   `account_status`, `remarks`, `source`, `upload_id`, timestamps.
 - `onboarding_ftd`: PK `account_no`. `account_type` (micro/standard), `join_date`, `ftd_at timestamptz`,
@@ -40,19 +41,42 @@ Every data table has `source` (`upload` | `api`) so a future API sync writes the
 - Sheet `Query result` (else the first sheet), headers `Date Time, UID, Document ID, is First Account,
   Trading Account No., Approval Method, Steps, Step Status, Account Status, Remarks` (order free, case
   and spacing ignored). A missing header rejects the file.
-- Source timezone: explicit choice on the form, else the offset in the file name
-  (`…+08_00.xlsx` → `+08:00`), else the default `+08:00`. Times are stored as `timestamptz`; days are
+- Source timezone: explicit choice on the form, else the default **`+07:00` (WIB)** — same default in
+  the upload routes and the CLI. The `…+08_00.xlsx` suffix in CRM file names is the *export* time
+  zone, not the data's: it is shown in the preview but never applied (applying it would shift every
+  event by one hour and defeat the duplicate check). Times are stored as `timestamptz`; days are
   bucketed in WIB (UTC+7).
-- **Preview** (parse, validate, WIB date range, invalid rows, in-file duplicates, conflicts with stored
-  rows grouped by Step Status: new / changed / unchanged, plus stored→incoming Step Status changes,
+- **Preview** (parse, validate, WIB date range, invalid rows, in-file duplicates, comparison with
+  stored events grouped by Step Status: new / duplicate (skipped), duplicates whose other columns
+  differ with any stored→incoming Step Status change, new events of already-known Document IDs,
   masked sample) then **Commit** (same file re-sent).
-- Upsert by Document ID; identical rows count as unchanged, so a re-upload never duplicates.
+- Insert-only: `INSERT … ON CONFLICT (document_id, event_at, step) DO NOTHING`. Already-stored events
+  and repeats inside the file (first copy wins) are skipped and reported as *skipped as duplicate*;
+  invalid rows as *invalid*. Re-uploading a file inserts 0 rows. Nothing is ever overwritten.
+
+### Event identity (migration 043)
+A Document ID can appear in several monthly exports with *different* events (e.g. Pending at the end
+of September, the decision in October). With PK `document_id` the file loaded last overwrote the
+earlier event, so month totals depended on load order. Collision analysis of the Jun/Jul/Sep/Oct 2026
+exports: inside every file Document ID alone, `+ event time`, `+ Steps` and `+ Step Status` all have 0
+collisions; across files Document ID alone collides 8–95 times per month pair (226 Document IDs in
+total), `document_id + event_at` collides 0 times between different months, and the two identical Sep
+copies collide on every row. `document_id + event_at` is the minimal collision-free key; Steps is added
+as a safety margin. Step Status is deliberately **not** in the key, so a re-export of the same event
+with a changed status is skipped, not counted as a second registration.
+Migration 043 swaps the primary key in one transaction (no row deleted or changed; the old key is a
+subset, so existing rows are already unique), adds `monthly_report_uploads.rows_duplicate`, is
+idempotent, and documents its rollback SQL in the header.
+Verified with all four months loaded in three orders (plus Sep twice, and Oct first under the old key
+then 043): identical results — Jun 26,506 / TRA 9,956; Jul 28,411 / 10,001; Sep 23,492 / 7,880;
+Oct 24,737 / 8,098 / Pending 9,296 / Rejected 7,343; no activated account in two months.
 
 ## Upload 2: FTD report
 - Accepts the monthly FTD CSV as exported (messy layout): only the **MONTHLY** block (columns B–H) is
   read; the DAILY block and the summary block are ignored; Year/Month come from B1:C2 and rows outside
   that month raise a warning. Also accepts a clean table (`Account, Type, Join Date, FTD Time, Amount`).
-- Upsert by Account. FTD time uses the same offset rule as onboarding.
+- Upsert by Account (one FTD per account ever, so the per-event issue above does not apply). FTD time
+  uses the same offset rule as onboarding (default +07:00).
 - The registrations template upload was removed (steering 2): registrations come from the export.
 
 ## Metric definitions
@@ -96,8 +120,8 @@ deck exactly at +07:00.
 
 ### Timezone finding
 At +07:00 the FTD daily array and the per-day registrations above match the deck; at the default
-+08:00 six FTD days shift (total unchanged) and registrations become 24,724. The default stays +08:00
-as decided; **open question** whether the exports are really in WIB.
++08:00 six FTD days shift (total unchanged) and registrations become 24,724. Resolved (2026-11-04):
+the exports are in WIB and the default is now +07:00.
 
 Funnel: Registration → KYC approved → Real account activated (unique) → FTD (same accounts), step % and overall %.
 The funnel and the FTD cohort use unique activated accounts, not Total Real Account, so manual KYC
@@ -133,8 +157,8 @@ Oct 2026 → I 1–11, II 12–18, III 19–25, IV 26–31.
 
 ## Import CLI (admin)
 `npx tsx scripts/monthly-report-import.ts --onboarding=<xlsx> --ftd=<csv> [--offset=+07:00]`
-Same parsers and upsert as the upload routes, writes upload history, idempotent (a rerun reports
-everything unchanged). Production load only after the deploy is approved.
+Same parsers and inserts as the upload routes (default offset +07:00), writes upload history,
+idempotent (a rerun reports 0 inserted, every row skipped as duplicate). Production load only after the deploy is approved.
 
 ## Tests
 - `tests/monthly-report-*.test.ts` with synthetic fixtures (`tests/fixtures/`), no real personal data.

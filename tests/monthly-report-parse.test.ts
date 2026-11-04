@@ -4,15 +4,15 @@ import {
   ONBOARDING_HEADERS, SYNTHETIC_ROWS, buildWorkbookBuffer, syntheticOnboardingWorkbook,
 } from './fixtures/monthly-report-onboarding';
 import {
-  DEFAULT_SOURCE_OFFSET, offsetFromFileName, parseOffset, parseOnboardingWorkbook, wallClockToIso,
+  DEFAULT_SOURCE_OFFSET, eventKey, offsetFromFileName, parseOffset, parseOnboardingWorkbook, wallClockToIso,
 } from '../src/lib/monthly-report/onboarding-parse';
 
-test('source offset comes from the export file name, else +08:00', () => {
+test('default source offset is +07:00 (WIB); a file name suffix can still be read for display', () => {
   assert.equal(offsetFromFileName('real_account_conversion_report_2026-11-02T19_00_22+08_00.xlsx'), '+08:00');
   assert.equal(offsetFromFileName('report_2026-11-02T19:00:22+07:00.xlsx'), '+07:00');
   assert.equal(offsetFromFileName('report-05_30.xlsx'), null);
   assert.equal(offsetFromFileName('export.xlsx'), null);
-  assert.equal(DEFAULT_SOURCE_OFFSET, '+08:00');
+  assert.equal(DEFAULT_SOURCE_OFFSET, '+07:00');
   assert.equal(parseOffset('+08:00'), 480);
   assert.equal(parseOffset('-03:30'), -210);
   assert.equal(parseOffset('+0800'), 480);
@@ -65,23 +65,38 @@ test('headers are validated (order and case are free, missing columns reject the
   assert.equal(missing.rows.length, 0);
 });
 
-test('invalid rows and in-file duplicate Document IDs are skipped and reported', () => {
+test('invalid rows and in-file duplicate events are skipped and reported (first copy wins)', () => {
   const rows: unknown[][] = [
     SYNTHETIC_ROWS[0],
     ['not a date', 1, 6000001, '', '', 'Auto', 'auto_kyc', 'Approved', 'KYC Done', ''],
     ['2026-10-02 10:00:00', 1, '', '', '', 'Auto', 'auto_kyc', 'Approved', 'KYC Done', ''],
-    [...SYNTHETIC_ROWS[0].slice(0, 9), 'second copy wins'],
+    [...SYNTHETIC_ROWS[0].slice(0, 9), 'second copy differs'],
+    SYNTHETIC_ROWS[0],
     ['2026-10-03 10:00:00', 2, 6000002, '', '', 'Robot', 'new_step', 'Approved', 'KYC Done', ''],
   ];
   const result = parseOnboardingWorkbook(buildWorkbookBuffer(rows), { offset: '+08:00' });
   assert.equal(result.rows.length, 2);
-  assert.equal(result.rows[0].remarks, 'second copy wins');
+  assert.equal(result.rows[0].remarks, 'Ekyc Status:Success;');
   assert.equal(result.summary.invalid, 2);
-  assert.equal(result.summary.duplicatesInFile, 1);
+  assert.equal(result.summary.duplicatesInFile, 2);
+  assert.equal(result.summary.conflictingDuplicatesInFile, 1);
   assert.match(result.issues[0].message, /Date Time/);
   assert.equal(result.issues[0].row, 3);
   assert.match(result.issues[1].message, /Document ID/);
   assert.deepEqual(result.summary.unknownValues, { 'Approval Method': ['Robot'], Steps: ['new_step'] });
+});
+
+test('one Document ID with events at different times or steps keeps every event', () => {
+  const rows: unknown[][] = [
+    ['2026-09-30 23:00:00', 1, 6100001, '', '', 'Manual', 'manual_kyc', 'Pending', 'KYC Pending', ''],
+    ['2026-10-02 09:00:00', 1, 6100001, '', '', 'Manual', 'manual_kyc', 'Approved', 'KYC Done', ''],
+    ['2026-10-02 09:00:00', 1, 6100001, '', '', 'Manual', 'manual_video_verify', 'Approved', 'Video Done', ''],
+  ];
+  const result = parseOnboardingWorkbook(buildWorkbookBuffer(rows), { offset: '+07:00' });
+  assert.equal(result.rows.length, 3);
+  assert.equal(result.summary.duplicatesInFile, 0);
+  assert.equal(new Set(result.rows.map(eventKey)).size, 3);
+  assert.equal(eventKey(result.rows[0]), '6100001|2026-09-30T16:00:00.000Z|manual_kyc');
 });
 
 test('a bad offset is an error', () => {
