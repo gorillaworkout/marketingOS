@@ -10,12 +10,12 @@ export function ReportTabs() {
   const { canUpload, isAdmin } = useMonthlyReportPermissions();
   const tabs = [
     { href: '/dashboard/monthly-report', label: 'Onboarding' },
-    { href: '/dashboard/monthly-report/settlement', label: 'Settlement' },
+    { href: '/dashboard/monthly-report/settlement', label: 'Settlement (coming soon)' },
     ...(canUpload ? [{ href: '/dashboard/monthly-report/uploads', label: 'Uploads' }] : []),
     ...(isAdmin ? [{ href: '/dashboard/monthly-report/access', label: 'Access' }] : []),
   ];
   return (
-    <nav aria-label="Monthly Report sections" className="flex gap-1 border-b border-[var(--mos-border-subtle)]">
+    <nav aria-label="Onboarding Reports sections" className="flex gap-1 border-b border-[var(--mos-border-subtle)]">
       {tabs.map(tab => {
         const active = pathname === tab.href;
         return (

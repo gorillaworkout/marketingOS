@@ -37,7 +37,7 @@ export const ACCOUNT_FEATURE_LABELS: Record<AccountFeature, string> = {
   'ai-research': 'AI Research',
   'internal-docs': 'FAQ & Guides',
   seo: 'SEO OS',
-  'monthly-report': 'Monthly Report',
+  'monthly-report': 'Onboarding Reports',
 };
 
 /** Dashboard href for each account feature. Last path segment is not always the feature id. */

@@ -50,7 +50,7 @@ test('view: admin, department feature or personal grant; upload: admin or upload
   // A stale upload flag without view access never allows upload.
   assert.equal(canUploadMonthlyReport({ role: 'member', features: [], monthlyReportUpload: true }), false);
 
-  assert.deepEqual(monthlyReportApiAccess(outsider), { error: 'Forbidden: you do not have access to Monthly Report', status: 403 });
+  assert.deepEqual(monthlyReportApiAccess(outsider), { error: 'Forbidden: you do not have access to Onboarding Reports', status: 403 });
   assert.equal(monthlyReportApiAccess(viaDepartment), null);
   assert.deepEqual(monthlyReportApiAccess(viaDepartment, { upload: true }), { error: 'Forbidden: upload rights are required', status: 403 });
 });

@@ -101,7 +101,7 @@ export default function MonthlyReportOnboardingPage() {
     <PageStack>
       <PageHeader
         eyebrow="Reports"
-        title="Monthly Report"
+        title="Onboarding Reports"
         description="Client onboarding from the CRM export: registrations, KYC, real account activations and first-time deposits. Days are counted in WIB (UTC+7)."
         actions={report && data?.hasAnyData ? (
           <a href={`/api/monthly-report/export?${query}`}><Button variant="primary">Export .xlsx</Button></a>

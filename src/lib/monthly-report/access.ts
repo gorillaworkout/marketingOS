@@ -52,7 +52,7 @@ export function monthlyReportApiAccess(
   principal: MonthlyReportPrincipal,
   options: { adminOnly?: boolean; upload?: boolean } = {},
 ): { error: string; status: number } | null {
-  if (!canViewMonthlyReport(principal)) return { error: 'Forbidden: you do not have access to Monthly Report', status: 403 };
+  if (!canViewMonthlyReport(principal)) return { error: 'Forbidden: you do not have access to Onboarding Reports', status: 403 };
   if (options.adminOnly && principal.role !== 'admin') return { error: 'Forbidden: admin only', status: 403 };
   if (options.upload && !canUploadMonthlyReport(principal)) return { error: 'Forbidden: upload rights are required', status: 403 };
   return null;

@@ -41,7 +41,7 @@ export default function MonthlyReportUploadsPage() {
 
   return (
     <PageStack>
-      <PageHeader eyebrow="Reports" title="Monthly Report" description="Upload the source files. Every upload is previewed first, validated, and kept in the history below." />
+      <PageHeader eyebrow="Reports" title="Onboarding Reports" description="Upload the source files. Every upload is previewed first, validated, and kept in the history below." />
       <ReportTabs />
       <div className="grid gap-6 xl:grid-cols-2">
         <UploadCard kind="onboarding" onDone={loadHistory} />

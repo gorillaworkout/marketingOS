@@ -31,10 +31,10 @@ export default function MonthlyReportAccessPage() {
 
   return (
     <PageStack>
-      <PageHeader eyebrow="Reports" title="Monthly Report" description="Who can open the report and who can upload data. Admins always have full access; everyone who can view sees the same report." />
+      <PageHeader eyebrow="Reports" title="Onboarding Reports" description="Who can open the report and who can upload data. Admins always have full access; everyone who can view sees the same report." />
       <ReportTabs />
       {error && <p className="text-xs text-red-300">{error}</p>}
-      <DataTableFrame title="Access" description="View comes from the department (Accounts → Departments → Monthly Report) or a personal grant here. Upload rights are personal.">
+      <DataTableFrame title="Access" description="View comes from the department (Accounts → Departments → Onboarding Reports) or a personal grant here. Upload rights are personal.">
         {!users ? <p className="px-5 py-6 text-xs text-[var(--mos-text-muted)]">Loading…</p> : users.length === 0 ? <EmptyState title="No users" /> : (
           <table className="w-full text-left text-xs">
             <thead className="text-[var(--mos-text-faint)]"><tr>{['User', 'Department', 'View', 'Personal access', 'Can upload'].map(h => <th key={h} className="px-4 py-2.5 font-medium">{h}</th>)}</tr></thead>
