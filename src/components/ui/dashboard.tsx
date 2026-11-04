@@ -83,12 +83,15 @@ export function MetricCard({
   value,
   note,
   trend,
+  detail,
   className,
 }: {
   label: string;
   value: ReactNode;
   note?: string;
   trend?: ReactNode;
+  /** Optional secondary detail under the note (e.g. a breakdown of the value). */
+  detail?: ReactNode;
   className?: string;
 }) {
   return (
@@ -99,6 +102,7 @@ export function MetricCard({
         {trend && <span className="text-[11px] text-[var(--mos-accent-soft)]">{trend}</span>}
       </div>
       {note && <p className="mt-1 truncate text-[11px] text-[var(--mos-text-faint)]">{note}</p>}
+      {detail && <div className="mt-1.5 text-[11px] text-[var(--mos-text-muted)]">{detail}</div>}
     </div>
   );
 }

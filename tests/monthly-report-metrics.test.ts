@@ -5,7 +5,7 @@ import { parseFtdFile } from '../src/lib/monthly-report/ftd-parse';
 import { parseOnboardingWorkbook } from '../src/lib/monthly-report/onboarding-parse';
 import {
   aggregateEventsByDay, aggregateFtdByDay, buildOnboardingReport, classifyEvent, dateCoverage, distinctActivatedAccounts,
-  ftdCohortStats, maskIdentifier, sumDaily, type PeriodData,
+  ftdCohortStats, maskIdentifier, pending, sumDaily, type PeriodData,
 } from '../src/lib/monthly-report/metrics';
 import { resolvePeriod } from '../src/lib/monthly-report/periods';
 
@@ -75,7 +75,10 @@ test('the report builds KPIs, October weeks, funnel and comparison', () => {
   assert.deepEqual(report.buckets.map(b => [b.from, b.to]), [
     ['2026-10-01', '2026-10-11'], ['2026-10-12', '2026-10-18'], ['2026-10-19', '2026-10-25'], ['2026-10-26', '2026-10-31'],
   ]);
-  assert.deepEqual(report.buckets.map(b => b.values.realAccountApproved), [3, 0, 0, 1]);
+  // Total Real Account = activated + manual KYC approved (demo not done).
+  assert.deepEqual(report.buckets.map(b => b.values.realAccountActivated), [3, 0, 0, 1]);
+  assert.deepEqual(report.buckets.map(b => b.values.manualKycApproved), [1, 0, 0, 0]);
+  assert.deepEqual(report.buckets.map(b => b.values.realAccountApproved), [4, 0, 0, 1]);
   assert.deepEqual(report.buckets.map(b => b.values.kycRejected), [1, 0, 1, 0]);
   // Registrations = every onboarding row (all steps), repeats counted.
   assert.deepEqual(report.buckets.map(b => b.values.registrations), [6, 2, 1, 2]);
@@ -85,14 +88,21 @@ test('the report builds KPIs, October weeks, funnel and comparison', () => {
   assert.equal(kpi.registrations.value, 11);
   assert.match(kpi.registrations.note, /all steps, repeats counted/);
   assert.equal(kpi.kycRejected.value, 2);
-  assert.equal(kpi.realAccountApproved.value, 4);
+  assert.equal(kpi.realAccountApproved.value, 5);
+  assert.equal(kpi.realAccountApproved.label, 'Total Real Account');
+  assert.equal(kpi.realAccountApproved.note, 'Real accounts activated + KYC manual approved (demo not done)');
+  assert.deepEqual(kpi.realAccountApproved.parts?.map(p => [p.key, p.label, p.value]), [
+    ['realAccountActivated', 'Real Account Activated', 4], ['manualKycApproved', 'Manual Approved Demo Not Done', 1],
+  ]);
+  assert.equal(report.total.realAccountActivated, 4);
   assert.equal(kpi.ftd.value, 5);
   assert.equal(kpi.ftd.previous, null);
-  assert.equal(kpi.pending.value, 11 - 4 - 2);
+  assert.equal(kpi.pending.value, 11 - 5 - 2);
+  assert.equal(kpi.pending.note, 'Registrations − Total Real Account − KYC Rejected');
   assert.deepEqual(report.buckets.map(b => b.values.ftd), [3, 1, 0, 1]);
   assert.deepEqual(report.ftd, {
     count: 5, amountTotal: 13667.02, amountAverage: 2733.4, byType: { micro: 3, standard: 2, other: 0 },
-    fromPeriodActivations: 3, fromEarlierAccounts: 2, dailyAverage: 0.2, ftdPerApprovedPct: 125,
+    fromPeriodActivations: 3, fromEarlierAccounts: 2, dailyAverage: 0.2, ftdPerApprovedPct: 100,
     ftdPerRegistrationPct: 45.5, realToFtdPct: 75, activatedWithFtd: 3,
   });
   assert.equal(kpi.registrations.previous, 2);
@@ -101,14 +111,16 @@ test('the report builds KPIs, October weeks, funnel and comparison', () => {
   assert.equal(kpi.realAccountApproved.changePct, null);
 
   assert.deepEqual(report.breakdown.map(b => [b.key, b.value]), [
-    ['firstAccount', 3], ['additionalAccount', 1], ['manualKycApproved', 1], ['autoKycApproved', 1],
+    ['realAccountActivated', 4], ['manualKycApproved', 1], ['firstAccount', 3], ['additionalAccount', 1], ['autoKycApproved', 1],
   ]);
-  assert.match(report.breakdown[0].label, /First account activation \(auto\)/);
+  assert.equal(report.breakdown[1].label, 'Manual Approved Demo Not Done');
+  assert.match(report.breakdown[2].label, /First account activation \(auto\)/);
 
   assert.deepEqual(report.funnel.map(s => [s.key, s.value, s.stepPct, s.overallPct]), [
     ['registrations', 11, null, 100],
     ['kycApproved', 2, 18.2, 18.2],
-    ['realAccountApproved', 4, 200, 36.4],
+    // Funnel stays on unique activated accounts, not Total Real Account.
+    ['realAccountActivated', 4, 200, 36.4],
     ['ftd', 3, 75, 27.3],
   ]);
   assert.equal(report.dataQuality.approvedBankInfoPending, 1);
@@ -116,6 +128,32 @@ test('the report builds KPIs, October weeks, funnel and comparison', () => {
   assert.equal(report.hasOnboardingData, true);
   assert.equal(report.hasPreviousData, true);
   assert.equal(report.hasFtd, true);
+});
+
+test('Total Real Account adds manual KYC approved to unique activations in every view', () => {
+  const day = (date: string, activated: number, manualKycApproved: number, kycRejected: number, events: number) => ({
+    date, kycRejected, manualKycApproved, autoKycApproved: 0, firstAccount: activated, additionalAccount: 0, activated,
+    approvedBankInfoPending: 0, pendingVideoFailed: 0, events,
+  });
+  const report = buildOnboardingReport({
+    period: resolvePeriod({ preset: 'month', anchor: '2026-10-15' }),
+    granularity: 'week',
+    // The same account activated on Oct 1 and Oct 2: daily rows count 2 + 1, the period total counts it once (2).
+    current: { ...empty, daily: [day('2026-10-01', 2, 3, 1, 20), day('2026-10-02', 1, 0, 0, 5), day('2026-10-20', 0, 2, 4, 10)], uniqueActivated: 2 },
+    previous: { ...empty, daily: [day('2026-09-10', 5, 1, 2, 30)], uniqueActivated: 5 },
+  });
+  assert.deepEqual(report.daily.slice(0, 2).map(d => [d.values.realAccountActivated, d.values.manualKycApproved, d.values.realAccountApproved]), [[2, 3, 5], [1, 0, 1]]);
+  assert.deepEqual(report.buckets.map(b => b.values.realAccountApproved), [6, 0, 2, 0]);
+  assert.equal(report.total.realAccountActivated, 2);
+  assert.equal(report.total.realAccountApproved, 2 + 5);
+  assert.equal(report.previousTotal.realAccountApproved, 5 + 1);
+  const kpi = Object.fromEntries(report.kpis.map(k => [k.key, k]));
+  assert.deepEqual([kpi.realAccountApproved.value, kpi.realAccountApproved.previous, kpi.realAccountApproved.change], [7, 6, 1]);
+  assert.deepEqual(kpi.realAccountApproved.parts?.map(p => [p.value, p.previous]), [[2, 5], [5, 1]]);
+  assert.deepEqual([kpi.pending.value, kpi.pending.previous], [35 - 7 - 5, 30 - 6 - 2]);
+  assert.equal(pending(report.buckets[0].values), 25 - 6 - 1);
+  // Funnel compares unique activations (2) with KYC approved (5), never Total Real Account.
+  assert.deepEqual(report.funnel[2], { key: 'realAccountActivated', label: 'Real account activated (unique)', value: 2, stepPct: 40, overallPct: 5.7 });
 });
 
 test('pending is hidden and FTD shows no data when nothing was uploaded', () => {

@@ -7,6 +7,9 @@ import type { FtdRow } from './ftd-parse';
 import type { OnboardingRow } from './onboarding-parse';
 import { wibDate } from './onboarding-parse';
 import {
+  MANUAL_APPROVED_DEMO_NOT_DONE_LABEL, REAL_ACCOUNT_ACTIVATED_LABEL, TOTAL_REAL_ACCOUNT_LABEL, TOTAL_REAL_ACCOUNT_NOTE, pending,
+} from './definitions';
+import {
   describeRange, reportBuckets, type Bucket, type DateRange, type Granularity, type ResolvedPeriod,
 } from './periods';
 
@@ -65,6 +68,10 @@ export interface DailyFtd { date: string; count: number; amount: number; micro: 
  *  - ftdFromPeriodActivations: FTDs in the range whose account was activated in the range
  */
 export interface FtdCohort { activatedWithFtd: number; ftdFromPeriodActivations: number }
+
+export {
+  MANUAL_APPROVED_DEMO_NOT_DONE_LABEL, REAL_ACCOUNT_ACTIVATED_LABEL, TOTAL_REAL_ACCOUNT_LABEL, TOTAL_REAL_ACCOUNT_NOTE, pending,
+} from './definitions';
 
 export const DAILY_COUNT_KEYS = [
   'kycRejected', 'manualKycApproved', 'autoKycApproved', 'firstAccount', 'additionalAccount',
@@ -173,7 +180,10 @@ const pct = (part: number | null, whole: number | null) => (part === null || who
 export interface BucketValues {
   registrations: number | null;
   kycRejected: number;
+  /** Total Real Account = realAccountActivated + manualKycApproved. */
   realAccountApproved: number;
+  /** Trading accounts activated (unique in the period total; per day/bucket otherwise). */
+  realAccountActivated: number;
   manualKycApproved: number;
   autoKycApproved: number;
   firstAccount: number;
@@ -197,6 +207,8 @@ export interface Kpi {
   previous: number | null;
   change: number | null;
   changePct: number | null;
+  /** Secondary detail shown under the headline value (e.g. the Total Real Account parts). */
+  parts?: Array<{ key: string; label: string; value: number | null; previous: number | null }>;
 }
 
 export interface FunnelStep { key: string; label: string; value: number | null; stepPct: number | null; overallPct: number | null }
@@ -219,11 +231,11 @@ export interface FtdSummary {
   fromEarlierAccounts: number;
   /** FTD count ÷ days in the period (the PPT's "daily average"). */
   dailyAverage: number | null;
-  /** FTD count ÷ Real Account Approved — the method the monthly PPT used (33.8% in Oct with 8,096). */
+  /** FTD count ÷ Total Real Account — the method the monthly PPT used (33.8% in Oct with 8,096; 8,098 here). */
   ftdPerApprovedPct: number | null;
   /** FTD count ÷ Registrations — the PPT's "overall" conversion. */
   ftdPerRegistrationPct: number | null;
-  /** Accounts activated in the period that made an FTD ÷ Real Account Approved. */
+  /** Accounts activated in the period that made an FTD ÷ unique Real Account Activated (same-account cohort). */
   realToFtdPct: number | null;
   activatedWithFtd: number;
 }
@@ -239,6 +251,8 @@ export interface OnboardingReport {
   buckets: ReportBucket[];
   daily: ReportBucket[];
   total: BucketValues;
+  /** The previous period's totals, built the same way as `total`. */
+  previousTotal: BucketValues;
   funnel: FunnelStep[];
   ftd: FtdSummary;
   dataQuality: { approvedBankInfoPending: number; pendingVideoFailed: number };
@@ -267,7 +281,8 @@ function valuesFor(range: DateRange, data: Pick<PeriodData, 'daily' | 'ftd' | 'f
   return {
     registrations: sum.events,
     kycRejected: sum.kycRejected,
-    realAccountApproved: sum.activated,
+    realAccountApproved: sum.activated + sum.manualKycApproved,
+    realAccountActivated: sum.activated,
     manualKycApproved: sum.manualKycApproved,
     autoKycApproved: sum.autoKycApproved,
     firstAccount: sum.firstAccount,
@@ -280,13 +295,14 @@ function valuesFor(range: DateRange, data: Pick<PeriodData, 'daily' | 'ftd' | 'f
   };
 }
 
-function pending(values: BucketValues): number | null {
-  return !values.registrations ? null : values.registrations - values.realAccountApproved - values.kycRejected;
+/** Period totals count activated accounts once, even when activated on several days. */
+function withUniqueActivated(values: BucketValues, uniqueActivated: number): BucketValues {
+  return { ...values, realAccountActivated: uniqueActivated, realAccountApproved: uniqueActivated + values.manualKycApproved };
 }
 
-function kpi(key: KpiKey, label: string, note: string, value: number | null, previous: number | null): Kpi {
+function kpi(key: KpiKey, label: string, note: string, value: number | null, previous: number | null, parts?: Kpi['parts']): Kpi {
   const change = value !== null && previous !== null ? value - previous : null;
-  return { key, label, note, value, previous, change, changePct: change !== null && previous ? round1((change / previous) * 100) : null };
+  return { key, label, note, value, previous, change, changePct: change !== null && previous ? round1((change / previous) * 100) : null, ...(parts ? { parts } : {}) };
 }
 
 function peak<T extends { date: string }>(rows: T[], pick: (row: T) => number | null) {
@@ -305,8 +321,8 @@ export function buildOnboardingReport(input: {
   previous: PeriodData;
 }): OnboardingReport {
   const { period, granularity, current, previous } = input;
-  const total = { ...valuesFor(period.range, current), realAccountApproved: current.uniqueActivated };
-  const prev = { ...valuesFor(period.previous, previous), realAccountApproved: previous.uniqueActivated };
+  const total = withUniqueActivated(valuesFor(period.range, current), current.uniqueActivated);
+  const prev = withUniqueActivated(valuesFor(period.previous, previous), previous.uniqueActivated);
   const toBuckets = (buckets: Bucket[]) => buckets.map(bucket => ({ ...bucket, values: valuesFor(bucket, current) }));
   const ftdDays = current.ftd.filter(day => inRange(day.date, period.range));
   const ftdCount = total.ftd ?? 0;
@@ -324,16 +340,19 @@ export function buildOnboardingReport(input: {
     dailyAverage: total.ftd === null ? null : Math.round((total.ftd / period.days) * 10) / 10,
     ftdPerApprovedPct: total.ftd === null ? null : pct(total.ftd, total.realAccountApproved),
     ftdPerRegistrationPct: total.ftd === null ? null : pct(total.ftd, total.registrations),
-    realToFtdPct: total.ftd === null ? null : pct(current.ftdCohort.activatedWithFtd, total.realAccountApproved),
+    realToFtdPct: total.ftd === null ? null : pct(current.ftdCohort.activatedWithFtd, total.realAccountActivated),
     activatedWithFtd: current.ftdCohort.activatedWithFtd,
   };
 
   const kpis: Kpi[] = [
     kpi('registrations', 'Registrations', REGISTRATIONS_DEFINITION, total.registrations, prev.registrations),
     kpi('kycRejected', 'KYC Rejected', 'Manual KYC step rejected', total.kycRejected, prev.kycRejected),
-    kpi('realAccountApproved', 'Real Account Approved', 'Unique trading accounts activated', total.realAccountApproved, prev.realAccountApproved),
+    kpi('realAccountApproved', TOTAL_REAL_ACCOUNT_LABEL, TOTAL_REAL_ACCOUNT_NOTE, total.realAccountApproved, prev.realAccountApproved, [
+      { key: 'realAccountActivated', label: REAL_ACCOUNT_ACTIVATED_LABEL, value: total.realAccountActivated, previous: prev.realAccountActivated },
+      { key: 'manualKycApproved', label: MANUAL_APPROVED_DEMO_NOT_DONE_LABEL, value: total.manualKycApproved, previous: prev.manualKycApproved },
+    ]),
     kpi('ftd', 'FTD', 'First-time deposits made in the period', total.ftd, prev.ftd),
-    kpi('pending', 'Pending', 'Registrations − Real Account Approved (unique) − KYC Rejected', pending(total), pending(prev)),
+    kpi('pending', 'Pending', 'Registrations − Total Real Account − KYC Rejected', pending(total), pending(prev)),
   ];
 
   const kycApproved = total.kycApproved;
@@ -341,11 +360,13 @@ export function buildOnboardingReport(input: {
   const funnel: FunnelStep[] = [
     { key: 'registrations', label: 'Registration', value: registrations, stepPct: null, overallPct: registrations ? 100 : null },
     { key: 'kycApproved', label: 'KYC approved', value: kycApproved, stepPct: pct(kycApproved, registrations), overallPct: pct(kycApproved, registrations) },
-    { key: 'realAccountApproved', label: 'Real account', value: total.realAccountApproved, stepPct: pct(total.realAccountApproved, kycApproved), overallPct: pct(total.realAccountApproved, registrations) },
+    // Funnel and FTD cohort use unique activated accounts (not Total Real Account), so the
+    // manual-approved-demo-not-done KYC rows are not counted twice against KYC approved.
+    { key: 'realAccountActivated', label: 'Real account activated (unique)', value: total.realAccountActivated, stepPct: pct(total.realAccountActivated, kycApproved), overallPct: pct(total.realAccountActivated, registrations) },
     {
       key: 'ftd', label: 'FTD (same accounts)',
       value: total.ftd === null ? null : current.ftdCohort.activatedWithFtd,
-      stepPct: total.ftd === null ? null : pct(current.ftdCohort.activatedWithFtd, total.realAccountApproved),
+      stepPct: total.ftd === null ? null : pct(current.ftdCohort.activatedWithFtd, total.realAccountActivated),
       overallPct: total.ftd === null ? null : pct(current.ftdCohort.activatedWithFtd, registrations),
     },
   ];
@@ -358,14 +379,16 @@ export function buildOnboardingReport(input: {
     granularity,
     kpis,
     breakdown: [
+      { key: 'realAccountActivated', label: REAL_ACCOUNT_ACTIVATED_LABEL, note: 'Unique trading accounts activated', value: total.realAccountActivated },
+      { key: 'manualKycApproved', label: MANUAL_APPROVED_DEMO_NOT_DONE_LABEL, note: 'Manual KYC approved, demo account not done yet; counted in Total Real Account', value: total.manualKycApproved },
       { key: 'firstAccount', label: 'First account activation (auto)', note: 'Activated accounts flagged as the client’s first account', value: total.firstAccount },
       { key: 'additionalAccount', label: 'Additional account', note: 'Activated accounts for clients who already had one', value: total.additionalAccount },
-      { key: 'manualKycApproved', label: 'Manual KYC approved', note: 'KYC step approved by the team (not an account count)', value: total.manualKycApproved },
       { key: 'autoKycApproved', label: 'Auto KYC approved', note: 'KYC step approved automatically (not an account count)', value: total.autoKycApproved },
     ],
     buckets: toBuckets(reportBuckets(period.range.from, period.range.to, granularity)),
     daily: toBuckets(reportBuckets(period.range.from, period.range.to, 'day')),
     total,
+    previousTotal: prev,
     funnel,
     ftd: ftdSummary,
     dataQuality: { approvedBankInfoPending: total.approvedBankInfoPending, pendingVideoFailed: total.pendingVideoFailed },

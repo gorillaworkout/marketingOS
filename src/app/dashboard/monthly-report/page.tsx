@@ -9,6 +9,7 @@ import { DUPOIN, formatAmount, formatChange, formatDateTimeWib, formatDecimal, f
 import { FunnelChart, TrendChart } from '@/components/monthly-report/charts';
 import { useMonthlyReportPermissions } from '@/components/monthly-report/MonthlyReportContext';
 import { InfoTip, ReportTabs } from '@/components/monthly-report/ReportTabs';
+import { pending, TOTAL_REAL_ACCOUNT_LABEL } from '@/lib/monthly-report/definitions';
 import type { BucketValues, OnboardingReport } from '@/lib/monthly-report/metrics';
 import {
   GRANULARITIES, PERIOD_PRESETS, PRESET_LABELS, defaultGranularity, formatDayLabel, resolvePeriod, shiftAnchor,
@@ -22,7 +23,7 @@ type DetailRow = { event_at: string; uid: string | null; trading_account_no: str
 type TrendMetric = 'registrations' | 'realAccountApproved' | 'kycRejected' | 'ftd';
 
 const TREND_METRICS: Array<[TrendMetric, string]> = [
-  ['registrations', 'Registrations'], ['realAccountApproved', 'Real Account Approved'], ['kycRejected', 'KYC Rejected'], ['ftd', 'FTD'],
+  ['registrations', 'Registrations'], ['realAccountApproved', TOTAL_REAL_ACCOUNT_LABEL], ['kycRejected', 'KYC Rejected'], ['ftd', 'FTD'],
 ];
 const GRANULARITY_LABELS: Record<Granularity, string> = { day: 'By day', week: 'By week', month: 'By month' };
 
@@ -178,13 +179,24 @@ export default function MonthlyReportOnboardingPage() {
                   value={kpi.key === 'ftd' && kpi.value === null ? 'No data' : formatInteger(kpi.value)}
                   trend={report.hasPreviousData ? formatChange(kpi.change, kpi.changePct) ?? undefined : 'No previous data'}
                   note={kpi.key === 'registrations' ? 'All onboarding entries, repeats counted' : kpi.note}
+                  detail={kpi.parts?.length ? (
+                    <dl className="space-y-0.5">
+                      {kpi.parts.map(part => (
+                        <div key={part.key} className="flex justify-between gap-2">
+                          <dt className="truncate">{part.label}</dt>
+                          <dd className="tabular-nums text-[var(--mos-text-secondary)]">{formatInteger(part.value)}</dd>
+                        </div>
+                      ))}
+                    </dl>
+                  ) : undefined}
                   className={kpi.key === 'ftd' ? 'bg-[rgba(46,181,196,0.06)]' : undefined}
                 />
               ))}
             </div>
             <p className="border-t border-[var(--mos-border-subtle)] px-5 py-2.5 text-[11px] text-[var(--mos-text-faint)]">
               Registrations<InfoTip text={report.kpis[0].note} /> = every onboarding entry in the export (all 6 steps; a user rejected and re-registering counts twice).
-              Pending = Registrations − Real Account Approved (unique) − KYC Rejected. Change is versus the previous period.
+              Total Real Account = Real Account Activated (unique) + Manual Approved Demo Not Done.
+              Pending = Registrations − Total Real Account − KYC Rejected. Change is versus the previous period.
             </p>
           </Panel>
 
@@ -219,7 +231,7 @@ export default function MonthlyReportOnboardingPage() {
               <SectionHeader title="Funnel" description="Registration → KYC approved → Real account → FTD from those same accounts." />
               <div className="mt-5"><FunnelChart steps={report.funnel} /></div>
               <p className="mt-4 text-[11px] leading-5 text-[var(--mos-text-faint)]">
-                KYC approved counts approved manual and auto KYC steps; Real account counts unique activated accounts. The last step only counts FTDs from accounts activated in this period.
+                KYC approved counts approved manual and auto KYC steps. The funnel uses unique activated accounts, not Total Real Account, so manual approvals are not counted twice; accounts can be activated from KYC approved before the period, so this step can pass 100%. The last step only counts FTDs from accounts activated in this period.
               </p>
             </Panel>
           </div>
@@ -241,8 +253,8 @@ export default function MonthlyReportOnboardingPage() {
                     <Stat label="Micro / Standard" value={`${formatInteger(report.ftd.byType.micro)} / ${formatInteger(report.ftd.byType.standard)}`} />
                   </div>
                   <dl className="mt-5 grid gap-x-6 gap-y-2 text-xs sm:grid-cols-2">
-                    <Row label="FTD ÷ Real Account Approved" hint="All FTDs in the period divided by unique activations (the monthly deck method)" value={formatPct(report.ftd.ftdPerApprovedPct)} />
-                    <Row label="Real → FTD (same accounts)" hint="Accounts activated in the period that also made an FTD" value={formatPct(report.ftd.realToFtdPct)} />
+                    <Row label="FTD ÷ Total Real Account" hint="All FTDs in the period divided by Total Real Account (the monthly deck method)" value={formatPct(report.ftd.ftdPerApprovedPct)} />
+                    <Row label="Activated → FTD (same accounts)" hint="Unique accounts activated in the period that also made an FTD, divided by Real Account Activated" value={formatPct(report.ftd.realToFtdPct)} />
                     <Row label="FTD ÷ Registrations" hint="All FTDs divided by registrations" value={formatPct(report.ftd.ftdPerRegistrationPct)} />
                     <Row label="From accounts activated this period" value={`${formatInteger(report.ftd.fromPeriodActivations)} · earlier accounts ${formatInteger(report.ftd.fromEarlierAccounts)}`} />
                   </dl>
@@ -254,7 +266,7 @@ export default function MonthlyReportOnboardingPage() {
             </Panel>
 
             <Panel>
-              <SectionHeader title="Real Account Approved — breakdown" description="Activations by type, and the KYC steps behind them. KYC counts are steps, not accounts." />
+              <SectionHeader title="Total Real Account — breakdown" description="Real Account Activated (unique accounts) plus Manual Approved Demo Not Done, then activations by type and auto KYC steps." />
               <dl className="mt-4 space-y-2.5 text-xs">
                 {report.breakdown.map(item => <Row key={item.key} label={item.label} hint={item.note} value={formatInteger(item.value)} />)}
               </dl>
@@ -294,23 +306,23 @@ export default function MonthlyReportOnboardingPage() {
 
           <DataTableFrame
             title="Summary"
-            description="Period rows count activations; the Total row counts unique accounts, so it can be lower than the sum."
+            description="Total Real Account = Activated + Manual Approved Demo Not Done. Period rows count activations; the Total row counts unique accounts, so it can be lower than the sum."
             action={<a href={`/api/monthly-report/export?${query}`}><Button size="sm">Export .xlsx</Button></a>}
           >
             <table className="w-full text-right text-xs">
               <thead className="text-[var(--mos-text-faint)]">
                 <tr>
                   <th className="px-4 py-2.5 text-left font-medium">Period</th>
-                  {['Registrations', 'KYC Rejected', 'Real Account Approved', 'FTD', 'Pending'].map(h => <th key={h} className="px-4 py-2.5 font-medium">{h}</th>)}
+                  {['Registrations', 'KYC Rejected', TOTAL_REAL_ACCOUNT_LABEL, 'Activated', 'Manual Approved', 'FTD', 'Pending'].map(h => <th key={h} className="px-4 py-2.5 font-medium">{h}</th>)}
                 </tr>
               </thead>
               <tbody>
                 {report.buckets.map(bucket => <SummaryRow key={bucket.key} label={bucket.label} values={bucket.values} />)}
                 <SummaryRow label="Total" values={report.total} strong />
                 {report.hasPreviousData ? (
-                  <SummaryRow label={`Previous (${report.previousLabel})`} values={previousValues(report)} muted />
+                  <SummaryRow label={`Previous (${report.previousLabel})`} values={report.previousTotal} muted />
                 ) : (
-                  <tr className="border-t border-[var(--mos-border-subtle)] text-[var(--mos-text-faint)]"><td className="px-4 py-2 text-left" colSpan={6}>Previous ({report.previousLabel}): no data uploaded</td></tr>
+                  <tr className="border-t border-[var(--mos-border-subtle)] text-[var(--mos-text-faint)]"><td className="px-4 py-2 text-left" colSpan={8}>Previous ({report.previousLabel}): no data uploaded</td></tr>
                 )}
               </tbody>
             </table>
@@ -329,21 +341,17 @@ export default function MonthlyReportOnboardingPage() {
   );
 }
 
-function previousValues(report: OnboardingReport): BucketValues {
-  const value = (key: string) => report.kpis.find(k => k.key === key)?.previous ?? null;
-  return { ...report.total, registrations: value('registrations'), kycRejected: value('kycRejected') ?? 0, realAccountApproved: value('realAccountApproved') ?? 0, ftd: value('ftd') };
-}
-
 function SummaryRow({ label, values, strong, muted }: { label: string; values: BucketValues; strong?: boolean; muted?: boolean }) {
-  const pending = values.registrations ? values.registrations - values.realAccountApproved - values.kycRejected : null;
   return (
     <tr className={`border-t border-[var(--mos-border-subtle)] ${strong ? 'font-semibold text-[var(--mos-text)]' : muted ? 'text-[var(--mos-text-faint)]' : 'text-[var(--mos-text-secondary)]'}`}>
       <td className="px-4 py-2 text-left">{label}</td>
       <td className="px-4 py-2">{formatInteger(values.registrations)}</td>
       <td className="px-4 py-2">{formatInteger(values.kycRejected)}</td>
       <td className="px-4 py-2">{formatInteger(values.realAccountApproved)}</td>
+      <td className="px-4 py-2">{formatInteger(values.realAccountActivated)}</td>
+      <td className="px-4 py-2">{formatInteger(values.manualKycApproved)}</td>
       <td className="px-4 py-2">{values.ftd === null ? 'No data' : formatInteger(values.ftd)}</td>
-      <td className="px-4 py-2">{formatInteger(pending)}</td>
+      <td className="px-4 py-2">{formatInteger(pending(values))}</td>
     </tr>
   );
 }
