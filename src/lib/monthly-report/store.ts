@@ -14,6 +14,9 @@ import {
 import { eventKey, type OnboardingRow } from './onboarding-parse';
 import type { StoredEvent } from './conflicts';
 import { REPORT_TIMEZONE, type DateRange } from './periods';
+import { coverageFromUploads, mergeRanges, monthsFromUploads, type DataCoverage, type UploadRange } from './coverage';
+import { pageOffset, uploadHistoryWhere, type UploadHistoryFilter } from './upload-history';
+import { combinedSpan, mergeDailyFtd, withManualFtdCoverage, type ManualFtdEntry, type ManualFtdInput } from './ftd-daily';
 
 export type UploadKind = 'onboarding' | 'ftd' | 'rejection_reasons';
 export type DataSource = 'upload' | 'api';
@@ -277,29 +280,168 @@ export async function loadFtdCohort(range: DateRange): Promise<PeriodData['ftdCo
   return { activatedWithFtd: Number(row?.activated_with_ftd ?? 0), ftdFromPeriodActivations: Number(row?.ftd_from_period ?? 0) };
 }
 
+/**
+ * One period's data. `ftd` applies the precedence of ftd-daily.ts: a manual
+ * daily entry replaces the account-derived value of its day.
+ * `ftdCoverage` = overall FTD span (account rows and manual days).
+ */
 export async function loadPeriodData(range: DateRange, ftdCoverage?: DateRange | null): Promise<PeriodData> {
-  const [daily, ftd, uniqueActivated, ftdCohort, coverage] = await Promise.all([
+  const [daily, derivedFtd, manualFtd, uniqueActivated, ftdCohort, coverage] = await Promise.all([
     loadDailyOnboarding(range),
     loadDailyFtd(range),
+    listManualFtd({ range }),
     loadUniqueActivated(range),
     loadFtdCohort(range),
-    ftdCoverage === undefined ? loadFtdCoverage() : Promise.resolve(ftdCoverage),
+    ftdCoverage === undefined ? loadCombinedFtdSpan() : Promise.resolve(ftdCoverage),
   ]);
-  return { daily, ftd, ftdCoverage: coverage, uniqueActivated, ftdCohort };
+  return { daily, ftd: mergeDailyFtd(derivedFtd, manualFtd), ftdCoverage: coverage, uniqueActivated, ftdCohort };
+}
+
+// ---- Manual daily FTD (onboarding_ftd_daily) ----
+
+interface ManualFtdRow { ftd_date: string; ftd_count: number | string; ftd_amount: string | number | null; updated_by_name: string | null; updated_at: string | Date; created_at: string | Date }
+
+const MANUAL_FTD_COLUMNS = `to_char(ftd_date, 'YYYY-MM-DD') AS ftd_date, ftd_count, ftd_amount::text AS ftd_amount, updated_by_name, updated_at, created_at`;
+
+function toManualEntry(row: ManualFtdRow): ManualFtdEntry {
+  return {
+    date: row.ftd_date,
+    count: Number(row.ftd_count),
+    amount: row.ftd_amount === null ? null : Number(row.ftd_amount),
+    updatedByName: row.updated_by_name,
+    updatedAt: new Date(row.updated_at).toISOString(),
+    createdAt: new Date(row.created_at).toISOString(),
+  };
+}
+
+/** SQL for the per-day upsert: insert, or update count/amount/editor of an existing day. */
+export const UPSERT_MANUAL_FTD_SQL = `INSERT INTO onboarding_ftd_daily (ftd_date, ftd_count, ftd_amount, updated_by, updated_by_name)
+VALUES (?::date, ?, ?::numeric, ?, ?)
+ON CONFLICT (ftd_date) DO UPDATE SET
+  ftd_count = EXCLUDED.ftd_count,
+  ftd_amount = EXCLUDED.ftd_amount,
+  updated_by = EXCLUDED.updated_by,
+  updated_by_name = EXCLUDED.updated_by_name,
+  updated_at = CURRENT_TIMESTAMP
+RETURNING ${MANUAL_FTD_COLUMNS}, (xmax = 0) AS inserted`;
+
+/** Creates or updates the manual FTD of one WIB day (upsert by date). */
+export async function upsertManualFtd(input: ManualFtdInput, actor: UploadActor): Promise<{ entry: ManualFtdEntry; created: boolean }> {
+  const row = await queryOne<ManualFtdRow & { inserted: boolean }>(
+    UPSERT_MANUAL_FTD_SQL,
+    [input.date, input.count, input.amount === null ? null : input.amount.toFixed(2), actor.id, actor.name],
+  );
+  if (!row) throw new Error('Could not save the FTD entry');
+  return { entry: toManualEntry(row), created: Boolean(row.inserted) };
+}
+
+/** Removes a day's manual entry; the day falls back to the FTD file (or "No data"). */
+export async function deleteManualFtd(date: string): Promise<boolean> {
+  const row = await queryOne<{ ftd_date: string }>('DELETE FROM onboarding_ftd_daily WHERE ftd_date = ?::date RETURNING ftd_date::text', [date]);
+  return Boolean(row);
+}
+
+/** Manual entries, newest day first; optionally within a WIB range. */
+export async function listManualFtd(options: { range?: DateRange; limit?: number } = {}): Promise<ManualFtdEntry[]> {
+  const params: unknown[] = [];
+  let where = '';
+  if (options.range) { where = 'WHERE ftd_date BETWEEN ?::date AND ?::date'; params.push(options.range.from, options.range.to); }
+  const limit = options.limit ? `LIMIT ${Math.min(Math.max(Math.floor(options.limit), 1), 400)}` : '';
+  const rows = await queryAll<ManualFtdRow & Record<string, unknown>>(
+    `SELECT ${MANUAL_FTD_COLUMNS} FROM onboarding_ftd_daily ${where} ORDER BY ftd_date DESC ${limit}`,
+    params,
+  );
+  return rows.map(toManualEntry);
+}
+
+export async function countManualFtd(): Promise<number> {
+  const row = await queryOne<{ count: string }>('SELECT COUNT(*)::text AS count FROM onboarding_ftd_daily');
+  return Number(row?.count ?? 0);
+}
+
+/** Every day that has a manual FTD entry (small table: one row per day). */
+export async function loadManualFtdDates(): Promise<string[]> {
+  const rows = await queryAll<{ ftd_date: string }>(`SELECT to_char(ftd_date, 'YYYY-MM-DD') AS ftd_date FROM onboarding_ftd_daily ORDER BY 1`);
+  return rows.map(row => row.ftd_date);
+}
+
+/** First → last FTD day across account rows and manual entries. */
+export async function loadCombinedFtdSpan(): Promise<DateRange | null> {
+  const [accounts, manual] = await Promise.all([loadFtdCoverage(), loadManualFtdDates()]);
+  return combinedSpan(accounts, manual);
 }
 
 export async function hasAnyOnboardingData(): Promise<boolean> {
   return Boolean(await queryOne('SELECT 1 FROM onboarding_events LIMIT 1'));
 }
 
+const UPLOAD_COLUMNS = `id, kind, file_name, source_utc_offset, uploaded_by_name, rows_total, rows_inserted, rows_updated, rows_skipped, rows_duplicate,
+       to_char(data_from, 'YYYY-MM-DD') AS data_from, to_char(data_to, 'YYYY-MM-DD') AS data_to, created_at`;
+
 export async function listUploads(limit = 50): Promise<UploadRecord[]> {
   const rows = await queryAll<UploadRecord & Record<string, unknown>>(
-    `SELECT id, kind, file_name, source_utc_offset, uploaded_by_name, rows_total, rows_inserted, rows_updated, rows_skipped, rows_duplicate,
-       to_char(data_from, 'YYYY-MM-DD') AS data_from, to_char(data_to, 'YYYY-MM-DD') AS data_to, created_at
-     FROM monthly_report_uploads ORDER BY created_at DESC LIMIT ?`,
+    `SELECT ${UPLOAD_COLUMNS} FROM monthly_report_uploads ORDER BY created_at DESC LIMIT ?`,
     [Math.min(Math.max(limit, 1), 200)],
   );
   return rows.map(row => ({ ...row, created_at: new Date(row.created_at).toISOString() }));
+}
+
+export interface UploadHistoryPage { uploads: UploadRecord[]; total: number; page: number; pageSize: number }
+
+/** One page of the upload history, newest first, filtered by type and data month. */
+export async function listUploadsPage(filter: UploadHistoryFilter): Promise<UploadHistoryPage> {
+  const where = uploadHistoryWhere(filter);
+  const [count, rows] = await Promise.all([
+    queryOne<{ count: string }>(`SELECT COUNT(*)::text AS count FROM monthly_report_uploads ${where.sql}`, where.params),
+    queryAll<UploadRecord & Record<string, unknown>>(
+      `SELECT ${UPLOAD_COLUMNS} FROM monthly_report_uploads ${where.sql} ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?`,
+      [...where.params, filter.pageSize, pageOffset(filter)],
+    ),
+  ]);
+  return {
+    uploads: rows.map(row => ({ ...row, created_at: new Date(row.created_at).toISOString() })),
+    total: Number(count?.count ?? 0),
+    page: filter.page,
+    pageSize: filter.pageSize,
+  };
+}
+
+/** Every upload's kind and WIB data range (web uploads and CLI imports alike). Small table. */
+export async function loadUploadRanges(): Promise<UploadRange[]> {
+  return queryAll<UploadRange & Record<string, unknown>>(
+    `SELECT kind, to_char(data_from, 'YYYY-MM-DD') AS data_from, to_char(data_to, 'YYYY-MM-DD') AS data_to
+     FROM monthly_report_uploads WHERE data_from IS NOT NULL AND data_to IS NOT NULL`,
+  );
+}
+
+export async function loadOnboardingSpan(): Promise<DateRange | null> {
+  const row = await queryOne<{ from: string | null; to: string | null }>(
+    `SELECT MIN(${wibDaySql('e.event_at')}) AS "from", MAX(${wibDaySql('e.event_at')}) AS "to" FROM onboarding_events e`,
+  );
+  return row?.from && row.to ? { from: row.from, to: row.to } : null;
+}
+
+/**
+ * Per-day coverage from the upload history. A kind with stored rows but no
+ * upload range (older data loaded without one) falls back to the stored span,
+ * so it never shows as entirely missing.
+ */
+export async function loadCoverage(uploadRanges?: UploadRange[]): Promise<DataCoverage> {
+  const coverage = coverageFromUploads(uploadRanges ?? await loadUploadRanges());
+  const [onboardingSpan, ftdSpan, manualDates] = await Promise.all([
+    coverage.onboarding.length ? Promise.resolve(null) : loadOnboardingSpan(),
+    coverage.ftd.length ? Promise.resolve(null) : loadFtdCoverage(),
+    loadManualFtdDates(),
+  ]);
+  // FTD coverage = account-level uploads OR days with a manual entry.
+  return withManualFtdCoverage({
+    onboarding: onboardingSpan ? mergeRanges([onboardingSpan]) : coverage.onboarding,
+    ftd: ftdSpan ? mergeRanges([ftdSpan]) : coverage.ftd,
+  }, manualDates);
+}
+
+export async function listUploadMonths(uploadRanges?: UploadRange[]): Promise<string[]> {
+  return monthsFromUploads(uploadRanges ?? await loadUploadRanges());
 }
 
 export const DETAIL_KINDS = {

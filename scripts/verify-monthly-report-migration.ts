@@ -1,10 +1,12 @@
 /**
- * Self-check for db/migrations/041_monthly_report.sql, 043_onboarding_event_natural_key.sql
- * and the Monthly Report store: applies each migration twice (idempotent),
+ * Self-check for db/migrations/041_monthly_report.sql, 043_onboarding_event_natural_key.sql,
+ * 044_onboarding_ftd_daily.sql and the Monthly Report store: applies each migration twice (idempotent),
  * checks that 043 keeps rows stored under the old Document-ID key, checks the
  * constraints, loads the synthetic fixtures through the same inserts as the
  * uploads (re-import = 0 inserted, other events of a known Document ID kept),
  * and asserts the SQL aggregates equal the pure functions in metrics.ts.
+ * 044: idempotent, onboarding_ftd untouched, manual daily FTD upsert/edit/clear,
+ * precedence over the account rows, coverage, and the documented rollback.
  *
  * Usage:
  *   TEST_DATABASE_URL=postgres://postgres@127.0.0.1:5599/postgres \
@@ -110,6 +112,53 @@ async function main() {
   }
   assert.deepEqual(await store.loadFtdCoverage(), { from: '2026-10-01', to: '2026-10-31' });
 
+  // ---- 044: manual daily FTD ----
+  const ftdDaily = await readFile(path.join(process.cwd(), 'db/migrations/044_onboarding_ftd_daily.sql'), 'utf8');
+  const ftdDailyRollback = ftdDaily.split('\n').filter(line => line.startsWith('--   ')).map(line => line.slice(5)).join('\n')
+    .replace(/DELETE FROM schema_migrations[^;]*;/, '');
+  const accountRows = await queryAll<Record<string, unknown>>('SELECT * FROM onboarding_ftd ORDER BY account_no');
+  await execute(ftdDaily);
+  await execute(ftdDaily);
+  assert.deepEqual(await queryAll<Record<string, unknown>>('SELECT * FROM onboarding_ftd ORDER BY account_no'), accountRows, '044 leaves onboarding_ftd untouched');
+  await execute('DELETE FROM onboarding_ftd_daily');
+  await assert.rejects(execute(`INSERT INTO onboarding_ftd_daily (ftd_date, ftd_count) VALUES ('2026-11-01', -1)`), 'negative count is rejected');
+  await assert.rejects(execute(`INSERT INTO onboarding_ftd_daily (ftd_date, ftd_count, ftd_amount) VALUES ('2026-11-01', 1, -1)`), 'negative amount is rejected');
+  const editor = await queryOne<{ id: string; name: string }>(`SELECT id, name FROM users ORDER BY username LIMIT 1`);
+  assert.ok(editor);
+  const derivedOct = await store.loadDailyFtd({ from: '2026-10-01', to: '2026-10-31' });
+  const overriddenDay = derivedOct[0].date;
+  const created = await store.upsertManualFtd({ date: overriddenDay, count: 42, amount: 1234.5 }, { id: editor.id, name: editor.name });
+  assert.equal(created.created, true);
+  assert.deepEqual([created.entry.date, created.entry.count, created.entry.amount, created.entry.updatedByName], [overriddenDay, 42, 1234.5, editor.name]);
+  const edited = await store.upsertManualFtd({ date: overriddenDay, count: 40, amount: null }, { id: null, name: 'verify' });
+  assert.equal(edited.created, false, 'saving the same day again is an edit');
+  assert.deepEqual([edited.entry.count, edited.entry.amount, edited.entry.updatedByName], [40, null, 'verify']);
+  assert.ok(edited.entry.updatedAt >= created.entry.updatedAt);
+  assert.equal(edited.entry.createdAt, created.entry.createdAt);
+  await store.upsertManualFtd({ date: '2026-11-02', count: 7, amount: 700 }, actor);
+  assert.equal(await store.countManualFtd(), 2);
+  assert.deepEqual((await store.listManualFtd({ limit: 10 })).map(e => e.date), ['2026-11-02', overriddenDay]);
+  // Precedence: the manual day replaces the derived one; other days stay derived.
+  const period = await store.loadPeriodData({ from: '2026-10-01', to: '2026-11-30' });
+  const byDate = new Map(period.ftd.map(day => [day.date, day]));
+  assert.deepEqual([byDate.get(overriddenDay)?.count, byDate.get(overriddenDay)?.source, byDate.get(overriddenDay)?.amountEntered], [40, 'manual', false]);
+  for (const day of derivedOct.slice(1)) assert.equal(byDate.get(day.date)?.count, day.count, `derived ${day.date} kept`);
+  assert.equal(byDate.get('2026-11-02')?.count, 7);
+  assert.deepEqual(period.ftdCoverage, { from: '2026-10-01', to: '2026-11-02' });
+  const coverage = await store.loadCoverage();
+  assert.deepEqual(coverage.ftdAccounts, [{ from: '2026-10-01', to: '2026-10-31' }]);
+  assert.deepEqual(coverage.ftd, [{ from: '2026-10-01', to: '2026-10-31' }, { from: '2026-11-02', to: '2026-11-02' }]);
+  // Clearing falls back to the account rows.
+  assert.equal(await store.deleteManualFtd(overriddenDay), true);
+  assert.equal(await store.deleteManualFtd(overriddenDay), false);
+  assert.equal((await store.loadPeriodData({ from: overriddenDay, to: overriddenDay })).ftd[0].count, derivedOct[0].count);
+  // Documented rollback drops only the new table, then 044 re-applies.
+  await execute(ftdDailyRollback);
+  assert.equal((await queryOne<{ t: string | null }>(`SELECT to_regclass('onboarding_ftd_daily')::text AS t`))?.t, null);
+  assert.deepEqual(await queryAll<Record<string, unknown>>('SELECT * FROM onboarding_ftd ORDER BY account_no'), accountRows, 'rollback leaves onboarding_ftd untouched');
+  await execute(ftdDaily);
+  assert.equal(await store.countManualFtd(), 0);
+
   const uploads = await store.listUploads();
   assert.equal(uploads.length, 4);
   assert.equal(uploads.find(u => u.kind === 'ftd')?.rows_inserted, 5);
@@ -133,6 +182,7 @@ async function main() {
   for (const table of ['onboarding_rejection_reasons', 'onboarding_ftd', 'onboarding_events', 'monthly_report_access', 'monthly_report_uploads']) await execute(`DELETE FROM ${table}`);
   await closeDb();
   console.log('041 + 043: idempotent, existing rows kept, rollback works, re-import inserts 0, SQL aggregates match metrics.ts');
+  console.log('044: idempotent, onboarding_ftd untouched, manual FTD upsert/edit/clear, precedence + coverage, rollback works');
 }
 
 main().catch(error => {

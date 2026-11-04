@@ -38,7 +38,7 @@ test('report export has the summary table, daily rows and KPI definitions', () =
   });
   assert.equal(exportFileName(report), 'monthly-report-onboarding_2026-10-01_2026-10-31.xlsx');
   const workbook = XLSX.read(buildReportWorkbook(report), { type: 'buffer' });
-  assert.deepEqual(workbook.SheetNames, ['Summary', 'Daily', 'KPIs']);
+  assert.deepEqual(workbook.SheetNames, ['Summary', 'Daily', 'FTD daily', 'KPIs']);
   const summary = XLSX.utils.sheet_to_json<unknown[]>(workbook.Sheets.Summary, { header: 1, defval: null });
   assert.deepEqual(summary[2], [...EXPORT_COLUMNS]);
   assert.deepEqual(summary.slice(3, 8).map(r => r[0]), ['Week I (01-11)', 'Week II (12-18)', 'Week III (19-25)', 'Week IV (26-31)', 'Total']);
