@@ -1,51 +1,51 @@
 /**
  * Upload preview: how incoming onboarding rows compare with what is already
- * stored, grouped by the incoming Step Status. A changed row is a "conflict":
- * the same Document ID with different values (most often Pending → Approved
- * or Rejected after the CRM processed it). The upload overwrites it.
+ * stored, matched by the event key (Document ID + event time + Steps, see
+ * `eventKey`), grouped by the incoming Step Status.
+ *  - new: the event is not stored yet and will be inserted.
+ *  - duplicate: the event is already stored; it is skipped (never overwritten).
+ *    `duplicateDiffers` counts the duplicates whose other columns differ from the
+ *    stored row (the stored row is kept), with any Step Status difference listed.
+ *  - newEventForKnownDocument: new events whose Document ID already has a
+ *    different event stored (e.g. Pending in September, decided in October).
+ *    These are kept as separate rows.
  */
-import type { OnboardingRow } from './onboarding-parse';
+import { eventKey, sameEventValues, type OnboardingRow } from './onboarding-parse';
 
-export interface StoredEvent {
-  documentId: string;
-  eventAt: string;
-  stepStatus: string;
-  accountStatus: string | null;
-  remarks: string | null;
-  tradingAccountNo: string | null;
-  step: string;
-}
+export type StoredEvent = OnboardingRow;
 
-export interface ConflictGroup { stepStatus: string; new: number; changed: number; unchanged: number }
+export interface ConflictGroup { stepStatus: string; new: number; duplicate: number }
 export interface StatusChange { from: string; to: string; count: number }
 export interface ConflictSummary {
   new: number;
-  changed: number;
-  unchanged: number;
+  duplicate: number;
+  duplicateDiffers: number;
+  newEventForKnownDocument: number;
   byStepStatus: ConflictGroup[];
+  /** Same event stored with another Step Status (stored → incoming); the stored value is kept. */
   statusChanges: StatusChange[];
 }
 
-const COMPARED: Array<keyof StoredEvent & keyof OnboardingRow> = ['eventAt', 'step', 'stepStatus', 'accountStatus', 'remarks', 'tradingAccountNo'];
-
-function sameInstant(a: string, b: string) {
-  return new Date(a).getTime() === new Date(b).getTime();
-}
-
 export function classifyConflicts(incoming: OnboardingRow[], stored: StoredEvent[]): ConflictSummary {
-  const byId = new Map(stored.map(row => [row.documentId, row]));
+  const byKey = new Map(stored.map(row => [eventKey(row), row]));
+  const storedDocuments = new Set(stored.map(row => row.documentId));
   const groups = new Map<string, ConflictGroup>();
   const changes = new Map<string, StatusChange>();
-  const totals = { new: 0, changed: 0, unchanged: 0 };
+  const totals = { new: 0, duplicate: 0, duplicateDiffers: 0, newEventForKnownDocument: 0 };
   for (const row of incoming) {
-    const group = groups.get(row.stepStatus) ?? { stepStatus: row.stepStatus, new: 0, changed: 0, unchanged: 0 };
+    const group = groups.get(row.stepStatus) ?? { stepStatus: row.stepStatus, new: 0, duplicate: 0 };
     groups.set(row.stepStatus, group);
-    const old = byId.get(row.documentId);
-    if (!old) { group.new += 1; totals.new += 1; continue; }
-    const differs = COMPARED.some(key => (key === 'eventAt' ? !sameInstant(old.eventAt, row.eventAt) : (old[key] ?? null) !== (row[key] ?? null)));
-    if (!differs) { group.unchanged += 1; totals.unchanged += 1; continue; }
-    group.changed += 1;
-    totals.changed += 1;
+    const old = byKey.get(eventKey(row));
+    if (!old) {
+      group.new += 1;
+      totals.new += 1;
+      if (storedDocuments.has(row.documentId)) totals.newEventForKnownDocument += 1;
+      continue;
+    }
+    group.duplicate += 1;
+    totals.duplicate += 1;
+    if (sameEventValues(old, row)) continue;
+    totals.duplicateDiffers += 1;
     if (old.stepStatus !== row.stepStatus) {
       const key = `${old.stepStatus}→${row.stepStatus}`;
       const change = changes.get(key) ?? { from: old.stepStatus, to: row.stepStatus, count: 0 };

@@ -6,7 +6,12 @@ export const ONBOARDING_COLUMNS = [
 ] as const;
 
 export const ONBOARDING_SHEET = 'Query result';
-export const DEFAULT_SOURCE_OFFSET = '+08:00';
+/**
+ * The exports' wall-clock times are WIB: the owner's confirmed figures only
+ * match at +07:00. The `+08_00` suffix in CRM export file names is the export
+ * timestamp's zone, not the data's, so it is never used to pick the offset.
+ */
+export const DEFAULT_SOURCE_OFFSET = '+07:00';
 export const KNOWN_STEPS = ['auto_kyc', 'manual_kyc', 'auto_video_verify', 'manual_video_verify', 'auto_add_account', 'manual_add_account'];
 export const KNOWN_STEP_STATUSES = ['Approved', 'Rejected', 'Pending'];
 export const KNOWN_APPROVAL_METHODS = ['Auto', 'Manual'];
@@ -28,12 +33,35 @@ export interface OnboardingRow {
   remarks: string | null;
 }
 
+/**
+ * Natural key of an onboarding event (migration 043): the same Document ID can
+ * appear in several monthly exports with different events (e.g. auto_kyc
+ * Pending at the end of September, manual_kyc decision in October), so a
+ * Document ID alone is not an event. Document ID + event time + Steps has no
+ * collisions inside any export and makes identical rows in two exports collide.
+ * Step Status is deliberately not part of the key: a re-export of the same
+ * event with a changed status must not count as a second registration.
+ */
+export function eventKey(row: Pick<OnboardingRow, 'documentId' | 'eventAt' | 'step'>): string {
+  return `${row.documentId}|${new Date(row.eventAt).toISOString()}|${row.step}`;
+}
+
+const COMPARED_FIELDS = ['uid', 'isFirstAccount', 'tradingAccountNo', 'approvalMethod', 'stepStatus', 'accountStatus', 'remarks'] as const;
+
+/** True when two rows with the same event key also agree on every other column. */
+export function sameEventValues(a: OnboardingRow, b: OnboardingRow): boolean {
+  return COMPARED_FIELDS.every(field => (a[field] ?? null) === (b[field] ?? null));
+}
+
 export interface ParseIssue { row: number; message: string }
 
 export interface OnboardingParseSummary {
   rows: number;
   invalid: number;
+  /** Rows dropped because an earlier row in the same file has the same event key (first one wins). */
   duplicatesInFile: number;
+  /** Of `duplicatesInFile`: same event key but some other column differs. */
+  conflictingDuplicatesInFile: number;
   wibRange: { from: string; to: string } | null;
   byStep: Record<string, number>;
   byStepStatus: Record<string, number>;
@@ -92,13 +120,13 @@ function optional(value: unknown): string | null {
 }
 
 function emptySummary(): OnboardingParseSummary {
-  return { rows: 0, invalid: 0, duplicatesInFile: 0, wibRange: null, byStep: {}, byStepStatus: {}, unknownValues: {} };
+  return { rows: 0, invalid: 0, duplicatesInFile: 0, conflictingDuplicatesInFile: 0, wibRange: null, byStep: {}, byStepStatus: {}, unknownValues: {} };
 }
 
 export function parseOnboardingWorkbook(buffer: Buffer | Uint8Array, options: { offset: string }): OnboardingParseResult {
   const offsetMinutes = parseOffset(options.offset);
   const base = { offset: options.offset, issues: [] as ParseIssue[], rows: [] as OnboardingRow[], summary: emptySummary() };
-  if (offsetMinutes === null) return { ...base, sheetName: '', errors: [`Source UTC offset "${options.offset}" is not valid. Use a value like +08:00.`] };
+  if (offsetMinutes === null) return { ...base, sheetName: '', errors: [`Source UTC offset "${options.offset}" is not valid. Use a value like +07:00.`] };
 
   let sheet;
   try {
@@ -113,7 +141,7 @@ export function parseOnboardingWorkbook(buffer: Buffer | Uint8Array, options: { 
   }
 
   const issues: ParseIssue[] = [];
-  const byId = new Map<string, number>();
+  const byKey = new Map<string, number>();
   const rows: OnboardingRow[] = [];
   const summary = emptySummary();
   const unknown: Record<string, Set<string>> = {};
@@ -157,12 +185,13 @@ export function parseOnboardingWorkbook(buffer: Buffer | Uint8Array, options: { 
     noteUnknown('Steps', parsed.step, KNOWN_STEPS);
     noteUnknown('Step Status', parsed.stepStatus, KNOWN_STEP_STATUSES);
     noteUnknown('Account Status', parsed.accountStatus, KNOWN_ACCOUNT_STATUSES);
-    const existing = byId.get(documentId);
+    const key = eventKey(parsed);
+    const existing = byKey.get(key);
     if (existing !== undefined) {
       summary.duplicatesInFile += 1;
-      rows[existing] = parsed;
+      if (!sameEventValues(rows[existing], parsed)) summary.conflictingDuplicatesInFile += 1;
     } else {
-      byId.set(documentId, rows.length);
+      byKey.set(key, rows.length);
       rows.push(parsed);
     }
   });

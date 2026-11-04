@@ -3,22 +3,22 @@
  * pure parse/metric functions as the app. Reads a local file only; nothing is
  * written or committed.
  *
- *   npx tsx scripts/verify-monthly-report-source.ts <onboarding.xlsx> [--ftd=ftd.csv] [--offset=+08:00] [--month=2026-10]
+ *   npx tsx scripts/verify-monthly-report-source.ts <onboarding.xlsx> [--ftd=ftd.csv] [--offset=+07:00] [--month=2026-10]
  */
 import { readFileSync } from 'node:fs';
 import { basename } from 'node:path';
-import { DEFAULT_SOURCE_OFFSET, offsetFromFileName, parseOnboardingWorkbook, wibDate } from '../src/lib/monthly-report/onboarding-parse';
+import { DEFAULT_SOURCE_OFFSET, parseOnboardingWorkbook, wibDate } from '../src/lib/monthly-report/onboarding-parse';
 import { parseFtdFile } from '../src/lib/monthly-report/ftd-parse';
 import { aggregateEventsByDay, aggregateFtdByDay, distinctActivatedAccounts, ftdCohortStats, sumDaily } from '../src/lib/monthly-report/metrics';
 import { monthWeekBuckets } from '../src/lib/monthly-report/periods';
 
 const [file, ...flags] = process.argv.slice(2);
 if (!file) {
-  console.error('Usage: verify-monthly-report-source.ts <onboarding.xlsx> [--ftd=file.csv] [--offset=+08:00] [--month=YYYY-MM]');
+  console.error('Usage: verify-monthly-report-source.ts <onboarding.xlsx> [--ftd=file.csv] [--offset=+07:00] [--month=YYYY-MM]');
   process.exit(1);
 }
 const flag = (name: string) => flags.find(f => f.startsWith(`--${name}=`))?.split('=')[1];
-const offset = flag('offset') ?? offsetFromFileName(basename(file)) ?? DEFAULT_SOURCE_OFFSET;
+const offset = flag('offset') ?? DEFAULT_SOURCE_OFFSET;
 const parsed = parseOnboardingWorkbook(readFileSync(file), { offset });
 if (parsed.errors.length) {
   console.error(parsed.errors.join('\n'));
@@ -30,7 +30,7 @@ const outside = parsed.rows.length - inMonth.length;
 const total = sumDaily(aggregateEventsByDay(inMonth));
 
 console.log(`file: ${basename(file)}  offset: ${offset}  month (WIB): ${month}`);
-console.log(`rows parsed: ${parsed.rows.length}  invalid: ${parsed.summary.invalid}  in-file duplicates: ${parsed.summary.duplicatesInFile}  outside month: ${outside}`);
+console.log(`rows parsed: ${parsed.rows.length}  invalid: ${parsed.summary.invalid}  in-file duplicate events: ${parsed.summary.duplicatesInFile}  outside month: ${outside}`);
 console.log(`WIB range: ${parsed.summary.wibRange?.from} .. ${parsed.summary.wibRange?.to}`);
 console.log('unknown values:', JSON.stringify(parsed.summary.unknownValues));
 console.table({

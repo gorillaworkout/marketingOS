@@ -1,16 +1,18 @@
 /**
  * Admin import for Monthly Report data: loads the onboarding export and/or
  * the FTD report with the same parsers and upserts as the dashboard uploads
- * (one upload-history row per file). Idempotent: re-running with the same
- * files inserts nothing and updates nothing.
+ * (one upload-history row per file). Onboarding events are insert-only by
+ * Document ID + event time + Steps: re-running with the same file inserts 0
+ * rows and reports every row as a skipped duplicate. FTD upserts by Account.
  *
  * Usage:
  *   DATABASE_URL=... npx tsx scripts/monthly-report-import.ts \
- *     --onboarding=source.xlsx --ftd=ftd.csv [--offset=+08:00] [--ftd-offset=+08:00] \
+ *     --onboarding=source.xlsx --ftd=ftd.csv [--offset=+07:00] [--ftd-offset=+07:00] \
  *     [--as=bayu] [--report=2026-10] [--dry-run]
  *
- * --offset is the UTC offset of the export timestamps (default: from the file
- * name, else +08:00); --ftd-offset defaults to --offset. --report prints the
+ * --offset is the UTC offset of the export timestamps (default +07:00 WIB; the
+ * `+08_00` suffix in CRM file names is the export time, not the data's, and is
+ * ignored); --ftd-offset defaults to --offset. --report prints the
  * month's numbers from the database after importing.
  */
 import 'dotenv/config';
@@ -20,6 +22,11 @@ import { basename } from 'node:path';
 const args = process.argv.slice(2);
 const flag = (name: string) => args.find(arg => arg.startsWith(`--${name}=`))?.slice(name.length + 3);
 const dryRun = args.includes('--dry-run');
+
+function warnFileNameOffset(name: string, offset: string, fromName: (n: string) => string | null) {
+  const suffix = fromName(name);
+  if (suffix && suffix !== offset) console.warn(`  note: file name suffix says ${suffix} (export time); using ${offset} for the data`);
+}
 
 async function main() {
   const { closeDb, queryOne } = await import('../src/lib/database');
@@ -33,7 +40,7 @@ async function main() {
   const ftdFile = flag('ftd');
   const reportMonth = flag('report');
   if (!onboardingFile && !ftdFile && !reportMonth) {
-    console.error('Usage: monthly-report-import.ts --onboarding=<xlsx> --ftd=<csv|xlsx> [--offset=+08:00] [--ftd-offset=] [--as=username] [--report=YYYY-MM] [--dry-run]');
+    console.error('Usage: monthly-report-import.ts --onboarding=<xlsx> --ftd=<csv|xlsx> [--offset=+07:00] [--ftd-offset=] [--as=username] [--report=YYYY-MM] [--dry-run]');
     process.exit(1);
   }
 
@@ -43,18 +50,21 @@ async function main() {
   let failed = false;
 
   if (onboardingFile) {
-    const offset = flag('offset') ?? offsetFromFileName(basename(onboardingFile)) ?? DEFAULT_SOURCE_OFFSET;
+    const offset = flag('offset') ?? DEFAULT_SOURCE_OFFSET;
+    warnFileNameOffset(basename(onboardingFile), offset, offsetFromFileName);
     const parsed = parseOnboardingWorkbook(readFileSync(onboardingFile), { offset });
-    console.log(`Onboarding ${basename(onboardingFile)} @ ${offset}: ${parsed.rows.length} rows, ${parsed.issues.length} invalid, ${parsed.summary.duplicatesInFile} duplicate Document IDs, WIB ${parsed.summary.wibRange?.from} → ${parsed.summary.wibRange?.to}`);
+    console.log(`Onboarding ${basename(onboardingFile)} @ ${offset}: ${parsed.rows.length} events, ${parsed.issues.length} invalid, ${parsed.summary.duplicatesInFile} repeated in file (${parsed.summary.conflictingDuplicatesInFile} with differing values), WIB ${parsed.summary.wibRange?.from} → ${parsed.summary.wibRange?.to}`);
     if (parsed.errors.length) { console.error(parsed.errors.join('\n')); failed = true; }
     else if (!dryRun) {
-      const saved = await store.saveOnboardingEvents(parsed.rows, { fileName: basename(onboardingFile), offset, actor, skipped: parsed.issues.length, range: parsed.summary.wibRange });
-      console.log('  saved:', saved.counts, 'upload', saved.uploadId);
+      const saved = await store.saveOnboardingEvents(parsed.rows, { fileName: basename(onboardingFile), offset, actor, skipped: parsed.issues.length, duplicatesInFile: parsed.summary.duplicatesInFile, range: parsed.summary.wibRange });
+      const c = saved.counts;
+      console.log(`  saved: ${c.inserted} inserted, ${c.skippedDuplicate} skipped as duplicate (${c.duplicatesInFile} within the file), ${c.invalid} invalid, ${c.total} rows total; upload ${saved.uploadId}`);
     }
   }
 
   if (ftdFile) {
-    const offset = flag('ftd-offset') ?? flag('offset') ?? offsetFromFileName(basename(ftdFile)) ?? DEFAULT_SOURCE_OFFSET;
+    const offset = flag('ftd-offset') ?? flag('offset') ?? DEFAULT_SOURCE_OFFSET;
+    warnFileNameOffset(basename(ftdFile), offset, offsetFromFileName);
     const parsed = parseFtdFile(readFileSync(ftdFile), { fileName: basename(ftdFile), offset });
     console.log(`FTD ${basename(ftdFile)} @ ${offset}: layout ${parsed.layout}, ${parsed.rows.length} accounts, ${parsed.issues.length} invalid, amount ${parsed.summary.amountTotal.toFixed(2)}`);
     for (const warning of parsed.warnings) console.warn(`  warning: ${warning}`);

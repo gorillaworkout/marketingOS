@@ -32,7 +32,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: `Could not read the file: ${error instanceof Error ? error.message : 'unknown error'}` }, { status: 400 });
   }
   const base = {
-    fileName, offset: resolved.offset, offsetFrom: resolved.from, layout: parsed.layout, reportMonth: parsed.reportMonth,
+    fileName, offset: resolved.offset, offsetFrom: resolved.from, fileNameOffset: resolved.fileNameOffset, layout: parsed.layout, reportMonth: parsed.reportMonth,
     errors: parsed.errors, warnings: parsed.warnings, issues: parsed.issues.slice(0, 50), issueCount: parsed.issues.length, summary: parsed.summary,
   };
   if (parsed.errors.length) return NextResponse.json({ ...base, ok: false }, { status: commit ? 400 : 200 });

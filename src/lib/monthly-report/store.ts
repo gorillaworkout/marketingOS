@@ -11,7 +11,7 @@ import {
   ACTIVATED_STATUS, ADD_ACCOUNT_STEPS, BANK_INFO_FAILED_STATUS, VIDEO_FAILED_STATUS, classifyEvent,
   type DailyFtd, type DailyOnboarding, type PeriodData,
 } from './metrics';
-import type { OnboardingRow } from './onboarding-parse';
+import { eventKey, type OnboardingRow } from './onboarding-parse';
 import type { StoredEvent } from './conflicts';
 import { REPORT_TIMEZONE, type DateRange } from './periods';
 
@@ -32,6 +32,7 @@ export interface UploadRecord {
   rows_inserted: number;
   rows_updated: number;
   rows_skipped: number;
+  rows_duplicate: number;
   data_from: string | null;
   data_to: string | null;
   created_at: string;
@@ -110,16 +111,62 @@ async function upsertWithHistory<T>(
   return { uploadId, counts: { total: rows.length, inserted, updated, unchanged: existingCount - updated, skipped: meta.skipped } };
 }
 
-export function saveOnboardingEvents(rows: OnboardingRow[], meta: { fileName: string; offset: string; actor: UploadActor; skipped: number; range: DateRange | null }, source: DataSource = 'upload') {
-  return upsertWithHistory<OnboardingRow>({
-    kind: 'onboarding',
-    table: 'onboarding_events',
-    key: 'document_id',
-    columns: ['document_id', 'event_at', 'uid', 'is_first_account', 'trading_account_no', 'approval_method', 'step', 'step_status', 'account_status', 'remarks', 'source', 'upload_id'],
-    casts: { event_at: '::timestamptz' },
-    keyOf: row => row.documentId,
-    values: (row, uploadId) => [row.documentId, row.eventAt, row.uid, row.isFirstAccount, row.tradingAccountNo, row.approvalMethod, row.step, row.stepStatus, row.accountStatus, row.remarks, source, uploadId],
-  }, rows, meta);
+/**
+ * What an onboarding import did. `skippedDuplicate` = rows already stored
+ * (same Document ID + event time + Steps) plus repeats inside the file;
+ * `invalid` = rows the parser rejected. Re-importing a file gives inserted 0.
+ */
+export interface OnboardingSaveCounts {
+  total: number;
+  inserted: number;
+  skippedDuplicate: number;
+  duplicatesInFile: number;
+  invalid: number;
+}
+
+export const ONBOARDING_EVENT_KEY = ['document_id', 'event_at', 'step'] as const;
+const ONBOARDING_COLUMNS = ['document_id', 'event_at', 'uid', 'is_first_account', 'trading_account_no', 'approval_method', 'step', 'step_status', 'account_status', 'remarks', 'source', 'upload_id'];
+
+export function insertOnboardingSql(count: number): string {
+  const placeholders = `(${ONBOARDING_COLUMNS.map(column => (column === 'event_at' ? '?::timestamptz' : '?')).join(', ')})`;
+  return `INSERT INTO onboarding_events (${ONBOARDING_COLUMNS.join(', ')})
+VALUES ${Array.from({ length: count }, () => placeholders).join(', ')}
+ON CONFLICT (${ONBOARDING_EVENT_KEY.join(', ')}) DO NOTHING`;
+}
+
+/**
+ * Insert-only: an event that is already stored is skipped, never overwritten,
+ * so loading monthly files in any order (or the same file twice) gives the same table.
+ */
+export async function saveOnboardingEvents(
+  rows: OnboardingRow[],
+  meta: { fileName: string; offset: string; actor: UploadActor; skipped: number; duplicatesInFile?: number; range: DateRange | null },
+  source: DataSource = 'upload',
+): Promise<{ uploadId: string; counts: OnboardingSaveCounts }> {
+  const unique = new Map<string, OnboardingRow>();
+  for (const row of rows) if (!unique.has(eventKey(row))) unique.set(eventKey(row), row);
+  const duplicatesInFile = (meta.duplicatesInFile ?? 0) + (rows.length - unique.size);
+  const uploadId = uuidv4();
+  let inserted = 0;
+  await executeTransaction(async transaction => {
+    await transaction.execute(
+      `INSERT INTO monthly_report_uploads (id, kind, file_name, source_utc_offset, uploaded_by, uploaded_by_name, rows_total, rows_skipped, data_from, data_to)
+       VALUES (?, 'onboarding', ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [uploadId, meta.fileName, meta.offset, meta.actor.id, meta.actor.name, rows.length + (meta.duplicatesInFile ?? 0) + meta.skipped, meta.skipped, meta.range?.from ?? null, meta.range?.to ?? null],
+    );
+    for (const batch of chunkRows([...unique.values()])) {
+      inserted += await transaction.execute(
+        insertOnboardingSql(batch.length),
+        batch.flatMap(row => [row.documentId, row.eventAt, row.uid, row.isFirstAccount, row.tradingAccountNo, row.approvalMethod, row.step, row.stepStatus, row.accountStatus, row.remarks, source, uploadId]),
+      );
+    }
+    const skippedDuplicate = unique.size - inserted + duplicatesInFile;
+    await transaction.execute('UPDATE monthly_report_uploads SET rows_inserted = ?, rows_duplicate = ? WHERE id = ?', [inserted, skippedDuplicate, uploadId]);
+  });
+  return {
+    uploadId,
+    counts: { total: unique.size + duplicatesInFile + meta.skipped, inserted, skippedDuplicate: unique.size - inserted + duplicatesInFile, duplicatesInFile, invalid: meta.skipped },
+  };
 }
 
 export function saveFtd(rows: FtdRow[], meta: { fileName: string; offset: string; actor: UploadActor; skipped: number; range: DateRange | null }, source: DataSource = 'upload') {
@@ -247,7 +294,7 @@ export async function hasAnyOnboardingData(): Promise<boolean> {
 
 export async function listUploads(limit = 50): Promise<UploadRecord[]> {
   const rows = await queryAll<UploadRecord & Record<string, unknown>>(
-    `SELECT id, kind, file_name, source_utc_offset, uploaded_by_name, rows_total, rows_inserted, rows_updated, rows_skipped,
+    `SELECT id, kind, file_name, source_utc_offset, uploaded_by_name, rows_total, rows_inserted, rows_updated, rows_skipped, rows_duplicate,
        to_char(data_from, 'YYYY-MM-DD') AS data_from, to_char(data_to, 'YYYY-MM-DD') AS data_to, created_at
      FROM monthly_report_uploads ORDER BY created_at DESC LIMIT ?`,
     [Math.min(Math.max(limit, 1), 200)],
@@ -330,16 +377,21 @@ export async function setUserAccess(userId: string, access: { view: boolean; upl
   return true;
 }
 
-/** Stored onboarding rows for these Document IDs, for the upload preview's conflict check. */
+/** Every stored event of these Document IDs, for the upload preview's duplicate check. */
 export async function loadStoredEvents(documentIds: string[]): Promise<StoredEvent[]> {
   const stored: StoredEvent[] = [];
-  for (const batch of chunkRows(documentIds, 5000)) {
-    const rows = await queryAll<{ document_id: string; event_at: string | Date; step: string; step_status: string; account_status: string | null; remarks: string | null; trading_account_no: string | null }>(
-      'SELECT document_id, event_at, step, step_status, account_status, remarks, trading_account_no FROM onboarding_events WHERE document_id = ANY(?::text[])',
+  for (const batch of chunkRows([...new Set(documentIds)], 5000)) {
+    const rows = await queryAll<{ document_id: string; event_at: string | Date; uid: string | null; is_first_account: boolean | null; trading_account_no: string | null; approval_method: string | null; step: string; step_status: string; account_status: string | null; remarks: string | null }>(
+      `SELECT document_id, event_at, uid, is_first_account, trading_account_no, approval_method, step, step_status, account_status, remarks
+       FROM onboarding_events WHERE document_id = ANY(?::text[])`,
       [batch],
     );
     for (const row of rows) {
-      stored.push({ documentId: row.document_id, eventAt: new Date(row.event_at).toISOString(), step: row.step, stepStatus: row.step_status, accountStatus: row.account_status, remarks: row.remarks, tradingAccountNo: row.trading_account_no });
+      stored.push({
+        documentId: row.document_id, eventAt: new Date(row.event_at).toISOString(), uid: row.uid, isFirstAccount: row.is_first_account,
+        tradingAccountNo: row.trading_account_no, approvalMethod: row.approval_method, step: row.step, stepStatus: row.step_status,
+        accountStatus: row.account_status, remarks: row.remarks,
+      });
     }
   }
   return stored;

@@ -1,8 +1,10 @@
 /**
- * Self-check for db/migrations/041_monthly_report.sql and the Monthly Report
- * store: applies the migration twice (idempotent), checks the constraints,
- * loads the synthetic fixtures through the same upserts as the uploads, and
- * asserts the SQL aggregates equal the pure functions in metrics.ts.
+ * Self-check for db/migrations/041_monthly_report.sql, 043_onboarding_event_natural_key.sql
+ * and the Monthly Report store: applies each migration twice (idempotent),
+ * checks that 043 keeps rows stored under the old Document-ID key, checks the
+ * constraints, loads the synthetic fixtures through the same inserts as the
+ * uploads (re-import = 0 inserted, other events of a known Document ID kept),
+ * and asserts the SQL aggregates equal the pure functions in metrics.ts.
  *
  * Usage:
  *   TEST_DATABASE_URL=postgres://postgres@127.0.0.1:5599/postgres \
@@ -30,8 +32,35 @@ async function main() {
   const fixtures = await import('../tests/fixtures/monthly-report-onboarding');
 
   const sql = await readFile(path.join(process.cwd(), 'db/migrations/041_monthly_report.sql'), 'utf8');
+  const naturalKey = await readFile(path.join(process.cwd(), 'db/migrations/043_onboarding_event_natural_key.sql'), 'utf8');
+  const rollback = naturalKey.split('\n').filter(line => line.startsWith('--   ')).map(line => line.slice(5)).join('\n')
+    .replace(/DELETE FROM schema_migrations[^;]*;/, '');
+  const pkColumns = async () => (await queryAll<{ attname: string }>(
+    `SELECT a.attname FROM pg_constraint c CROSS JOIN LATERAL unnest(c.conkey) WITH ORDINALITY AS k(attnum, ord)
+     JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = k.attnum
+     WHERE c.conrelid = 'onboarding_events'::regclass AND c.contype = 'p' ORDER BY k.ord`)).map(r => r.attname);
   await execute(sql);
   await execute(sql);
+  if ((await pkColumns()).length === 3) await execute(rollback); // start from the pre-043 schema
+
+  // Rows stored under PRIMARY KEY (document_id) survive 043 unchanged.
+  await execute('DELETE FROM onboarding_events');
+  await execute(`INSERT INTO onboarding_events (document_id, event_at, step, step_status) VALUES ('old-1', '2026-10-01T00:00:00Z', 'manual_kyc', 'Approved'), ('old-2', '2026-10-02T00:00:00Z', 'auto_kyc', 'Pending')`);
+  const before = await queryAll<Record<string, unknown>>('SELECT * FROM onboarding_events ORDER BY document_id');
+  await execute(naturalKey);
+  await execute(naturalKey);
+  assert.deepEqual(await pkColumns(), ['document_id', 'event_at', 'step']);
+  assert.deepEqual(await queryAll<Record<string, unknown>>('SELECT * FROM onboarding_events ORDER BY document_id'), before, '043 keeps existing rows');
+  await execute(sql); // 041 re-run after 043 keeps the natural key
+  assert.deepEqual(await pkColumns(), ['document_id', 'event_at', 'step']);
+  // The documented rollback works while each Document ID has one row, and refuses otherwise.
+  await execute(rollback);
+  assert.deepEqual(await pkColumns(), ['document_id']);
+  await execute(naturalKey);
+  await execute(`INSERT INTO onboarding_events (document_id, event_at, step, step_status) VALUES ('old-1', '2026-11-01T00:00:00Z', 'manual_kyc', 'Approved')`);
+  // Only the guard (a DO block is atomic on its own; a failed BEGIN…COMMIT would leave a pooled connection aborted).
+  await assert.rejects(execute(rollback.match(/DO \$\$[\s\S]*?END \$\$;/)![0]), /several events/);
+  assert.deepEqual(await pkColumns(), ['document_id', 'event_at', 'step']);
 
   // Department feature is assignable.
   const department = await queryOne<{ id: string }>('SELECT id FROM departments LIMIT 1');
@@ -48,13 +77,26 @@ async function main() {
   const actor = { id: null, name: 'verify' };
   const onboarding = parseOnboardingWorkbook(fixtures.syntheticOnboardingWorkbook(), { offset: '+07:00' });
   const ftd = parseFtdFile(Buffer.from(fixtures.syntheticFtdReportCsv()), { fileName: 'ftd.csv', offset: '+07:00' });
-  const first = await store.saveOnboardingEvents(onboarding.rows, { fileName: 'synthetic.xlsx', offset: '+07:00', actor, skipped: 0, range: onboarding.summary.wibRange });
-  assert.deepEqual(first.counts, { total: 11, inserted: 11, updated: 0, unchanged: 0, skipped: 0 });
-  const again = await store.saveOnboardingEvents(onboarding.rows, { fileName: 'synthetic.xlsx', offset: '+07:00', actor, skipped: 0, range: onboarding.summary.wibRange });
-  assert.deepEqual(again.counts, { total: 11, inserted: 0, updated: 0, unchanged: 11, skipped: 0 });
+  const meta = { fileName: 'synthetic.xlsx', offset: '+07:00', actor, skipped: 0, duplicatesInFile: 0, range: onboarding.summary.wibRange };
+  const first = await store.saveOnboardingEvents(onboarding.rows, meta);
+  assert.deepEqual(first.counts, { total: 11, inserted: 11, skippedDuplicate: 0, duplicatesInFile: 0, invalid: 0 });
+  const again = await store.saveOnboardingEvents(onboarding.rows, meta);
+  assert.deepEqual(again.counts, { total: 11, inserted: 0, skippedDuplicate: 11, duplicatesInFile: 0, invalid: 0 });
+  // A re-export with a changed value is the same event: skipped, the stored row is kept.
   const changed = onboarding.rows.map((row, i) => (i === 0 ? { ...row, remarks: 'changed' } : row));
-  const third = await store.saveOnboardingEvents(changed, { fileName: 'synthetic.xlsx', offset: '+07:00', actor, skipped: 0, range: onboarding.summary.wibRange });
-  assert.deepEqual(third.counts, { total: 11, inserted: 0, updated: 1, unchanged: 10, skipped: 0 });
+  const third = await store.saveOnboardingEvents(changed, { ...meta, skipped: 2, duplicatesInFile: 1 });
+  assert.deepEqual(third.counts, { total: 14, inserted: 0, skippedDuplicate: 12, duplicatesInFile: 1, invalid: 2 });
+  assert.equal((await queryOne<{ remarks: string }>('SELECT remarks FROM onboarding_events WHERE document_id = ?', [onboarding.rows[0].documentId]))?.remarks, onboarding.rows[0].remarks);
+  // Another event of a known Document ID (a later month) is stored alongside.
+  const later = { ...onboarding.rows[2], eventAt: '2026-11-03T02:00:00.000Z', stepStatus: 'Approved', accountStatus: 'KYC Done' };
+  const fourth = await store.saveOnboardingEvents([later], { ...meta, range: { from: '2026-11-03', to: '2026-11-03' } });
+  assert.equal(fourth.counts.inserted, 1);
+  assert.equal(Number((await queryOne<{ n: string }>('SELECT COUNT(*)::text AS n FROM onboarding_events WHERE document_id = ?', [later.documentId]))?.n), 2);
+  assert.equal((await store.loadStoredEvents([later.documentId])).length, 2);
+  await execute('DELETE FROM onboarding_events WHERE upload_id = ?', [fourth.uploadId]);
+  await execute('DELETE FROM monthly_report_uploads WHERE id = ?', [fourth.uploadId]);
+  const history = (await store.listUploads()).find(u => u.id === third.uploadId);
+  assert.deepEqual([history?.rows_total, history?.rows_inserted, history?.rows_duplicate, history?.rows_skipped], [14, 0, 12, 2]);
   const ftdSaved = await store.saveFtd(ftd.rows, { fileName: 'ftd.csv', offset: '+07:00', actor, skipped: 0, range: ftd.summary.wibRange });
   assert.equal(ftdSaved.counts.inserted, 5);
 
@@ -90,7 +132,7 @@ async function main() {
 
   for (const table of ['onboarding_rejection_reasons', 'onboarding_ftd', 'onboarding_events', 'monthly_report_access', 'monthly_report_uploads']) await execute(`DELETE FROM ${table}`);
   await closeDb();
-  console.log('041_monthly_report: idempotent, constraints hold, SQL aggregates match metrics.ts');
+  console.log('041 + 043: idempotent, existing rows kept, rollback works, re-import inserts 0, SQL aggregates match metrics.ts');
 }
 
 main().catch(error => {
