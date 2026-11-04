@@ -14,6 +14,8 @@ import {
 import { eventKey, type OnboardingRow } from './onboarding-parse';
 import type { StoredEvent } from './conflicts';
 import { REPORT_TIMEZONE, type DateRange } from './periods';
+import { coverageFromUploads, mergeRanges, monthsFromUploads, type DataCoverage, type UploadRange } from './coverage';
+import { pageOffset, uploadHistoryWhere, type UploadHistoryFilter } from './upload-history';
 
 export type UploadKind = 'onboarding' | 'ftd' | 'rejection_reasons';
 export type DataSource = 'upload' | 'api';
@@ -292,14 +294,71 @@ export async function hasAnyOnboardingData(): Promise<boolean> {
   return Boolean(await queryOne('SELECT 1 FROM onboarding_events LIMIT 1'));
 }
 
+const UPLOAD_COLUMNS = `id, kind, file_name, source_utc_offset, uploaded_by_name, rows_total, rows_inserted, rows_updated, rows_skipped, rows_duplicate,
+       to_char(data_from, 'YYYY-MM-DD') AS data_from, to_char(data_to, 'YYYY-MM-DD') AS data_to, created_at`;
+
 export async function listUploads(limit = 50): Promise<UploadRecord[]> {
   const rows = await queryAll<UploadRecord & Record<string, unknown>>(
-    `SELECT id, kind, file_name, source_utc_offset, uploaded_by_name, rows_total, rows_inserted, rows_updated, rows_skipped, rows_duplicate,
-       to_char(data_from, 'YYYY-MM-DD') AS data_from, to_char(data_to, 'YYYY-MM-DD') AS data_to, created_at
-     FROM monthly_report_uploads ORDER BY created_at DESC LIMIT ?`,
+    `SELECT ${UPLOAD_COLUMNS} FROM monthly_report_uploads ORDER BY created_at DESC LIMIT ?`,
     [Math.min(Math.max(limit, 1), 200)],
   );
   return rows.map(row => ({ ...row, created_at: new Date(row.created_at).toISOString() }));
+}
+
+export interface UploadHistoryPage { uploads: UploadRecord[]; total: number; page: number; pageSize: number }
+
+/** One page of the upload history, newest first, filtered by type and data month. */
+export async function listUploadsPage(filter: UploadHistoryFilter): Promise<UploadHistoryPage> {
+  const where = uploadHistoryWhere(filter);
+  const [count, rows] = await Promise.all([
+    queryOne<{ count: string }>(`SELECT COUNT(*)::text AS count FROM monthly_report_uploads ${where.sql}`, where.params),
+    queryAll<UploadRecord & Record<string, unknown>>(
+      `SELECT ${UPLOAD_COLUMNS} FROM monthly_report_uploads ${where.sql} ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?`,
+      [...where.params, filter.pageSize, pageOffset(filter)],
+    ),
+  ]);
+  return {
+    uploads: rows.map(row => ({ ...row, created_at: new Date(row.created_at).toISOString() })),
+    total: Number(count?.count ?? 0),
+    page: filter.page,
+    pageSize: filter.pageSize,
+  };
+}
+
+/** Every upload's kind and WIB data range (web uploads and CLI imports alike). Small table. */
+export async function loadUploadRanges(): Promise<UploadRange[]> {
+  return queryAll<UploadRange & Record<string, unknown>>(
+    `SELECT kind, to_char(data_from, 'YYYY-MM-DD') AS data_from, to_char(data_to, 'YYYY-MM-DD') AS data_to
+     FROM monthly_report_uploads WHERE data_from IS NOT NULL AND data_to IS NOT NULL`,
+  );
+}
+
+export async function loadOnboardingSpan(): Promise<DateRange | null> {
+  const row = await queryOne<{ from: string | null; to: string | null }>(
+    `SELECT MIN(${wibDaySql('e.event_at')}) AS "from", MAX(${wibDaySql('e.event_at')}) AS "to" FROM onboarding_events e`,
+  );
+  return row?.from && row.to ? { from: row.from, to: row.to } : null;
+}
+
+/**
+ * Per-day coverage from the upload history. A kind with stored rows but no
+ * upload range (older data loaded without one) falls back to the stored span,
+ * so it never shows as entirely missing.
+ */
+export async function loadCoverage(uploadRanges?: UploadRange[]): Promise<DataCoverage> {
+  const coverage = coverageFromUploads(uploadRanges ?? await loadUploadRanges());
+  const [onboardingSpan, ftdSpan] = await Promise.all([
+    coverage.onboarding.length ? Promise.resolve(null) : loadOnboardingSpan(),
+    coverage.ftd.length ? Promise.resolve(null) : loadFtdCoverage(),
+  ]);
+  return {
+    onboarding: onboardingSpan ? mergeRanges([onboardingSpan]) : coverage.onboarding,
+    ftd: ftdSpan ? mergeRanges([ftdSpan]) : coverage.ftd,
+  };
+}
+
+export async function listUploadMonths(uploadRanges?: UploadRange[]): Promise<string[]> {
+  return monthsFromUploads(uploadRanges ?? await loadUploadRanges());
 }
 
 export const DETAIL_KINDS = {

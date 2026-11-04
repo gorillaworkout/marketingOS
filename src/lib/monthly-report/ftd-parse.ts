@@ -51,7 +51,7 @@ function parseAmount(value: unknown): number | null {
   return Math.round(Number(text) * 100) / 100;
 }
 
-function findHeader(rows: unknown[][]): { rowIndex: number; columns: Record<string, number> } | null {
+export function findHeader(rows: unknown[][]): { rowIndex: number; columns: Record<string, number> } | null {
   for (let rowIndex = 0; rowIndex < Math.min(rows.length, 30); rowIndex += 1) {
     const row = rows[rowIndex] ?? [];
     const normalized = row.map(normalizeHeader);
@@ -75,7 +75,7 @@ function findHeader(rows: unknown[][]): { rowIndex: number; columns: Record<stri
   return null;
 }
 
-function findReportMonth(rows: unknown[][]): { year: number; month: number } | null {
+export function findReportMonth(rows: unknown[][]): { year: number; month: number } | null {
   let year: number | null = null;
   let month: number | null = null;
   for (const row of rows) {

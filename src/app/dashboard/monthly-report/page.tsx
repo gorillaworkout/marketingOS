@@ -8,9 +8,10 @@ import {
 import { DUPOIN, formatAmount, formatChange, formatDateTimeWib, formatDecimal, formatInteger, formatPct } from '@/components/monthly-report/brand';
 import { FunnelChart, TrendChart } from '@/components/monthly-report/charts';
 import { useMonthlyReportPermissions } from '@/components/monthly-report/MonthlyReportContext';
+import { DataThrough, MissingDataNotice } from '@/components/monthly-report/DataCoverage';
 import { InfoTip, ReportTabs } from '@/components/monthly-report/ReportTabs';
 import { pending, TOTAL_REAL_ACCOUNT_LABEL } from '@/lib/monthly-report/definitions';
-import type { BucketValues, OnboardingReport } from '@/lib/monthly-report/metrics';
+import type { BucketCoverage, BucketValues, OnboardingReport } from '@/lib/monthly-report/metrics';
 import {
   GRANULARITIES, PERIOD_PRESETS, PRESET_LABELS, defaultGranularity, formatDayLabel, resolvePeriod, shiftAnchor,
   type Granularity, type PeriodInput, type PeriodPreset,
@@ -25,6 +26,11 @@ type TrendMetric = 'registrations' | 'realAccountApproved' | 'kycRejected' | 'ft
 const TREND_METRICS: Array<[TrendMetric, string]> = [
   ['registrations', 'Registrations'], ['realAccountApproved', TOTAL_REAL_ACCOUNT_LABEL], ['kycRejected', 'KYC Rejected'], ['ftd', 'FTD'],
 ];
+const NO_DATA = 'No data';
+/** Onboarding counts are "No data" (not 0) when no upload covers the bucket: registrations is null then. */
+const noOnboarding = (values: BucketValues) => values.registrations === null;
+const isPartial = (coverage?: BucketCoverage) => coverage?.onboarding === 'partial' || coverage?.ftd === 'partial';
+
 const GRANULARITY_LABELS: Record<Granularity, string> = { day: 'By day', week: 'By week', month: 'By month' };
 
 function todayWib(): string {
@@ -165,6 +171,12 @@ export default function MonthlyReportOnboardingPage() {
             <p><span className="font-medium text-[var(--mos-text)]">{report.rangeLabel}</span> · compared with {report.previousLabel}</p>
             {data.lastUpload && <p>Last upload: {data.lastUpload.file_name} · {formatDateTimeWib(data.lastUpload.created_at)}</p>}
           </div>
+          {report.coverage && (
+            <>
+              <DataThrough coverage={report.coverage} />
+              <MissingDataNotice coverage={report.coverage} scope={report.rangeLabel} />
+            </>
+          )}
 
           {!report.hasOnboardingData && (
             <Panel><EmptyState title="No onboarding entries in this period" description="Try another period, or upload an export that covers these dates." /></Panel>
@@ -176,7 +188,7 @@ export default function MonthlyReportOnboardingPage() {
                 <MetricCard
                   key={kpi.key}
                   label={kpi.label}
-                  value={kpi.key === 'ftd' && kpi.value === null ? 'No data' : formatInteger(kpi.value)}
+                  value={kpi.value === null || (kpi.key !== 'ftd' && noOnboarding(report.total)) ? NO_DATA : formatInteger(kpi.value)}
                   trend={report.hasPreviousData ? formatChange(kpi.change, kpi.changePct) ?? undefined : 'No previous data'}
                   note={kpi.key === 'registrations' ? 'All onboarding entries, repeats counted' : kpi.note}
                   detail={kpi.parts?.length ? (
@@ -216,7 +228,12 @@ export default function MonthlyReportOnboardingPage() {
               <div className="mt-4 text-[var(--mos-text)]">
                 <TrendChart
                   ariaLabel={`${trendMetric} trend`}
-                  points={report.buckets.map(bucket => ({ key: bucket.key, label: granularity === 'day' ? formatDayLabel(bucket.from) : bucket.label, value: bucket.values[trendMetric] }))}
+                  points={report.buckets.map(bucket => ({
+                    key: bucket.key,
+                    label: granularity === 'day' ? formatDayLabel(bucket.from) : bucket.label,
+                    // Uncovered buckets are gaps ("no data"), not zero bars.
+                    value: trendMetric !== 'ftd' && noOnboarding(bucket.values) ? null : bucket.values[trendMetric],
+                  }))}
                 />
               </div>
               {report.peaks.registrations && (
@@ -317,8 +334,8 @@ export default function MonthlyReportOnboardingPage() {
                 </tr>
               </thead>
               <tbody>
-                {report.buckets.map(bucket => <SummaryRow key={bucket.key} label={bucket.label} values={bucket.values} />)}
-                <SummaryRow label="Total" values={report.total} strong />
+                {report.buckets.map(bucket => <SummaryRow key={bucket.key} label={bucket.label} values={bucket.values} coverage={bucket.coverage} />)}
+                <SummaryRow label="Total" values={report.total} coverage={report.totalCoverage} strong />
                 {report.hasPreviousData ? (
                   <SummaryRow label={`Previous (${report.previousLabel})`} values={report.previousTotal} muted />
                 ) : (
@@ -341,17 +358,22 @@ export default function MonthlyReportOnboardingPage() {
   );
 }
 
-function SummaryRow({ label, values, strong, muted }: { label: string; values: BucketValues; strong?: boolean; muted?: boolean }) {
+function SummaryRow({ label, values, coverage, strong, muted }: { label: string; values: BucketValues; coverage?: BucketCoverage; strong?: boolean; muted?: boolean }) {
+  const missing = noOnboarding(values);
+  const cell = (value: number | null) => <td className={`px-4 py-2${missing ? ' text-[var(--mos-text-faint)]' : ''}`}>{missing ? NO_DATA : formatInteger(value)}</td>;
   return (
     <tr className={`border-t border-[var(--mos-border-subtle)] ${strong ? 'font-semibold text-[var(--mos-text)]' : muted ? 'text-[var(--mos-text-faint)]' : 'text-[var(--mos-text-secondary)]'}`}>
-      <td className="px-4 py-2 text-left">{label}</td>
-      <td className="px-4 py-2">{formatInteger(values.registrations)}</td>
-      <td className="px-4 py-2">{formatInteger(values.kycRejected)}</td>
-      <td className="px-4 py-2">{formatInteger(values.realAccountApproved)}</td>
-      <td className="px-4 py-2">{formatInteger(values.realAccountActivated)}</td>
-      <td className="px-4 py-2">{formatInteger(values.manualKycApproved)}</td>
-      <td className="px-4 py-2">{values.ftd === null ? 'No data' : formatInteger(values.ftd)}</td>
-      <td className="px-4 py-2">{formatInteger(pending(values))}</td>
+      <td className="px-4 py-2 text-left">
+        {label}
+        {isPartial(coverage) && <span className="ml-1.5 text-[10px] font-normal text-amber-200" title="Some days in this period have no uploaded data">partial</span>}
+      </td>
+      {cell(values.registrations)}
+      {cell(values.kycRejected)}
+      {cell(values.realAccountApproved)}
+      {cell(values.realAccountActivated)}
+      {cell(values.manualKycApproved)}
+      <td className={`px-4 py-2${values.ftd === null ? ' text-[var(--mos-text-faint)]' : ''}`}>{values.ftd === null ? NO_DATA : formatInteger(values.ftd)}</td>
+      {cell(pending(values))}
     </tr>
   );
 }

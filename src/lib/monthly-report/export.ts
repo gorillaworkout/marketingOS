@@ -9,16 +9,28 @@ export const EXPORT_COLUMNS = [
   'First account', 'Additional account', 'Auto KYC approved',
 ] as const;
 
-function bucketRow(bucket: Pick<ReportBucket, 'label' | 'from' | 'to' | 'values'>): (string | number | null)[] {
+export const NO_DATA = 'No data';
+
+type RowBucket = Pick<ReportBucket, 'label' | 'from' | 'to' | 'values'> & { coverage?: ReportBucket['coverage'] };
+
+/**
+ * One table row. With upload coverage, days no upload covers read "No data"
+ * instead of 0 (onboarding columns and FTD columns separately).
+ */
+function bucketRow(bucket: RowBucket, markNoData = false): (string | number | null)[] {
   const v = bucket.values;
-  return [bucket.label, bucket.from, bucket.to, v.registrations, v.kycRejected, v.realAccountApproved, v.realAccountActivated,
-    v.manualKycApproved, pending(v), v.ftd, v.ftdAmount, v.firstAccount, v.additionalAccount, v.autoKycApproved];
+  const noOnboarding = markNoData && bucket.coverage !== undefined && (bucket.coverage.onboarding === 'none' || bucket.coverage.onboarding === 'future');
+  const ob = (value: number | null) => (noOnboarding ? NO_DATA : value);
+  const ftd = (value: number | null) => (markNoData && value === null ? NO_DATA : value);
+  return [bucket.label, bucket.from, bucket.to, ob(v.registrations), ob(v.kycRejected), ob(v.realAccountApproved), ob(v.realAccountActivated),
+    ob(v.manualKycApproved), ob(pending(v)), ftd(v.ftd), ftd(v.ftdAmount), ob(v.firstAccount), ob(v.additionalAccount), ob(v.autoKycApproved)];
 }
 
 export function reportTableRows(report: OnboardingReport): (string | number | null)[][] {
+  const mark = report.coverage !== null;
   return [
-    ...report.buckets.map(bucketRow),
-    bucketRow({ label: 'Total', from: report.range.from, to: report.range.to, values: report.total }),
+    ...report.buckets.map(bucket => bucketRow(bucket, mark)),
+    bucketRow({ label: 'Total', from: report.range.from, to: report.range.to, values: report.total, coverage: report.totalCoverage }, mark),
   ];
 }
 
@@ -39,10 +51,16 @@ export function buildReportWorkbook(report: OnboardingReport): Buffer {
     ['Note', 'Real Account Activated in the Total row counts unique accounts; period rows count activations. The Total can be lower than the sum of the rows.'],
     ['Registrations', report.kpis.find(k => k.key === 'registrations')?.note ?? ''],
     ['Pending', report.kpis.find(k => k.key === 'pending')?.note ?? ''],
+    ...(report.coverage ? [
+      ['No data', 'No upload covers these days (onboarding and FTD are tracked separately), so they are not counted as 0.'],
+      ['Onboarding data through', report.coverage.onboarding.through ?? '—'],
+      ['FTD data through', report.coverage.ftd.through ?? '—'],
+    ] : []),
   ]);
   summary['!cols'] = header.map((_, i) => ({ wch: i === 0 ? 22 : 14 }));
   XLSX.utils.book_append_sheet(workbook, summary, 'Summary');
-  const daily = XLSX.utils.aoa_to_sheet([header, ...report.daily.map(bucketRow)]);
+  const mark = report.coverage !== null;
+  const daily = XLSX.utils.aoa_to_sheet([header, ...report.daily.map(bucket => bucketRow(bucket, mark))]);
   XLSX.utils.book_append_sheet(workbook, daily, 'Daily');
   const kpis = XLSX.utils.aoa_to_sheet([
     ['KPI', 'Value', `Previous (${report.previousLabel})`, 'Change', 'Change %', 'Definition'],

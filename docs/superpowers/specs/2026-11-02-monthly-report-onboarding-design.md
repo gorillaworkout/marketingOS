@@ -144,14 +144,58 @@ Built **inside each calendar month**; weeks end on Sunday.
 
 Oct 2026 → I 1–11, II 12–18, III 19–25, IV 26–31.
 
+## Upload auto-detect (Nov 2026)
+- The Uploads page has one primary **Upload file** drop zone (`POST uploads/auto`, same raw body,
+  `mode`, `fileName`, `offset`). The server sniffs only the first 40 rows (`readSheetRows` with
+  `sheetRows`) and routes the file:
+  - all onboarding columns in the first row (preferred sheet "Query result") → onboarding parser;
+  - otherwise the FTD header (`Account · Type · Join Date · FTD Time · Amount`) anywhere in the first
+    rows → FTD parser, labelled "FTD report (monthly report)" (title rows / side-by-side blocks) or
+    "FTD report (clean table)".
+  - anything else → 400 with a plain error listing the expected columns of both types, plus a hint
+    when a file looks like a near miss (names the missing columns).
+- The preview shows "Detected: <type>" before Save. Commit sends `expect=<previewed kind>`; if the
+  file now detects as another type the server answers 409 and saves nothing.
+- Preview/commit, duplicate counts, conflicts and the WIB (+07:00) default are the same as before:
+  both routes share `upload-handlers.ts`. The two type-specific cards remain as a manual override
+  under a collapsed "Choose type manually".
+
+## Data coverage ("data through" and gaps)
+- Coverage per kind = the merged `data_from`–`data_to` (WIB dates) of all `monthly_report_uploads`
+  rows of that kind. Web uploads and the import CLI write the same rows (the CLI passes
+  `range: parsed.summary.wibRange` to the same store functions), so both count. Uploads with no valid
+  rows (null range) do not count. If a kind has stored data but no ranged upload rows (older
+  imports), the stored data span is used instead, so old data is never flagged as missing.
+- Onboarding and FTD are tracked separately. The dashboard and the Uploads page show
+  "Onboarding data through <date> · FTD data through <date> (WIB)".
+- Within the selected range (dashboard) or data month / overall span (Uploads page) a
+  "Missing data in …" notice lists uncovered dates/ranges per kind. Days after today (WIB) are never
+  flagged.
+- Buckets carry `coverage: {onboarding, ftd}` = `full | partial | none | future`. Daily/weekly charts,
+  the summary table, KPIs and the .xlsx export show **No data** (null) for a bucket with no covered
+  day instead of 0; partially covered buckets keep their numbers with a "partial" tag. Without
+  coverage input (`buildOnboardingReport` called without `coverage`) the old behaviour is unchanged.
+- Pure logic in `coverage.ts` (merge, missing ranges, states, overview).
+
+## Upload history
+`GET uploads?page=&pageSize=&kind=&month=` — 25 per page (max 100), newest first
+(`created_at DESC, id DESC`), no hard cap. Filters: type (`onboarding | ftd | rejection_reasons`)
+and data month (`YYYY-MM`, overlaps the upload's `data_from`–`data_to`; uploads without a range use
+their WIB upload date). Each row shows inserted / updated / duplicate / invalid counts and the WIB
+data range. Pure query parsing in `upload-history.ts`. Response also returns the months that have
+data (filter options) and the coverage overview.
+
+No migration: `data_from`, `data_to`, `rows_duplicate` and the other counters already exist (041/043).
+
 ## Architecture
 - Pure functions in `src/lib/monthly-report/`: `periods.ts`, `xlsx-read.ts`, `onboarding-parse.ts`,
-  `ftd-parse.ts`, `metrics.ts`, `conflicts.ts`, `export.ts`, `access.ts`, `upload-offset.ts`.
+  `ftd-parse.ts`, `metrics.ts`, `conflicts.ts`, `export.ts`, `access.ts`, `upload-offset.ts`,
+  `detect.ts`, `coverage.ts`, `upload-history.ts`; shared upload route bodies in `upload-handlers.ts`.
   DB in `store.ts`; route glue in `service.ts`.
 - API (`/api/monthly-report/*`); the UI reads only aggregation routes:
   - `GET report` · `GET details?kind=` (masked drill-down) · `GET export` (.xlsx: Summary, Daily, KPIs)
-  - `POST uploads/onboarding`, `POST uploads/ftd` (raw body, `mode=preview|commit`, `fileName`, `offset`)
-  - `GET uploads` (history, upload rights) · `GET/PUT access` (admin only)
+  - `POST uploads/auto` (detects the type), `POST uploads/onboarding`, `POST uploads/ftd` (raw body, `mode=preview|commit`, `fileName`, `offset`)
+  - `GET uploads` (paged history with filters, coverage, upload rights) · `GET/PUT access` (admin only)
 - UI: `/dashboard/monthly-report` (Onboarding), `/settlement` (Coming soon), `/uploads`, `/access`.
   Sidebar section "Reports". Dupoin teal `#2EB5C4` / `#1A8A96` inside these pages.
 

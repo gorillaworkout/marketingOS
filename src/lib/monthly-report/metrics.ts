@@ -12,6 +12,7 @@ import {
 import {
   describeRange, reportBuckets, type Bucket, type DateRange, type Granularity, type ResolvedPeriod,
 } from './periods';
+import { coverageState, summarizeCoverage, type CoverageState, type CoverageSummary, type DataCoverage } from './coverage';
 
 export const ADD_ACCOUNT_STEPS = ['auto_add_account', 'manual_add_account'];
 export const ACTIVATED_STATUS = 'Real Account Activated';
@@ -195,7 +196,10 @@ export interface BucketValues {
   pendingVideoFailed: number;
 }
 
-export interface ReportBucket extends Bucket { values: BucketValues }
+/** Per-bucket coverage: `none` / `future` buckets show "No data" instead of 0. */
+export interface BucketCoverage { onboarding: CoverageState; ftd: CoverageState }
+
+export interface ReportBucket extends Bucket { values: BucketValues; coverage: BucketCoverage }
 
 export type KpiKey = 'registrations' | 'kycRejected' | 'realAccountApproved' | 'ftd' | 'pending';
 
@@ -261,6 +265,14 @@ export interface OnboardingReport {
   /** False when the previous period has no onboarding rows, so "change vs previous" means nothing. */
   hasPreviousData: boolean;
   hasFtd: boolean;
+  /** Coverage of the whole period (same states as the buckets). */
+  totalCoverage: BucketCoverage;
+  /**
+   * Upload coverage (from the upload history's WIB date ranges): last covered day
+   * and the days of the period, up to today, that no upload covers.
+   * Null when the caller did not pass coverage (legacy: FTD span only).
+   */
+  coverage: { today: string; onboarding: CoverageSummary; ftd: CoverageSummary } | null;
 }
 
 /**
@@ -271,15 +283,32 @@ export interface OnboardingReport {
  */
 export const REGISTRATIONS_DEFINITION = 'Every onboarding entry in the CRM export (all steps, repeats counted: a user rejected and re-registering counts twice).';
 
-function valuesFor(range: DateRange, data: Pick<PeriodData, 'daily' | 'ftd' | 'ftdCoverage'>): BucketValues {
+interface CoverageContext { coverage: DataCoverage | null; today: string }
+
+const hasData = (state: CoverageState) => state === 'full' || state === 'partial';
+
+export function bucketCoverage(range: DateRange, data: Pick<PeriodData, 'ftdCoverage'>, context: CoverageContext): BucketCoverage {
+  if (!context.coverage) {
+    // Legacy (no upload coverage passed): onboarding always counts; FTD by its overall span.
+    const ftdCovered = data.ftdCoverage !== null && data.ftdCoverage.from <= range.to && data.ftdCoverage.to >= range.from;
+    return { onboarding: 'full', ftd: ftdCovered ? 'full' : 'none' };
+  }
+  return {
+    onboarding: coverageState(range, context.coverage.onboarding, context.today),
+    ftd: coverageState(range, context.coverage.ftd, context.today),
+  };
+}
+
+function valuesFor(range: DateRange, data: Pick<PeriodData, 'daily' | 'ftd' | 'ftdCoverage'>, coverage: BucketCoverage): BucketValues {
   const days = data.daily.filter(day => inRange(day.date, range));
   const ftd = data.ftd.filter(day => inRange(day.date, range));
   const sum = sumDaily(days);
   const ftdCount = ftd.reduce((total, day) => total + day.count, 0);
   const ftdCents = ftd.reduce((total, day) => total + Math.round(day.amount * 100), 0);
-  const covered = data.ftdCoverage !== null && data.ftdCoverage.from <= range.to && data.ftdCoverage.to >= range.from;
+  const covered = hasData(coverage.ftd);
   return {
-    registrations: sum.events,
+    // Registrations is null ("No data") when no upload covers the bucket, not 0.
+    registrations: hasData(coverage.onboarding) ? sum.events : null,
     kycRejected: sum.kycRejected,
     realAccountApproved: sum.activated + sum.manualKycApproved,
     realAccountActivated: sum.activated,
@@ -319,11 +348,23 @@ export function buildOnboardingReport(input: {
   granularity: Granularity;
   current: PeriodData;
   previous: PeriodData;
+  /** Upload coverage per kind; when given, uncovered days show "No data" and gaps are reported. */
+  coverage?: DataCoverage | null;
+  /** Today in WIB (`YYYY-MM-DD`); days after it are never reported missing. */
+  today?: string;
 }): OnboardingReport {
   const { period, granularity, current, previous } = input;
-  const total = withUniqueActivated(valuesFor(period.range, current), current.uniqueActivated);
-  const prev = withUniqueActivated(valuesFor(period.previous, previous), previous.uniqueActivated);
-  const toBuckets = (buckets: Bucket[]) => buckets.map(bucket => ({ ...bucket, values: valuesFor(bucket, current) }));
+  const context: CoverageContext = {
+    coverage: input.coverage ?? null,
+    today: input.today ?? new Date(Date.now() + 7 * 3_600_000).toISOString().slice(0, 10),
+  };
+  const totalCoverage = bucketCoverage(period.range, current, context);
+  const total = withUniqueActivated(valuesFor(period.range, current, totalCoverage), current.uniqueActivated);
+  const prev = withUniqueActivated(valuesFor(period.previous, previous, bucketCoverage(period.previous, previous, context)), previous.uniqueActivated);
+  const toBuckets = (buckets: Bucket[]) => buckets.map(bucket => {
+    const coverage = bucketCoverage(bucket, current, context);
+    return { ...bucket, values: valuesFor(bucket, current, coverage), coverage };
+  });
   const ftdDays = current.ftd.filter(day => inRange(day.date, period.range));
   const ftdCount = total.ftd ?? 0;
   const ftdSummary: FtdSummary = {
@@ -400,5 +441,11 @@ export function buildOnboardingReport(input: {
     hasOnboardingData: current.daily.some(day => day.events > 0),
     hasPreviousData: previous.daily.some(day => inRange(day.date, period.previous) && day.events > 0),
     hasFtd: total.ftd !== null,
+    totalCoverage,
+    coverage: context.coverage ? {
+      today: context.today,
+      onboarding: summarizeCoverage(period.range, context.coverage.onboarding, context.today),
+      ftd: summarizeCoverage(period.range, context.coverage.ftd, context.today),
+    } : null,
   };
 }

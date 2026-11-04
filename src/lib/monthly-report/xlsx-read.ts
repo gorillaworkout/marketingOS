@@ -13,10 +13,12 @@ export function isZipWorkbook(buffer: Buffer | Uint8Array): boolean {
  * Reads one sheet as raw cell values (numbers stay numbers, dates stay serials).
  * CSV files are read as text (`raw`) so dates like 10/1/2026 are never guessed.
  */
-export function readSheetRows(buffer: Buffer | Uint8Array, preferredSheet?: string): SheetRows {
+export function readSheetRows(buffer: Buffer | Uint8Array, preferredSheet?: string, options: { maxRows?: number } = {}): SheetRows {
+  // `maxRows` limits parsing to the first rows (cheap header sniffing for auto-detect).
+  const limit = options.maxRows ? { sheetRows: options.maxRows } : {};
   const workbook = isZipWorkbook(buffer)
-    ? XLSX.read(buffer, { type: 'buffer', cellDates: false, dense: false })
-    : XLSX.read(Buffer.from(buffer).toString('utf8').replace(/^\uFEFF/, ''), { type: 'string', raw: true, cellDates: false });
+    ? XLSX.read(buffer, { type: 'buffer', cellDates: false, dense: false, ...limit })
+    : XLSX.read(Buffer.from(buffer).toString('utf8').replace(/^\uFEFF/, ''), { type: 'string', raw: true, cellDates: false, ...limit });
   const sheetName = preferredSheet && workbook.SheetNames.includes(preferredSheet)
     ? preferredSheet
     : workbook.SheetNames[0];
