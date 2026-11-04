@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState, type DragEvent } from 'react';
 import { Button, DataTableFrame, EmptyState, FilterGroup, FormField, PageHeader, PageStack, Panel, SectionHeader, Select, StatusBadge, TextInput, Toolbar } from '@/components/ui/dashboard';
 import { formatAmount, formatDateTimeWib, formatInteger } from '@/components/monthly-report/brand';
+import { DailyFtdPanel } from '@/components/monthly-report/DailyFtdPanel';
 import { DataThrough, MissingDataNotice } from '@/components/monthly-report/DataCoverage';
 import { ReportTabs } from '@/components/monthly-report/ReportTabs';
 import { formatCoverageDate, type CoverageOverview } from '@/lib/monthly-report/coverage';
@@ -17,7 +18,7 @@ type Preview = {
   conflicts?: { new: number; duplicate?: number; duplicateDiffers?: number; newEventForKnownDocument?: number; existing?: number; byStepStatus?: Array<{ stepStatus: string; new: number; duplicate: number }>; statusChanges?: Array<{ from: string; to: string; count: number }> };
   counts?: { total: number; inserted: number; updated?: number; unchanged?: number; skipped?: number; skippedDuplicate?: number; duplicatesInFile?: number; invalid?: number };
 };
-type History = { uploads: Upload[]; total: number; page: number; pageSize: number; pageCount: number; months: string[]; coverage: CoverageOverview };
+type History = { uploads: Upload[]; total: number; page: number; pageSize: number; pageCount: number; months: string[]; coverage: CoverageOverview; permissions?: { canUpload: boolean; isAdmin: boolean } };
 
 const PAGE_SIZE = 25;
 const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
@@ -28,7 +29,7 @@ type CardConfig = { title: string; description: string; accept: string; endpoint
 
 const AUTO_CARD: CardConfig = {
   title: 'Upload file',
-  description: 'Drop the CRM onboarding export or the FTD report (.xlsx or .csv). The type is detected from the column headers and shown in the preview before anything is saved.',
+  description: 'Drop the CRM onboarding export (.xlsx or .csv). The file is checked from its column headers and previewed before anything is saved. FTD is not uploaded: enter it per day in Daily FTD below.',
   accept: '.xlsx,.xls,.csv',
   endpoint: '/api/monthly-report/uploads/auto',
 };
@@ -41,8 +42,8 @@ const CARDS: Record<Kind, CardConfig> = {
     endpoint: '/api/monthly-report/uploads/onboarding',
   },
   ftd: {
-    title: 'FTD report',
-    description: 'The monthly FTD report CSV (only the MONTHLY block is read) or a clean table with Account, Type, Join Date, FTD Time, Amount. Rows are matched by Account.',
+    title: 'FTD file (legacy, admin only)',
+    description: 'Optional: the monthly FTD report CSV (only the MONTHLY block is read) or a clean table with Account, Type, Join Date, FTD Time, Amount. Rows are matched by Account. Daily FTD is normally entered by hand; an account-level file is only needed for "Activated → FTD (same accounts)". Manual daily values win over the file for their day.',
     accept: '.csv,.xlsx,.xls',
     endpoint: '/api/monthly-report/uploads/ftd',
   },
@@ -89,14 +90,15 @@ export default function MonthlyReportUploadsPage() {
         </Panel>
       )}
       <UploadCard card={AUTO_CARD} onDone={loadHistory} primary />
+      <DailyFtdPanel onSaved={loadHistory} />
       <details className="group rounded-[var(--mos-radius-panel)] border border-[var(--mos-border)] bg-[var(--mos-panel)]">
         <summary className="cursor-pointer select-none px-5 py-3.5 text-xs font-medium text-[var(--mos-text-secondary)]">
           Choose type manually
           <span className="ml-2 font-normal text-[var(--mos-text-faint)]">Use when the detected type is wrong or you want a specific parser.</span>
         </summary>
-        <div className="grid gap-6 border-t border-[var(--mos-border-subtle)] p-5 xl:grid-cols-2">
+        <div className={`grid gap-6 border-t border-[var(--mos-border-subtle)] p-5 ${history?.permissions?.isAdmin ? 'xl:grid-cols-2' : ''}`}>
           <UploadCard card={CARDS.onboarding} kind="onboarding" onDone={loadHistory} />
-          <UploadCard card={CARDS.ftd} kind="ftd" onDone={loadHistory} />
+          {history?.permissions?.isAdmin && <UploadCard card={CARDS.ftd} kind="ftd" onDone={loadHistory} />}
         </div>
       </details>
       <Panel>

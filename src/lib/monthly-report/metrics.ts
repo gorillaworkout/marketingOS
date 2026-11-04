@@ -61,7 +61,15 @@ export interface DailyOnboarding {
   events: number;
 }
 
-export interface DailyFtd { date: string; count: number; amount: number; micro: number; standard: number; other: number }
+export interface DailyFtd {
+  date: string; count: number; amount: number; micro: number; standard: number; other: number;
+  /** Where the day's value comes from (absent = account rows; see ftd-daily.ts for the precedence). */
+  source?: FtdSource;
+  /** False when a manual entry left the amount empty (`amount` is then 0 and not a real value). */
+  amountEntered?: boolean;
+}
+
+export type FtdSource = 'manual' | 'accounts';
 
 /**
  * Links FTDs to onboarding on the trading account number, for one range:
@@ -228,11 +236,25 @@ export interface PeriodData {
 
 export interface FtdSummary {
   count: number;
+  /** Sum of the entered amounts (days whose manual entry has no amount add nothing; see daysWithoutAmount). */
   amountTotal: number;
   amountAverage: number | null;
+  /** Account types are only known for days from the FTD file (manual days have no type). */
   byType: { micro: number; standard: number; other: number };
-  fromPeriodActivations: number;
-  fromEarlierAccounts: number;
+  /** False when some days of the period come from manual entries (their types are unknown). */
+  byTypeComplete: boolean;
+  /** Days of the period whose FTD value is a manual entry / derived from account rows. */
+  manualDays: number;
+  accountDays: number;
+  /** Manual days saved without an amount. */
+  daysWithoutAmount: number;
+  /**
+   * Same-account cohort metrics need account-level FTD data for the whole period.
+   * When false, fromPeriodActivations / fromEarlierAccounts / realToFtdPct / activatedWithFtd are null ("No data").
+   */
+  cohortAvailable: boolean;
+  fromPeriodActivations: number | null;
+  fromEarlierAccounts: number | null;
   /** FTD count ÷ days in the period (the PPT's "daily average"). */
   dailyAverage: number | null;
   /** FTD count ÷ Total Real Account — the method the monthly PPT used (33.8% in Oct with 8,096; 8,098 here). */
@@ -241,8 +263,13 @@ export interface FtdSummary {
   ftdPerRegistrationPct: number | null;
   /** Accounts activated in the period that made an FTD ÷ unique Real Account Activated (same-account cohort). */
   realToFtdPct: number | null;
-  activatedWithFtd: number;
+  activatedWithFtd: number | null;
 }
+
+/** One WIB day of FTD for the period: null count = no data (no manual entry, no FTD file covers it). */
+export interface FtdDayValue { date: string; count: number | null; amount: number | null; source: FtdSource | null }
+
+export { COHORT_UNAVAILABLE_NOTE } from './definitions';
 
 export interface OnboardingReport {
   range: DateRange;
@@ -259,6 +286,8 @@ export interface OnboardingReport {
   previousTotal: BucketValues;
   funnel: FunnelStep[];
   ftd: FtdSummary;
+  /** Every day of the period with its FTD value and source (manual entry overrides the FTD file). */
+  ftdDays: FtdDayValue[];
   dataQuality: { approvedBankInfoPending: number; pendingVideoFailed: number };
   peaks: { activations: { date: string; value: number } | null; registrations: { date: string; value: number } | null; ftd: { date: string; value: number } | null };
   hasOnboardingData: boolean;
@@ -297,6 +326,18 @@ export function bucketCoverage(range: DateRange, data: Pick<PeriodData, 'ftdCove
     onboarding: coverageState(range, context.coverage.onboarding, context.today),
     ftd: coverageState(range, context.coverage.ftd, context.today),
   };
+}
+
+/**
+ * The same-account cohort (Activated → FTD) joins FTDs to onboarding by account
+ * number, so it is only reported when account-level FTD data (the FTD file)
+ * covers every past day of the range. Manual daily counts have no accounts;
+ * computing the cohort on part of the period would understate it silently.
+ */
+export function cohortAvailable(range: DateRange, context: CoverageContext): boolean {
+  if (!context.coverage) return true; // legacy: no coverage passed, FTD rows are the only source
+  const state = coverageState(range, context.coverage.ftdAccounts ?? context.coverage.ftd, context.today);
+  return state === 'full';
 }
 
 function valuesFor(range: DateRange, data: Pick<PeriodData, 'daily' | 'ftd' | 'ftdCoverage'>, coverage: BucketCoverage): BucketValues {
@@ -367,23 +408,44 @@ export function buildOnboardingReport(input: {
   });
   const ftdDays = current.ftd.filter(day => inRange(day.date, period.range));
   const ftdCount = total.ftd ?? 0;
+  const manualDays = ftdDays.filter(day => day.source === 'manual');
+  const amountedCount = ftdDays.reduce((n, day) => n + (day.amountEntered === false ? 0 : day.count), 0);
+  const cohort = total.ftd !== null && cohortAvailable(period.range, context) ? current.ftdCohort : null;
   const ftdSummary: FtdSummary = {
     count: ftdCount,
     amountTotal: total.ftdAmount ?? 0,
-    amountAverage: ftdCount ? Math.round(((total.ftdAmount ?? 0) / ftdCount) * 100) / 100 : null,
+    // Average over the FTDs whose amount is known, so empty manual amounts do not pull it down.
+    amountAverage: amountedCount ? Math.round(((total.ftdAmount ?? 0) / amountedCount) * 100) / 100 : null,
     byType: {
       micro: ftdDays.reduce((n, day) => n + day.micro, 0),
       standard: ftdDays.reduce((n, day) => n + day.standard, 0),
       other: ftdDays.reduce((n, day) => n + day.other, 0),
     },
-    fromPeriodActivations: current.ftdCohort.ftdFromPeriodActivations,
-    fromEarlierAccounts: Math.max(0, ftdCount - current.ftdCohort.ftdFromPeriodActivations),
+    byTypeComplete: manualDays.length === 0,
+    manualDays: manualDays.length,
+    accountDays: ftdDays.length - manualDays.length,
+    daysWithoutAmount: manualDays.filter(day => day.amountEntered === false).length,
+    cohortAvailable: cohort !== null,
+    fromPeriodActivations: cohort ? cohort.ftdFromPeriodActivations : null,
+    fromEarlierAccounts: cohort ? Math.max(0, ftdCount - cohort.ftdFromPeriodActivations) : null,
     dailyAverage: total.ftd === null ? null : Math.round((total.ftd / period.days) * 10) / 10,
     ftdPerApprovedPct: total.ftd === null ? null : pct(total.ftd, total.realAccountApproved),
     ftdPerRegistrationPct: total.ftd === null ? null : pct(total.ftd, total.registrations),
-    realToFtdPct: total.ftd === null ? null : pct(current.ftdCohort.activatedWithFtd, total.realAccountActivated),
-    activatedWithFtd: current.ftdCohort.activatedWithFtd,
+    realToFtdPct: cohort ? pct(cohort.activatedWithFtd, total.realAccountActivated) : null,
+    activatedWithFtd: cohort ? cohort.activatedWithFtd : null,
   };
+  const dailyBuckets = toBuckets(reportBuckets(period.range.from, period.range.to, 'day'));
+  const ftdByDate = new Map(ftdDays.map(day => [day.date, day]));
+  const ftdDayValues: FtdDayValue[] = dailyBuckets.map(bucket => {
+    const day = ftdByDate.get(bucket.from);
+    if (bucket.values.ftd === null) return { date: bucket.from, count: null, amount: null, source: null };
+    return {
+      date: bucket.from,
+      count: bucket.values.ftd,
+      amount: day && day.amountEntered === false ? null : bucket.values.ftdAmount,
+      source: day?.source ?? 'accounts',
+    };
+  });
 
   const kpis: Kpi[] = [
     kpi('registrations', 'Registrations', REGISTRATIONS_DEFINITION, total.registrations, prev.registrations),
@@ -406,9 +468,9 @@ export function buildOnboardingReport(input: {
     { key: 'realAccountActivated', label: 'Real account activated (unique)', value: total.realAccountActivated, stepPct: pct(total.realAccountActivated, kycApproved), overallPct: pct(total.realAccountActivated, registrations) },
     {
       key: 'ftd', label: 'FTD (same accounts)',
-      value: total.ftd === null ? null : current.ftdCohort.activatedWithFtd,
-      stepPct: total.ftd === null ? null : pct(current.ftdCohort.activatedWithFtd, total.realAccountActivated),
-      overallPct: total.ftd === null ? null : pct(current.ftdCohort.activatedWithFtd, registrations),
+      value: cohort ? cohort.activatedWithFtd : null,
+      stepPct: cohort ? pct(cohort.activatedWithFtd, total.realAccountActivated) : null,
+      overallPct: cohort ? pct(cohort.activatedWithFtd, registrations) : null,
     },
   ];
 
@@ -427,11 +489,12 @@ export function buildOnboardingReport(input: {
       { key: 'autoKycApproved', label: 'Auto KYC approved', note: 'KYC step approved automatically (not an account count)', value: total.autoKycApproved },
     ],
     buckets: toBuckets(reportBuckets(period.range.from, period.range.to, granularity)),
-    daily: toBuckets(reportBuckets(period.range.from, period.range.to, 'day')),
+    daily: dailyBuckets,
     total,
     previousTotal: prev,
     funnel,
     ftd: ftdSummary,
+    ftdDays: ftdDayValues,
     dataQuality: { approvedBankInfoPending: total.approvedBankInfoPending, pendingVideoFailed: total.pendingVideoFailed },
     peaks: {
       activations: peak(current.daily.filter(d => d.date >= period.range.from && d.date <= period.range.to), d => d.activated),

@@ -1,6 +1,7 @@
 /** .xlsx export of the Onboarding report: the summary table plus daily rows. */
 import * as XLSX from 'xlsx';
-import { pending } from './definitions';
+import { COHORT_UNAVAILABLE_NOTE, pending } from './definitions';
+import { FTD_SOURCE_LABELS } from './ftd-daily';
 import type { OnboardingReport, ReportBucket } from './metrics';
 
 export const EXPORT_COLUMNS = [
@@ -34,6 +35,16 @@ export function reportTableRows(report: OnboardingReport): (string | number | nu
   ];
 }
 
+export const FTD_DAILY_COLUMNS = ['Date (WIB)', 'FTD', 'FTD Amount (USD)', 'Source'] as const;
+export const AMOUNT_NOT_ENTERED = 'Not entered';
+
+/** "FTD daily" sheet: one row per day of the period; manual entries override the FTD file. */
+export function ftdDailyRows(report: OnboardingReport): (string | number)[][] {
+  return (report.ftdDays ?? []).map(day => (day.count === null
+    ? [day.date, NO_DATA, NO_DATA, '']
+    : [day.date, day.count, day.amount === null ? AMOUNT_NOT_ENTERED : day.amount, day.source ? FTD_SOURCE_LABELS[day.source] : '']));
+}
+
 export function exportFileName(report: OnboardingReport): string {
   return `monthly-report-onboarding_${report.range.from}_${report.range.to}.xlsx`;
 }
@@ -62,6 +73,17 @@ export function buildReportWorkbook(report: OnboardingReport): Buffer {
   const mark = report.coverage !== null;
   const daily = XLSX.utils.aoa_to_sheet([header, ...report.daily.map(bucket => bucketRow(bucket, mark))]);
   XLSX.utils.book_append_sheet(workbook, daily, 'Daily');
+  const ftdDaily = XLSX.utils.aoa_to_sheet([
+    [...FTD_DAILY_COLUMNS],
+    ...ftdDailyRows(report),
+    [],
+    ['Total FTD', report.ftd.count],
+    ['Manual entry days', report.ftd.manualDays],
+    ['FTD file days', report.ftd.accountDays],
+    ['Note', 'A manual daily entry replaces the FTD-file value of its day (count and amount). "Not entered" = manual entry without an amount.'],
+  ]);
+  ftdDaily['!cols'] = [{ wch: 14 }, { wch: 10 }, { wch: 18 }, { wch: 20 }];
+  XLSX.utils.book_append_sheet(workbook, ftdDaily, 'FTD daily');
   const kpis = XLSX.utils.aoa_to_sheet([
     ['KPI', 'Value', `Previous (${report.previousLabel})`, 'Change', 'Change %', 'Definition'],
     ...report.kpis.flatMap(k => [
@@ -70,7 +92,9 @@ export function buildReportWorkbook(report: OnboardingReport): Buffer {
     ]),
     [],
     ['Funnel step', 'Value', 'Step %', 'Overall %'],
-    ...report.funnel.map(s => [s.label, s.value, s.stepPct, s.overallPct]),
+    ...report.funnel.map(s => (s.key === 'ftd' && !report.ftd.cohortAvailable
+      ? [s.label, NO_DATA, null, null, COHORT_UNAVAILABLE_NOTE]
+      : [s.label, s.value, s.stepPct, s.overallPct])),
     [],
     [`Previous (${report.previousLabel})`],
     header,

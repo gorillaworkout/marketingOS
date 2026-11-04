@@ -15,3 +15,6 @@ export const MANUAL_APPROVED_DEMO_NOT_DONE_LABEL = 'Manual Approved Demo Not Don
 export function pending(values: { registrations: number | null; realAccountApproved: number; kycRejected: number }): number | null {
   return !values.registrations ? null : values.registrations - values.realAccountApproved - values.kycRejected;
 }
+
+/** Why the same-account cohort (Activated → FTD) shows "No data" for a period. */
+export const COHORT_UNAVAILABLE_NOTE = 'Needs the account-level FTD file for every day of the period; manual daily FTD entries have no account numbers.';

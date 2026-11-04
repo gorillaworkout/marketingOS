@@ -71,7 +71,10 @@ Verified with all four months loaded in three orders (plus Sep twice, and Oct fi
 then 043): identical results — Jun 26,506 / TRA 9,956; Jul 28,411 / 10,001; Sep 23,492 / 7,880;
 Oct 24,737 / 8,098 / Pending 9,296 / Rejected 7,343; no activated account in two months.
 
-## Upload 2: FTD report
+## Upload 2: FTD report (legacy, admin only — see "Manual daily FTD" below)
+- Daily FTD is now entered by hand (steering, 2026-11-04). The FTD file import remains for admins
+  under "Choose type manually" and in the CLI (`--ftd`); it is the only source of account-level FTDs
+  (needed for the same-account cohort). October 2026 (2,734) was imported this way and keeps working.
 - Accepts the monthly FTD CSV as exported (messy layout): only the **MONTHLY** block (columns B–H) is
   read; the DAILY block and the summary block are ignored; Year/Month come from B1:C2 and rows outside
   that month raise a warning. Also accepts a clean table (`Account, Type, Join Date, FTD Time, Amount`).
@@ -145,6 +148,8 @@ Built **inside each calendar month**; weeks end on Sunday.
 Oct 2026 → I 1–11, II 12–18, III 19–25, IV 26–31.
 
 ## Upload auto-detect (Nov 2026)
+- Update 2026-11-04: an FTD file detected here is no longer imported; the route answers 400 "FTD is
+  entered manually below" (see "Manual daily FTD").
 - The Uploads page has one primary **Upload file** drop zone (`POST uploads/auto`, same raw body,
   `mode`, `fileName`, `offset`). The server sniffs only the first 40 rows (`readSheetRows` with
   `sheetRows`) and routes the file:
@@ -159,6 +164,46 @@ Oct 2026 → I 1–11, II 12–18, III 19–25, IV 26–31.
 - Preview/commit, duplicate counts, conflicts and the WIB (+07:00) default are the same as before:
   both routes share `upload-handlers.ts`. The two type-specific cards remain as a manual override
   under a collapsed "Choose type manually".
+
+## Manual daily FTD (Nov 2026)
+Steering (owner, 2026-11-04): "FTD does not need an upload: pick the date and enter the FTD number.
+Everything else is uploaded as files."
+- Table `onboarding_ftd_daily` (migration 044, additive): `ftd_date DATE PK` (WIB day), `ftd_count
+  INTEGER ≥ 0`, `ftd_amount NUMERIC(16,2) NULL` (USD, optional), `updated_by` (users, SET NULL on
+  delete), `updated_by_name`, `created_at`, `updated_at`. `onboarding_ftd` is untouched.
+  Rollback (documented in the migration): `DROP TABLE IF EXISTS onboarding_ftd_daily;` + delete the
+  `schema_migrations` row.
+- API `GET/POST/DELETE /api/monthly-report/ftd-daily` (same permission as uploads: admin or
+  "Can upload"). POST `{date, count, amount?}` upserts by date (`ON CONFLICT (ftd_date) DO UPDATE`),
+  so saving a date again is an edit; returns `created` true/false. Validation (`ftd-daily.ts`):
+  valid ISO date, not after today (WIB), whole count ≥ 0, amount empty or ≥ 0 with ≤ 2 decimals.
+  DELETE `?date=` clears a day (it falls back to the FTD file, or No data).
+- UI: "Daily FTD" panel on the Uploads page, under the onboarding drop zone: Date (WIB, default
+  yesterday, max today), FTD count, FTD amount (optional), Save/Update (a badge warns when the date
+  already has a value), and a table of the last 31 entered days (date, FTD, amount or "Not entered",
+  last edited by, when WIB, Edit / Clear).
+- Auto-detect upload takes onboarding exports only. An FTD file dropped there returns 400 with
+  "FTD is entered manually below…" (`ftdManual: true`); nothing is saved. `POST uploads/ftd` is admin
+  only; the FTD card is shown only to admins inside "Choose type manually".
+- Precedence per WIB day: a manual entry → its count and amount (an entered 0 is a real 0; an empty
+  amount is "Not entered", never filled from the account rows, so count and amount share one source);
+  otherwise the count/amount derived from `onboarding_ftd` account rows (as before).
+- FTD coverage = account-level FTD uploads ∪ days with a manual entry (`DataCoverage.ftd`); the
+  account part alone is `DataCoverage.ftdAccounts`. "FTD data through", missing days and No data use
+  the union.
+- Metrics: FTD count, daily average, peak, FTD ÷ Total Real Account and FTD ÷ Registrations use the
+  merged daily counts. Amount total sums the known amounts; the average is over FTDs with a known
+  amount; the UI notes how many manual days have no amount. Micro / Standard comes only from
+  account-level days (labelled "(FTD-file days)" when manual days are in the period).
+- Same-account cohort ("Activated → FTD (same accounts)", "From accounts activated this period",
+  funnel FTD step) joins FTDs to onboarding by trading account, which a manual count does not have.
+  It is reported only when account-level FTD data covers every (past) day of the period
+  (`cohortAvailable`); otherwise it reads **No data** with the note "Needs the account-level FTD file
+  for every day of the period". Partial account coverage would silently understate the cohort, so it
+  is not shown. October 2026 (fully covered by the FTD file) keeps 2,467 / 34.4%.
+- Export: new sheet **FTD daily** (Date (WIB), FTD, FTD Amount (USD), Source = Manual entry / FTD file
+  (accounts); No data / Not entered), plus totals of manual vs file days. The Summary/Daily sheets use
+  the merged counts; the KPIs sheet writes No data for the cohort funnel step when unavailable.
 
 ## Data coverage ("data through" and gaps)
 - Coverage per kind = the merged `data_from`–`data_to` (WIB dates) of all `monthly_report_uploads`
@@ -190,11 +235,12 @@ No migration: `data_from`, `data_to`, `rows_duplicate` and the other counters al
 ## Architecture
 - Pure functions in `src/lib/monthly-report/`: `periods.ts`, `xlsx-read.ts`, `onboarding-parse.ts`,
   `ftd-parse.ts`, `metrics.ts`, `conflicts.ts`, `export.ts`, `access.ts`, `upload-offset.ts`,
-  `detect.ts`, `coverage.ts`, `upload-history.ts`; shared upload route bodies in `upload-handlers.ts`.
+  `detect.ts`, `coverage.ts`, `upload-history.ts`, `ftd-daily.ts`; shared upload route bodies in `upload-handlers.ts`.
   DB in `store.ts`; route glue in `service.ts`.
 - API (`/api/monthly-report/*`); the UI reads only aggregation routes:
-  - `GET report` · `GET details?kind=` (masked drill-down) · `GET export` (.xlsx: Summary, Daily, KPIs)
-  - `POST uploads/auto` (detects the type), `POST uploads/onboarding`, `POST uploads/ftd` (raw body, `mode=preview|commit`, `fileName`, `offset`)
+  - `GET report` · `GET details?kind=` (masked drill-down) · `GET export` (.xlsx: Summary, Daily, FTD daily, KPIs)
+  - `POST uploads/auto` (onboarding only; FTD → "entered manually"), `POST uploads/onboarding`, `POST uploads/ftd` (admin only) (raw body, `mode=preview|commit`, `fileName`, `offset`)
+  - `GET/POST/DELETE ftd-daily` (manual daily FTD, upload rights)
   - `GET uploads` (paged history with filters, coverage, upload rights) · `GET/PUT access` (admin only)
 - UI: `/dashboard/monthly-report` (Onboarding), `/settlement` (Coming soon), `/uploads`, `/access`.
   Sidebar section "Reports". Dupoin teal `#2EB5C4` / `#1A8A96` inside these pages.
@@ -209,7 +255,10 @@ idempotent (a rerun reports 0 inserted, every row skipped as duplicate). Product
 - `tests/monthly-report-real-files.test.ts` runs only when `MONTHLY_REPORT_DATA_DIR` holds the real
   files (never committed) and asserts the October numbers above.
 - `scripts/verify-monthly-report-migration.ts` (needs `TEST_DATABASE_URL`) applies 041 twice and checks
-  SQL aggregations against the pure functions.
+  SQL aggregations against the pure functions; also 044 twice, manual FTD upsert/edit/clear,
+  precedence, coverage and the 044 rollback (onboarding_ftd unchanged).
+- `tests/monthly-report-ftd-daily.test.ts`: validation, upsert/edit, precedence, coverage, cohort
+  availability, permissions, export sheet, migration shape.
 
 ## Out of scope / later
 Settlement data, rejection-reason parser, API sync, per-user data scoping.

@@ -12,8 +12,13 @@ import { addDays, type DateRange } from './periods';
 export const COVERAGE_KINDS = ['onboarding', 'ftd'] as const;
 export type CoverageKind = typeof COVERAGE_KINDS[number];
 
-/** Merged, sorted, non-overlapping covered ranges per kind. */
-export interface DataCoverage { onboarding: DateRange[]; ftd: DateRange[] }
+/**
+ * Merged, sorted, non-overlapping covered ranges per kind. `ftd` = days with
+ * FTD data from any source (account-level upload or manual daily entry);
+ * `ftdAccounts` = only the account-level uploads (needed by the same-account
+ * cohort metrics). When `ftdAccounts` is absent, `ftd` is account-level only.
+ */
+export interface DataCoverage { onboarding: DateRange[]; ftd: DateRange[]; ftdAccounts?: DateRange[] }
 
 /**
  * How much of a bucket is covered, counting only days up to today (WIB):

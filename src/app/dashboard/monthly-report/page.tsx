@@ -10,7 +10,7 @@ import { FunnelChart, TrendChart } from '@/components/monthly-report/charts';
 import { useMonthlyReportPermissions } from '@/components/monthly-report/MonthlyReportContext';
 import { DataThrough, MissingDataNotice } from '@/components/monthly-report/DataCoverage';
 import { InfoTip, ReportTabs } from '@/components/monthly-report/ReportTabs';
-import { pending, TOTAL_REAL_ACCOUNT_LABEL } from '@/lib/monthly-report/definitions';
+import { COHORT_UNAVAILABLE_NOTE, pending, TOTAL_REAL_ACCOUNT_LABEL } from '@/lib/monthly-report/definitions';
 import type { BucketCoverage, BucketValues, OnboardingReport } from '@/lib/monthly-report/metrics';
 import {
   GRANULARITIES, PERIOD_PRESETS, PRESET_LABELS, defaultGranularity, formatDayLabel, resolvePeriod, shiftAnchor,
@@ -257,7 +257,7 @@ export default function MonthlyReportOnboardingPage() {
             <Panel>
               <SectionHeader title="First-time deposits" description="FTD count is the headline. Amount is shown for reference only." />
               {!report.hasFtd ? (
-                <EmptyState className="min-h-32" title="No FTD data for this period" description={canUpload ? 'Upload the monthly FTD report on the Uploads tab.' : 'FTD data has not been uploaded for these dates.'} />
+                <EmptyState className="min-h-32" title="No FTD data for this period" description={canUpload ? 'Enter the daily FTD on the Uploads tab (pick the date, type the number).' : 'FTD has not been entered for these dates.'} />
               ) : (
                 <>
                   <div className="mt-4 flex flex-wrap items-end gap-x-8 gap-y-3">
@@ -267,16 +267,18 @@ export default function MonthlyReportOnboardingPage() {
                     </div>
                     <Stat label="Daily average" value={formatDecimal(report.ftd.dailyAverage)} />
                     <Stat label="Peak day" value={report.peaks.ftd ? `${formatInteger(report.peaks.ftd.value)} · ${formatDayLabel(report.peaks.ftd.date)}` : '—'} />
-                    <Stat label="Micro / Standard" value={`${formatInteger(report.ftd.byType.micro)} / ${formatInteger(report.ftd.byType.standard)}`} />
+                    <Stat label={report.ftd.byTypeComplete === false ? 'Micro / Standard (FTD-file days)' : 'Micro / Standard'} value={report.ftd.accountDays === 0 && report.ftd.manualDays > 0 ? '—' : `${formatInteger(report.ftd.byType.micro)} / ${formatInteger(report.ftd.byType.standard)}`} />
                   </div>
                   <dl className="mt-5 grid gap-x-6 gap-y-2 text-xs sm:grid-cols-2">
                     <Row label="FTD ÷ Total Real Account" hint="All FTDs in the period divided by Total Real Account (the monthly deck method)" value={formatPct(report.ftd.ftdPerApprovedPct)} />
-                    <Row label="Activated → FTD (same accounts)" hint="Unique accounts activated in the period that also made an FTD, divided by Real Account Activated" value={formatPct(report.ftd.realToFtdPct)} />
+                    <Row label="Activated → FTD (same accounts)" hint={report.ftd.cohortAvailable === false ? COHORT_UNAVAILABLE_NOTE : 'Unique accounts activated in the period that also made an FTD, divided by Real Account Activated'} value={report.ftd.cohortAvailable === false ? 'No data' : formatPct(report.ftd.realToFtdPct)} />
                     <Row label="FTD ÷ Registrations" hint="All FTDs divided by registrations" value={formatPct(report.ftd.ftdPerRegistrationPct)} />
-                    <Row label="From accounts activated this period" value={`${formatInteger(report.ftd.fromPeriodActivations)} · earlier accounts ${formatInteger(report.ftd.fromEarlierAccounts)}`} />
+                    <Row label="From accounts activated this period" hint={report.ftd.cohortAvailable === false ? COHORT_UNAVAILABLE_NOTE : undefined} value={report.ftd.cohortAvailable === false ? 'No data' : `${formatInteger(report.ftd.fromPeriodActivations)} · earlier accounts ${formatInteger(report.ftd.fromEarlierAccounts)}`} />
                   </dl>
                   <p className="mt-4 border-t border-[var(--mos-border-subtle)] pt-3 text-[11px] text-[var(--mos-text-faint)]">
-                    Amount (as in the FTD report): total {formatAmount(report.ftd.amountTotal)} · average {formatAmount(report.ftd.amountAverage)} per FTD
+                    Amount: total {formatAmount(report.ftd.amountTotal)} · average {formatAmount(report.ftd.amountAverage)} per FTD
+                    {report.ftd.daysWithoutAmount > 0 ? ` · ${formatInteger(report.ftd.daysWithoutAmount)} manual day(s) without amount (not included)` : ''}
+                    {report.ftd.manualDays > 0 ? ` · ${formatInteger(report.ftd.manualDays)} day(s) from manual entry` : ''}
                   </p>
                 </>
               )}

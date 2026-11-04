@@ -32,6 +32,19 @@ export const EXPECTED_COLUMNS: Record<DetectedKind, readonly string[]> = {
   ftd: FTD_COLUMNS,
 };
 
+/** Shown when an FTD file is dropped on the auto-detect upload: daily FTD is entered by hand. */
+export const FTD_IS_MANUAL_MESSAGE = 'FTD is entered manually below: pick the date and type the FTD count (and amount). Only the onboarding export is uploaded here.';
+
+/**
+ * What the auto-detect upload does with a detected file. Only onboarding
+ * exports are imported; an FTD file is rejected with FTD_IS_MANUAL_MESSAGE
+ * (the legacy FTD CSV import stays under "Choose type manually", admin only).
+ */
+export function autoUploadAction(detected: DetectResult): 'onboarding' | 'ftd-manual' | 'unknown' {
+  if (!detected.ok) return 'unknown';
+  return detected.kind === 'onboarding' ? 'onboarding' : 'ftd-manual';
+}
+
 export function unknownFormatError(): string {
   return 'Unknown file format. Expected an onboarding export with the columns: '
     + `${ONBOARDING_COLUMNS.join(', ')}; or an FTD report / table with the columns: ${FTD_COLUMNS.join(', ')}.`;

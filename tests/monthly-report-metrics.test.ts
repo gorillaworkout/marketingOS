@@ -102,6 +102,7 @@ test('the report builds KPIs, October weeks, funnel and comparison', () => {
   assert.deepEqual(report.buckets.map(b => b.values.ftd), [3, 1, 0, 1]);
   assert.deepEqual(report.ftd, {
     count: 5, amountTotal: 13667.02, amountAverage: 2733.4, byType: { micro: 3, standard: 2, other: 0 },
+    byTypeComplete: true, manualDays: 0, accountDays: 4, daysWithoutAmount: 0, cohortAvailable: true,
     fromPeriodActivations: 3, fromEarlierAccounts: 2, dailyAverage: 0.2, ftdPerApprovedPct: 100,
     ftdPerRegistrationPct: 45.5, realToFtdPct: 75, activatedWithFtd: 3,
   });

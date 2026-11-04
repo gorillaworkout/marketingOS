@@ -4,7 +4,7 @@ import * as XLSX from 'xlsx';
 import {
   ONBOARDING_HEADERS, SYNTHETIC_ROWS, buildWorkbookBuffer, cleanFtdWorkbook, syntheticFtdReportCsv, syntheticOnboardingWorkbook,
 } from './fixtures/monthly-report-onboarding';
-import { detectUploadKind, unknownFormatError } from '../src/lib/monthly-report/detect';
+import { FTD_IS_MANUAL_MESSAGE, autoUploadAction, detectUploadKind, unknownFormatError } from '../src/lib/monthly-report/detect';
 import { FTD_COLUMNS, parseFtdFile } from '../src/lib/monthly-report/ftd-parse';
 import { ONBOARDING_COLUMNS, parseOnboardingWorkbook } from '../src/lib/monthly-report/onboarding-parse';
 
@@ -84,16 +84,26 @@ test('detect: empty and unreadable files', () => {
   assert.equal(detectUploadKind(Buffer.from('just some text\nwithout columns\n')).kind, null);
 });
 
-test('detect: the auto route delegates to the same handlers and checks the previewed type on commit', async () => {
+test('detect: the auto route imports onboarding only, rejects FTD files with the manual-entry message, checks the previewed type on commit', async () => {
   const { readFile } = await import('node:fs/promises');
   const route = await readFile('src/app/api/monthly-report/uploads/auto/route.ts', 'utf8');
   assert.match(route, /detectUploadKind\(body\)/);
   assert.match(route, /handleOnboardingUpload\(user, body, params, extra\)/);
-  assert.match(route, /handleFtdUpload\(user, body, params, extra\)/);
+  assert.doesNotMatch(route, /handleFtdUpload/);
+  assert.match(route, /autoUploadAction\(detected\) === 'ftd-manual'/);
+  assert.match(route, /FTD_IS_MANUAL_MESSAGE/);
   assert.match(route, /expect !== detected\.kind/);
   assert.match(route, /requireMonthlyReport\(request, \{ upload: true \}\)/);
-  for (const kind of ['onboarding', 'ftd']) {
-    const source = await readFile(`src/app/api/monthly-report/uploads/${kind}/route.ts`, 'utf8');
-    assert.match(source, /requireMonthlyReport\(request, \{ upload: true \}\)/);
-  }
+  const onboarding = await readFile('src/app/api/monthly-report/uploads/onboarding/route.ts', 'utf8');
+  assert.match(onboarding, /requireMonthlyReport\(request, \{ upload: true \}\)/);
+  // Legacy account-level FTD file import: admin only.
+  const ftd = await readFile('src/app/api/monthly-report/uploads/ftd/route.ts', 'utf8');
+  assert.match(ftd, /requireMonthlyReport\(request, \{ adminOnly: true \}\)/);
+});
+
+test('detect: auto-upload action per detected kind', () => {
+  assert.equal(autoUploadAction(detectUploadKind(syntheticOnboardingWorkbook())), 'onboarding');
+  assert.equal(autoUploadAction(detectUploadKind(Buffer.from(syntheticFtdReportCsv(), 'utf8'))), 'ftd-manual');
+  assert.equal(autoUploadAction(detectUploadKind(Buffer.from('just some text\nwithout columns\n'))), 'unknown');
+  assert.match(FTD_IS_MANUAL_MESSAGE, /FTD is entered manually below/);
 });

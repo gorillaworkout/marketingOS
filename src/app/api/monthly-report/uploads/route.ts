@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { coverageOverview } from '@/lib/monthly-report/coverage';
 import { listUploadMonths, listUploadsPage, loadCoverage, loadUploadRanges } from '@/lib/monthly-report/store';
-import { requireMonthlyReport, todayWib } from '@/lib/monthly-report/service';
+import { permissionsFor, requireMonthlyReport, todayWib } from '@/lib/monthly-report/service';
 import { monthBounds, pageCount, parseUploadHistoryQuery } from '@/lib/monthly-report/upload-history';
 
 export const dynamic = 'force-dynamic';
@@ -26,5 +26,6 @@ export async function GET(request: NextRequest) {
     months,
     coverage: coverageOverview(coverage, today, filter.month ? monthBounds(filter.month) : null),
     today,
+    permissions: permissionsFor(user),
   }, { headers: { 'Cache-Control': 'no-store' } });
 }

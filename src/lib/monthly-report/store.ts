@@ -16,6 +16,7 @@ import type { StoredEvent } from './conflicts';
 import { REPORT_TIMEZONE, type DateRange } from './periods';
 import { coverageFromUploads, mergeRanges, monthsFromUploads, type DataCoverage, type UploadRange } from './coverage';
 import { pageOffset, uploadHistoryWhere, type UploadHistoryFilter } from './upload-history';
+import { combinedSpan, mergeDailyFtd, withManualFtdCoverage, type ManualFtdEntry, type ManualFtdInput } from './ftd-daily';
 
 export type UploadKind = 'onboarding' | 'ftd' | 'rejection_reasons';
 export type DataSource = 'upload' | 'api';
@@ -279,15 +280,95 @@ export async function loadFtdCohort(range: DateRange): Promise<PeriodData['ftdCo
   return { activatedWithFtd: Number(row?.activated_with_ftd ?? 0), ftdFromPeriodActivations: Number(row?.ftd_from_period ?? 0) };
 }
 
+/**
+ * One period's data. `ftd` applies the precedence of ftd-daily.ts: a manual
+ * daily entry replaces the account-derived value of its day.
+ * `ftdCoverage` = overall FTD span (account rows and manual days).
+ */
 export async function loadPeriodData(range: DateRange, ftdCoverage?: DateRange | null): Promise<PeriodData> {
-  const [daily, ftd, uniqueActivated, ftdCohort, coverage] = await Promise.all([
+  const [daily, derivedFtd, manualFtd, uniqueActivated, ftdCohort, coverage] = await Promise.all([
     loadDailyOnboarding(range),
     loadDailyFtd(range),
+    listManualFtd({ range }),
     loadUniqueActivated(range),
     loadFtdCohort(range),
-    ftdCoverage === undefined ? loadFtdCoverage() : Promise.resolve(ftdCoverage),
+    ftdCoverage === undefined ? loadCombinedFtdSpan() : Promise.resolve(ftdCoverage),
   ]);
-  return { daily, ftd, ftdCoverage: coverage, uniqueActivated, ftdCohort };
+  return { daily, ftd: mergeDailyFtd(derivedFtd, manualFtd), ftdCoverage: coverage, uniqueActivated, ftdCohort };
+}
+
+// ---- Manual daily FTD (onboarding_ftd_daily) ----
+
+interface ManualFtdRow { ftd_date: string; ftd_count: number | string; ftd_amount: string | number | null; updated_by_name: string | null; updated_at: string | Date; created_at: string | Date }
+
+const MANUAL_FTD_COLUMNS = `to_char(ftd_date, 'YYYY-MM-DD') AS ftd_date, ftd_count, ftd_amount::text AS ftd_amount, updated_by_name, updated_at, created_at`;
+
+function toManualEntry(row: ManualFtdRow): ManualFtdEntry {
+  return {
+    date: row.ftd_date,
+    count: Number(row.ftd_count),
+    amount: row.ftd_amount === null ? null : Number(row.ftd_amount),
+    updatedByName: row.updated_by_name,
+    updatedAt: new Date(row.updated_at).toISOString(),
+    createdAt: new Date(row.created_at).toISOString(),
+  };
+}
+
+/** SQL for the per-day upsert: insert, or update count/amount/editor of an existing day. */
+export const UPSERT_MANUAL_FTD_SQL = `INSERT INTO onboarding_ftd_daily (ftd_date, ftd_count, ftd_amount, updated_by, updated_by_name)
+VALUES (?::date, ?, ?::numeric, ?, ?)
+ON CONFLICT (ftd_date) DO UPDATE SET
+  ftd_count = EXCLUDED.ftd_count,
+  ftd_amount = EXCLUDED.ftd_amount,
+  updated_by = EXCLUDED.updated_by,
+  updated_by_name = EXCLUDED.updated_by_name,
+  updated_at = CURRENT_TIMESTAMP
+RETURNING ${MANUAL_FTD_COLUMNS}, (xmax = 0) AS inserted`;
+
+/** Creates or updates the manual FTD of one WIB day (upsert by date). */
+export async function upsertManualFtd(input: ManualFtdInput, actor: UploadActor): Promise<{ entry: ManualFtdEntry; created: boolean }> {
+  const row = await queryOne<ManualFtdRow & { inserted: boolean }>(
+    UPSERT_MANUAL_FTD_SQL,
+    [input.date, input.count, input.amount === null ? null : input.amount.toFixed(2), actor.id, actor.name],
+  );
+  if (!row) throw new Error('Could not save the FTD entry');
+  return { entry: toManualEntry(row), created: Boolean(row.inserted) };
+}
+
+/** Removes a day's manual entry; the day falls back to the FTD file (or "No data"). */
+export async function deleteManualFtd(date: string): Promise<boolean> {
+  const row = await queryOne<{ ftd_date: string }>('DELETE FROM onboarding_ftd_daily WHERE ftd_date = ?::date RETURNING ftd_date::text', [date]);
+  return Boolean(row);
+}
+
+/** Manual entries, newest day first; optionally within a WIB range. */
+export async function listManualFtd(options: { range?: DateRange; limit?: number } = {}): Promise<ManualFtdEntry[]> {
+  const params: unknown[] = [];
+  let where = '';
+  if (options.range) { where = 'WHERE ftd_date BETWEEN ?::date AND ?::date'; params.push(options.range.from, options.range.to); }
+  const limit = options.limit ? `LIMIT ${Math.min(Math.max(Math.floor(options.limit), 1), 400)}` : '';
+  const rows = await queryAll<ManualFtdRow & Record<string, unknown>>(
+    `SELECT ${MANUAL_FTD_COLUMNS} FROM onboarding_ftd_daily ${where} ORDER BY ftd_date DESC ${limit}`,
+    params,
+  );
+  return rows.map(toManualEntry);
+}
+
+export async function countManualFtd(): Promise<number> {
+  const row = await queryOne<{ count: string }>('SELECT COUNT(*)::text AS count FROM onboarding_ftd_daily');
+  return Number(row?.count ?? 0);
+}
+
+/** Every day that has a manual FTD entry (small table: one row per day). */
+export async function loadManualFtdDates(): Promise<string[]> {
+  const rows = await queryAll<{ ftd_date: string }>(`SELECT to_char(ftd_date, 'YYYY-MM-DD') AS ftd_date FROM onboarding_ftd_daily ORDER BY 1`);
+  return rows.map(row => row.ftd_date);
+}
+
+/** First → last FTD day across account rows and manual entries. */
+export async function loadCombinedFtdSpan(): Promise<DateRange | null> {
+  const [accounts, manual] = await Promise.all([loadFtdCoverage(), loadManualFtdDates()]);
+  return combinedSpan(accounts, manual);
 }
 
 export async function hasAnyOnboardingData(): Promise<boolean> {
@@ -347,14 +428,16 @@ export async function loadOnboardingSpan(): Promise<DateRange | null> {
  */
 export async function loadCoverage(uploadRanges?: UploadRange[]): Promise<DataCoverage> {
   const coverage = coverageFromUploads(uploadRanges ?? await loadUploadRanges());
-  const [onboardingSpan, ftdSpan] = await Promise.all([
+  const [onboardingSpan, ftdSpan, manualDates] = await Promise.all([
     coverage.onboarding.length ? Promise.resolve(null) : loadOnboardingSpan(),
     coverage.ftd.length ? Promise.resolve(null) : loadFtdCoverage(),
+    loadManualFtdDates(),
   ]);
-  return {
+  // FTD coverage = account-level uploads OR days with a manual entry.
+  return withManualFtdCoverage({
     onboarding: onboardingSpan ? mergeRanges([onboardingSpan]) : coverage.onboarding,
     ftd: ftdSpan ? mergeRanges([ftdSpan]) : coverage.ftd,
-  };
+  }, manualDates);
 }
 
 export async function listUploadMonths(uploadRanges?: UploadRange[]): Promise<string[]> {

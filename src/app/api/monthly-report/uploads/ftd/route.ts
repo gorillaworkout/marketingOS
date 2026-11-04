@@ -6,12 +6,14 @@ export const dynamic = 'force-dynamic';
 export const maxDuration = 120;
 
 /**
- * FTD upload (manual type choice): the monthly FTD report CSV (MONTHLY block) or a clean table with
+ * Legacy FTD file import (admin only; daily FTD is normally entered by hand on
+ * the Uploads page, see /api/monthly-report/ftd-daily). Account-level rows feed
+ * the same-account cohort metrics. FTD upload (manual type choice): the monthly FTD report CSV (MONTHLY block) or a clean table with
  * Account, Type, Join Date, FTD Time, Amount. Upserts by Account.
  * Same query parameters as the onboarding upload.
  */
 export async function POST(request: NextRequest) {
-  const user = await requireMonthlyReport(request, { upload: true });
+  const user = await requireMonthlyReport(request, { adminOnly: true });
   if (user instanceof NextResponse) return user;
   const body = await readUploadBody(request);
   if (body instanceof NextResponse) return body;
