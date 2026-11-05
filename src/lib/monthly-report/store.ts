@@ -17,8 +17,13 @@ import { REPORT_TIMEZONE, type DateRange } from './periods';
 import { coverageFromUploads, mergeRanges, monthsFromUploads, type DataCoverage, type UploadRange } from './coverage';
 import { pageOffset, uploadHistoryWhere, type UploadHistoryFilter } from './upload-history';
 import { combinedSpan, mergeDailyFtd, withManualFtdCoverage, type ManualFtdEntry, type ManualFtdInput } from './ftd-daily';
+import type { SummaryRow } from './summary-parse';
+import { summaryFingerprint, summaryToDaily } from './summary-parse';
+import type { UserApprovedRow } from './user-approved-parse';
+import { userApprovedKey, buildApproverReport, type ApproverStat } from './user-approved-parse';
+import { buildRejectionReasonsReport, type RejectionReasonsReport } from './rejection-reasons';
 
-export type UploadKind = 'onboarding' | 'ftd' | 'rejection_reasons';
+export type UploadKind = 'onboarding' | 'onboarding_summary' | 'user_approved' | 'ftd' | 'rejection_reasons';
 export type DataSource = 'upload' | 'api';
 
 export interface UploadActor { id: string | null; name: string }
@@ -286,14 +291,21 @@ export async function loadFtdCohort(range: DateRange): Promise<PeriodData['ftdCo
  * `ftdCoverage` = overall FTD span (account rows and manual days).
  */
 export async function loadPeriodData(range: DateRange, ftdCoverage?: DateRange | null): Promise<PeriodData> {
-  const [daily, derivedFtd, manualFtd, uniqueActivated, ftdCohort, coverage] = await Promise.all([
+  const [eventDaily, summaryDaily, derivedFtd, manualFtd, uniqueActivatedEvents, ftdCohort, coverage] = await Promise.all([
     loadDailyOnboarding(range),
+    loadDailySummary(range),
     loadDailyFtd(range),
     listManualFtd({ range }),
     loadUniqueActivated(range),
     loadFtdCohort(range),
     ftdCoverage === undefined ? loadCombinedFtdSpan() : Promise.resolve(ftdCoverage),
   ]);
+  const daily = mergeDailyWithSummary(eventDaily, summaryDaily);
+  // Summary days already carry per-day activations; prefer their sum when any summary is present
+  // so Total Real Account matches the Metabase daily sheet (PPT-style). Otherwise use unique events.
+  const uniqueActivated = summaryDaily.length
+    ? daily.reduce((n, day) => n + day.activated, 0)
+    : uniqueActivatedEvents;
   return { daily, ftd: mergeDailyFtd(derivedFtd, manualFtd), ftdCoverage: coverage, uniqueActivated, ftdCohort };
 }
 
@@ -372,7 +384,10 @@ export async function loadCombinedFtdSpan(): Promise<DateRange | null> {
 }
 
 export async function hasAnyOnboardingData(): Promise<boolean> {
-  return Boolean(await queryOne('SELECT 1 FROM onboarding_events LIMIT 1'));
+  return Boolean(
+    await queryOne('SELECT 1 FROM onboarding_events LIMIT 1')
+    || await queryOne('SELECT 1 FROM onboarding_daily_summary LIMIT 1'),
+  );
 }
 
 const UPLOAD_COLUMNS = `id, kind, file_name, source_utc_offset, uploaded_by_name, rows_total, rows_inserted, rows_updated, rows_skipped, rows_duplicate,
@@ -547,4 +562,258 @@ export async function countStoredFtd(accountNos: string[]): Promise<number> {
     count += Number(row?.count ?? 0);
   }
   return count;
+}
+
+// ---- Daily summary (onboarding_daily_summary) + user_approved ----
+
+export interface SummarySaveCounts {
+  total: number;
+  inserted: number;
+  updated: number;
+  unchanged: number; // identical fingerprint re-upload
+  invalid: number;
+}
+
+/**
+ * Upsert daily summary rows by summary_date. Identical numbers → unchanged
+ * (rows_duplicate); different numbers → replace (rows_updated).
+ */
+export async function saveOnboardingSummary(
+  rows: SummaryRow[],
+  meta: { fileName: string; actor: UploadActor; skipped: number; range: DateRange | null },
+  source: DataSource = 'upload',
+): Promise<{ uploadId: string; counts: SummarySaveCounts }> {
+  const uploadId = uuidv4();
+  const existingRows = rows.length
+    ? await queryAll<{
+        summary_date: string; registrations: number; total_real_account: number; manual_kyc_approved: number;
+        kyc_rejected: number; first_account: number; additional_account: number; auto_kyc_approved: number;
+      }>(
+      `SELECT to_char(summary_date, 'YYYY-MM-DD') AS summary_date, registrations, total_real_account, manual_kyc_approved,
+              kyc_rejected, first_account, additional_account, auto_kyc_approved
+       FROM onboarding_daily_summary WHERE summary_date = ANY(?::date[])`,
+      [rows.map(row => row.date)],
+    )
+    : [];
+  const existingByDate = new Map(existingRows.map(row => [row.summary_date, row]));
+  let inserted = 0;
+  let updated = 0;
+  let unchanged = 0;
+  const toInsert: SummaryRow[] = [];
+  const toUpdate: SummaryRow[] = [];
+  for (const row of rows) {
+    const existing = existingByDate.get(row.date);
+    if (!existing) { toInsert.push(row); continue; }
+    const existingFp = [
+      existing.registrations, existing.total_real_account, existing.manual_kyc_approved, existing.kyc_rejected,
+      existing.first_account, existing.additional_account, existing.auto_kyc_approved,
+    ].join('|');
+    if (existingFp === summaryFingerprint(row)) unchanged += 1;
+    else toUpdate.push(row);
+  }
+  await executeTransaction(async transaction => {
+    await transaction.execute(
+      `INSERT INTO monthly_report_uploads (id, kind, file_name, source_utc_offset, uploaded_by, uploaded_by_name, rows_total, rows_skipped, data_from, data_to)
+       VALUES (?, 'onboarding_summary', ?, NULL, ?, ?, ?, ?, ?, ?)`,
+      [uploadId, meta.fileName, meta.actor.id, meta.actor.name, rows.length + meta.skipped, meta.skipped, meta.range?.from ?? null, meta.range?.to ?? null],
+    );
+    for (const row of toInsert) {
+      await transaction.execute(
+        `INSERT INTO onboarding_daily_summary
+           (summary_date, registrations, total_real_account, manual_kyc_approved, kyc_rejected,
+            first_account, additional_account, auto_kyc_approved, source, upload_id)
+         VALUES (?::date, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [row.date, row.registrations, row.totalRealAccount, row.manualKycApproved, row.kycRejected,
+         row.firstAccount, row.additionalAccount, row.autoKycApproved, source, uploadId],
+      );
+      inserted += 1;
+    }
+    for (const row of toUpdate) {
+      await transaction.execute(
+        `UPDATE onboarding_daily_summary SET
+           registrations = ?, total_real_account = ?, manual_kyc_approved = ?, kyc_rejected = ?,
+           first_account = ?, additional_account = ?, auto_kyc_approved = ?,
+           source = ?, upload_id = ?, updated_at = CURRENT_TIMESTAMP
+         WHERE summary_date = ?::date`,
+        [row.registrations, row.totalRealAccount, row.manualKycApproved, row.kycRejected,
+         row.firstAccount, row.additionalAccount, row.autoKycApproved, source, uploadId, row.date],
+      );
+      updated += 1;
+    }
+    await transaction.execute(
+      'UPDATE monthly_report_uploads SET rows_inserted = ?, rows_updated = ?, rows_duplicate = ? WHERE id = ?',
+      [inserted, updated, unchanged, uploadId],
+    );
+  });
+  return { uploadId, counts: { total: rows.length, inserted, updated, unchanged, invalid: meta.skipped } };
+}
+
+export interface UserApprovedSaveCounts {
+  total: number;
+  inserted: number;
+  skippedDuplicate: number;
+  duplicatesInFile: number;
+  invalid: number;
+  robotRows: number;
+}
+
+const UA_COLUMNS = [
+  'record_id', 'document_id', 'create_time', 'finished_time', 'applicant_uid', 'approver_uid', 'approver',
+  'approval_method', 'step', 'step_status', 'approved_status', 'success_status', 'account', 'processing_time',
+  'remark', 'rejected_reason', 'source', 'upload_id',
+] as const;
+
+function insertUserApprovedSql(count: number): string {
+  const casts: Record<string, string> = { create_time: '::timestamptz', finished_time: '::timestamptz' };
+  const placeholders = `(${UA_COLUMNS.map(c => `?${casts[c] ?? ''}`).join(', ')})`;
+  return `INSERT INTO onboarding_user_approved (${UA_COLUMNS.join(', ')})
+VALUES ${Array.from({ length: count }, () => placeholders).join(', ')}
+ON CONFLICT (record_id) DO NOTHING`;
+}
+
+export async function saveUserApproved(
+  rows: UserApprovedRow[],
+  meta: { fileName: string; offset: string; actor: UploadActor; skipped: number; duplicatesInFile?: number; range: DateRange | null; robotRows?: number },
+  source: DataSource = 'upload',
+): Promise<{ uploadId: string; counts: UserApprovedSaveCounts }> {
+  const unique = new Map<string, UserApprovedRow>();
+  for (const row of rows) if (!unique.has(userApprovedKey(row))) unique.set(userApprovedKey(row), row);
+  const duplicatesInFile = (meta.duplicatesInFile ?? 0) + (rows.length - unique.size);
+  const uploadId = uuidv4();
+  let inserted = 0;
+  await executeTransaction(async transaction => {
+    await transaction.execute(
+      `INSERT INTO monthly_report_uploads (id, kind, file_name, source_utc_offset, uploaded_by, uploaded_by_name, rows_total, rows_skipped, data_from, data_to)
+       VALUES (?, 'user_approved', ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [uploadId, meta.fileName, meta.offset, meta.actor.id, meta.actor.name, rows.length + (meta.duplicatesInFile ?? 0) + meta.skipped, meta.skipped, meta.range?.from ?? null, meta.range?.to ?? null],
+    );
+    for (const batch of chunkRows([...unique.values()])) {
+      inserted += await transaction.execute(
+        insertUserApprovedSql(batch.length),
+        batch.flatMap(row => [
+          row.recordId, row.documentId, row.createTime, row.finishedTime, row.applicantUid, row.approverUid, row.approver,
+          row.approvalMethod, row.step, row.stepStatus, row.approvedStatus, row.successStatus, row.account, row.processingTime,
+          row.remark, row.rejectedReason, source, uploadId,
+        ]),
+      );
+    }
+    const skippedDuplicate = unique.size - inserted + duplicatesInFile;
+    await transaction.execute('UPDATE monthly_report_uploads SET rows_inserted = ?, rows_duplicate = ? WHERE id = ?', [inserted, skippedDuplicate, uploadId]);
+  });
+  return {
+    uploadId,
+    counts: {
+      total: unique.size + duplicatesInFile + meta.skipped,
+      inserted,
+      skippedDuplicate: unique.size - inserted + duplicatesInFile,
+      duplicatesInFile,
+      invalid: meta.skipped,
+      robotRows: meta.robotRows ?? 0,
+    },
+  };
+}
+
+interface SummaryDbRow {
+  summary_date: string;
+  registrations: number;
+  total_real_account: number;
+  manual_kyc_approved: number;
+  kyc_rejected: number;
+  first_account: number;
+  additional_account: number;
+  auto_kyc_approved: number;
+}
+
+export async function loadDailySummary(range: DateRange): Promise<DailyOnboarding[]> {
+  const rows = await queryAll<SummaryDbRow & Record<string, unknown>>(
+    `SELECT to_char(summary_date, 'YYYY-MM-DD') AS summary_date, registrations, total_real_account,
+            manual_kyc_approved, kyc_rejected, first_account, additional_account, auto_kyc_approved
+     FROM onboarding_daily_summary
+     WHERE summary_date BETWEEN ?::date AND ?::date
+     ORDER BY summary_date`,
+    [range.from, range.to],
+  );
+  return rows.map(row => summaryToDaily({
+    date: row.summary_date,
+    registrations: Number(row.registrations),
+    totalRealAccount: Number(row.total_real_account),
+    manualKycApproved: Number(row.manual_kyc_approved),
+    kycRejected: Number(row.kyc_rejected),
+    firstAccount: Number(row.first_account),
+    additionalAccount: Number(row.additional_account),
+    autoKycApproved: Number(row.auto_kyc_approved),
+    // Stored TOTAL REAL ACCOUNT is activations-only in the Metabase export; TRA = TOTAL + manual.
+    totalIncludesManual: false,
+  }));
+}
+
+/** Summary rows win over classic event aggregates for the same WIB day. */
+export function mergeDailyWithSummary(eventDaily: DailyOnboarding[], summaryDaily: DailyOnboarding[]): DailyOnboarding[] {
+  const byDate = new Map(eventDaily.map(day => [day.date, day]));
+  for (const day of summaryDaily) byDate.set(day.date, day);
+  return [...byDate.values()].sort((a, b) => a.date.localeCompare(b.date));
+}
+
+interface UaDbRow {
+  record_id: string;
+  document_id: string | null;
+  create_time: string | Date;
+  finished_time: string | Date | null;
+  applicant_uid: string | null;
+  approver_uid: string | null;
+  approver: string;
+  approval_method: string | null;
+  step: string | null;
+  step_status: string | null;
+  approved_status: string | null;
+  success_status: string | null;
+  account: string | null;
+  processing_time: string | null;
+  remark: string | null;
+  rejected_reason: string | null;
+}
+
+function toUserApprovedRow(row: UaDbRow): UserApprovedRow {
+  return {
+    recordId: row.record_id,
+    documentId: row.document_id,
+    createTime: new Date(row.create_time).toISOString(),
+    finishedTime: row.finished_time ? new Date(row.finished_time).toISOString() : null,
+    applicantUid: row.applicant_uid,
+    approverUid: row.approver_uid,
+    approver: row.approver,
+    approvalMethod: row.approval_method,
+    step: row.step,
+    stepStatus: row.step_status,
+    approvedStatus: row.approved_status,
+    successStatus: row.success_status,
+    account: row.account,
+    processingTime: row.processing_time,
+    remark: row.remark,
+    rejectedReason: row.rejected_reason,
+  };
+}
+
+/** Load user_approved rows whose finished (else create) day OR create day intersects the range. */
+export async function loadUserApprovedForRange(range: DateRange): Promise<UserApprovedRow[]> {
+  const rows = await queryAll<UaDbRow & Record<string, unknown>>(
+    `SELECT record_id, document_id, create_time, finished_time, applicant_uid, approver_uid, approver,
+            approval_method, step, step_status, approved_status, success_status, account, processing_time,
+            remark, rejected_reason
+     FROM onboarding_user_approved
+     WHERE (${wibRangeSql('COALESCE(finished_time, create_time)')})
+        OR (${wibRangeSql('create_time')})`,
+    [range.from, range.to, range.from, range.to],
+  );
+  return rows.map(toUserApprovedRow);
+}
+
+export async function loadApproverStats(range: DateRange): Promise<ApproverStat[]> {
+  const rows = await loadUserApprovedForRange(range);
+  return buildApproverReport(rows, range);
+}
+
+export async function loadRejectionReasons(range: DateRange): Promise<RejectionReasonsReport> {
+  const rows = await loadUserApprovedForRange(range);
+  return buildRejectionReasonsReport(rows, range);
 }

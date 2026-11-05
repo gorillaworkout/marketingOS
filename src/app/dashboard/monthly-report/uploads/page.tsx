@@ -8,10 +8,11 @@ import { DataThrough, MissingDataNotice } from '@/components/monthly-report/Data
 import { ReportTabs } from '@/components/monthly-report/ReportTabs';
 import { formatCoverageDate, type CoverageOverview } from '@/lib/monthly-report/coverage';
 
+type DetectedKind = 'onboarding' | 'onboarding_summary' | 'user_approved' | 'ftd';
 type Kind = 'onboarding' | 'ftd';
 type Upload = { id: string; kind: string; file_name: string; source_utc_offset: string | null; uploaded_by_name: string | null; rows_total: number; rows_inserted: number; rows_updated: number; rows_skipped: number; rows_duplicate?: number; data_from: string | null; data_to: string | null; created_at: string };
 type Preview = {
-  ok: boolean; error?: string; hints?: string[]; detectedKind?: Kind | null; detectedLabel?: string;
+  ok: boolean; error?: string; hints?: string[]; detectedKind?: DetectedKind | null; detectedLabel?: string;
   fileName: string; offset: string; offsetFrom: string; fileNameOffset?: string | null; errors: string[]; warnings?: string[];
   issues: Array<{ row: number; message: string }>; issueCount: number; layout?: string; reportMonth?: { year: number; month: number } | null;
   summary: { rows: number; invalid: number; duplicatesInFile: number; conflictingDuplicatesInFile?: number; wibRange: { from: string; to: string } | null; byStepStatus?: Record<string, number>; byStep?: Record<string, number>; amountTotal?: number; byType?: Record<string, number> };
@@ -23,13 +24,13 @@ type History = { uploads: Upload[]; total: number; page: number; pageSize: numbe
 const PAGE_SIZE = 25;
 const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const monthLabel = (month: string) => `${MONTH_NAMES[Number(month.slice(5, 7)) - 1]} ${month.slice(0, 4)}`;
-const KIND_LABELS: Record<string, string> = { onboarding: 'Onboarding', ftd: 'FTD', rejection_reasons: 'Rejection reasons' };
+const KIND_LABELS: Record<string, string> = { onboarding: 'Onboarding (classic)', onboarding_summary: 'Onboarding daily summary', user_approved: 'User approved', ftd: 'FTD', rejection_reasons: 'Rejection reasons (legacy)' };
 
 type CardConfig = { title: string; description: string; accept: string; endpoint: string };
 
 const AUTO_CARD: CardConfig = {
   title: 'Upload file',
-  description: 'Drop the CRM onboarding export (.xlsx or .csv). The file is checked from its column headers and previewed before anything is saved. FTD is not uploaded: enter it per day in Daily FTD below.',
+  description: 'Drop the daily onboarding summary (obd_kyc), the user_approved Metabase export, or the classic onboarding event export. Type is detected from column headers. FTD is entered per day in Daily FTD below.',
   accept: '.xlsx,.xls,.csv',
   endpoint: '/api/monthly-report/uploads/auto',
 };
@@ -101,12 +102,10 @@ export default function MonthlyReportUploadsPage() {
           {history?.permissions?.isAdmin && <UploadCard card={CARDS.ftd} kind="ftd" onDone={loadHistory} />}
         </div>
       </details>
-      <Panel>
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <SectionHeader title="Rejection reasons" description="Per Document ID or UID: date and reason." />
-          <StatusBadge>Coming soon</StatusBadge>
-        </div>
-        <p className="mt-3 text-xs text-[var(--mos-text-muted)]">Upload is not available yet. The format will be agreed with the CRM team.</p>
+      <Panel padding="compact">
+        <p className="text-xs text-[var(--mos-text-muted)]">
+          KYC rejection reasons come from the <span className="text-[var(--mos-text-secondary)]">Remark</span> column on the user_approved upload (Robot vs Staff). No separate rejection file is needed.
+        </p>
       </Panel>
       <DataTableFrame
         title="Upload history"
@@ -118,7 +117,9 @@ export default function MonthlyReportUploadsPage() {
             <div className="w-44 shrink-0">
               <Select aria-label="Filter by type" value={filter.kind} onChange={e => setFilter(f => ({ ...f, kind: e.target.value, page: 1 }))}>
                 <option value="">All types</option>
-                <option value="onboarding">Onboarding</option>
+                <option value="onboarding_summary">Onboarding daily summary</option>
+                <option value="user_approved">User approved</option>
+                <option value="onboarding">Onboarding (classic)</option>
                 <option value="ftd">FTD</option>
               </Select>
             </div>
@@ -184,7 +185,7 @@ function UploadCard({ card, kind: fixedKind, onDone, primary }: { card: CardConf
   const [result, setResult] = useState<Preview | null>(null);
   const [error, setError] = useState<{ message: string; hints?: string[] } | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
-  const kind: Kind | null = fixedKind ?? preview?.detectedKind ?? result?.detectedKind ?? null;
+  const kind: DetectedKind | null = fixedKind ?? preview?.detectedKind ?? result?.detectedKind ?? null;
 
   const pick = (next: File | null) => { setFile(next); setPreview(null); setResult(null); setError(null); };
   const onDrop = (event: DragEvent<HTMLDivElement>) => {
@@ -269,7 +270,7 @@ function UploadCard({ card, kind: fixedKind, onDone, primary }: { card: CardConf
       {result?.counts && kind && (
         <p className="mt-4 rounded-[var(--mos-radius-control)] border border-emerald-400/20 bg-emerald-400/10 px-3 py-2 text-xs text-emerald-200">
           {!fixedKind && result.detectedLabel ? `${result.detectedLabel}. ` : ''}
-          {kind === 'onboarding'
+          {kind === 'onboarding' || kind === 'onboarding_summary' || kind === 'user_approved'
             ? <>Saved: {formatInteger(result.counts.inserted)} new, {formatInteger(result.counts.skippedDuplicate)} skipped as duplicate{result.counts.duplicatesInFile ? ` (${formatInteger(result.counts.duplicatesInFile)} repeated within the file)` : ''}, {formatInteger(result.counts.invalid)} invalid (offset {result.offset}).</>
             : <>Saved: {formatInteger(result.counts.inserted)} new, {formatInteger(result.counts.updated)} updated, {formatInteger(result.counts.unchanged)} unchanged, {formatInteger(result.counts.skipped)} skipped (offset {result.offset}).</>}
         </p>
@@ -278,7 +279,7 @@ function UploadCard({ card, kind: fixedKind, onDone, primary }: { card: CardConf
   );
 }
 
-function PreviewDetails({ kind, preview }: { kind: Kind; preview: Preview }) {
+function PreviewDetails({ kind, preview }: { kind: DetectedKind; preview: Preview }) {
   const { summary, conflicts } = preview;
   return (
     <div className="mt-4 space-y-3 text-xs">

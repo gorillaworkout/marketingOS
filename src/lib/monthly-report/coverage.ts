@@ -64,9 +64,12 @@ export function mergeRanges(ranges: readonly DateRange[]): DateRange[] {
 export function coverageFromUploads(uploads: readonly UploadRange[]): DataCoverage {
   const byKind: Record<CoverageKind, DateRange[]> = { onboarding: [], ftd: [] };
   for (const upload of uploads) {
-    if (!(COVERAGE_KINDS as readonly string[]).includes(upload.kind)) continue;
     if (!upload.data_from || !upload.data_to) continue;
-    byKind[upload.kind as CoverageKind].push({ from: upload.data_from.slice(0, 10), to: upload.data_to.slice(0, 10) });
+    // Daily KPI summary covers the funnel the same way classic onboarding does.
+    // user_approved never feeds funnel KPIs, so it does not extend onboarding coverage.
+    const kind = upload.kind === 'onboarding_summary' ? 'onboarding' : upload.kind;
+    if (!(COVERAGE_KINDS as readonly string[]).includes(kind)) continue;
+    byKind[kind as CoverageKind].push({ from: upload.data_from.slice(0, 10), to: upload.data_to.slice(0, 10) });
   }
   return { onboarding: mergeRanges(byKind.onboarding), ftd: mergeRanges(byKind.ftd) };
 }

@@ -82,7 +82,7 @@ test('onboarding export: October numbers (computed, PPT gap documented)', { skip
   });
   const kpi = Object.fromEntries(report.kpis.map(k => [k.key, k.value]));
   assert.equal(kpi.realAccountApproved, 8098); // 7,162 + 936 (PPT 8,096)
-  assert.equal(kpi.pending, 24737 - 8098 - 7343); // 9,296
+  assert.equal(kpi.pending, undefined); // Pending KPI removed Nov 2026
   assert.equal(report.ftd.ftdPerApprovedPct, 33.8); // 2,734 ÷ 8,098, the deck method (PPT 33.8%)
   assert.equal(report.ftd.realToFtdPct, 34.4); // 2,467 ÷ 7,162 unique activated
   assert.deepEqual(report.funnel.map(s => [s.key, s.value]), [['registrations', 24737], ['kycApproved', 7071], ['realAccountActivated', 7162], ['ftd', 2467]]);

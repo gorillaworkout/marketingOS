@@ -5,7 +5,7 @@ import { parseFtdFile } from '../src/lib/monthly-report/ftd-parse';
 import { parseOnboardingWorkbook } from '../src/lib/monthly-report/onboarding-parse';
 import {
   aggregateEventsByDay, aggregateFtdByDay, buildOnboardingReport, classifyEvent, dateCoverage, distinctActivatedAccounts,
-  ftdCohortStats, maskIdentifier, pending, sumDaily, type PeriodData,
+  ftdCohortStats, maskIdentifier, sumDaily, type PeriodData,
 } from '../src/lib/monthly-report/metrics';
 import { resolvePeriod } from '../src/lib/monthly-report/periods';
 
@@ -97,8 +97,7 @@ test('the report builds KPIs, October weeks, funnel and comparison', () => {
   assert.equal(report.total.realAccountActivated, 4);
   assert.equal(kpi.ftd.value, 5);
   assert.equal(kpi.ftd.previous, null);
-  assert.equal(kpi.pending.value, 11 - 5 - 2);
-  assert.equal(kpi.pending.note, 'Registrations − Total Real Account − KYC Rejected');
+  assert.equal(kpi.pending, undefined);
   assert.deepEqual(report.buckets.map(b => b.values.ftd), [3, 1, 0, 1]);
   assert.deepEqual(report.ftd, {
     count: 5, amountTotal: 13667.02, amountAverage: 2733.4, byType: { micro: 3, standard: 2, other: 0 },
@@ -151,21 +150,19 @@ test('Total Real Account adds manual KYC approved to unique activations in every
   const kpi = Object.fromEntries(report.kpis.map(k => [k.key, k]));
   assert.deepEqual([kpi.realAccountApproved.value, kpi.realAccountApproved.previous, kpi.realAccountApproved.change], [7, 6, 1]);
   assert.deepEqual(kpi.realAccountApproved.parts?.map(p => [p.value, p.previous]), [[2, 5], [5, 1]]);
-  assert.deepEqual([kpi.pending.value, kpi.pending.previous], [35 - 7 - 5, 30 - 6 - 2]);
-  assert.equal(pending(report.buckets[0].values), 25 - 6 - 1);
+  assert.equal(kpi.pending, undefined);
   // Funnel compares unique activations (2) with KYC approved (5), never Total Real Account.
   assert.deepEqual(report.funnel[2], { key: 'realAccountActivated', label: 'Real account activated (unique)', value: 2, stepPct: 40, overallPct: 5.7 });
 });
 
-test('pending is hidden and FTD shows no data when nothing was uploaded', () => {
+test('Pending KPI is gone and FTD shows no data when nothing was uploaded', () => {
   const report = buildOnboardingReport({
     period: resolvePeriod({ preset: 'month', anchor: '2026-10-15' }),
     granularity: 'week',
     current: empty,
     previous: empty,
   });
-  const pending = report.kpis.find(k => k.key === 'pending')!;
-  assert.equal(pending.value, null);
+  assert.equal(report.kpis.find(k => (k.key as string) === 'pending'), undefined);
   assert.equal(report.kpis.find(k => k.key === 'registrations')!.value, 0);
   assert.equal(report.funnel[1].overallPct, null);
   assert.equal(report.hasOnboardingData, false);

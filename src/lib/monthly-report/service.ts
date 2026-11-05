@@ -5,7 +5,7 @@ import { queryOne } from '@/lib/database';
 import { monthlyReportApiAccess, canUploadMonthlyReport } from './access';
 import { buildOnboardingReport, type OnboardingReport } from './metrics';
 import { GRANULARITIES, PERIOD_PRESETS, defaultGranularity, resolvePeriod, type Granularity, type PeriodInput, type PeriodPreset, type ResolvedPeriod } from './periods';
-import { loadCombinedFtdSpan, loadCoverage, loadPeriodData, type UploadActor } from './store';
+import { loadApproverStats, loadCombinedFtdSpan, loadCoverage, loadPeriodData, loadRejectionReasons, type UploadActor } from './store';
 
 export async function requireMonthlyReport(
   request: NextRequest,
@@ -46,9 +46,17 @@ export function parseReportQuery(params: URLSearchParams): { period: ResolvedPer
 
 export async function loadOnboardingReport(period: ResolvedPeriod, granularity: Granularity): Promise<OnboardingReport> {
   const [ftdSpan, coverage] = await Promise.all([loadCombinedFtdSpan(), loadCoverage()]);
-  const [current, previous] = await Promise.all([loadPeriodData(period.range, ftdSpan), loadPeriodData(period.previous, ftdSpan)]);
+  const [current, previous, approvers, rejectionReasons] = await Promise.all([
+    loadPeriodData(period.range, ftdSpan),
+    loadPeriodData(period.previous, ftdSpan),
+    loadApproverStats(period.range),
+    loadRejectionReasons(period.range),
+  ]);
   // Upload coverage drives "No data" days and the missing-data warning; days after today (WIB) are never missing.
-  return buildOnboardingReport({ period, granularity, current, previous, coverage, today: todayWib() });
+  return buildOnboardingReport({
+    period, granularity, current, previous, coverage, today: todayWib(),
+    approvers, rejectionReasons,
+  });
 }
 
 export const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
