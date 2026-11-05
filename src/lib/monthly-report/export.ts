@@ -120,8 +120,8 @@ export function buildReportWorkbook(report: OnboardingReport): Buffer {
       ['Staff rejected', rr.staffRejected],
       ['Rejected Reason column filled', rr.rejectedReasonColumnFilled],
       ['Rejected Reason equals Remark', rr.rejectedReasonMatchesRemark],
-      ['Robot rule', rr.robotRule],
-      ['Note', 'Remark is the rejection reason (Bayu). Rejected Reason is usually empty in the Metabase export. Unmatched remarks are listed under Other with raw text.'],
+      ['Classification rule', rr.robotRule],
+      ['Note', 'Remark is the rejection reason. Staff counts only Manual + manual_kyc rows with a named approver and a human Remark (not Ekyc, E-Kyc, Speech Script Matching, HasSameIdentity, Face consistency, or similar program flags). manual_video_verify and auto_* are not Staff. Rows that are neither Robot nor Staff are omitted. Rejected Reason is usually empty in the Metabase export. Unmatched human remarks are listed under Other with raw text.'],
     ]);
     XLSX.utils.book_append_sheet(workbook, reasons, 'Rejection reasons');
   }

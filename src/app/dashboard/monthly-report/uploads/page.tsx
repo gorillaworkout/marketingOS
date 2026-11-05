@@ -105,7 +105,7 @@ export default function MonthlyReportUploadsPage() {
       </details>
       <Panel padding="compact">
         <p className="text-xs text-[var(--mos-text-muted)]">
-          KYC rejection reasons come from the <span className="text-[var(--mos-text-secondary)]">Remark</span> column on the user_approved upload (Robot vs Staff). No separate rejection file is needed.
+          KYC rejection reasons come from the <span className="text-[var(--mos-text-secondary)]">Remark</span> column on the user_approved upload. Staff is Manual + manual_kyc with a human Remark. Robot is an approver of robot/system, Approval Method Auto, Steps auto_*, or a machine Remark. No separate rejection file is needed.
         </p>
       </Panel>
       <DataTableFrame

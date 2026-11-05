@@ -384,7 +384,7 @@ export default function MonthlyReportOnboardingPage() {
               <Panel>
                 <SectionHeader
                   title="KYC rejection reasons"
-                  description="From user_approved Remark (Bayu). Split Robot vs Staff. Unmatched remarks stay under Other with raw text."
+                  description="From user_approved Remark. Robot: approver robot/system, Approval Method Auto, Steps auto_*, or a machine Remark. Staff: Failed/Rejected, named approver, Approval Method Manual, Steps manual_kyc, and a human Remark. Machine remarks (Ekyc, E-Kyc, Speech Script Matching, HasSameIdentity, and similar program flags) and other steps such as manual_video_verify are not Staff. Rows that match neither are omitted. Unmatched human remarks stay under Other."
                 />
                 {!report.rejectionReasons || report.rejectionReasons.totalRejected === 0 ? (
                   <EmptyState className="min-h-24" title="No rejections in this period" description="Upload user_approved for these dates, or the period has no Failed/Rejected rows." />
