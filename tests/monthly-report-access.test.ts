@@ -80,3 +80,11 @@ test('Access API: personal grant always stores can_upload=true; upload flag opti
   assert.match(store, /VALUES \(\?, \?, \?\)/);
   assert.match(store, /\[userId, true, grantedBy\]/);
 });
+
+test('Access page has Personal access only (no separate Upload toggle)', () => {
+  const page = read('src/app/dashboard/monthly-report/access/page.tsx');
+  assert.match(page, /Personal access/);
+  assert.doesNotMatch(page, /Upload rights for/);
+  assert.doesNotMatch(page, /'Can upload'/);
+  assert.match(page, /JSON\.stringify\(\{ userId: user\.id, view \}\)/);
+});
