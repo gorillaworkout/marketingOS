@@ -304,7 +304,7 @@ export interface OnboardingReport {
   coverage: { today: string; onboarding: CoverageSummary; ftd: CoverageSummary } | null;
   /** Approver ranking from user_approved (Deposit Robot excluded). Absent when none loaded. */
   approvers?: Array<{ approver: string; finalApproved: number; stepsApproved: number; finalRejected: number }>;
-  /** KYC rejection reasons from user_approved.Remark, split Robot vs Staff. */
+  /** KYC rejection reasons from user_approved.Remark. Staff is Manual + manual_kyc with a human Remark; Robot keeps the auto/system rule. */
   rejectionReasons?: {
     totalRejected: number;
     robotRejected: number;

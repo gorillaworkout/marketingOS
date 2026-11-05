@@ -3,12 +3,19 @@
  * guide categories (WNI / WNA). Rejected Reason is almost always empty in the
  * live Metabase export — Remark is the source of truth (Bayu 2026-11-05).
  *
- * Robot vs Staff: a Failed/Rejected row counts as Robot when Approver looks
- * like a robot/system account, Approval Method is Auto, Steps starts with
- * auto_, OR Remark is a machine diagnostic (Ekyc Status:… / Speech Script…).
- * Deposit Robot video-verify failures are real KYC rejections → included under
- * Robot (they are not deposit-related noise). Deposit Robot is still skipped
- * for the Approver ranking only.
+ * Robot vs Staff. Robot (unchanged): Approver matches /robot|system/i, Approval
+ * Method is Auto, Steps starts with auto_, OR Remark is a machine diagnostic
+ * (Ekyc Status / Speech Script / HasSameIdentity / Face consistency /
+ * isFirstAccount / livenessAuth). Deposit Robot video-verify failures stay
+ * under Robot. Deposit Robot is still skipped for the Approver ranking only.
+ *
+ * Staff (Bayu 2026-11-05) only when ALL of: rejection row, Approver non-blank,
+ * Approval Method /^manual$/i, Steps /^manual_kyc$/i, and Remark is human
+ * language. manual_video_verify, auto_*, and machine Remarks (Ekyc, E-Kyc,
+ * Speech Script Matching, HasSameIdentity, Face consistency, isFirstAccount,
+ * livenessAuth, occupation:, openingPurpose:, fundSource:, isDemoTrade:) are
+ * not Staff. A row that is neither Robot nor Staff is omitted from reason totals.
+ * When a row matches both, Robot wins.
  */
 import type { UserApprovedRow } from './user-approved-parse';
 
@@ -31,77 +38,77 @@ export const GUIDE_CATEGORIES: GuideCategory[] = [
     keywords: ['FOTO KTP', 'UNGGAH KTP', 'KTP ASLI'],
   },
   {
-    id: 'passport', label: 'PASSPORT',
+    id: 'passport', label: 'Passport',
     templates: ['PLEASE SELECT PASSPORT', 'PLEASE UPLOAD A CLEAR, VALID, AND COMPLETE PHOTO OF YOUR ORIGINAL PASSPORT'],
     keywords: ['PASSPORT'],
   },
   {
-    id: 'selfie', label: 'SELFIE',
+    id: 'selfie', label: 'Selfie',
     templates: ['MOHON UNGGAH FOTO SELFIE'],
     keywords: ['FOTO SELFIE', 'SELFIE'],
   },
   {
-    id: 'proof_of_address', label: 'PROOF OF ADDRESS',
+    id: 'proof_of_address', label: 'Proof of Address',
     templates: ['PLEASE UPLOAD AN OFFICIAL DOCUMENT THAT SHOWS YOUR RESIDENTIAL ADDRESS'],
     keywords: ['PROOF OF ADDRESS', 'RESIDENTIAL ADDRESS'],
   },
   {
-    id: 'data_diri', label: 'INFORMASI DATA DIRI',
+    id: 'data_diri', label: 'Personal Information',
     templates: ['MOHON LENGKAPI INFORMASI DATA DIRI', 'MOHON ISI SELURUH DETAIL ALAMAT'],
     keywords: ['DATA DIRI', 'DETAIL ALAMAT', 'ALAMAT TEMPAT TINGGAL', 'PENDIDIKAN TERAKHIR', 'IBU KANDUNG', 'PLEASE COMPLETE YOUR PERSONAL INFORMATION'],
   },
   {
-    id: 'pekerjaan', label: 'INFORMASI DATA PEKERJAAN',
+    id: 'pekerjaan', label: 'Employment Information',
     templates: ['MOHON LENGKAPI INFORMASI PEKERJAAN', 'PERBAIKI DATA PEKERJAAN'],
     keywords: ['DATA PEKERJAAN', 'OCCUPATION', 'NAMA PERUSAHAAN', 'PLEASE COMPLETE YOUR EMPLOYMENT'],
   },
   {
-    id: 'contact_person', label: 'INFORMASI CONTACT PERSON',
+    id: 'contact_person', label: 'Contact Person Information',
     templates: ['MOHON LENGKAPI INFORMASI KONTAK DARURAT', 'MOHON LENGKAPI INFORMASI CONTACT PERSON'],
     keywords: ['KONTAK DARURAT', 'CONTACT PERSON', 'EMERGENCY CONTACT'],
   },
   {
-    id: 'sumber_dana', label: 'INFORMASI SUMBER DANA',
+    id: 'sumber_dana', label: 'Financial Information',
     templates: ['MOHON LENGKAPI DATA SUMBER DANA', 'ANNUAL INCOME'],
     keywords: ['SUMBER DANA', 'ANNUAL INCOME', 'PENDAPATAN TAHUNAN', 'SOURCE OF FUNDS', 'FINANCIAL INFORMATION'],
   },
   {
-    id: 'rekening_bank', label: 'INFORMASI REKENING BANK',
+    id: 'rekening_bank', label: 'Bank Account Information',
     templates: ['MOHON LENGKAPI INFORMASI REKENING BANK', 'PLEASE PROVIDE A VALID BANK ACCOUNT'],
     keywords: ['REKENING BANK', 'BANK ACCOUNT', 'ADD BANK'],
   },
   {
-    id: 'pengalaman_investasi', label: 'INFORMASI PENGALAMAN INVESTASI',
+    id: 'pengalaman_investasi', label: 'Investment Experience Information',
     templates: ['MOHON LENGKAPI INFORMASI PENGALAMAN TRADING', 'PLEASE COMPLETE YOUR TRADING EXPERIENCE'],
     keywords: ['PENGALAMAN TRADING', 'PENGALAMAN INVESTASI', 'OPENING PURPOSE', 'INVESTMENT EXPERIENCE'],
   },
   {
-    id: 'duplicate_account', label: 'INFORMASI DUPLICATE ACCOUNT',
+    id: 'duplicate_account', label: 'Duplicate Account',
     templates: ['ANDA SUDAH PERNAH MENDAFTAR'],
     keywords: ['DUPLICATE ACCOUNT', 'SUDAH PERNAH MENDAFTAR', 'HASSAMEIDENTITY:1'],
   },
   {
-    id: 'forbidden_occupation', label: 'INFORMASI FORBIDEN OCCUPATION',
+    id: 'forbidden_occupation', label: 'Forbidden Occupation',
     templates: ['MOHON MAAF SAAT INI KAMI TIDAK BISA MENERIMA ANDA MENJADI NASABAH'],
     keywords: ['FORBIDEN OCCUPATION', 'FORBIDDEN OCCUPATION', 'TIDAK BISA MENERIMA ANDA'],
   },
   {
-    id: 'restricted_country', label: 'RESTRICTED COUNTRY',
+    id: 'restricted_country', label: 'Restricted Country',
     templates: ['WE APOLOGIZE, WE ARE UNABLE TO ACCEPT YOU AS OUR CLIENT'],
     keywords: ['RESTRICTED COUNTRY'],
   },
   {
-    id: 'demo_account', label: 'DEMO ACCOUNT',
+    id: 'demo_account', label: 'Demo Account',
     templates: ['AKUN DEMO BELUM DITRANSAKSIKAN', 'MOHON TRANSAKSIKAN AKUN DEMO', 'DATA COMPLETED. DEMO ACCOUNT HAS NO TRANSACTION YET'],
     keywords: ['AKUN DEMO', 'DEMO ACCOUNT', 'TRANSAKSIKAN AKUN DEMO', 'DEMO NOT YET', 'ISDEMOTRADE:FALSE'],
   },
   {
-    id: 'video_verifikasi', label: 'VIDEO VERIFIKASI',
+    id: 'video_verifikasi', label: 'Video Verification',
     templates: ['MOHON PERBAIKI VIDEO VERIFIKASI', 'MOHON UPLOAD ULANG VIDEO VERIFIKASI'],
     keywords: ['VIDEO VERIFIKASI', 'VIDEO VERIFICATION', 'SPEECH SCRIPT MATCHING', 'FACE CONSISTENCY'],
   },
   {
-    id: 'video_under_age', label: 'VIDEO VERIFIKASI - UNDER AGE',
+    id: 'video_under_age', label: 'Video Verification - Under Age',
     templates: [],
     keywords: ['UNDER AGE', 'UNDERAGE', 'USIA DI BAWAH'],
   },
@@ -227,6 +234,30 @@ export function isRobotRejection(row: Pick<UserApprovedRow, 'approver' | 'approv
   return false;
 }
 
+/**
+ * Machine / program Remark language. Broader than the Robot diagnostic check:
+ * E-Kyc/EKyc and occupation:/openingPurpose:/fundSource:/isDemoTrade: flags
+ * are not staff copy even when the Robot rule does not fire.
+ */
+const MACHINE_REMARK = /ekyc status|e-?kyc|speech script matching|hassameidentity|face consistency|isfirstaccount|livenessauth|occupation\s*:|openingpurpose\s*:|fundsource\s*:|isdemotrade\s*:/i;
+
+export function isMachineRemark(remark: string | null | undefined): boolean {
+  return MACHINE_REMARK.test(remark ?? '');
+}
+
+/**
+ * Staff only when every inclusion rule holds (Bayu 2026-11-05).
+ * Does not itself exclude Robot rows; the report assigns Robot first when both match.
+ */
+export function isStaffRejection(row: Pick<UserApprovedRow, 'approver' | 'approvalMethod' | 'step' | 'remark' | 'approvedStatus' | 'successStatus'>): boolean {
+  if (!isRejectionRow(row)) return false;
+  if (!(row.approver ?? '').trim()) return false;
+  if (!/^manual$/i.test((row.approvalMethod ?? '').trim())) return false;
+  if (!/^manual_kyc$/i.test((row.step ?? '').trim())) return false;
+  if (isMachineRemark(row.remark)) return false;
+  return true;
+}
+
 /** A row counts as a rejection when Approved Status or Success Status is Failed/Rejected. */
 export function isRejectionRow(row: Pick<UserApprovedRow, 'approvedStatus' | 'successStatus'>): boolean {
   return /^(failed|rejected)$/i.test(row.approvedStatus ?? '')
@@ -255,7 +286,7 @@ export interface RejectionReasonsReport {
   robotRule: string;
 }
 
-const ROBOT_RULE_TEXT = 'Robot when Approver matches /robot|system/i, OR Approval Method is Auto, OR Steps starts with auto_, OR Remark looks like a machine diagnostic (Ekyc Status / Speech Script / …). Deposit Robot video-verify failures are included under Robot.';
+const ROBOT_RULE_TEXT = 'Robot when Approver matches /robot|system/i, OR Approval Method is Auto, OR Steps starts with auto_, OR Remark looks like a machine diagnostic (Ekyc Status / Speech Script / HasSameIdentity / Face consistency / isFirstAccount / livenessAuth). Deposit Robot video-verify failures are included under Robot. Staff only when all of these hold: the row is Failed or Rejected, Approver is non-blank, Approval Method is Manual, Steps is manual_kyc, and Remark is not machine language (Ekyc Status, E-Kyc/EKyc, Speech Script Matching, HasSameIdentity, Face consistency, isFirstAccount, livenessAuth, occupation:, openingPurpose:, fundSource:, or similar program flags such as isDemoTrade:). manual_video_verify and auto_* are not Staff. Rows that are neither Robot nor Staff are omitted from reason totals.';
 
 function wibDayFromIso(iso: string): string {
   return new Date(new Date(iso).getTime() + 7 * 3_600_000).toISOString().slice(0, 10);
@@ -276,6 +307,7 @@ export function buildRejectionReasonsReport(
 ): RejectionReasonsReport {
   const rejected = filterRejectionsByFinishedDay(rows, range.from, range.to);
   const byCategory = new Map<string, RejectionReasonStat>();
+  let totalRejected = 0;
   let robotRejected = 0;
   let staffRejected = 0;
   let rejectedReasonColumnFilled = 0;
@@ -296,7 +328,12 @@ export function buildRejectionReasonsReport(
   for (const row of rejected) {
     // Empty Approver = unfinished KYC — never count in rejection reasons.
     if (!(row.approver ?? '').trim()) continue;
-    const source: RejectSource = isRobotRejection(row) ? 'robot' : 'staff';
+    const robot = isRobotRejection(row);
+    const staff = isStaffRejection(row);
+    // Neither column: manual_video_verify, non-manual methods, machine remarks the Robot rule misses.
+    if (!robot && !staff) continue;
+    const source: RejectSource = robot ? 'robot' : 'staff';
+    totalRejected += 1;
     if (source === 'robot') robotRejected += 1; else staffRejected += 1;
     const remark = (row.remark ?? '').trim();
     const rejCol = (row.rejectedReason ?? '').trim();
@@ -314,7 +351,7 @@ export function buildRejectionReasonsReport(
 
   const reasons = [...byCategory.values()].sort((a, b) => b.total - a.total || a.categoryLabel.localeCompare(b.categoryLabel));
   return {
-    totalRejected: rejected.length,
+    totalRejected,
     robotRejected,
     staffRejected,
     rejectedReasonColumnFilled,
