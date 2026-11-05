@@ -2,7 +2,7 @@
  * Monthly Report access rules.
  *  - View:   admin, OR the user's department has `monthly-report`, OR a row in
  *            monthly_report_access (personal grant).
- *  - Upload: admin, OR a personal grant with can_upload = true.
+ *  - Upload: same as view (operators self-upload).
  * Everyone who can view sees the same report.
  */
 import { MONTHLY_REPORT_FEATURE, canAccessFeature } from '@/lib/authorization';
@@ -33,8 +33,7 @@ export function canViewMonthlyReport(principal: MonthlyReportPrincipal): boolean
 }
 
 export function canUploadMonthlyReport(principal: MonthlyReportPrincipal): boolean {
-  if (principal.role === 'admin') return true;
-  return canViewMonthlyReport(principal) && principal.monthlyReportUpload === true;
+  return canViewMonthlyReport(principal);
 }
 
 export function monthlyReportPageAccess(
