@@ -37,3 +37,11 @@ test('user_approved accepts Finsihed Time / Step Astatus typos and keeps Deposit
   const finished = parsed.rows.find(r => r.recordId === '900001');
   assert.ok(finished?.finishedTime);
 });
+
+test('user_approved skips empty Approver as unfinished KYC (not invalid, not stored)', () => {
+  const parsed = parseUserApproved(syntheticUserApprovedWorkbook(), { offset: '+07:00' });
+  assert.equal(parsed.summary.skippedBlankApprover, 2);
+  assert.ok(!parsed.rows.some(r => !r.approver || !r.approver.trim()));
+  assert.ok(!parsed.issues.some(i => /Approver is missing/i.test(i.message)));
+  assert.ok(parsed.summary.skippedRobot >= 1);
+});

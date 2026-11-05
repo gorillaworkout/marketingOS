@@ -64,6 +64,8 @@ export interface UserApprovedParseSummary {
   rows: number;
   invalid: number;
   skippedRobot: number; // Deposit Robot rows kept in `rows` but excluded from Approver ranking
+  /** Empty Approver = KYC not finished yet; not stored, excluded from ranking + rejection reasons. */
+  skippedBlankApprover: number;
   duplicatesInFile: number;
   wibRange: { from: string; to: string } | null;
 }
@@ -125,7 +127,7 @@ export function parseUserApproved(
   if (offsetMinutes === null) {
     return {
       sheetName: '', offset, errors: [`Invalid timezone offset: ${offset}`], issues: [], rows: [],
-      summary: { rows: 0, invalid: 0, skippedRobot: 0, duplicatesInFile: 0, wibRange: null }};
+      summary: { rows: 0, invalid: 0, skippedRobot: 0, skippedBlankApprover: 0, duplicatesInFile: 0, wibRange: null }};
   }
   const sheet = readSheetRows(buffer, ONBOARDING_SHEET);
   const mapped = mapAliasedHeaders(sheet.rows[0]);
@@ -134,12 +136,13 @@ export function parseUserApproved(
       sheetName: sheet.sheetName, offset,
       errors: [`Missing required columns: ${mapped.missing.join(', ')}.`],
       issues: [], rows: [],
-      summary: { rows: 0, invalid: 0, skippedRobot: 0, duplicatesInFile: 0, wibRange: null }};
+      summary: { rows: 0, invalid: 0, skippedRobot: 0, skippedBlankApprover: 0, duplicatesInFile: 0, wibRange: null }};
   }
 
   const rows: UserApprovedRow[] = [];
   const issues: UserApprovedParseIssue[] = [];
   let skippedRobot = 0;
+  let skippedBlankApprover = 0;
   const seen = new Set<string>();
   let duplicatesInFile = 0;
   const idx = mapped.index;
@@ -150,8 +153,9 @@ export function parseUserApproved(
     if (raw.every(cell => cell === null || cell === undefined || cellText(cell) === '')) continue;
 
     const approver = cellText(at(raw, 'Approver'));
+    // Empty Approver means KYC is not finished yet — skip (do not store, do not count as invalid).
     if (!approver) {
-      issues.push({ row: i + 1, message: 'Approver is missing' });
+      skippedBlankApprover += 1;
       continue;
     }
     // Deposit Robot rows are stored (rejection reasons) but excluded from Approver ranking.
@@ -215,6 +219,7 @@ export function parseUserApproved(
       rows: rows.length,
       invalid: issues.length,
       skippedRobot,
+      skippedBlankApprover,
       duplicatesInFile,
       wibRange}};
 }
@@ -241,7 +246,7 @@ export function aggregateApproverStats(rows: UserApprovedRow[]): ApproverStat[] 
     return row;
   };
   for (const row of rows) {
-    if (row.approver === DEPOSIT_ROBOT) continue;
+    if (!row.approver?.trim() || row.approver === DEPOSIT_ROBOT) continue;
     const stat = bump(row.approver);
     if (/^approved$/i.test(row.successStatus ?? '')) stat.finalApproved += 1;
     else if (/^(rejected|failed)$/i.test(row.successStatus ?? '')) stat.finalRejected += 1;
@@ -278,7 +283,7 @@ export function buildApproverReport(rows: UserApprovedRow[], range: { from: stri
     return row;
   };
   for (const row of rows) {
-    if (row.approver === DEPOSIT_ROBOT) continue;
+    if (!row.approver?.trim() || row.approver === DEPOSIT_ROBOT) continue;
     const finishedDay = wibDayFromIso(row.finishedTime ?? row.createTime);
     const createDay = wibDayFromIso(row.createTime);
     if (finishedDay >= range.from && finishedDay <= range.to) {

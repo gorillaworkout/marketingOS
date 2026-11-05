@@ -1,6 +1,7 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState, type DragEvent } from 'react';
+import { useCallback, useEffect, useId, useRef, useState, type DragEvent } from 'react';
+import { MAX_MULTI_UPLOAD_FILES, MAX_UPLOAD_BYTES, selectUploadFiles, validItemsForImport } from '@/lib/monthly-report/multi-file-upload';
 import { Button, DataTableFrame, EmptyState, FilterGroup, FormField, PageHeader, PageStack, Panel, SectionHeader, Select, StatusBadge, TextInput, Toolbar } from '@/components/ui/dashboard';
 import { formatAmount, formatDateTimeWib, formatInteger } from '@/components/monthly-report/brand';
 import { DailyFtdPanel } from '@/components/monthly-report/DailyFtdPanel';
@@ -15,7 +16,7 @@ type Preview = {
   ok: boolean; error?: string; hints?: string[]; detectedKind?: DetectedKind | null; detectedLabel?: string;
   fileName: string; offset: string; offsetFrom: string; fileNameOffset?: string | null; errors: string[]; warnings?: string[];
   issues: Array<{ row: number; message: string }>; issueCount: number; layout?: string; reportMonth?: { year: number; month: number } | null;
-  summary: { rows: number; invalid: number; duplicatesInFile: number; conflictingDuplicatesInFile?: number; wibRange: { from: string; to: string } | null; byStepStatus?: Record<string, number>; byStep?: Record<string, number>; amountTotal?: number; byType?: Record<string, number> };
+  summary: { rows: number; invalid: number; duplicatesInFile: number; conflictingDuplicatesInFile?: number; skippedRobot?: number; skippedBlankApprover?: number; wibRange: { from: string; to: string } | null; byStepStatus?: Record<string, number>; byStep?: Record<string, number>; amountTotal?: number; byType?: Record<string, number> };
   conflicts?: { new: number; duplicate?: number; duplicateDiffers?: number; newEventForKnownDocument?: number; existing?: number; byStepStatus?: Array<{ stepStatus: string; new: number; duplicate: number }>; statusChanges?: Array<{ from: string; to: string; count: number }> };
   counts?: { total: number; inserted: number; updated?: number; unchanged?: number; skipped?: number; skippedDuplicate?: number; duplicatesInFile?: number; invalid?: number };
 };
@@ -30,7 +31,7 @@ type CardConfig = { title: string; description: string; accept: string; endpoint
 
 const AUTO_CARD: CardConfig = {
   title: 'Upload file',
-  description: 'Drop the daily onboarding summary (obd_kyc), the user_approved Metabase export, or the classic onboarding event export. Type is detected from column headers. FTD is entered per day in Daily FTD below.',
+  description: 'Drop or pick up to 10 files at once (25 MB each): daily onboarding summary (obd_kyc), user_approved Metabase export, or classic onboarding event export. Each file is detected independently. FTD is entered per day in Daily FTD below.',
   accept: '.xlsx,.xls,.csv',
   endpoint: '/api/monthly-report/uploads/auto',
 };
@@ -90,7 +91,7 @@ export default function MonthlyReportUploadsPage() {
           </div>
         </Panel>
       )}
-      <UploadCard card={AUTO_CARD} onDone={loadHistory} primary />
+      <MultiFileUploadCard card={AUTO_CARD} onDone={loadHistory} />
       <DailyFtdPanel onSaved={loadHistory} />
       <details className="group rounded-[var(--mos-radius-panel)] border border-[var(--mos-border)] bg-[var(--mos-panel)]">
         <summary className="cursor-pointer select-none px-5 py-3.5 text-xs font-medium text-[var(--mos-text-secondary)]">
@@ -167,6 +168,272 @@ export default function MonthlyReportUploadsPage() {
         )}
       </DataTableFrame>
     </PageStack>
+  );
+}
+
+
+type QueueItem = {
+  id: string;
+  file: File;
+  status: 'queued' | 'previewing' | 'ready' | 'error' | 'importing' | 'done';
+  preview: Preview | null;
+  result: Preview | null;
+  error: { message: string; hints?: string[] } | null;
+};
+
+/**
+ * Multi-file auto-detect upload. Replaces the old single-file dropzone that only
+ * kept files[0], which made a summary + user_approved pair look like one detection.
+ */
+function MultiFileUploadCard({ card, onDone }: { card: CardConfig; onDone: () => void }) {
+  const [items, setItems] = useState<QueueItem[]>([]);
+  const [dragging, setDragging] = useState(false);
+  const [offsetChoice, setOffsetChoice] = useState('auto');
+  const [customOffset, setCustomOffset] = useState('');
+  const [batchBusy, setBatchBusy] = useState(false);
+  const [rejectNotes, setRejectNotes] = useState<string[]>([]);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const idPrefix = useId();
+  const seq = useRef(0);
+
+  const offsetParam = offsetChoice === 'custom' ? customOffset : offsetChoice === 'auto' ? '' : offsetChoice;
+
+  const patchItem = (id: string, patch: Partial<QueueItem>) => {
+    setItems(prev => prev.map(item => (item.id === id ? { ...item, ...patch } : item)));
+  };
+
+  const previewOne = async (item: QueueItem) => {
+    patchItem(item.id, { status: 'previewing', error: null, preview: null, result: null });
+    const params = new URLSearchParams({ mode: 'preview', fileName: item.file.name });
+    if (offsetParam) params.set('offset', offsetParam);
+    try {
+      const response = await fetch(`${card.endpoint}?${params}`, {
+        method: 'POST',
+        body: item.file,
+        headers: { 'Content-Type': 'application/octet-stream' },
+      });
+      const data = await response.json().catch(() => ({ error: 'Unexpected response' }));
+      if (data.error) {
+        patchItem(item.id, { status: 'error', error: { message: data.error, hints: data.hints }, preview: null });
+      } else if (!data.ok) {
+        patchItem(item.id, {
+          status: 'error',
+          preview: data,
+          error: { message: (data.errors || []).join(' ') || 'Preview failed' },
+        });
+      } else {
+        patchItem(item.id, { status: 'ready', preview: data, error: null });
+      }
+    } catch {
+      patchItem(item.id, { status: 'error', error: { message: 'Upload failed. Check the connection and try again.' } });
+    }
+  };
+
+  const addFiles = (list: FileList | File[] | null) => {
+    if (!list || list.length === 0) return;
+    const incoming = Array.from(list);
+    // Compute against the current queue outside the updater so Strict Mode
+    // double-invokes cannot duplicate ids or kick off two preview loops.
+    const result = selectUploadFiles(
+      items.map(i => i.file),
+      incoming,
+      { maxFiles: MAX_MULTI_UPLOAD_FILES, maxBytes: MAX_UPLOAD_BYTES },
+    );
+    const notes = result.rejected.map(r => `${r.name}: ${r.reason}`);
+    if (result.hitFileCap) notes.unshift(`Only ${MAX_MULTI_UPLOAD_FILES} files can be queued at once.`);
+    setRejectNotes(notes);
+    const existingKeys = new Set(items.map(i => `${i.file.name}::${i.file.size}`));
+    const fresh: QueueItem[] = [];
+    for (const file of result.accepted) {
+      if (existingKeys.has(`${file.name}::${file.size}`)) continue;
+      seq.current += 1;
+      fresh.push({
+        id: `${idPrefix}-${seq.current}`,
+        file,
+        status: 'queued',
+        preview: null,
+        result: null,
+        error: null,
+      });
+    }
+    if (!fresh.length) return;
+    setItems(prev => {
+      const keys = new Set(prev.map(i => `${i.file.name}::${i.file.size}`));
+      const unique = fresh.filter(item => !keys.has(`${item.file.name}::${item.file.size}`));
+      return unique.length ? [...prev, ...unique] : prev;
+    });
+    // Defer until after React commits the queue, then preview sequentially.
+    window.setTimeout(() => {
+      void (async () => {
+        for (const item of fresh) {
+          await previewOne(item);
+        }
+      })();
+    }, 0);
+  };
+
+  const onDrop = (event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    setDragging(false);
+    addFiles(event.dataTransfer.files);
+  };
+
+  const removeItem = (id: string) => setItems(prev => prev.filter(item => item.id !== id));
+
+  const commitOne = async (item: QueueItem): Promise<boolean> => {
+    if (!item.preview?.ok || !item.preview.detectedKind) return false;
+    patchItem(item.id, { status: 'importing', error: null });
+    const params = new URLSearchParams({ mode: 'commit', fileName: item.file.name, expect: item.preview.detectedKind });
+    if (offsetParam) params.set('offset', offsetParam);
+    try {
+      const response = await fetch(`${card.endpoint}?${params}`, {
+        method: 'POST',
+        body: item.file,
+        headers: { 'Content-Type': 'application/octet-stream' },
+      });
+      const data = await response.json().catch(() => ({ error: 'Unexpected response' }));
+      if (data.error || !response.ok || !data.ok) {
+        patchItem(item.id, {
+          status: 'error',
+          error: { message: data.error || (data.errors || []).join(' ') || 'Import failed', hints: data.hints },
+          preview: item.preview,
+        });
+        return false;
+      }
+      patchItem(item.id, { status: 'done', result: data, preview: null, error: null });
+      return true;
+    } catch {
+      patchItem(item.id, { status: 'error', error: { message: 'Import failed. Check the connection and try again.' }, preview: item.preview });
+      return false;
+    }
+  };
+
+  const importAllValid = async () => {
+    const candidates = items
+      .filter(i => i.status === 'ready' && i.preview)
+      .map(i => ({ item: i, ok: Boolean(i.preview?.ok), error: i.error?.message ?? null }));
+    const ready = validItemsForImport(candidates).map(c => c.item);
+    if (!ready.length) return;
+    setBatchBusy(true);
+    let anyOk = false;
+    // Sequential commits: one bad file must not block the rest.
+    for (const item of ready) {
+      const ok = await commitOne(item);
+      if (ok) anyOk = true;
+    }
+    setBatchBusy(false);
+    if (anyOk) onDone();
+  };
+
+  const importOne = async (id: string) => {
+    const item = items.find(i => i.id === id);
+    if (!item || item.status !== 'ready') return;
+    setBatchBusy(true);
+    const ok = await commitOne(item);
+    setBatchBusy(false);
+    if (ok) onDone();
+  };
+
+  const validCount = items.filter(i => i.status === 'ready' && i.preview?.ok).length;
+  const busy = batchBusy || items.some(i => i.status === 'previewing' || i.status === 'importing');
+
+  return (
+    <Panel className="border-[rgba(46,181,196,0.35)]">
+      <SectionHeader title={card.title} description={card.description} />
+      <div className="mt-4 grid gap-3 sm:grid-cols-[1fr_auto]">
+        <FormField label="Files">
+          <div
+            role="button"
+            tabIndex={0}
+            onClick={() => inputRef.current?.click()}
+            onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); inputRef.current?.click(); } }}
+            onDragOver={e => { e.preventDefault(); setDragging(true); }}
+            onDragLeave={() => setDragging(false)}
+            onDrop={onDrop}
+            className={`flex min-h-24 cursor-pointer flex-col items-center justify-center rounded-[var(--mos-radius-control)] border border-dashed px-4 py-5 text-center text-xs transition-colors ${dragging ? 'border-[rgba(46,181,196,0.7)] bg-[rgba(46,181,196,0.08)]' : 'border-[var(--mos-border)] bg-[var(--mos-raised)]'}`}
+          >
+            <span className="font-medium text-[var(--mos-text-secondary)]">
+              {items.length ? `${items.length} file${items.length === 1 ? '' : 's'} queued — drop or click to add more` : 'Drop files here or click to choose'}
+            </span>
+            <span className="mt-1 text-[var(--mos-text-faint)]">.xlsx or .csv · up to {MAX_MULTI_UPLOAD_FILES} files · {formatInteger(MAX_UPLOAD_BYTES / (1024 * 1024))} MB each</span>
+            <input
+              ref={inputRef}
+              type="file"
+              accept={card.accept}
+              multiple
+              className="sr-only"
+              onChange={e => { addFiles(e.target.files); e.target.value = ''; }}
+            />
+          </div>
+        </FormField>
+        <FormField label="Time zone of the export" hint="WIB = +07:00">
+          <Select value={offsetChoice} onChange={e => setOffsetChoice(e.target.value)} className="w-56">
+            <option value="auto">Default: UTC+7 (WIB)</option>
+            <option value="+08:00">UTC+8</option>
+            <option value="custom">Other…</option>
+          </Select>
+        </FormField>
+      </div>
+      {offsetChoice === 'custom' && <TextInput className="mt-2 w-40" placeholder="+05:30" value={customOffset} onChange={e => setCustomOffset(e.target.value)} />}
+      {rejectNotes.length > 0 && (
+        <div className="mt-3 space-y-1 text-xs text-amber-200">
+          {rejectNotes.map(note => <p key={note}>{note}</p>)}
+        </div>
+      )}
+      <div className="mt-4 flex flex-wrap items-center gap-2">
+        <Button variant="primary" disabled={validCount === 0 || busy} onClick={() => void importAllValid()}>
+          {batchBusy ? 'Importing…' : `Import all valid (${formatInteger(validCount)})`}
+        </Button>
+        {items.length > 0 && (
+          <Button variant="ghost" disabled={busy} onClick={() => { setItems([]); setRejectNotes([]); }}>Clear queue</Button>
+        )}
+      </div>
+      {items.length > 0 && (
+        <div className="mt-4 space-y-3">
+          {items.map(item => {
+            const kind = (item.preview?.detectedKind ?? item.result?.detectedKind ?? null) as DetectedKind | null;
+            const preview = item.preview ?? item.result;
+            return (
+              <div key={item.id} className="rounded-[var(--mos-radius-control)] border border-[var(--mos-border)] bg-[var(--mos-raised)] px-3 py-3">
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="truncate text-xs font-medium text-[var(--mos-text)]" title={item.file.name}>{item.file.name}</p>
+                    <p className="text-[var(--mos-text-faint)] text-[11px]">{formatInteger(Math.ceil(item.file.size / 1024))} KB
+                      {item.status === 'previewing' ? ' · Checking…' : ''}
+                      {item.status === 'importing' ? ' · Saving…' : ''}
+                      {item.status === 'done' ? ' · Imported' : ''}
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    {item.preview?.detectedLabel && <StatusBadge tone="info" dot>Detected: {item.preview.detectedLabel}</StatusBadge>}
+                    {item.result?.detectedLabel && <StatusBadge tone="success" dot>{item.result.detectedLabel}</StatusBadge>}
+                    {item.status === 'ready' && (
+                      <Button size="sm" variant="primary" disabled={busy} onClick={() => void importOne(item.id)}>Import</Button>
+                    )}
+                    <Button size="sm" variant="ghost" disabled={busy && item.status === 'importing'} onClick={() => removeItem(item.id)}>Remove</Button>
+                  </div>
+                </div>
+                {item.error && (
+                  <div className="mt-2 space-y-1 text-xs text-red-300">
+                    <p>{item.error.message}</p>
+                    {(item.error.hints ?? []).map(hint => <p key={hint} className="text-red-200/80">{hint}</p>)}
+                  </div>
+                )}
+                {preview && kind && item.status !== 'done' && <PreviewDetails kind={kind} preview={preview} />}
+                {item.result?.counts && kind && (
+                  <p className="mt-3 rounded-[var(--mos-radius-control)] border border-emerald-400/20 bg-emerald-400/10 px-3 py-2 text-xs text-emerald-200">
+                    {item.result.detectedLabel ? `${item.result.detectedLabel}. ` : ''}
+                    {kind === 'onboarding' || kind === 'onboarding_summary' || kind === 'user_approved'
+                      ? <>Saved: {formatInteger(item.result.counts.inserted)} new, {formatInteger(item.result.counts.skippedDuplicate)} skipped as duplicate{item.result.counts.duplicatesInFile ? ` (${formatInteger(item.result.counts.duplicatesInFile)} repeated within the file)` : ''}, {formatInteger(item.result.counts.invalid)} invalid (offset {item.result.offset}).</>
+                      : <>Saved: {formatInteger(item.result.counts.inserted)} new, {formatInteger(item.result.counts.updated)} updated, {formatInteger(item.result.counts.unchanged)} unchanged, {formatInteger(item.result.counts.skipped)} skipped (offset {item.result.offset}).</>}
+                  </p>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </Panel>
   );
 }
 
@@ -293,6 +560,12 @@ function PreviewDetails({ kind, preview }: { kind: DetectedKind; preview: Previe
         <div><dt>Valid rows</dt><dd className="font-semibold text-[var(--mos-text)]">{formatInteger(summary.rows)}</dd></div>
         <div><dt>Invalid rows</dt><dd className="font-semibold text-[var(--mos-text)]">{formatInteger(summary.invalid)}</dd></div>
         <div><dt>Duplicates in file</dt><dd className="font-semibold text-[var(--mos-text)]">{formatInteger(summary.duplicatesInFile)}</dd></div>
+        {kind === 'user_approved' && (summary.skippedBlankApprover ?? 0) > 0 && (
+          <div><dt>Skipped (empty Approver)</dt><dd className="font-semibold text-[var(--mos-text)]">{formatInteger(summary.skippedBlankApprover ?? 0)}</dd></div>
+        )}
+        {kind === 'user_approved' && (summary.skippedRobot ?? 0) > 0 && (
+          <div><dt>Skipped ranking (Deposit Robot)</dt><dd className="font-semibold text-[var(--mos-text)]">{formatInteger(summary.skippedRobot ?? 0)}</dd></div>
+        )}
         {kind === 'onboarding' && conflicts && <div><dt>Already stored (skipped)</dt><dd className="font-semibold text-[var(--mos-text)]">{formatInteger(conflicts.duplicate)}</dd></div>}
         <div><dt>Dates (WIB)</dt><dd className="font-semibold text-[var(--mos-text)]">{summary.wibRange ? `${summary.wibRange.from} → ${summary.wibRange.to}` : '—'}</dd></div>
         <div><dt>Time zone</dt><dd className="font-semibold text-[var(--mos-text)]">{preview.offset} <span className="font-normal">({preview.offsetFrom}{preview.fileNameOffset && preview.fileNameOffset !== preview.offset ? `; file name says ${preview.fileNameOffset}, ignored` : ''})</span></dd></div>

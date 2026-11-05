@@ -41,9 +41,9 @@ export const USER_APPROVED_HEADERS_CORRECT = [
 ] as const;
 
 type UaRow = [
-  string | null, number | string, string, number, number, string,
-  string, number, string, string, string, string,
-  string, string, string, string,
+  string | null, number | string, string, number | null, number | null, string | null,
+  string, number, string, string | null, string | null, string,
+  string | null, string, string, string,
 ];
 
 /** Synthetic user_approved rows (WIB wall clocks). Includes Deposit Robot (kept in storage, skipped for ranking) and Failed/Rejected remarks. */
@@ -63,6 +63,9 @@ export const SYNTHETIC_UA_ROWS: UaRow[] = [
   ['Failed', 900009, '2026-11-02 10:00:00', 1009, 502, 'Budi Santoso', 'Manual', 700009, 'manual_kyc', 'Failed', 'Failed', '', '2026-11-02 10:15:00', '00:15:00', 'Custom staff note not in guide', ''],
   // Staff selfie
   ['Failed', 900010, '2026-11-02 11:00:00', 1010, 501, 'Ayu Pratama', 'Manual', 700010, 'manual_kyc', 'Failed', 'Failed', '', '2026-11-02 11:20:00', '00:20:00', 'Mohon unggah foto selfie memegang KTP', ''],
+  // Empty Approver = unfinished KYC — skipped (not stored, not ranked, not in rejection reasons)
+  [null, 900011, '2026-11-01 15:00:00', 1011, null, '', 'Manual', 700011, 'manual_kyc', 'Pending', null, '', null, '', '', ''],
+  [null, 900012, '2026-11-02 12:00:00', 1012, null, null, 'Manual', 700012, 'manual_kyc', 'Pending', null, '', null, '', '', ''],
 ];
 
 function uaWorkbook(headers: readonly string[], rows: UaRow[]): Buffer {

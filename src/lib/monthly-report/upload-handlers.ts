@@ -135,7 +135,8 @@ export async function handleUserApprovedUpload(user: AuthorizedUser, body: Buffe
   }
   const saved = await saveUserApproved(parsed.rows, {
     fileName, offset: resolved.offset, actor: await uploadActor(user),
-    skipped: parsed.issues.length, duplicatesInFile: parsed.summary.duplicatesInFile,
+    skipped: parsed.issues.length + parsed.summary.skippedBlankApprover,
+    duplicatesInFile: parsed.summary.duplicatesInFile,
     range: parsed.summary.wibRange, robotRows: parsed.summary.skippedRobot,
   });
   return NextResponse.json({ ...base, ok: true, uploadId: saved.uploadId, counts: saved.counts });

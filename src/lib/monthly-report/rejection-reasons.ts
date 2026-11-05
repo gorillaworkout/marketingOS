@@ -294,6 +294,8 @@ export function buildRejectionReasonsReport(
   };
 
   for (const row of rejected) {
+    // Empty Approver = unfinished KYC — never count in rejection reasons.
+    if (!(row.approver ?? '').trim()) continue;
     const source: RejectSource = isRobotRejection(row) ? 'robot' : 'staff';
     if (source === 'robot') robotRejected += 1; else staffRejected += 1;
     const remark = (row.remark ?? '').trim();
