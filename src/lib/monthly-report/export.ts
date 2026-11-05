@@ -1,12 +1,12 @@
 /** .xlsx export of the Onboarding report: the summary table plus daily rows. */
 import * as XLSX from 'xlsx';
-import { COHORT_UNAVAILABLE_NOTE, pending } from './definitions';
+import { COHORT_UNAVAILABLE_NOTE } from './definitions';
 import { FTD_SOURCE_LABELS } from './ftd-daily';
 import type { OnboardingReport, ReportBucket } from './metrics';
 
 export const EXPORT_COLUMNS = [
   'Period', 'From', 'To', 'Registrations', 'KYC Rejected', 'Total Real Account', 'Real Account Activated',
-  'Manual Approved Demo Not Done', 'Pending', 'FTD', 'FTD Amount',
+  'Manual Approved Demo Not Done', 'FTD', 'FTD Amount',
   'First account', 'Additional account', 'Auto KYC approved',
 ] as const;
 
@@ -24,7 +24,7 @@ function bucketRow(bucket: RowBucket, markNoData = false): (string | number | nu
   const ob = (value: number | null) => (noOnboarding ? NO_DATA : value);
   const ftd = (value: number | null) => (markNoData && value === null ? NO_DATA : value);
   return [bucket.label, bucket.from, bucket.to, ob(v.registrations), ob(v.kycRejected), ob(v.realAccountApproved), ob(v.realAccountActivated),
-    ob(v.manualKycApproved), ob(pending(v)), ftd(v.ftd), ftd(v.ftdAmount), ob(v.firstAccount), ob(v.additionalAccount), ob(v.autoKycApproved)];
+    ob(v.manualKycApproved), ftd(v.ftd), ftd(v.ftdAmount), ob(v.firstAccount), ob(v.additionalAccount), ob(v.autoKycApproved)];
 }
 
 export function reportTableRows(report: OnboardingReport): (string | number | null)[][] {
@@ -61,7 +61,6 @@ export function buildReportWorkbook(report: OnboardingReport): Buffer {
     ['Total Real Account', report.kpis.find(k => k.key === 'realAccountApproved')?.note ?? ''],
     ['Note', 'Real Account Activated in the Total row counts unique accounts; period rows count activations. The Total can be lower than the sum of the rows.'],
     ['Registrations', report.kpis.find(k => k.key === 'registrations')?.note ?? ''],
-    ['Pending', report.kpis.find(k => k.key === 'pending')?.note ?? ''],
     ...(report.coverage ? [
       ['No data', 'No upload covers these days (onboarding and FTD are tracked separately), so they are not counted as 0.'],
       ['Onboarding data through', report.coverage.onboarding.through ?? '—'],
@@ -101,5 +100,30 @@ export function buildReportWorkbook(report: OnboardingReport): Buffer {
     bucketRow({ label: 'Previous', from: report.previousRange.from, to: report.previousRange.to, values: report.previousTotal }),
   ]);
   XLSX.utils.book_append_sheet(workbook, kpis, 'KPIs');
+  if (report.approvers?.length) {
+    const approvers = XLSX.utils.aoa_to_sheet([
+      ['Approver', 'Final Approved (by Finished Time)', 'Steps Approved (by Create Time)', 'Final Rejected'],
+      ...report.approvers.map(a => [a.approver, a.finalApproved, a.stepsApproved, a.finalRejected]),
+      [],
+      ['Note', 'Deposit Robot is excluded from this ranking. Final Approved uses Success Status = Approved bucketed by Finished Time (else Create Time).'],
+    ]);
+    XLSX.utils.book_append_sheet(workbook, approvers, 'Approvers');
+  }
+  if (report.rejectionReasons) {
+    const rr = report.rejectionReasons;
+    const reasons = XLSX.utils.aoa_to_sheet([
+      ['Category', 'Robot', 'Staff', 'Total', 'Sample remarks (admin)'],
+      ...rr.reasons.map(r => [r.categoryLabel, r.robot, r.staff, r.total, r.samples.join(' | ').slice(0, 500)]),
+      [],
+      ['Total rejected rows', rr.totalRejected],
+      ['Robot rejected', rr.robotRejected],
+      ['Staff rejected', rr.staffRejected],
+      ['Rejected Reason column filled', rr.rejectedReasonColumnFilled],
+      ['Rejected Reason equals Remark', rr.rejectedReasonMatchesRemark],
+      ['Robot rule', rr.robotRule],
+      ['Note', 'Remark is the rejection reason (Bayu). Rejected Reason is usually empty in the Metabase export. Unmatched remarks are listed under Other with raw text.'],
+    ]);
+    XLSX.utils.book_append_sheet(workbook, reasons, 'Rejection reasons');
+  }
   return XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' }) as Buffer;
 }

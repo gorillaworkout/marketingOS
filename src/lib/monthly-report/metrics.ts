@@ -7,7 +7,7 @@ import type { FtdRow } from './ftd-parse';
 import type { OnboardingRow } from './onboarding-parse';
 import { wibDate } from './onboarding-parse';
 import {
-  MANUAL_APPROVED_DEMO_NOT_DONE_LABEL, REAL_ACCOUNT_ACTIVATED_LABEL, TOTAL_REAL_ACCOUNT_LABEL, TOTAL_REAL_ACCOUNT_NOTE, pending,
+  MANUAL_APPROVED_DEMO_NOT_DONE_LABEL, REAL_ACCOUNT_ACTIVATED_LABEL, TOTAL_REAL_ACCOUNT_LABEL, TOTAL_REAL_ACCOUNT_NOTE,
 } from './definitions';
 import {
   describeRange, reportBuckets, type Bucket, type DateRange, type Granularity, type ResolvedPeriod,
@@ -79,7 +79,7 @@ export type FtdSource = 'manual' | 'accounts';
 export interface FtdCohort { activatedWithFtd: number; ftdFromPeriodActivations: number }
 
 export {
-  MANUAL_APPROVED_DEMO_NOT_DONE_LABEL, REAL_ACCOUNT_ACTIVATED_LABEL, TOTAL_REAL_ACCOUNT_LABEL, TOTAL_REAL_ACCOUNT_NOTE, pending,
+  MANUAL_APPROVED_DEMO_NOT_DONE_LABEL, REAL_ACCOUNT_ACTIVATED_LABEL, TOTAL_REAL_ACCOUNT_LABEL, TOTAL_REAL_ACCOUNT_NOTE,
 } from './definitions';
 
 export const DAILY_COUNT_KEYS = [
@@ -209,7 +209,7 @@ export interface BucketCoverage { onboarding: CoverageState; ftd: CoverageState 
 
 export interface ReportBucket extends Bucket { values: BucketValues; coverage: BucketCoverage }
 
-export type KpiKey = 'registrations' | 'kycRejected' | 'realAccountApproved' | 'ftd' | 'pending';
+export type KpiKey = 'registrations' | 'kycRejected' | 'realAccountApproved' | 'ftd';
 
 export interface Kpi {
   key: KpiKey;
@@ -302,6 +302,18 @@ export interface OnboardingReport {
    * Null when the caller did not pass coverage (legacy: FTD span only).
    */
   coverage: { today: string; onboarding: CoverageSummary; ftd: CoverageSummary } | null;
+  /** Approver ranking from user_approved (Deposit Robot excluded). Absent when none loaded. */
+  approvers?: Array<{ approver: string; finalApproved: number; stepsApproved: number; finalRejected: number }>;
+  /** KYC rejection reasons from user_approved.Remark, split Robot vs Staff. */
+  rejectionReasons?: {
+    totalRejected: number;
+    robotRejected: number;
+    staffRejected: number;
+    rejectedReasonColumnFilled: number;
+    rejectedReasonMatchesRemark: number;
+    reasons: Array<{ categoryId: string; categoryLabel: string; robot: number; staff: number; total: number; samples: string[] }>;
+    robotRule: string;
+  };
 }
 
 /**
@@ -393,6 +405,8 @@ export function buildOnboardingReport(input: {
   coverage?: DataCoverage | null;
   /** Today in WIB (`YYYY-MM-DD`); days after it are never reported missing. */
   today?: string;
+  approvers?: OnboardingReport['approvers'];
+  rejectionReasons?: OnboardingReport['rejectionReasons'];
 }): OnboardingReport {
   const { period, granularity, current, previous } = input;
   const context: CoverageContext = {
@@ -455,7 +469,6 @@ export function buildOnboardingReport(input: {
       { key: 'manualKycApproved', label: MANUAL_APPROVED_DEMO_NOT_DONE_LABEL, value: total.manualKycApproved, previous: prev.manualKycApproved },
     ]),
     kpi('ftd', 'FTD', 'First-time deposits made in the period', total.ftd, prev.ftd),
-    kpi('pending', 'Pending', 'Registrations − Total Real Account − KYC Rejected', pending(total), pending(prev)),
   ];
 
   const kycApproved = total.kycApproved;
@@ -510,5 +523,7 @@ export function buildOnboardingReport(input: {
       onboarding: summarizeCoverage(period.range, context.coverage.onboarding, context.today),
       ftd: summarizeCoverage(period.range, context.coverage.ftd, context.today),
     } : null,
+    ...(input.approvers ? { approvers: input.approvers } : {}),
+    ...(input.rejectionReasons ? { rejectionReasons: input.rejectionReasons } : {}),
   };
 }

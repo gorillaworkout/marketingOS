@@ -18,7 +18,7 @@ test('detect: onboarding export (.xlsx, "Query result" sheet)', () => {
   assert.equal(result.ok, true);
   assert.equal(result.kind, 'onboarding');
   assert.equal(result.ok && result.sheetName, 'Query result');
-  assert.equal(result.ok && result.label, 'Onboarding export');
+  assert.equal(result.ok && result.label, 'Onboarding export (classic)');
 });
 
 test('detect: onboarding export on another sheet name and as .csv', () => {

@@ -3,7 +3,7 @@
  * parameters; store.ts runs it). Newest first, no hard cap: the UI pages
  * through everything 25 rows at a time.
  */
-export const HISTORY_KINDS = ['onboarding', 'ftd', 'rejection_reasons'] as const;
+export const HISTORY_KINDS = ['onboarding', 'onboarding_summary', 'user_approved', 'ftd', 'rejection_reasons'] as const;
 export type HistoryKind = typeof HISTORY_KINDS[number];
 
 export const DEFAULT_HISTORY_PAGE_SIZE = 25;

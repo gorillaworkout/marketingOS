@@ -3,14 +3,14 @@
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import {
-  Button, DataTableFrame, EmptyState, FilterGroup, LoadingState, MetricCard, PageHeader, PageStack, Panel, SectionHeader, Select, StatusBadge, TextInput, Toolbar,
+  Button, DataTableFrame, EmptyState, FilterGroup, LoadingState, MetricCard, PageHeader, PageStack, Panel, SectionHeader, Select, TextInput, Toolbar,
 } from '@/components/ui/dashboard';
 import { DUPOIN, formatAmount, formatChange, formatDateTimeWib, formatDecimal, formatInteger, formatPct } from '@/components/monthly-report/brand';
 import { FunnelChart, TrendChart } from '@/components/monthly-report/charts';
 import { useMonthlyReportPermissions } from '@/components/monthly-report/MonthlyReportContext';
 import { DataThrough, MissingDataNotice } from '@/components/monthly-report/DataCoverage';
 import { InfoTip, ReportTabs } from '@/components/monthly-report/ReportTabs';
-import { COHORT_UNAVAILABLE_NOTE, pending, TOTAL_REAL_ACCOUNT_LABEL } from '@/lib/monthly-report/definitions';
+import { COHORT_UNAVAILABLE_NOTE, TOTAL_REAL_ACCOUNT_LABEL } from '@/lib/monthly-report/definitions';
 import type { BucketCoverage, BucketValues, OnboardingReport } from '@/lib/monthly-report/metrics';
 import {
   GRANULARITIES, PERIOD_PRESETS, PRESET_LABELS, defaultGranularity, formatDayLabel, resolvePeriod, shiftAnchor,
@@ -208,7 +208,7 @@ export default function MonthlyReportOnboardingPage() {
             <p className="border-t border-[var(--mos-border-subtle)] px-5 py-2.5 text-[11px] text-[var(--mos-text-faint)]">
               Registrations<InfoTip text={report.kpis[0].note} /> = every onboarding entry in the export (all 6 steps; a user rejected and re-registering counts twice).
               Total Real Account = Real Account Activated (unique) + Manual Approved Demo Not Done.
-              Pending = Registrations − Total Real Account − KYC Rejected. Change is versus the previous period.
+              Change is versus the previous period.
             </p>
           </Panel>
 
@@ -332,7 +332,7 @@ export default function MonthlyReportOnboardingPage() {
               <thead className="text-[var(--mos-text-faint)]">
                 <tr>
                   <th className="px-4 py-2.5 text-left font-medium">Period</th>
-                  {['Registrations', 'KYC Rejected', TOTAL_REAL_ACCOUNT_LABEL, 'Activated', 'Manual Approved', 'FTD', 'Pending'].map(h => <th key={h} className="px-4 py-2.5 font-medium">{h}</th>)}
+                  {['Registrations', 'KYC Rejected', TOTAL_REAL_ACCOUNT_LABEL, 'Activated', 'Manual Approved', 'FTD'].map(h => <th key={h} className="px-4 py-2.5 font-medium">{h}</th>)}
                 </tr>
               </thead>
               <tbody>
@@ -341,19 +341,94 @@ export default function MonthlyReportOnboardingPage() {
                 {report.hasPreviousData ? (
                   <SummaryRow label={`Previous (${report.previousLabel})`} values={report.previousTotal} muted />
                 ) : (
-                  <tr className="border-t border-[var(--mos-border-subtle)] text-[var(--mos-text-faint)]"><td className="px-4 py-2 text-left" colSpan={8}>Previous ({report.previousLabel}): no data uploaded</td></tr>
+                  <tr className="border-t border-[var(--mos-border-subtle)] text-[var(--mos-text-faint)]"><td className="px-4 py-2 text-left" colSpan={7}>Previous ({report.previousLabel}): no data uploaded</td></tr>
                 )}
               </tbody>
             </table>
           </DataTableFrame>
 
-          <Panel>
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <SectionHeader title="Rejection reasons" description="Why KYC was rejected, grouped by reason." />
-              <StatusBadge tone="neutral">Coming soon</StatusBadge>
+          {(report.approvers?.length || report.rejectionReasons) && (
+            <div className="grid gap-6 xl:grid-cols-2">
+              <Panel>
+                <SectionHeader
+                  title="Approvers"
+                  description="Final Approved by Finished Time (else Create Time). Deposit Robot excluded. Steps Approved counts Approved Status = Approved by Create Time."
+                />
+                {!report.approvers?.length ? (
+                  <EmptyState className="min-h-24" title="No approver data" description="Upload the user_approved Metabase export for this period." />
+                ) : (
+                  <div className="mt-4 overflow-x-auto">
+                    <table className="w-full text-right text-xs">
+                      <thead className="text-[var(--mos-text-faint)]">
+                        <tr>
+                          <th className="px-3 py-2 text-left font-medium">Approver</th>
+                          <th className="px-3 py-2 font-medium">Final Approved</th>
+                          <th className="px-3 py-2 font-medium">Steps Approved</th>
+                          <th className="px-3 py-2 font-medium">Final Rejected</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {report.approvers.map(row => (
+                          <tr key={row.approver} className="border-t border-[var(--mos-border-subtle)] text-[var(--mos-text-secondary)]">
+                            <td className="px-3 py-2 text-left text-[var(--mos-text)]">{row.approver}</td>
+                            <td className="px-3 py-2 tabular-nums">{formatInteger(row.finalApproved)}</td>
+                            <td className="px-3 py-2 tabular-nums">{formatInteger(row.stepsApproved)}</td>
+                            <td className="px-3 py-2 tabular-nums">{formatInteger(row.finalRejected)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </Panel>
+              <Panel>
+                <SectionHeader
+                  title="KYC rejection reasons"
+                  description="From user_approved Remark (Bayu). Split Robot vs Staff. Unmatched remarks stay under Other with raw text."
+                />
+                {!report.rejectionReasons || report.rejectionReasons.totalRejected === 0 ? (
+                  <EmptyState className="min-h-24" title="No rejections in this period" description="Upload user_approved for these dates, or the period has no Failed/Rejected rows." />
+                ) : (
+                  <>
+                    <p className="mt-3 text-[11px] text-[var(--mos-text-faint)]">
+                      {formatInteger(report.rejectionReasons.totalRejected)} rejected
+                      · Robot {formatInteger(report.rejectionReasons.robotRejected)}
+                      · Staff {formatInteger(report.rejectionReasons.staffRejected)}
+                    </p>
+                    <div className="mt-3 overflow-x-auto">
+                      <table className="w-full text-right text-xs">
+                        <thead className="text-[var(--mos-text-faint)]">
+                          <tr>
+                            <th className="px-3 py-2 text-left font-medium">Reason</th>
+                            <th className="px-3 py-2 font-medium">Robot</th>
+                            <th className="px-3 py-2 font-medium">Staff</th>
+                            <th className="px-3 py-2 font-medium">Total</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {report.rejectionReasons.reasons.filter(r => r.total > 0).map(row => (
+                            <tr key={row.categoryId} className="border-t border-[var(--mos-border-subtle)] text-[var(--mos-text-secondary)]">
+                              <td className="px-3 py-2 text-left">
+                                <div className="text-[var(--mos-text)]">{row.categoryLabel}</div>
+                                {row.categoryId === 'other' && row.samples.length > 0 && (
+                                  <div className="mt-0.5 text-[10px] text-[var(--mos-text-faint)]" title={row.samples.join(' | ')}>
+                                    e.g. {row.samples[0].slice(0, 80)}{row.samples[0].length > 80 ? '…' : ''}
+                                  </div>
+                                )}
+                              </td>
+                              <td className="px-3 py-2 tabular-nums">{formatInteger(row.robot)}</td>
+                              <td className="px-3 py-2 tabular-nums">{formatInteger(row.staff)}</td>
+                              <td className="px-3 py-2 tabular-nums font-medium text-[var(--mos-text)]">{formatInteger(row.total)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </>
+                )}
+              </Panel>
             </div>
-            <p className="mt-3 text-xs text-[var(--mos-text-muted)]">Rejection reasons will be uploaded separately later. The data model is ready (keyed by Document ID or UID, with date and reason).</p>
-          </Panel>
+          )}
         </>
       )}
     </PageStack>
@@ -375,7 +450,6 @@ function SummaryRow({ label, values, coverage, strong, muted }: { label: string;
       {cell(values.realAccountActivated)}
       {cell(values.manualKycApproved)}
       <td className={`px-4 py-2${values.ftd === null ? ' text-[var(--mos-text-faint)]' : ''}`}>{values.ftd === null ? NO_DATA : formatInteger(values.ftd)}</td>
-      {cell(pending(values))}
     </tr>
   );
 }
