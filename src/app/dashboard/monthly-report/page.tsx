@@ -45,12 +45,9 @@ function queryString(input: PeriodInput, granularity: Granularity): string {
 }
 
 function initialInput(): PeriodInput {
-  // Start on the last complete month: monthly reports are read after the month closes.
+  // Default to the current calendar month in WIB. The anchor is the first of that month.
   const today = todayWib();
-  const firstOfMonth = `${today.slice(0, 7)}-01`;
-  const lastMonth = new Date(`${firstOfMonth}T00:00:00Z`);
-  lastMonth.setUTCMonth(lastMonth.getUTCMonth() - 1);
-  return { preset: 'month', anchor: lastMonth.toISOString().slice(0, 10) };
+  return { preset: 'month', anchor: `${today.slice(0, 7)}-01` };
 }
 
 export default function MonthlyReportOnboardingPage() {
@@ -183,7 +180,7 @@ export default function MonthlyReportOnboardingPage() {
           )}
 
           <Panel padding="none">
-            <div className="grid grid-cols-2 md:grid-cols-5">
+            <div className="grid grid-cols-2 md:grid-cols-4">
               {report.kpis.map(kpi => (
                 <MetricCard
                   key={kpi.key}
