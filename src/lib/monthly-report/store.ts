@@ -516,8 +516,8 @@ export async function listAccessUsers(): Promise<AccessUser[]> {
   return rows.map(row => ({ ...row, via_department: Boolean(row.via_department), personal_grant: Boolean(row.personal_grant), can_upload: Boolean(row.can_upload) }));
 }
 
-/** view=false removes the personal grant; upload rights require a personal grant. */
-export async function setUserAccess(userId: string, access: { view: boolean; upload: boolean }, grantedBy: string): Promise<boolean> {
+/** view=false removes the personal grant; view=true always stores can_upload=true (upload = view). */
+export async function setUserAccess(userId: string, access: { view: boolean; upload?: boolean }, grantedBy: string): Promise<boolean> {
   const user = await queryOne('SELECT id FROM users WHERE id = ?', [userId]);
   if (!user) return false;
   await executeTransaction(async transaction => {
@@ -528,7 +528,7 @@ export async function setUserAccess(userId: string, access: { view: boolean; upl
     await transaction.execute(
       `INSERT INTO monthly_report_access (user_id, can_upload, granted_by) VALUES (?, ?, ?)
        ON CONFLICT (user_id) DO UPDATE SET can_upload = EXCLUDED.can_upload, granted_by = EXCLUDED.granted_by, updated_at = CURRENT_TIMESTAMP`,
-      [userId, access.upload, grantedBy],
+      [userId, true, grantedBy],
     );
   });
   return true;

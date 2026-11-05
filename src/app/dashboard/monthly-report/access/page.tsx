@@ -19,10 +19,10 @@ export default function MonthlyReportAccessPage() {
     });
   }, []);
 
-  const update = async (user: AccessUser, view: boolean, upload: boolean) => {
+  const update = async (user: AccessUser, view: boolean) => {
     setSaving(user.id);
     setError('');
-    const response = await fetch('/api/monthly-report/access', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ userId: user.id, view, upload }) });
+    const response = await fetch('/api/monthly-report/access', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ userId: user.id, view }) });
     const data = await response.json().catch(() => ({}));
     if (response.ok && data.user) setUsers(list => list?.map(u => (u.id === user.id ? data.user : u)) ?? null);
     else setError(data.error || 'Could not save');
@@ -31,13 +31,13 @@ export default function MonthlyReportAccessPage() {
 
   return (
     <PageStack>
-      <PageHeader eyebrow="Reports" title="Onboarding Reports" description="Who can open the report and who can upload data. Admins always have full access; everyone who can view sees the same report." />
+      <PageHeader eyebrow="Reports" title="Onboarding Reports" description="Who can open Onboarding Reports. Anyone with access can upload. Admins always have full access." />
       <ReportTabs />
       {error && <p className="text-xs text-red-300">{error}</p>}
-      <DataTableFrame title="Access" description="View comes from the department (Accounts → Departments → Onboarding Reports) or a personal grant here. Upload rights are personal.">
+      <DataTableFrame title="Access" description="Access comes from the department (Accounts → Departments → Onboarding Reports) or a personal grant here. View and upload are the same.">
         {!users ? <p className="px-5 py-6 text-xs text-[var(--mos-text-muted)]">Loading…</p> : users.length === 0 ? <EmptyState title="No users" /> : (
           <table className="w-full text-left text-xs">
-            <thead className="text-[var(--mos-text-faint)]"><tr>{['User', 'Department', 'View', 'Personal access', 'Can upload'].map(h => <th key={h} className="px-4 py-2.5 font-medium">{h}</th>)}</tr></thead>
+            <thead className="text-[var(--mos-text-faint)]"><tr>{['User', 'Department', 'View', 'Personal access'].map(h => <th key={h} className="px-4 py-2.5 font-medium">{h}</th>)}</tr></thead>
             <tbody>
               {users.map(user => {
                 const admin = user.role === 'admin';
@@ -50,10 +50,7 @@ export default function MonthlyReportAccessPage() {
                       {admin ? <StatusBadge tone="info">Admin</StatusBadge> : canView ? <StatusBadge tone="success">{user.via_department ? 'Via department' : 'Personal'}</StatusBadge> : <StatusBadge>No access</StatusBadge>}
                     </td>
                     <td className="px-4 py-2.5">
-                      <Toggle label={`Personal access for ${user.name}`} checked={admin || user.personal_grant} disabled={admin || saving === user.id} onChange={value => update(user, value, value && user.can_upload)} />
-                    </td>
-                    <td className="px-4 py-2.5">
-                      <Toggle label={`Upload rights for ${user.name}`} checked={admin || user.can_upload} disabled={admin || saving === user.id} onChange={value => update(user, value || user.personal_grant, value)} />
+                      <Toggle label={`Personal access for ${user.name}`} checked={admin || user.personal_grant} disabled={admin || saving === user.id} onChange={value => update(user, value)} />
                     </td>
                   </tr>
                 );

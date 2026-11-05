@@ -168,18 +168,16 @@ test('ftd-daily: Excel export has an "FTD daily" sheet with values, sources and 
   assert.ok(kpis.some(row => row[0] === 'FTD (same accounts)' && row[1] === NO_DATA));
 });
 
-test('ftd-daily: permissions — same as upload (admin or "Can upload"); legacy FTD file import is admin only', async () => {
+test('ftd-daily: permissions — same as view (admin or monthly-report access); legacy FTD file import is admin only', async () => {
   const admin = { role: 'admin', features: [] };
-  const uploader = { role: 'user', features: ['monthly-report'], monthlyReportUpload: true };
-  const viewer = { role: 'user', features: ['monthly-report'], monthlyReportUpload: false };
+  const viaDepartment = { role: 'user', features: ['monthly-report'], monthlyReportUpload: false };
   const outsider = { role: 'user', features: [] };
   assert.equal(canUploadMonthlyReport(admin), true);
-  assert.equal(canUploadMonthlyReport(uploader), true);
+  assert.equal(canUploadMonthlyReport(viaDepartment), true);
   assert.equal(monthlyReportApiAccess(admin, { upload: true }), null);
-  assert.equal(monthlyReportApiAccess(uploader, { upload: true }), null);
-  assert.equal(monthlyReportApiAccess(viewer, { upload: true })?.status, 403);
+  assert.equal(monthlyReportApiAccess(viaDepartment, { upload: true }), null);
   assert.equal(monthlyReportApiAccess(outsider, { upload: true })?.status, 403);
-  assert.equal(monthlyReportApiAccess(uploader, { adminOnly: true })?.status, 403);
+  assert.equal(monthlyReportApiAccess(viaDepartment, { adminOnly: true })?.status, 403);
   const route = await readFile('src/app/api/monthly-report/ftd-daily/route.ts', 'utf8');
   for (const method of ['GET', 'POST', 'DELETE']) assert.match(route, new RegExp(`export async function ${method}\\(`));
   assert.equal(route.match(/requireMonthlyReport\(request, \{ upload: true \}\)/g)?.length, 3);

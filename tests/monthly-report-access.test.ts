@@ -29,30 +29,33 @@ test('a per-user grant adds the feature on top of the department', () => {
   assert.deepEqual(enabledFeaturesForUser({ role: 'member', features: departmentFeaturesWithGrants(['internal-docs'], false) }), ['internal-docs', 'monthly-report']);
 });
 
-test('view: admin, department feature or personal grant; upload: admin or upload grant only', () => {
+test('view and upload: admin, department feature, or personal grant (same predicate)', () => {
   const admin = { role: 'admin', features: [...ACCOUNT_FEATURES], monthlyReportUpload: false };
   const viaDepartment = { role: 'member', features: ['monthly-report'], monthlyReportUpload: false };
-  const uploader = { role: 'member', features: ['monthly-report'], monthlyReportUpload: true };
+  const personalGrant = { role: 'member', features: ['monthly-report'], monthlyReportUpload: true };
   const outsider = { role: 'member', features: ['seo'], monthlyReportUpload: false };
+  const staleUploadFlag = { role: 'member', features: [], monthlyReportUpload: true };
 
   assert.equal(monthlyReportPageAccess(null), 'login');
   assert.equal(monthlyReportPageAccess(viaDepartment), 'allowed');
   assert.equal(monthlyReportPageAccess(outsider), 'forbidden');
-  assert.equal(monthlyReportPageAccess(viaDepartment, { upload: true }), 'forbidden');
-  assert.equal(monthlyReportPageAccess(uploader, { upload: true }), 'allowed');
-  assert.equal(monthlyReportPageAccess(uploader, { adminOnly: true }), 'forbidden');
+  assert.equal(monthlyReportPageAccess(viaDepartment, { upload: true }), 'allowed');
+  assert.equal(monthlyReportPageAccess(personalGrant, { upload: true }), 'allowed');
+  assert.equal(monthlyReportPageAccess(personalGrant, { adminOnly: true }), 'forbidden');
   assert.equal(monthlyReportPageAccess(admin, { adminOnly: true }), 'allowed');
   assert.equal(monthlyReportPageAccess(admin, { upload: true }), 'allowed');
 
   assert.equal(canUploadMonthlyReport(admin), true);
-  assert.equal(canUploadMonthlyReport(uploader), true);
-  assert.equal(canUploadMonthlyReport(viaDepartment), false);
-  // A stale upload flag without view access never allows upload.
-  assert.equal(canUploadMonthlyReport({ role: 'member', features: [], monthlyReportUpload: true }), false);
+  assert.equal(canUploadMonthlyReport(viaDepartment), true);
+  assert.equal(canUploadMonthlyReport(personalGrant), true);
+  assert.equal(canUploadMonthlyReport(outsider), false);
+  // Stale upload flag without view still never allows upload.
+  assert.equal(canUploadMonthlyReport(staleUploadFlag), false);
 
   assert.deepEqual(monthlyReportApiAccess(outsider), { error: 'Forbidden: you do not have access to Onboarding Reports', status: 403 });
   assert.equal(monthlyReportApiAccess(viaDepartment), null);
-  assert.deepEqual(monthlyReportApiAccess(viaDepartment, { upload: true }), { error: 'Forbidden: upload rights are required', status: 403 });
+  assert.equal(monthlyReportApiAccess(viaDepartment, { upload: true }), null);
+  assert.equal(monthlyReportApiAccess(outsider, { upload: true })?.status, 403);
 });
 
 test('every session query loads the personal Monthly Report grant', () => {
@@ -62,4 +65,26 @@ test('every session query loads the personal Monthly Report grant', () => {
   assert.equal((route.match(/MONTHLY_REPORT_GRANT_SQL/g) ?? []).length >= 2, true);
   assert.match(auth, /monthlyReportUpload/);
   assert.match(read('src/lib/monthly-report/access.ts'), /FROM monthly_report_access/);
+});
+
+test('Access API: personal grant always stores can_upload=true; upload flag optional', () => {
+  const route = read('src/app/api/monthly-report/access/route.ts');
+  const store = read('src/lib/monthly-report/store.ts');
+  assert.match(route, /typeof body\.view !== 'boolean'/);
+  assert.doesNotMatch(route, /typeof body\.upload !== 'boolean'/);
+  assert.doesNotMatch(route, /Upload rights need view access/);
+  assert.match(route, /upload:\s*true/);
+  assert.match(store, /can_upload/);
+  assert.doesNotMatch(store, /access\.upload/);
+  // setUserAccess forces the literal true on insert when view is granted
+  assert.match(store, /VALUES \(\?, \?, \?\)/);
+  assert.match(store, /\[userId, true, grantedBy\]/);
+});
+
+test('Access page has Personal access only (no separate Upload toggle)', () => {
+  const page = read('src/app/dashboard/monthly-report/access/page.tsx');
+  assert.match(page, /Personal access/);
+  assert.doesNotMatch(page, /Upload rights for/);
+  assert.doesNotMatch(page, /'Can upload'/);
+  assert.match(page, /JSON\.stringify\(\{ userId: user\.id, view \}\)/);
 });
