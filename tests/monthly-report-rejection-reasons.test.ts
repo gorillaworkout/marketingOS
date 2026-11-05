@@ -49,3 +49,23 @@ test('isRobotRejection covers Deposit Robot, Auto method, auto_ steps, machine r
   assert.equal(isRejectionRow({ approvedStatus: 'Failed', successStatus: null }), true);
   assert.equal(isRejectionRow({ approvedStatus: 'Approved', successStatus: 'Approved' }), false);
 });
+
+test('empty Approver rows never appear in ranking or rejection reasons', () => {
+  assert.equal(parsed.summary.skippedBlankApprover, 2);
+  const report = buildApproverReport(rows, { from: '2026-11-01', to: '2026-11-02' });
+  assert.ok(!report.some(a => !a.approver.trim()), 'no blank approver line in ranking');
+  // Even if a blank-approver rejection slipped into storage, the report must ignore it.
+  const withBlank = [
+    ...rows,
+    {
+      recordId: 'blank-1', documentId: 'd', createTime: '2026-11-01T12:00:00+07:00', finishedTime: '2026-11-01T12:05:00+07:00',
+      applicantUid: null, approverUid: null, approver: '', approvalMethod: 'Manual', step: 'manual_kyc',
+      stepStatus: null, approvedStatus: 'Failed', successStatus: 'Failed', account: null, processingTime: null,
+      remark: 'Should not count', rejectedReason: null,
+    },
+  ];
+  const rej = buildRejectionReasonsReport(withBlank, { from: '2026-11-01', to: '2026-11-02' });
+  assert.ok(!rej.reasons.some(r => r.samples.some(s => /Should not count/.test(s))));
+  const ranking = buildApproverReport(withBlank, { from: '2026-11-01', to: '2026-11-02' });
+  assert.ok(!ranking.some(a => a.approver === '' || a.approver === '(blank)'));
+});
