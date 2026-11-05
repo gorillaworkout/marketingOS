@@ -66,3 +66,17 @@ test('every session query loads the personal Monthly Report grant', () => {
   assert.match(auth, /monthlyReportUpload/);
   assert.match(read('src/lib/monthly-report/access.ts'), /FROM monthly_report_access/);
 });
+
+test('Access API: personal grant always stores can_upload=true; upload flag optional', () => {
+  const route = read('src/app/api/monthly-report/access/route.ts');
+  const store = read('src/lib/monthly-report/store.ts');
+  assert.match(route, /typeof body\.view !== 'boolean'/);
+  assert.doesNotMatch(route, /typeof body\.upload !== 'boolean'/);
+  assert.doesNotMatch(route, /Upload rights need view access/);
+  assert.match(route, /upload:\s*true/);
+  assert.match(store, /can_upload/);
+  assert.doesNotMatch(store, /access\.upload/);
+  // setUserAccess forces the literal true on insert when view is granted
+  assert.match(store, /VALUES \(\?, \?, \?\)/);
+  assert.match(store, /\[userId, true, grantedBy\]/);
+});
