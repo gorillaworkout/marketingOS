@@ -4,7 +4,7 @@ import { syntheticUserApprovedWorkbook } from './fixtures/monthly-report-daily';
 import {
   GUIDE_CATEGORIES, OTHER_CATEGORY_LABEL, buildRejectionReasonsReport, isRejectionRow, isRobotRejection, mapRemarkToCategories,
 } from '../src/lib/monthly-report/rejection-reasons';
-import { buildApproverReport, DEPOSIT_ROBOT, parseUserApproved, type UserApprovedRow } from '../src/lib/monthly-report/user-approved-parse';
+import { aggregateApproverStats, buildApproverReport, DEPOSIT_ROBOT, parseUserApproved, type UserApprovedRow } from '../src/lib/monthly-report/user-approved-parse';
 
 const parsed = parseUserApproved(syntheticUserApprovedWorkbook(), { offset: '+07:00' });
 const rows = parsed.rows;
@@ -229,4 +229,89 @@ test('classification copy documents the Staff rule in English', () => {
   assert.match(report.robotRule, /manual_kyc/i);
   assert.match(report.robotRule, /Staff/i);
   assert.doesNotMatch(report.robotRule, /INFORMASI|VERIFIKASI/);
+});
+
+test('Final Rejected counts a manual_kyc failure when Success Status is blank', () => {
+  // Live Metabase: Success Status is Approved or blank; the failure is Approved Status = Failed.
+  const onlyRejection = rejection({
+    recordId: 'blank-success',
+    approver: 'Citra Lestari',
+    successStatus: null,
+    approvedStatus: 'Failed',
+    approvalMethod: 'Manual',
+    step: 'manual_kyc',
+    remark: 'Mohon unggah foto KTP asli yang jelas',
+  });
+  const report = buildApproverReport([onlyRejection], RANGE);
+  const citra = report.find(a => a.approver === 'Citra Lestari');
+  assert.ok(citra, 'an approver with only rejections still appears in the ranking');
+  assert.equal(citra.finalApproved, 0);
+  assert.equal(citra.finalRejected, 1);
+  assert.equal(citra.finalRejected, buildRejectionReasonsReport([onlyRejection], RANGE).staffRejected);
+  const aggregated = aggregateApproverStats([onlyRejection]);
+  assert.equal(aggregated.find(a => a.approver === 'Citra Lestari')?.finalRejected, 1);
+});
+
+test('Final Rejected skips manual_video_verify, Manual auto_kyc, and Deposit Robot', () => {
+  const video = rejection({
+    recordId: 'video',
+    approver: 'Citra Lestari',
+    successStatus: 'Failed',
+    approvedStatus: 'Failed',
+    step: 'manual_video_verify',
+    remark: 'Mohon perbaiki video verifikasi',
+  });
+  const autoKyc = rejection({
+    recordId: 'auto-kyc',
+    approver: 'Eka Nugroho',
+    successStatus: null,
+    approvedStatus: 'Failed',
+    approvalMethod: 'Manual',
+    step: 'auto_kyc',
+    remark: 'Ekyc Status: HasSameIdentity:0',
+  });
+  const robot = rejection({
+    recordId: 'robot',
+    approver: DEPOSIT_ROBOT,
+    successStatus: null,
+    approvedStatus: 'Failed',
+    approvalMethod: 'Manual',
+    step: 'manual_kyc',
+    remark: 'Mohon unggah foto KTP asli yang jelas',
+  });
+  const machineRemark = rejection({
+    recordId: 'machine-remark',
+    approver: 'Fajar Hidayat',
+    successStatus: 'Failed',
+    approvedStatus: 'Failed',
+    approvalMethod: 'Manual',
+    step: 'manual_kyc',
+    remark: 'Ekyc Status: occupation:True',
+  });
+  const rowsForCase = [video, autoKyc, robot, machineRemark];
+  const report = buildApproverReport(rowsForCase, RANGE);
+  assert.equal(report.find(a => a.approver === 'Citra Lestari')?.finalRejected ?? 0, 0);
+  assert.equal(report.find(a => a.approver === 'Eka Nugroho')?.finalRejected ?? 0, 0);
+  assert.equal(report.find(a => a.approver === 'Fajar Hidayat')?.finalRejected ?? 0, 0);
+  assert.equal(report.some(a => a.approver === DEPOSIT_ROBOT), false);
+  for (const stat of report) {
+    const staff = buildRejectionReasonsReport(
+      rowsForCase.filter(row => row.approver === stat.approver),
+      RANGE,
+    ).staffRejected;
+    assert.equal(stat.finalRejected, staff, stat.approver);
+  }
+});
+
+test('fixture Final Rejected matches each approver Staff rejection count', () => {
+  const report = buildApproverReport(rows, RANGE);
+  assert.ok(report.some(a => a.approver === 'Ayu Pratama'));
+  assert.ok(report.some(a => a.approver === 'Budi Santoso'));
+  for (const stat of report) {
+    const staff = buildRejectionReasonsReport(
+      rows.filter(row => row.approver === stat.approver),
+      RANGE,
+    ).staffRejected;
+    assert.equal(stat.finalRejected, staff, stat.approver);
+  }
 });

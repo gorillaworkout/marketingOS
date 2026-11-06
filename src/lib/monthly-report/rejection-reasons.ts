@@ -9,9 +9,9 @@
  * isFirstAccount / livenessAuth). Deposit Robot video-verify failures stay
  * under Robot. Deposit Robot is still skipped for the Approver ranking only.
  *
- * Staff (Bayu 2026-11-05) only when ALL of: rejection row, Approver non-blank,
- * Approval Method /^manual$/i, Steps /^manual_kyc$/i, and Remark is human
- * language. manual_video_verify, auto_*, and machine Remarks (Ekyc, E-Kyc,
+ * Staff (Bayu 2026-11-05) only when ALL of: rejection row, Approver non-blank
+ * and not /robot|system/i, Approval Method /^manual$/i, Steps /^manual_kyc$/i,
+ * and Remark is human language. manual_video_verify, auto_*, and machine Remarks (Ekyc, E-Kyc,
  * Speech Script Matching, HasSameIdentity, Face consistency, isFirstAccount,
  * livenessAuth, occupation:, openingPurpose:, fundSource:, isDemoTrade:) are
  * not Staff. A row that is neither Robot nor Staff is omitted from reason totals.
@@ -246,16 +246,26 @@ export function isMachineRemark(remark: string | null | undefined): boolean {
 }
 
 /**
- * Staff only when every inclusion rule holds (Bayu 2026-11-05).
- * Does not itself exclude Robot rows; the report assigns Robot first when both match.
+ * Staff manual KYC rejection, shared by the Staff column and Approver Final Rejected.
+ * A row counts when every rule holds: Approved Status or Success Status is
+ * Failed/Rejected, the approver is a named human (not blank, not /robot|system/i),
+ * Approval Method is Manual, Steps is manual_kyc, and Remark is human language.
+ * The machine-remark filter is part of this helper, so Final Rejected stays equal
+ * to that approver's Staff count. manual_video_verify, auto_*, and add_account do not count.
  */
-export function isStaffRejection(row: Pick<UserApprovedRow, 'approver' | 'approvalMethod' | 'step' | 'remark' | 'approvedStatus' | 'successStatus'>): boolean {
+export function isStaffManualKycRejection(row: Pick<UserApprovedRow, 'approver' | 'approvalMethod' | 'step' | 'remark' | 'approvedStatus' | 'successStatus'>): boolean {
   if (!isRejectionRow(row)) return false;
-  if (!(row.approver ?? '').trim()) return false;
+  const approver = (row.approver ?? '').trim();
+  if (!approver || /robot|system/i.test(approver)) return false;
   if (!/^manual$/i.test((row.approvalMethod ?? '').trim())) return false;
   if (!/^manual_kyc$/i.test((row.step ?? '').trim())) return false;
   if (isMachineRemark(row.remark)) return false;
   return true;
+}
+
+/** Staff column. Same predicate as Approver Final Rejected. */
+export function isStaffRejection(row: Pick<UserApprovedRow, 'approver' | 'approvalMethod' | 'step' | 'remark' | 'approvedStatus' | 'successStatus'>): boolean {
+  return isStaffManualKycRejection(row);
 }
 
 /** A row counts as a rejection when Approved Status or Success Status is Failed/Rejected. */
@@ -286,7 +296,7 @@ export interface RejectionReasonsReport {
   robotRule: string;
 }
 
-const ROBOT_RULE_TEXT = 'Robot when Approver matches /robot|system/i, OR Approval Method is Auto, OR Steps starts with auto_, OR Remark looks like a machine diagnostic (Ekyc Status / Speech Script / HasSameIdentity / Face consistency / isFirstAccount / livenessAuth). Deposit Robot video-verify failures are included under Robot. Staff only when all of these hold: the row is Failed or Rejected, Approver is non-blank, Approval Method is Manual, Steps is manual_kyc, and Remark is not machine language (Ekyc Status, E-Kyc/EKyc, Speech Script Matching, HasSameIdentity, Face consistency, isFirstAccount, livenessAuth, occupation:, openingPurpose:, fundSource:, or similar program flags such as isDemoTrade:). manual_video_verify and auto_* are not Staff. Rows that are neither Robot nor Staff are omitted from reason totals.';
+const ROBOT_RULE_TEXT = 'Robot when Approver matches /robot|system/i, OR Approval Method is Auto, OR Steps starts with auto_, OR Remark looks like a machine diagnostic (Ekyc Status / Speech Script / HasSameIdentity / Face consistency / isFirstAccount / livenessAuth). Deposit Robot video-verify failures are included under Robot. Staff only when all of these hold: the row is Failed or Rejected, Approver is non-blank and does not match /robot|system/i, Approval Method is Manual, Steps is manual_kyc, and Remark is not machine language (Ekyc Status, E-Kyc/EKyc, Speech Script Matching, HasSameIdentity, Face consistency, isFirstAccount, livenessAuth, occupation:, openingPurpose:, fundSource:, or similar program flags such as isDemoTrade:). manual_video_verify and auto_* are not Staff. Rows that are neither Robot nor Staff are omitted from reason totals.';
 
 function wibDayFromIso(iso: string): string {
   return new Date(new Date(iso).getTime() + 7 * 3_600_000).toISOString().slice(0, 10);
