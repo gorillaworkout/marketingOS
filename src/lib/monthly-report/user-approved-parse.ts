@@ -9,6 +9,7 @@
  */
 import { cellText, cellToWallClock, normalizeHeader, readSheetRows } from './xlsx-read';
 import { ONBOARDING_SHEET, wallClockToIso, parseOffset, DEFAULT_SOURCE_OFFSET } from './onboarding-parse';
+import { isStaffManualKycRejection } from './rejection-reasons';
 
 export const USER_APPROVED_REQUIRED = [
   'Record ID',
@@ -230,7 +231,10 @@ export interface ApproverStat {
   finalApproved: number;
   /** Approved steps (Approved Status = Approved), bucketed by Create Time. */
   stepsApproved: number;
-  /** Rejected / failed finals in the same finished-time bucket. */
+  /**
+   * Staff manual KYC rejections (Manual + manual_kyc, Failed/Rejected on
+   * Approved Status or Success Status), same finished-time bucket as finalApproved.
+   */
   finalRejected: number;
 }
 
@@ -249,7 +253,7 @@ export function aggregateApproverStats(rows: UserApprovedRow[]): ApproverStat[] 
     if (!row.approver?.trim() || row.approver === DEPOSIT_ROBOT) continue;
     const stat = bump(row.approver);
     if (/^approved$/i.test(row.successStatus ?? '')) stat.finalApproved += 1;
-    else if (/^(rejected|failed)$/i.test(row.successStatus ?? '')) stat.finalRejected += 1;
+    if (isStaffManualKycRejection(row)) stat.finalRejected += 1;
     if (/^approved$/i.test(row.approvedStatus ?? '')) stat.stepsApproved += 1;
   }
   return [...by.values()].sort((a, b) => b.finalApproved - a.finalApproved || a.approver.localeCompare(b.approver));
@@ -273,7 +277,8 @@ export function filterUserApprovedByCreateDay(rows: UserApprovedRow[], from: str
 
 /**
  * Builds ApproverStats with the dual bucketing rule:
- * finalApproved / finalRejected by Finished (else Create); stepsApproved by Create Time.
+ * finalApproved and finalRejected (staff manual KYC) by Finished (else Create); stepsApproved by Create Time.
+ * An approver with only rejections still appears.
  */
 export function buildApproverReport(rows: UserApprovedRow[], range: { from: string; to: string }): ApproverStat[] {
   const by = new Map<string, ApproverStat>();
@@ -289,7 +294,7 @@ export function buildApproverReport(rows: UserApprovedRow[], range: { from: stri
     if (finishedDay >= range.from && finishedDay <= range.to) {
       const stat = bump(row.approver);
       if (/^approved$/i.test(row.successStatus ?? '')) stat.finalApproved += 1;
-      else if (/^(rejected|failed)$/i.test(row.successStatus ?? '')) stat.finalRejected += 1;
+      if (isStaffManualKycRejection(row)) stat.finalRejected += 1;
     }
     if (createDay >= range.from && createDay <= range.to) {
       if (/^approved$/i.test(row.approvedStatus ?? '')) bump(row.approver).stepsApproved += 1;

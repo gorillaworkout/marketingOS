@@ -105,7 +105,7 @@ export function buildReportWorkbook(report: OnboardingReport): Buffer {
       ['Approver', 'Final Approved (by Finished Time)', 'Steps Approved (by Create Time)', 'Final Rejected'],
       ...report.approvers.map(a => [a.approver, a.finalApproved, a.stepsApproved, a.finalRejected]),
       [],
-      ['Note', 'Deposit Robot is excluded from this ranking. Final Approved uses Success Status = Approved bucketed by Finished Time (else Create Time).'],
+      ['Note', 'Deposit Robot is excluded from this ranking. Final Approved uses Success Status = Approved bucketed by Finished Time (else Create Time). Final Rejected = manual KYC rejections by staff (Approval Method Manual, Steps manual_kyc, Approved Status Failed/Rejected), by Finished Time (else Create Time).'],
     ]);
     XLSX.utils.book_append_sheet(workbook, approvers, 'Approvers');
   }

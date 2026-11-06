@@ -264,7 +264,6 @@ export default function MonthlyReportOnboardingPage() {
                     </div>
                     <Stat label="Daily average" value={formatDecimal(report.ftd.dailyAverage)} />
                     <Stat label="Peak day" value={report.peaks.ftd ? `${formatInteger(report.peaks.ftd.value)} · ${formatDayLabel(report.peaks.ftd.date)}` : '—'} />
-                    <Stat label={report.ftd.byTypeComplete === false ? 'Micro / Standard (FTD-file days)' : 'Micro / Standard'} value={report.ftd.accountDays === 0 && report.ftd.manualDays > 0 ? '—' : `${formatInteger(report.ftd.byType.micro)} / ${formatInteger(report.ftd.byType.standard)}`} />
                   </div>
                   <dl className="mt-5 grid gap-x-6 gap-y-2 text-xs sm:grid-cols-2">
                     <Row label="FTD ÷ Total Real Account" hint="All FTDs in the period divided by Total Real Account (the monthly deck method)" value={formatPct(report.ftd.ftdPerApprovedPct)} />
@@ -349,7 +348,7 @@ export default function MonthlyReportOnboardingPage() {
               <Panel>
                 <SectionHeader
                   title="Approvers"
-                  description="Final Approved by Finished Time (else Create Time). Deposit Robot excluded. Steps Approved counts Approved Status = Approved by Create Time."
+                  description="Final Approved by Finished Time (else Create Time). Deposit Robot excluded. Steps Approved counts Approved Status = Approved by Create Time. Final Rejected = manual KYC rejections by staff (Approval Method Manual, Steps manual_kyc, Approved Status Failed/Rejected), by Finished Time (else Create Time)."
                 />
                 {!report.approvers?.length ? (
                   <EmptyState className="min-h-24" title="No approver data" description="Upload the user_approved Metabase export for this period." />
