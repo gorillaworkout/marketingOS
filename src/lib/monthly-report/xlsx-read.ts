@@ -10,15 +10,40 @@ export function isZipWorkbook(buffer: Buffer | Uint8Array): boolean {
 }
 
 /**
+ * SheetJS ZIP reader console.errors "Bad uncompressed size: N != 0" when a local
+ * header uses the data-descriptor flag (GP bit 3) and optional signature 0x08074b50
+ * — common in Metabase exports. Parsing still succeeds; silence only that noise.
+ */
+export const SHEETJS_ZIP_SIZE_NOISE =
+  /^Bad (?:un)?compressed size:\s*\d+\s*!=\s*\d+$/i;
+
+export function withSilencedSheetJsZipNoise<T>(fn: () => T): T {
+  const original = console.error;
+  console.error = (...args: unknown[]) => {
+    const message = args.map(String).join(' ');
+    if (SHEETJS_ZIP_SIZE_NOISE.test(message)) return;
+    original.apply(console, args as Parameters<typeof console.error>);
+  };
+  try {
+    return fn();
+  } finally {
+    console.error = original;
+  }
+}
+
+/**
  * Reads one sheet as raw cell values (numbers stay numbers, dates stay serials).
  * CSV files are read as text (`raw`) so dates like 10/1/2026 are never guessed.
+ * Metabase ZIP data-descriptor size noise is silenced (see withSilencedSheetJsZipNoise).
  */
 export function readSheetRows(buffer: Buffer | Uint8Array, preferredSheet?: string, options: { maxRows?: number } = {}): SheetRows {
   // `maxRows` limits parsing to the first rows (cheap header sniffing for auto-detect).
   const limit = options.maxRows ? { sheetRows: options.maxRows } : {};
-  const workbook = isZipWorkbook(buffer)
-    ? XLSX.read(buffer, { type: 'buffer', cellDates: false, dense: false, ...limit })
-    : XLSX.read(Buffer.from(buffer).toString('utf8').replace(/^\uFEFF/, ''), { type: 'string', raw: true, cellDates: false, ...limit });
+  const workbook = withSilencedSheetJsZipNoise(() =>
+    isZipWorkbook(buffer)
+      ? XLSX.read(buffer, { type: 'buffer', cellDates: false, dense: false, ...limit })
+      : XLSX.read(Buffer.from(buffer).toString('utf8').replace(/^\uFEFF/, ''), { type: 'string', raw: true, cellDates: false, ...limit }),
+  );
   const sheetName = preferredSheet && workbook.SheetNames.includes(preferredSheet)
     ? preferredSheet
     : workbook.SheetNames[0];
