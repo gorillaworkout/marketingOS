@@ -8,7 +8,10 @@ test('settlement page is its own route and uses the shared composition', async (
   const page = await readFile('src/app/dashboard/settlement-report/page.tsx', 'utf8');
   assert.match(page, /PageHeader/);
   assert.match(page, /PageStack/);
-  assert.match(page, /SettlementHome/);
+  assert.match(page, /SettlementWorkspace/);
+  const workspace = await readFile('src/components/settlement/SettlementWorkspace.tsx', 'utf8');
+  assert.match(workspace, /SettlementDashboard/);
+  assert.match(workspace, /SettlementHome/);
   assert.doesNotMatch(page, /coming soon/i);
   const home = await readFile('src/components/settlement/SettlementHome.tsx', 'utf8');
   assert.match(home, /SettlementUploadPanel/);

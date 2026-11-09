@@ -29,7 +29,7 @@ type History = {
 
 const KINDS = ['settlement_crm_deposit', 'settlement_crm_withdrawal', 'settlement_mt5_dw', 'settlement_ftd'] as const;
 
-export function SettlementHome() {
+export function SettlementHome({ onImported }: { onImported?: () => void }) {
   const [history, setHistory] = useState<History | null>(null);
   const [error, setError] = useState('');
   const [page, setPage] = useState(1);
@@ -62,7 +62,7 @@ export function SettlementHome() {
         ))}
         <span className="text-[var(--mos-text-faint)]"> (WIB)</span>
       </p>
-      <SettlementUploadPanel onImported={() => load(page)} />
+      <SettlementUploadPanel onImported={() => { load(page); onImported?.(); }} />
       {error && <p className="text-xs text-red-300">{error}</p>}
       <DataTableFrame title="Upload history" description="Newest first. Re-uploading the same export updates changed rows and leaves the rest unchanged.">
         {!history ? <p className="px-5 py-6 text-xs text-[var(--mos-text-muted)]">Loading…</p> : history.uploads.length === 0 ? (
