@@ -1,6 +1,6 @@
 import { PageHeader, PageStack } from '@/components/ui/dashboard';
-import { SettlementHome } from '@/components/settlement/SettlementHome';
 import { SettlementNav } from '@/components/settlement/SettlementNav';
+import { SettlementWorkspace } from '@/components/settlement/SettlementWorkspace';
 
 export default function SettlementReportPage() {
   return (
@@ -8,10 +8,10 @@ export default function SettlementReportPage() {
       <PageHeader
         eyebrow="Reports"
         title="Settlement Report"
-        description="Upload the CRM deposit and withdrawal reports, the MT5 Deposit and Withdrawal export, and the Dealing FTD list. Reconciliation and the other sections follow in the next release."
+        description="Daily reconciliation of CRM against MT5 (12:00 WIB cut-off), processing time, withdrawal %, margin in–out, and swap from Deposit & Withdrawal (CRM-S / CRM-SR)."
       />
       <SettlementNav />
-      <SettlementHome />
+      <SettlementWorkspace />
     </PageStack>
   );
 }
