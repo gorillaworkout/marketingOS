@@ -10,7 +10,6 @@ export function ReportTabs() {
   const { canUpload, isAdmin } = useMonthlyReportPermissions();
   const tabs = [
     { href: '/dashboard/monthly-report', label: 'Onboarding' },
-    { href: '/dashboard/monthly-report/settlement', label: 'Settlement (coming soon)' },
     ...(canUpload ? [{ href: '/dashboard/monthly-report/uploads', label: 'Uploads' }] : []),
     ...(isAdmin ? [{ href: '/dashboard/monthly-report/access', label: 'Access' }] : []),
   ];

@@ -1,6 +1,11 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  async redirects() {
+    return [
+      { source: '/dashboard/monthly-report/settlement', destination: '/dashboard/settlement-report', permanent: false },
+    ];
+  },
   serverExternalPackages: ['xlsx', 'exceljs', 'mammoth', 'unpdf', 'jszip', 'pdfkit'],
   // FAQ & Guides rejects files over 100 MB in the upload route. This only
   // applies when a Next.js proxy buffers the body; the default is 10 MB and

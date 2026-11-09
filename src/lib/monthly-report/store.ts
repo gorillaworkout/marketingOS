@@ -23,7 +23,8 @@ import type { UserApprovedRow } from './user-approved-parse';
 import { userApprovedKey, buildApproverReport, type ApproverStat } from './user-approved-parse';
 import { buildRejectionReasonsReport, type RejectionReasonsReport } from './rejection-reasons';
 
-export type UploadKind = 'onboarding' | 'onboarding_summary' | 'user_approved' | 'ftd' | 'rejection_reasons';
+export type UploadKind = 'onboarding' | 'onboarding_summary' | 'user_approved' | 'ftd' | 'rejection_reasons'
+  | 'settlement_crm_deposit' | 'settlement_crm_withdrawal' | 'settlement_mt5_dw' | 'settlement_ftd';
 export type DataSource = 'upload' | 'api';
 
 export interface UploadActor { id: string | null; name: string }
@@ -78,7 +79,7 @@ ON CONFLICT (${key}) DO UPDATE SET
 WHERE (${updatable.map(column => `${table}.${column}`).join(', ')}) IS DISTINCT FROM (${updatable.map(column => `EXCLUDED.${column}`).join(', ')})`;
 }
 
-interface UpsertPlan<T> {
+export interface UpsertPlan<T> {
   kind: UploadKind;
   table: string;
   key: string;
@@ -88,7 +89,7 @@ interface UpsertPlan<T> {
   values: (row: T, uploadId: string) => unknown[];
 }
 
-async function upsertWithHistory<T>(
+export async function upsertWithHistory<T>(
   plan: UpsertPlan<T>,
   rows: T[],
   meta: { fileName: string; offset: string | null; actor: UploadActor; skipped: number; range: DateRange | null },
