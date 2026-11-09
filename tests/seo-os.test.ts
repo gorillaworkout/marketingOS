@@ -125,8 +125,8 @@ test('migration 035 is transactional, idempotent, and seeds Operations and sites
   }
   assert.match(sql, /DROP CONSTRAINT IF EXISTS departments_permitted_features_valid/);
   const check = sql.match(/ADD CONSTRAINT departments_permitted_features_valid[\s\S]*?\);/)?.[0] ?? '';
-  // `monthly-report` was added later by migration 041.
-  for (const feature of ACCOUNT_FEATURES.filter(f => f !== 'monthly-report')) assert.match(check, new RegExp(`'${feature}'`), feature);
+  // `monthly-report` was added later by migration 041; `settlement-report` by 046.
+  for (const feature of ACCOUNT_FEATURES.filter(f => f !== 'monthly-report' && f !== 'settlement-report')) assert.match(check, new RegExp(`'${feature}'`), feature);
 
   assert.match(sql, /'00000000-0000-0000-0000-000000000005',\s*'Operations'/);
   assert.match(sql, /ARRAY\['seo', 'internal-docs'\]/);

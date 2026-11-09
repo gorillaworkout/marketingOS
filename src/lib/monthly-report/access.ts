@@ -5,7 +5,7 @@
  *  - Upload: same as view (operators self-upload).
  * Everyone who can view sees the same report.
  */
-import { MONTHLY_REPORT_FEATURE, canAccessFeature } from '@/lib/authorization';
+import { MONTHLY_REPORT_FEATURE, SETTLEMENT_REPORT_FEATURE, canAccessFeature } from '@/lib/authorization';
 
 export interface MonthlyReportPrincipal {
   role: string;
@@ -21,10 +21,19 @@ export type MonthlyReportPageAccess = 'allowed' | 'login' | 'forbidden';
  */
 export const MONTHLY_REPORT_GRANT_SQL = '(SELECT mra.can_upload FROM monthly_report_access mra WHERE mra.user_id = u.id) AS monthly_report_grant';
 
-/** Department features plus `monthly-report` when the user has a personal grant. */
-export function departmentFeaturesWithGrants(departmentFeatures: readonly string[] | null | undefined, grant: boolean | null | undefined): string[] {
+/**
+ * Department features plus `monthly-report` when the user has a personal Onboarding grant,
+ * and `settlement-report` when they have a personal Settlement grant.
+ * A missing grant argument leaves that feature untouched (Onboarding callers stay the same).
+ */
+export function departmentFeaturesWithGrants(
+  departmentFeatures: readonly string[] | null | undefined,
+  grant: boolean | null | undefined,
+  settlementGrant?: boolean | null,
+): string[] {
   const features = [...(departmentFeatures ?? [])];
   if (grant !== null && grant !== undefined && !features.includes(MONTHLY_REPORT_FEATURE)) features.push(MONTHLY_REPORT_FEATURE);
+  if (settlementGrant !== null && settlementGrant !== undefined && !features.includes(SETTLEMENT_REPORT_FEATURE)) features.push(SETTLEMENT_REPORT_FEATURE);
   return features;
 }
 

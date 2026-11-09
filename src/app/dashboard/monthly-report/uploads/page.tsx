@@ -25,7 +25,10 @@ type History = { uploads: Upload[]; total: number; page: number; pageSize: numbe
 const PAGE_SIZE = 25;
 const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const monthLabel = (month: string) => `${MONTH_NAMES[Number(month.slice(5, 7)) - 1]} ${month.slice(0, 4)}`;
-const KIND_LABELS: Record<string, string> = { onboarding: 'Onboarding (classic)', onboarding_summary: 'Onboarding daily summary', user_approved: 'User approved', ftd: 'FTD', rejection_reasons: 'Rejection reasons (legacy)' };
+const KIND_LABELS: Record<string, string> = {
+  onboarding: 'Onboarding (classic)', onboarding_summary: 'Onboarding daily summary', user_approved: 'User approved', ftd: 'FTD', rejection_reasons: 'Rejection reasons (legacy)',
+  settlement_crm_deposit: 'Settlement · CRM deposits', settlement_crm_withdrawal: 'Settlement · CRM withdrawals', settlement_mt5_dw: 'Settlement · MT5 Deposit & Withdrawal', settlement_ftd: 'Settlement · Dealing FTD list',
+};
 
 type CardConfig = { title: string; description: string; accept: string; endpoint: string };
 

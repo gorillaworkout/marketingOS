@@ -158,7 +158,10 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     },
     {
       label: 'Reports',
-      items: [{ href: '/dashboard/monthly-report', label: 'Onboarding Reports', icon: 'report', feature: 'monthly-report' }],
+      items: [
+        { href: '/dashboard/monthly-report', label: 'Onboarding Report', icon: 'report', feature: 'monthly-report' },
+        { href: '/dashboard/settlement-report', label: 'Settlement Report', icon: 'report', feature: 'settlement-report' },
+      ],
     },
     {
       label: 'Library',

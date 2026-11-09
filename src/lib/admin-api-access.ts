@@ -9,6 +9,7 @@ const ADMIN_ONLY_API_PREFIXES = [
   '/api/seo/sync',
   '/api/seo/settings',
   '/api/monthly-report/access',
+  '/api/settlement-report/access',
 ];
 
 /** Exact paths a signed-in member may call even when the prefix is admin-only. */
