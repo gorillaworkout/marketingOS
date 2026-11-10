@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { v4 as uuidv4 } from 'uuid';
 import { readUploadBody } from '@/lib/monthly-report/service';
-import { MAX_CHUNK_BYTES, MAX_CHUNK_DEALS, parseDealsTitle, type ParsedDeal } from '@/lib/settlement/deals-parse';
+import { MAX_CHUNK_BYTES, MAX_CHUNK_DEALS, parseDealsTitle, validateDeal, type ParsedDeal } from '@/lib/settlement/deals-parse';
 import { withSessionLock } from '@/lib/settlement/deals-lock';
 import { abortOwnedSession, commitOwnedSession, openOwnedSession, stageOwnedChunk } from '@/lib/settlement/deals-store';
 import { requireSettlementReport } from '@/lib/settlement/service';
@@ -22,6 +22,7 @@ export async function POST(request: NextRequest) {
   const payload = JSON.parse(body.toString('utf8')) as { action?: string; fileName?: string; title?: string; footerCommission?: number; footerSwap?: number; sessionId?: string; seq?: number; hash?: string; deals?: ParsedDeal[] };
   if (payload.action === 'open') {
     const title = parseDealsTitle(payload.title ?? '');
+    if (!title) return NextResponse.json({ error: 'The file title was not parsed' }, { status: 400 });
     const id = uuidv4();
     await openOwnedSession({
       id, ownerId: user.id, fileName: (payload.fileName || 'deals-history').slice(0, 200),
@@ -43,6 +44,10 @@ export async function POST(request: NextRequest) {
       if (payload.action === 'chunk') {
         const deals = payload.deals ?? [];
         if (deals.length > MAX_CHUNK_DEALS) return { ok: false, error: `A chunk can contain at most ${MAX_CHUNK_DEALS} deals`, status: 400 };
+        for (const deal of deals) {
+          const invalid = validateDeal(deal);
+          if (invalid) return { ok: false, error: invalid, status: 400 };
+        }
         const staged = await stageOwnedChunk({ sessionId: payload.sessionId as string, actorId: user.id, seq: Number(payload.seq), hash: String(payload.hash ?? ''), deals });
         return { ok: true, ...staged };
       }

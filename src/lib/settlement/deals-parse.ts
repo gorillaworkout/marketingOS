@@ -16,7 +16,43 @@ export function emptyUtf16LineState(): Utf16LineState {
   return { pendingByte: null, partial: '', bomPending: true };
 }
 
-/** Push the next bytes of a UTF-16LE file. An odd trailing byte and a partial line are kept. */
+/** Quote-aware TSV records. A quoted tab or newline stays inside the field. `""` is an escaped quote. */
+export function splitTsvRecords(text: string): { records: string[]; rest: string } {
+  const records: string[] = [];
+  let current = '';
+  let quoted = false;
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
+    if (char === '"') {
+      current += char;
+      if (quoted && text[index + 1] === '"') { current += '"'; index += 1; }
+      else quoted = !quoted;
+    } else if (!quoted && char === '\n') { records.push(current.replace(/\r$/, '')); current = ''; }
+    else current += char;
+  }
+  return { records, rest: current };
+}
+
+export function splitTsvFields(record: string): string[] {
+  const fields: string[] = [];
+  let current = '';
+  let quoted = false;
+  for (let index = 0; index < record.length; index += 1) {
+    const char = record[index];
+    if (quoted) {
+      if (char === '"') {
+        if (record[index + 1] === '"') { current += '"'; index += 1; }
+        else quoted = false;
+      } else current += char;
+    } else if (char === '"') quoted = true;
+    else if (char === '\t') { fields.push(current); current = ''; }
+    else current += char;
+  }
+  fields.push(current);
+  return fields;
+}
+
+/** Push the next bytes of a UTF-16LE file. An odd trailing byte and an unfinished quoted record are kept. */
 export function pushUtf16LeLines(state: Utf16LineState, bytes: Uint8Array): { state: Utf16LineState; lines: string[] } {
   const codes: number[] = [];
   let pending = state.pendingByte;
@@ -36,10 +72,8 @@ export function pushUtf16LeLines(state: Utf16LineState, bytes: Uint8Array): { st
     }
     text += String.fromCharCode(code);
   }
-  const combined = state.partial + text;
-  const pieces = combined.split(/\r?\n/);
-  const partial = pieces.pop() ?? '';
-  return { state: { pendingByte: pending, partial, bomPending }, lines: pieces };
+  const split = splitTsvRecords(state.partial + text);
+  return { state: { pendingByte: pending, partial: split.rest, bomPending }, lines: split.records };
 }
 
 export function finishUtf16LeLines(state: Utf16LineState): string[] {
@@ -100,7 +134,7 @@ export function serverDateOf(raw: string): { serverTime: string; serverDate: str
 }
 
 export function parseDealsRow(header: DealsHeader, line: string): ParsedDeal | null {
-  const cells = line.split('\t');
+  const cells = splitTsvFields(line);
   const at = (name: string) => cells[header.index[name]] ?? '';
   const deal = at('deal').trim();
   const login = at('login').trim();
@@ -120,8 +154,21 @@ export function parseDealsRow(header: DealsHeader, line: string): ParsedDeal | n
   };
 }
 
+const AMOUNT_LIMIT = 1e12;
+
+export function validateDeal(deal: ParsedDeal): string | null {
+  if (!/^\d{1,20}$/.test(deal.deal)) return 'Deal is not a numeric id';
+  if (!/^\d{2,20}$/.test(deal.login)) return 'Login is not a numeric account';
+  if (!/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(deal.serverTime) || deal.serverDate !== deal.serverTime.slice(0, 10)) return 'Server time is not yyyy-mm-dd HH:MM:SS';
+  if (!/^[a-z]{2,12}$/.test(deal.entry)) return 'Entry is not a known token';
+  for (const amount of [deal.volume, deal.commission, deal.fee, deal.swap, deal.profit]) {
+    if (!Number.isFinite(amount) || Math.abs(amount) > AMOUNT_LIMIT) return 'Amount is not a finite number within bounds';
+  }
+  return null;
+}
+
 export function parseDealsFooter(header: DealsHeader, line: string): { commission: number; swap: number } | null {
-  const cells = line.split('\t');
+  const cells = splitTsvFields(line);
   if (cells[0]?.trim().toLowerCase() !== 'total') return null;
   const commission = num(cells[header.index.commission] ?? '');
   const swap = num(cells[header.index.swap] ?? '');

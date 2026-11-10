@@ -64,6 +64,7 @@ CREATE TABLE IF NOT EXISTS settlement_dh_staging (
   rate INTEGER,
   PRIMARY KEY (session_id, deal)
 );
+CREATE INDEX IF NOT EXISTS idx_settlement_dh_staging_seq ON settlement_dh_staging (session_id, seq);
 
 CREATE TABLE IF NOT EXISTS settlement_mt5_deal_facts (
   deal TEXT PRIMARY KEY,

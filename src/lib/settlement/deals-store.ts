@@ -5,7 +5,7 @@
 import { execute, executeTransaction, queryAll } from '@/lib/database';
 import { eachDate } from './deals-parse';
 import { dealsHistoryFromDaily, type DealsDay } from './deals-report';
-import { footerMatches, mergeIncoming, type DealFact } from './deals-engine';
+import { coverageDates, footerMatches, mergeIncoming, type DealFact } from './deals-engine';
 
 export const UPSERT_FACT_SQL = `INSERT INTO settlement_mt5_deal_facts
   (deal, login, server_time, entry, volume, commission, fee, swap, profit, currency, rate, session_id)
@@ -36,6 +36,11 @@ FROM settlement_mt5_deal_facts
 WHERE rate IS NOT NULL AND server_time::date = ANY(?::date[])
 GROUP BY 1, 2`;
 
+export const LOCK_DEALS_SQL = 'SELECT pg_advisory_xact_lock(hashtext(id)) FROM (SELECT unnest(?::text[]) AS id ORDER BY 1) locked';
+export const EXPIRE_STAGING_SQL = `DELETE FROM settlement_dh_staging WHERE session_id IN (
+  SELECT id FROM settlement_dh_sessions WHERE status = 'open' AND created_at < CURRENT_TIMESTAMP - INTERVAL '24 hours')`;
+export const EXPIRE_SESSION_SQL = `UPDATE settlement_dh_sessions SET status = 'aborted'
+  WHERE status = 'open' AND created_at < CURRENT_TIMESTAMP - INTERVAL '24 hours'`;
 export const ABORT_STAGING_SQL = 'DELETE FROM settlement_dh_staging WHERE session_id = ?';
 export const ABORT_CHUNKS_SQL = 'DELETE FROM settlement_dh_chunks WHERE session_id = ?';
 
@@ -78,8 +83,9 @@ export async function commitOwnedSession(sessionId: string, actorId: string, foo
     const footer = { commission: Number(session.footer_commission), swap: Number(session.footer_swap) };
     if (!footerMatches(incoming, footer)) throw new Error('Footer total does not match the parsed Commission and Swap columns');
     const ids = incoming.map(deal => deal.deal);
+    if (ids.length) await tx.execute(LOCK_DEALS_SQL, [ids]);
     const existingRows = ids.length
-      ? await tx.queryAll<Record<string, unknown>>('SELECT deal, login, server_time::text, entry, volume::text, commission::text, fee::text, swap::text, profit::text, currency, rate FROM settlement_mt5_deal_facts WHERE deal = ANY(?::text[])', [ids])
+      ? await tx.queryAll<Record<string, unknown>>('SELECT deal, login, server_time::text, entry, volume::text, commission::text, fee::text, swap::text, profit::text, currency, rate FROM settlement_mt5_deal_facts WHERE deal = ANY(?::text[]) FOR UPDATE', [ids])
       : [];
     const existing: Record<string, DealFact> = {};
     for (const row of existingRows) { const fact = toFact(row); existing[fact.deal] = fact; }
@@ -91,17 +97,21 @@ export async function commitOwnedSession(sessionId: string, actorId: string, foo
       await tx.execute(REBUILD_DELETE_SQL, [merged.touchedDates]);
       await tx.execute(REBUILD_INSERT_SQL, [merged.touchedDates]);
     }
-    if (session.range_from && session.range_to) {
-      for (const date of eachDate(session.range_from, session.range_to)) {
-        if (session.title_filter === '*') {
-          await tx.execute(`INSERT INTO settlement_dh_coverage (server_date, status, session_id) VALUES (?::date, 'full', ?)
-            ON CONFLICT (server_date) DO UPDATE SET status = 'full', session_id = EXCLUDED.session_id`, [date, sessionId]);
-        } else {
-          await tx.execute(`INSERT INTO settlement_dh_coverage (server_date, status, session_id) VALUES (?::date, 'partial', ?)
-            ON CONFLICT (server_date) DO UPDATE SET status = CASE WHEN settlement_dh_coverage.status = 'full' THEN 'full' ELSE 'partial' END,
-            session_id = CASE WHEN settlement_dh_coverage.status = 'full' THEN settlement_dh_coverage.session_id ELSE EXCLUDED.session_id END`, [date, sessionId]);
-        }
-      }
+    const title = session.range_from && session.range_to && session.title_filter
+      ? { filter: session.title_filter, from: session.range_from, to: session.range_to, star: session.title_filter === '*' }
+      : null;
+    if (incoming.some(deal => !title || deal.serverDate < title.from || deal.serverDate > title.to)) {
+      throw new Error('A deal date is outside the title range');
+    }
+    const covered = coverageDates(title, incoming);
+    for (const date of covered.full) {
+      await tx.execute(`INSERT INTO settlement_dh_coverage (server_date, status, session_id) VALUES (?::date, 'full', ?)
+        ON CONFLICT (server_date) DO UPDATE SET status = 'full', session_id = EXCLUDED.session_id`, [date, sessionId]);
+    }
+    for (const date of covered.partial) {
+      await tx.execute(`INSERT INTO settlement_dh_coverage (server_date, status, session_id) VALUES (?::date, 'partial', ?)
+        ON CONFLICT (server_date) DO UPDATE SET status = CASE WHEN settlement_dh_coverage.status = 'full' THEN 'full' ELSE 'partial' END,
+        session_id = CASE WHEN settlement_dh_coverage.status = 'full' THEN settlement_dh_coverage.session_id ELSE EXCLUDED.session_id END`, [date, sessionId]);
     }
     await tx.execute(`UPDATE settlement_dh_sessions SET status = 'committed', committed_at = CURRENT_TIMESTAMP WHERE id = ?`, [sessionId]);
     await tx.execute(ABORT_STAGING_SQL, [sessionId]);
@@ -151,7 +161,16 @@ export async function loadDealsFacts(from: string, to: string): Promise<DealFact
   return rows.map(toFact);
 }
 
+export async function expireAbandonedSessions(): Promise<void> {
+  await executeTransaction(async tx => {
+    await tx.execute(EXPIRE_STAGING_SQL);
+    await tx.execute('DELETE FROM settlement_dh_chunks WHERE session_id IN (SELECT id FROM settlement_dh_sessions WHERE status = \'open\' AND created_at < CURRENT_TIMESTAMP - INTERVAL \'24 hours\')');
+    await tx.execute(EXPIRE_SESSION_SQL);
+  });
+}
+
 export async function openOwnedSession(input: { id: string; ownerId: string; fileName: string; titleFilter: string | null; from: string | null; to: string | null; footerCommission: number; footerSwap: number }): Promise<void> {
+  await expireAbandonedSessions();
   await execute(`INSERT INTO settlement_dh_sessions (id, owner_id, file_name, status, title_filter, range_from, range_to, footer_commission, footer_swap)
     VALUES (?, ?, ?, 'open', ?, ?::date, ?::date, ?::numeric, ?::numeric)`,
   [input.id, input.ownerId, input.fileName, input.titleFilter, input.from, input.to, input.footerCommission, input.footerSwap]);

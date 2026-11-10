@@ -2,7 +2,8 @@
 
 import { useState } from 'react';
 import { Panel, SectionHeader } from '@/components/ui/dashboard';
-import { MAX_CHUNK_BYTES, MAX_CHUNK_DEALS, emptyUtf16LineState, finishUtf16LeLines, parseDealsFooter, parseDealsHeader, parseDealsRow, parseDealsTitle, pushUtf16LeLines, type ParsedDeal } from '@/lib/settlement/deals-parse';
+import { ingestDealsBytes } from '@/lib/settlement/deals-ingest';
+import { MAX_CHUNK_BYTES, MAX_CHUNK_DEALS, type ParsedDeal } from '@/lib/settlement/deals-parse';
 
 async function post(payload: unknown) {
   const body = JSON.stringify(payload);
@@ -22,50 +23,31 @@ export function DealsHistoryPanel({ onImported }: { onImported?: () => void }) {
     setBusy(true);
     setStatus('Reading…');
     const reader = file.stream().getReader();
-    let decoder = emptyUtf16LineState();
-    let header: ReturnType<typeof parseDealsHeader> = null;
-    let title = '';
-    let footer = { commission: 0, swap: 0 };
-    let batch: ParsedDeal[] = [];
     let seq = 1;
     let sessionId = '';
-    const flush = async () => {
-      if (!batch.length || !sessionId) return;
-      if (batch.length > MAX_CHUNK_DEALS) throw new Error(`A chunk can contain at most ${MAX_CHUNK_DEALS} deals`);
-      const hash = `${seq}:${batch[0].deal}:${batch.at(-1)?.deal}:${batch.length}:${batch.reduce((sum, deal) => sum + deal.commission, 0)}`;
-      await post({ action: 'chunk', sessionId, seq, hash, deals: batch });
-      seq += 1;
-      batch = [];
-    };
-    const take = async (lines: string[]) => {
-      for (const line of lines) {
-        if (!title && parseDealsTitle(line)) {
-          title = line;
-          if (!sessionId) {
-            const opened = await post({ action: 'open', fileName: file.name, title, footerCommission: 0, footerSwap: 0 });
-            sessionId = opened.sessionId ?? '';
-          }
-        }
-        if (!header) { header = parseDealsHeader(line); continue; }
-        const foot = parseDealsFooter(header, line);
-        if (foot) { footer = foot; continue; }
-        const deal = parseDealsRow(header, line);
-        if (!deal) continue;
-        batch.push(deal);
-        if (batch.length >= MAX_CHUNK_DEALS) await flush();
+    const bytes = async function* () {
+      for (;;) {
+        const step = await reader.read();
+        if (step.done) return;
+        yield step.value;
       }
     };
     try {
-      for (;;) {
-        const step = await reader.read();
-        if (step.done) break;
-        const pushed = pushUtf16LeLines(decoder, step.value);
-        decoder = pushed.state;
-        await take(pushed.lines);
-      }
-      await take(finishUtf16LeLines(decoder));
-      await flush();
-      await post({ action: 'commit', sessionId, footerCommission: footer.commission, footerSwap: footer.swap });
+      await ingestDealsBytes(bytes(), {
+        open: async title => {
+          const opened = await post({ action: 'open', fileName: file.name, title, footerCommission: 0, footerSwap: 0 });
+          sessionId = opened.sessionId ?? '';
+        },
+        chunk: async (deals: ParsedDeal[]) => {
+          if (deals.length > MAX_CHUNK_DEALS) throw new Error(`A chunk can contain at most ${MAX_CHUNK_DEALS} deals`);
+          const hash = `${seq}:${deals[0]?.deal}:${deals.at(-1)?.deal}:${deals.length}:${deals.reduce((sum, deal) => sum + deal.commission, 0)}`;
+          await post({ action: 'chunk', sessionId, seq, hash, deals });
+          seq += 1;
+        },
+        commit: async footer => {
+          await post({ action: 'commit', sessionId, footerCommission: footer.commission, footerSwap: footer.swap });
+        },
+      });
       setStatus(`Imported ${file.name}. Re-uploading the same deals does not double-count.`);
       onImported?.();
     } catch (error) {

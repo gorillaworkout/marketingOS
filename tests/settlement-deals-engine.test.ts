@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { abortDhSession, applyDhChunk, commitDhSession, emptyDhState, footerMatches, mergeIncoming, openDhSession, type DealFact, type DhState } from '../src/lib/settlement/deals-engine';
+import { abortDhSession, applyDhChunk, commitDhSession, coverageDates, emptyDhState, expireOpenSessions, footerMatches, mergeIncoming, openDhSession, SESSION_TTL_MS, type DealFact, type DhState } from '../src/lib/settlement/deals-engine';
 import { OFFICIAL_COMMISSION_BUCKETS, OFFICIAL_DH_OCT_1_5, PENDING_DEALS_HISTORY, composeSwap, dealsHistoryReport, officialBucketDeals } from '../src/lib/settlement/deals-report';
 import { swapReport } from '../src/lib/settlement/metrics';
 import { withSessionLock } from '../src/lib/settlement/deals-lock';
@@ -138,8 +138,8 @@ describe('deals history sessions', () => {
       currentState = applied.state;
     });
     let currentState = current;
-    await Promise.all([apply(1, 'a'), apply(2, 'b')]);
-    assert.deepEqual(Object.keys(currentState.sessions.lock.staging).sort(), ['a', 'b']);
+    await Promise.all([apply(1, '101'), apply(2, '102')]);
+    assert.deepEqual(Object.keys(currentState.sessions.lock.staging).sort(), ['101', '102']);
   });
 
   it('projects disk growth without deleting and caps a chunk at 2000 deals and 25 MB', () => {
@@ -153,6 +153,35 @@ describe('deals history sessions', () => {
     const tooMany = Array.from({ length: MAX_CHUNK_DEALS + 1 }, (_, index) => fact({ deal: String(index + 1), serverDate: '2026-10-01' }));
     assert.equal(applyDhChunk(opened.state, { sessionId: 'cap', actorId: 'owner', seq: 1, hash: 'big', deals: tooMany, byteLength: 100 }).ok, false);
     assert.equal(applyDhChunk(opened.state, { sessionId: 'cap', actorId: 'owner', seq: 1, hash: 'big', deals: [fact({ deal: '1', serverDate: '2026-10-01' })], byteLength: MAX_CHUNK_BYTES + 1 }).ok, false);
+  });
+
+  it('does not mark a claimed title day full when no staged deal reaches it, and a moved deal touches both dates', () => {
+    const only = [fact({ deal: '1', serverDate: '2026-10-01', commission: -3 })];
+    const wide = publish(emptyDhState(), 'wide', 'owner', only, { filter: '*', from: '2026-10-01', to: '2026-10-31', star: true });
+    assert.deepEqual(coverageDates(wide.state.sessions.wide.title, only).full, ['2026-10-01']);
+    assert.equal(wide.state.coverage['2026-10-31'], undefined);
+    const moved = publish(wide.state, 'move', 'owner', [fact({ deal: '1', serverDate: '2026-10-05', commission: -3 })]);
+    assert.deepEqual(moved.value.touchedDates, ['2026-10-01', '2026-10-05']);
+    assert.equal(moved.state.facts['1'].serverDate, '2026-10-05');
+    const outside = openDhSession(emptyDhState(), { id: 'out', ownerId: 'owner', title: { filter: '*', from: '2026-10-01', to: '2026-10-02', star: true } });
+    if (!outside.ok) throw new Error(outside.error);
+    const staged = applyDhChunk(outside.state, { sessionId: 'out', actorId: 'owner', seq: 1, hash: 'o', deals: [fact({ deal: '9', serverDate: '2026-10-09', commission: -1 })], byteLength: 20 });
+    if (!staged.ok) throw new Error(staged.error);
+    const rejected = commitDhSession(staged.state, { sessionId: 'out', actorId: 'owner', footer: { commission: -1, swap: 0 } });
+    assert.equal(rejected.ok, false);
+  });
+
+  it('expires an abandoned open session and drops only its staging', () => {
+    const opened = openDhSession(emptyDhState(), { id: 'old', ownerId: 'owner', title });
+    if (!opened.ok) throw new Error(opened.error);
+    opened.state.sessions.old.openedAt = Date.now() - SESSION_TTL_MS - 1;
+    const staged = applyDhChunk(opened.state, { sessionId: 'old', actorId: 'owner', seq: 1, hash: 'e', deals: [fact({ deal: '1', serverDate: '2026-10-01' })], byteLength: 10 });
+    if (!staged.ok) throw new Error(staged.error);
+    const live = publish(staged.state, 'keep', 'owner', [fact({ deal: '2', serverDate: '2026-10-02', commission: -4 })]);
+    const expired = expireOpenSessions(live.state, Date.now());
+    assert.equal(expired.sessions.old.status, 'aborted');
+    assert.deepEqual(expired.sessions.old.staging, {});
+    assert.equal(expired.facts['2'].commission, -4);
   });
 
   it('mergeIncoming does not require facts that are absent from the file', () => {

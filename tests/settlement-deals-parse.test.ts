@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
-  emptyUtf16LineState, finishUtf16LeLines, parseDealsFooter, parseDealsHeader, parseDealsRow, parseDealsTitle, pushUtf16LeLines, serverDateOf,
+  emptyUtf16LineState, finishUtf16LeLines, parseDealsFooter, parseDealsHeader, parseDealsRow, parseDealsTitle, pushUtf16LeLines, serverDateOf, splitTsvFields, validateDeal,
 } from '../src/lib/settlement/deals-parse';
 
 const header = 'Deal\tLogin\tName\tTime\tEntry\tVolume\tCommission\tFee\tSwap\tProfit\tCurrency\tComment';
@@ -46,5 +46,22 @@ describe('deals history text', () => {
     assert.equal('name' in row, false);
     assert.equal('comment' in row, false);
     assert.equal(serverDateOf('2026.10.25 03:00:00')?.serverDate, '2026-10-25');
+  });
+
+  it('keeps a quoted tab and a quoted newline inside one field', () => {
+    const text = '10\t2000001\t"Quoted\tName\nline"\t2026.10.01 01:00:00\tin\t1\t-2.5\t0\t0\t0\tUSD\tnote\n';
+    const bytes = utf16(text);
+    const cut = 7;
+    const state = emptyUtf16LineState();
+    const first = pushUtf16LeLines(state, bytes.subarray(0, cut));
+    const second = pushUtf16LeLines(first.state, bytes.subarray(cut));
+    const records = [...first.lines, ...second.lines, ...finishUtf16LeLines(second.state)];
+    assert.equal(records.length, 1);
+    const header = parseDealsHeader('Deal\tLogin\tName\tTime\tEntry\tVolume\tCommission\tFee\tSwap\tProfit\tCurrency\tComment');
+    assert.ok(header);
+    const row = parseDealsRow(header, records[0]);
+    assert.equal(row?.commission, -2.5);
+    assert.equal(splitTsvFields(records[0])[2], 'Quoted\tName\nline');
+    assert.equal(validateDeal({ ...row!, commission: Number.POSITIVE_INFINITY }), 'Amount is not a finite number within bounds');
   });
 });

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import {
-  ABORT_CHUNKS_SQL, ABORT_STAGING_SQL, REBUILD_INSERT_SQL, STAGE_SQL, UPSERT_FACT_SQL,
+  ABORT_CHUNKS_SQL, ABORT_STAGING_SQL, EXPIRE_STAGING_SQL, LOCK_DEALS_SQL, REBUILD_INSERT_SQL, STAGE_SQL, UPSERT_FACT_SQL,
 } from '../src/lib/settlement/deals-store';
 
 const migration = readFileSync('db/migrations/047_settlement_deals_history.sql', 'utf8');
@@ -27,6 +27,10 @@ test('commit SQL upserts on deal and rebuilds the cache from facts; abort does n
   assert.match(STAGE_SQL, /settlement_dh_staging\.seq <= EXCLUDED\.seq/);
   assert.match(abortSource, /settlement_dh_staging/);
   assert.doesNotMatch(abortSource, /settlement_mt5_deal_facts/);
+  assert.match(LOCK_DEALS_SQL, /pg_advisory_xact_lock/);
+  assert.match(LOCK_DEALS_SQL, /ORDER BY 1/);
+  assert.match(EXPIRE_STAGING_SQL, /24 hours/);
+  assert.match(migration, /idx_settlement_dh_staging_seq/);
   assert.match(route, /requireSettlementReport/);
   assert.match(route, /readUploadBody/);
   assert.match(route, /withSessionLock/);

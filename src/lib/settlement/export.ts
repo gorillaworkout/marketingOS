@@ -70,10 +70,11 @@ export function swapRows(report: SettlementReport): Cell[][] {
     [],
     ['IDR (Σ × rate, IDR buckets)', 'CRM-S', s.idrSwap, 'CRM-SR', s.idrRefund, 'S + SR', Math.round((s.idrSwap + s.idrRefund) * 100) / 100],
     [],
-    ['Deals History swap (separate term, server date of the deal)'],
+    ['Deals History swap (separate from CRM-S and CRM-SR)'],
+    ['Date (MT5 server)', ...RATES.map(rate => `DH swap ${RATE_LABEL(rate)}`)],
     ...(report.dealsHistory?.length
-      ? report.dealsHistory.map(day => [day.date, day.status === 'full' && day.swap ? day.swap[1] : PENDING_DEALS_HISTORY, day.status === 'full' && day.swap ? day.swap[10000] : PENDING_DEALS_HISTORY])
-      : [[PENDING_DEALS_HISTORY]]),
+      ? report.dealsHistory.map(day => [day.date, ...RATES.map(rate => day.status === 'full' && day.swap ? day.swap[rate] : PENDING_DEALS_HISTORY)])
+      : [['(no dates)', ...RATES.map(() => PENDING_DEALS_HISTORY)]]),
   ];
 }
 
