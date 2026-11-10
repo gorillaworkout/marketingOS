@@ -68,7 +68,9 @@ test('HTML totals equal the workbook and a missing commission stays Pending', ()
 test('the HTML export route stays behind the settlement access check', () => {
   const route = readFileSync('src/app/api/settlement-report/export/route.ts', 'utf8');
   const auth = route.indexOf('requireSettlementReport');
-  const html = route.indexOf("format') === 'html'");
-  assert.ok(auth >= 0 && html > auth);
+  const html = route.indexOf("format === 'html'");
+  const docx = route.indexOf("format === 'docx'");
+  assert.ok(auth >= 0 && html > auth && docx > auth);
   assert.match(route, /settlementHtmlFileName/);
+  assert.match(route, /settlementDocxFileName/);
 });
