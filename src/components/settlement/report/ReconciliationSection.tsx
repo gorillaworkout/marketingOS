@@ -76,10 +76,10 @@ export function ReconciliationSection({ date, recon, list, variant, onDate, onLi
       </div>
       {recon && crm && (
         <>
-          <div className="grid lg:grid-cols-[1fr_1fr_280px]">
+          <div className={variant === 'print' ? 'grid grid-cols-1' : 'grid lg:grid-cols-[1fr_1fr_280px]'}>
             <Statement title="CRM" block={crm} />
-            <div className="border-l border-[var(--mos-border-subtle)]"><Statement title="MT5" block={recon.reconciliation.mt5} /></div>
-            <div className="border-l border-[var(--mos-border-subtle)] px-5 py-4">
+            <div className={variant === 'print' ? 'border-t border-[var(--mos-border-subtle)]' : 'border-l border-[var(--mos-border-subtle)]'}><Statement title="MT5" block={recon.reconciliation.mt5} /></div>
+            <div className={`px-5 py-4 ${variant === 'print' ? 'border-t border-[var(--mos-border-subtle)]' : 'border-l border-[var(--mos-border-subtle)]'}`}>
               <div className="mb-3 flex items-center gap-3">
                 <svg viewBox="0 0 42 42" className="h-14 w-14" role="img" aria-label={`${pct}% of rows matched`}>
                   <circle cx="21" cy="21" r="16" fill="none" stroke="rgba(255,255,255,.08)" strokeWidth="4" />

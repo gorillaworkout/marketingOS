@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { REPORT_SECTIONS, activateSection, sectionIdFromHash, type ReportSectionId } from './section-nav';
+import { REPORT_SECTIONS, activateSection, sectionFromScroll, sectionIdFromHash, type ReportSectionId } from './section-nav';
 
 const tabClass = 'cursor-pointer rounded-[6px] px-3 py-1.5 text-[12.5px] font-medium transition duration-150 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--mos-accent-ring)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--mos-bg)]';
 
@@ -68,17 +68,16 @@ export function SectionNav({ mismatches, pendingDays, current: controlled }: { m
       const scroller = scrollContainer(navRef.current);
       const origin = scroller === document.documentElement ? 0 : scroller.getBoundingClientRect().top;
       const line = origin + (navRef.current?.offsetHeight ?? 0) + 16;
-      if (pending.current) {
-        const target = document.getElementById(pending.current);
-        if (target && Math.abs(target.getBoundingClientRect().top - line) < 48) pending.current = null;
-        else return;
-      }
-      let active: ReportSectionId = REPORT_SECTIONS[0][0];
-      for (const [id] of REPORT_SECTIONS) {
+      const tops = REPORT_SECTIONS.flatMap(([id]) => {
         const node = document.getElementById(id);
-        if (node && node.getBoundingClientRect().top <= line) active = id;
+        return node ? [{ id, top: node.getBoundingClientRect().top }] : [];
+      });
+      if (pending.current) {
+        const target = tops.find(item => item.id === pending.current);
+        if (!target || Math.abs(target.top - line) >= 48) return;
+        pending.current = null;
       }
-      setUncontrolled(active);
+      setUncontrolled(sectionFromScroll(tops, line, sectionIdFromHash(window.location.hash)));
     };
     const scroller = scrollContainer(navRef.current);
     const target: HTMLElement | Window = scroller === document.documentElement ? window : scroller;

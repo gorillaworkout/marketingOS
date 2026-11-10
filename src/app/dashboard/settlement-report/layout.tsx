@@ -2,9 +2,9 @@
 // admin, the department's `settlement-report` feature, or a personal grant.
 import type { CSSProperties, ReactNode } from 'react';
 import { cookies } from 'next/headers';
-import { redirect } from 'next/navigation';
 import { getAuthorizedUserBySessionId } from '@/lib/auth';
 import { canUploadSettlementReport, settlementReportPageAccess } from '@/lib/settlement/access';
+import { SettlementGate } from '@/components/settlement/SettlementGate';
 import { SettlementProvider } from '@/components/settlement/SettlementContext';
 
 export const dynamic = 'force-dynamic';
@@ -21,8 +21,8 @@ export default async function SettlementReportLayout({ children }: { children: R
   const cookieStore = await cookies();
   const user = await getAuthorizedUserBySessionId(cookieStore.get('session_id')?.value);
   const access = settlementReportPageAccess(user);
-  if (access === 'login' || !user) redirect('/');
-  if (access === 'forbidden') redirect('/dashboard');
+  if (access === 'login' || !user) return <SettlementGate href="/" />;
+  if (access === 'forbidden') return <SettlementGate href="/dashboard" />;
   return (
     <SettlementProvider value={{ canUpload: canUploadSettlementReport(user), isAdmin: user.role === 'admin' }}>
       <div style={DUPOIN_ACCENT}>{children}</div>

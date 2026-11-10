@@ -3,7 +3,7 @@ import { describe, it } from 'node:test';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { SectionNav } from '../src/components/settlement/report/SectionNav';
-import { REPORT_SECTIONS, activateSection, sectionIdFromHash, scrollOffsetTop } from '../src/components/settlement/report/section-nav';
+import { REPORT_SECTIONS, activateSection, sectionFromScroll, sectionIdFromHash, scrollOffsetTop } from '../src/components/settlement/report/section-nav';
 
 describe('settlement section tabs', () => {
   it('scrolls the clicked section clear of the sticky bar and records the hash', () => {
@@ -30,6 +30,16 @@ describe('settlement section tabs', () => {
     assert.equal(activateSection('not-a-section', {
       elementTop: 10, scrollTop: 0, sticky: 0, scrollTo: () => { throw new Error('should not scroll'); }, setHash: () => { throw new Error('should not set hash'); },
     }), null);
+  });
+
+  it('keeps a clicked section selected when the next section shares its row', () => {
+    const tops = [
+      { id: 'withdrawal-timing' as const, top: 53 },
+      { id: 'margin' as const, top: 53 },
+    ];
+    assert.equal(sectionFromScroll(tops, 41, 'withdrawal-timing'), 'withdrawal-timing');
+    assert.equal(sectionFromScroll(tops, 41, 'margin'), 'margin');
+    assert.equal(sectionFromScroll(tops, 200, 'withdrawal-timing'), 'margin');
   });
 
   it('renders every section as a keyboard link and marks only the active one', () => {
