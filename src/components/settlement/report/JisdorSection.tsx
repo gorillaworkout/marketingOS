@@ -49,7 +49,7 @@ export function JisdorSection({ variant, fixings: provided }: { variant: 'screen
   }).join(' ');
 
   return (
-    <section id="jisdor" className="scroll-mt-16 rounded-[var(--mos-radius-panel)] border border-[var(--mos-border)] bg-[var(--mos-panel)] p-5">
+    <section id="jisdor" className="scroll-mt-24 rounded-[var(--mos-radius-panel)] border border-[var(--mos-border)] bg-[var(--mos-panel)] p-5">
       <div className="mb-3 flex items-start justify-between gap-3">
         <div>
           <h2 className="flex items-center gap-2 text-[15px] font-[560]">JISDOR reference <StatusBadge tone="info">Display only</StatusBadge></h2>

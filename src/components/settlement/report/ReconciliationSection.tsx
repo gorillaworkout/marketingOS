@@ -86,7 +86,7 @@ export function ReconciliationSection({ date, recon, list, variant, onDate, onLi
               </div>
               <div className="flex flex-col gap-1.5">
                 {REASONS.map(([key, label]) => (
-                  <button key={key} type="button" aria-pressed={list === key} onClick={() => onList?.(key)} className={`flex justify-between rounded-[6px] border px-2.5 py-2 text-left text-[12.5px] ${list === key ? 'border-[#2EB5C4]/50 bg-[#2EB5C4]/10 text-[var(--mos-text)]' : 'border-[var(--mos-border-subtle)] text-[var(--mos-text-secondary)]'}`}>
+                  <button key={key} type="button" aria-pressed={list === key} onClick={() => onList?.(key)} className={`flex cursor-pointer justify-between rounded-[6px] border px-2.5 py-2 text-left text-[12.5px] transition duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--mos-accent-ring)] ${list === key ? 'border-[#2EB5C4]/50 bg-[#2EB5C4]/10 text-[var(--mos-text)]' : 'border-[var(--mos-border-subtle)] text-[var(--mos-text-secondary)] hover:border-[var(--mos-border-strong)] hover:bg-white/[0.04] hover:text-[var(--mos-text)] active:bg-white/[0.08]'}`}>
                     <span>{label}</span><b className="tabular-nums">{counts?.[key] ?? 0}</b>
                   </button>
                 ))}

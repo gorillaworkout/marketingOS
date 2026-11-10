@@ -13,7 +13,7 @@ const ITEMS = [
 
 export function MethodologySection() {
   return (
-    <section id="methodology" className="scroll-mt-16 rounded-[var(--mos-radius-panel)] border border-[var(--mos-border)] bg-[var(--mos-panel)] p-5">
+    <section id="methodology" className="scroll-mt-24 rounded-[var(--mos-radius-panel)] border border-[var(--mos-border)] bg-[var(--mos-panel)] p-5">
       <h2 className="text-[15px] font-[560]">Methodology & sources</h2>
       <p className="mt-1 mb-4 text-xs text-[var(--mos-text-muted)]">Shown once here instead of under every table.</p>
       <dl className="grid gap-4 text-xs text-[var(--mos-text-muted)] sm:grid-cols-2 lg:grid-cols-3">
