@@ -63,7 +63,8 @@ describe('settlement export', () => {
     const withdrawalLabel = WITHDRAWAL_PCT_KPI === 'wd-over-dep' ? WITHDRAWAL_PCT_LABEL['wd-over-dep'] : WITHDRAWAL_PCT_LABEL['office-hour'];
     assert.ok(overview.some(row => row[0] === withdrawalLabel));
     const book = XLSX.read(buildSettlementWorkbook(gap), { type: 'buffer' });
-    assert.equal(book.SheetNames.at(-1), 'Commission');
+    assert.ok(book.SheetNames.includes('Commission'));
+    assert.equal(book.SheetNames.at(-1), 'JISDOR');
   });
 
 });

@@ -54,6 +54,25 @@ export function parseJisdorHtml(html: string): JisdorFixing[] {
   return rows.sort((a, b) => a.date.localeCompare(b.date));
 }
 
+export interface JisdorMonthRow { date: string; rate: number; change: number | null }
+
+/**
+ * Published fixings in one month, newest first.
+ * Change is versus the previous published fixing, which may fall in the prior month.
+ * Dates the source omitted (weekends, holidays) are not invented.
+ */
+export function jisdorMonthTable(fixings: readonly JisdorFixing[], yearMonth: string): JisdorMonthRow[] {
+  const sorted = [...fixings].sort((a, b) => a.date.localeCompare(b.date));
+  const withChange = sorted.map((row, index) => {
+    const previous = index === 0 ? null : sorted[index - 1].rate;
+    const change = previous === null ? null : Math.round((row.rate - previous) * 100) / 100;
+    return { date: row.date, rate: row.rate, change };
+  });
+  return withChange.filter(row => row.date.startsWith(`${yearMonth}-`)).reverse();
+}
+
+export const JISDOR_MONTH_UNAVAILABLE = 'JISDOR not available for this month';
+
 /** Upsert parsed dates only. Does not invent a row for a gap between them. */
 export function applyFixings(existing: readonly JisdorFixing[], parsed: readonly JisdorFixing[]): JisdorFixing[] {
   const rates = new Map(existing.map(row => [row.date, row.rate]));

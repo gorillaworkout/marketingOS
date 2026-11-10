@@ -10,6 +10,7 @@ import { applications, marginInOut, processingTime, swapReport, withdrawalPercen
 import { buildDailyReconciliation, type DailyReconciliation, type MismatchItem } from './reconcile';
 import { loadCrm, loadFtd, loadHolidays, loadMt5Deals, loadSettlementCoverage } from './store';
 import type { DealsDay } from './deals-report';
+import type { JisdorFixing } from './jisdor';
 import { dailyFlows, periodTotals, previousSettlementRange, type PeriodSummary } from './summary';
 import type { CrmTransaction, Mt5Deal } from './types';
 
@@ -67,6 +68,8 @@ export interface SettlementReport {
   previousRange: DateRange;
   summary: { current: PeriodSummary; previous: PeriodSummary };
   daily: ReturnType<typeof dailyFlows>;
+  /** Cached BI fixings for the export. Display only; absent until the export route attaches them. */
+  jisdor?: JisdorFixing[];
 }
 
 export const SWAP_LABEL = 'Swap from Deposit & Withdrawal (CRM-S / CRM-SR), excludes Deals History swap';

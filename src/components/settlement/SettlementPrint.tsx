@@ -7,6 +7,7 @@ import { SettlementReportView } from './report/SettlementReportView';
 export function SettlementPrint({ preset, anchor, noprint, generatedAt }: { preset: string; anchor: string; noprint: boolean; generatedAt: string }) {
   const [report, setReport] = useState<SettlementReport | null>(null);
   const [recon, setRecon] = useState<ReconciliationResponse | null>(null);
+  const [jisdor, setJisdor] = useState<{ anchor: string; fixings: { date: string; rate: number }[]; unavailable: boolean } | null>(null);
   const [error, setError] = useState('');
   const date = report?.period.preset === 'day' ? report.period.anchor : anchor;
 
@@ -34,16 +35,32 @@ export function SettlementPrint({ preset, anchor, noprint, generatedAt }: { pres
   }, [report, anchor]);
 
   useEffect(() => {
-    if (!report || noprint) return undefined;
+    if (!report) return undefined;
+    const controller = new AbortController();
+    const month = report.period.anchor.slice(0, 7);
+    fetch(`/api/settlement-report/jisdor?month=${month}`, { signal: controller.signal })
+      .then(async response => {
+        const body = await response.json().catch(() => ({}));
+        if (controller.signal.aborted) return;
+        if (!response.ok) setJisdor({ anchor: report.period.anchor, fixings: [], unavailable: true });
+        else setJisdor({ anchor: report.period.anchor, fixings: body.fixings ?? [], unavailable: Boolean(body.unavailable) });
+      })
+      .catch(() => { if (!controller.signal.aborted) setJisdor({ anchor: report.period.anchor, fixings: [], unavailable: true }); });
+    return () => controller.abort();
+  }, [report]);
+
+  const jisdorReady = jisdor?.anchor === report?.period.anchor;
+  useEffect(() => {
+    if (!report || !jisdorReady || noprint) return undefined;
     const timer = window.setTimeout(() => window.print(), 400);
     return () => window.clearTimeout(timer);
-  }, [report, noprint]);
+  }, [report, jisdorReady, noprint]);
 
   if (error) return <p className="p-8 text-sm">{error}</p>;
-  if (!report) return <p className="p-8 text-sm">Loading settlement report…</p>;
+  if (!report || !jisdorReady || !jisdor) return <p className="p-8 text-sm">Loading settlement report…</p>;
   return (
     <div className="print-report mx-auto max-w-[1400px] bg-white p-6 text-[#1A1F24]">
-      <SettlementReportView variant="print" report={report} recon={recon} reconDate={date} list="all" generatedAt={generatedAt} />
+      <SettlementReportView variant="print" report={report} recon={recon} reconDate={date} list="all" generatedAt={generatedAt} jisdor={jisdor.fixings} jisdorUnavailable={jisdor.unavailable} />
     </div>
   );
 }
