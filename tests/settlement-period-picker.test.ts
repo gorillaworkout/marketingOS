@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
+import { isFutureDay, isFutureMonth, monthWeeks, weekRange } from '../src/components/settlement/report/calendar';
+import { PeriodDateField } from '../src/components/settlement/report/PeriodDateField';
 import { ReconciliationSection } from '../src/components/settlement/report/ReconciliationSection';
 import { SettlementPeriodBar } from '../src/components/settlement/report/SettlementPeriodBar';
 import { anchorFromPicker, dailyPairLabel } from '../src/components/settlement/report/labels';
@@ -32,54 +34,79 @@ describe('settlement period picker snapping', () => {
   });
 });
 
+describe('settlement calendar grid', () => {
+  it('builds Monday weeks and marks days and months after today', () => {
+    const weeks = monthWeeks(2026, 11);
+    assert.equal(weeks[0][0], '2026-10-26');
+    assert.equal(weeks[0][6], '2026-11-01');
+    assert.deepEqual(weekRange('2026-11-08'), { from: '2026-11-02', to: '2026-11-08' });
+    assert.equal(isFutureDay('2026-11-11', '2026-11-10'), true);
+    assert.equal(isFutureDay('2026-11-10', '2026-11-10'), false);
+    assert.equal(isFutureMonth('2026-12', '2026-11-10'), true);
+    assert.equal(isFutureMonth('2026-11', '2026-11-10'), false);
+  });
+});
+
 describe('settlement period picker controls', () => {
   const period = resolveSettlementPeriod('week', anchorFromPicker('week', '2026-11-08')!);
-  const picks: string[] = [];
 
-  it('renders a date input on the period label and keeps the arrows', () => {
+  it('opens from the period label and keeps the arrows, with no native date input', () => {
     const html = renderToStaticMarkup(createElement(SettlementPeriodBar, {
       period,
       previous: { from: '2026-10-26', to: '2026-11-01' },
       onPreset: () => undefined,
       onShift: () => undefined,
-      onAnchor: value => picks.push(value),
+      onAnchor: () => undefined,
     }));
-    assert.match(html, /type="date"/);
-    assert.match(html, /value="2026-11-02"/);
+    assert.doesNotMatch(html, /type="date"|type="month"/);
     assert.match(html, /aria-label="Choose report period"/);
+    assert.match(html, /aria-label="Choose report period calendar"/);
+    assert.match(html, /aria-expanded="false"/);
     assert.match(html, /aria-label="Previous period"/);
     assert.match(html, /aria-label="Next period"/);
     assert.match(html, /02–08 Nov/);
   });
 
-  it('uses a month input for the monthly preset', () => {
-    const html = renderToStaticMarkup(createElement(SettlementPeriodBar, {
-      period: resolveSettlementPeriod('month', '2026-10-15'),
-      previous: { from: '2026-09-01', to: '2026-09-30' },
-      onPreset: () => undefined,
-      onShift: () => undefined,
-      onAnchor: () => undefined,
+  it('shows a day grid that disables future days and highlights the selected week', () => {
+    const day = renderToStaticMarkup(createElement(PeriodDateField, {
+      preset: 'day', value: '2026-11-06', today: '2026-11-10', defaultOpen: true, label: 'Choose report period', onChange: () => undefined,
+      children: '05–06 Nov',
     }));
-    assert.match(html, /type="month"/);
-    assert.match(html, /value="2026-10"/);
-    assert.match(html, /October 2026/);
+    assert.match(day, /role="dialog"/);
+    assert.match(day, /aria-label="2026-11-11" aria-selected="false" disabled=""/);
+    assert.match(day, /aria-label="2026-11-06" aria-selected="true"/);
+    const week = renderToStaticMarkup(createElement(PeriodDateField, {
+      preset: 'week', value: '2026-11-02', today: '2026-11-10', defaultOpen: true, label: 'Choose report period', onChange: () => undefined,
+      children: '02–08 Nov',
+    }));
+    assert.match(week, /data-selected-week="true"/);
+    assert.match(week, /aria-label="2026-11-02"/);
+    assert.match(week, /aria-label="2026-11-08"/);
   });
 
-  it('gives the reconciliation day its own date input beside the arrows', () => {
-    const html = renderToStaticMarkup(createElement(ReconciliationSection, {
-      date: '2026-11-06',
-      recon: null,
-      list: 'all',
-      variant: 'screen',
-      onDate: value => picks.push(value),
+  it('shows a 12-month grid and disables months after today', () => {
+    const html = renderToStaticMarkup(createElement(PeriodDateField, {
+      preset: 'month', value: '2026-10-01', today: '2026-11-10', defaultOpen: true, label: 'Choose report period', onChange: () => undefined,
+      children: 'October 2026',
     }));
-    assert.match(html, /type="date"/);
-    assert.match(html, /value="2026-11-06"/);
+    assert.match(html, /aria-label="2026-10"/);
+    assert.match(html, /<button\b(?=[^>]*aria-label="2026-12")(?=[^>]*disabled)[^>]*>/);
+    assert.match(html, /aria-label="Previous year"/);
+    assert.match(html, /<button\b(?=[^>]*aria-label="Next year")(?=[^>]*disabled)[^>]*>/);
+    assert.doesNotMatch(html, /type="month"/);
+  });
+
+  it('gives the reconciliation day the same popover and hides it when printing', () => {
+    const html = renderToStaticMarkup(createElement(ReconciliationSection, {
+      date: '2026-11-06', recon: null, list: 'all', variant: 'screen', onDate: () => undefined,
+    }));
     assert.match(html, /aria-label="Choose reconciliation day"/);
+    assert.match(html, /aria-label="Choose reconciliation day calendar"/);
     assert.match(html, /05–06 Nov/);
     assert.match(html, /aria-label="Previous report day"/);
+    assert.doesNotMatch(html, /type="date"/);
     assert.doesNotMatch(renderToStaticMarkup(createElement(ReconciliationSection, {
       date: '2026-11-06', recon: null, list: 'all', variant: 'print',
-    })), /type="date"/);
+    })), /Choose reconciliation day/);
   });
 });
