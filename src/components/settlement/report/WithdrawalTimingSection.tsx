@@ -23,7 +23,7 @@ export function WithdrawalTimingSection({ weeks }: { weeks: WithdrawalWeek[] }) 
     office: sum.office + week.office, after: sum.after + week.afterOffice, second: sum.second + week.secondWithdrawal, total: sum.total + week.total,
   }), { office: 0, after: 0, second: 0, total: 0 });
   return (
-    <section id="withdrawal-timing" className="scroll-mt-16 rounded-[var(--mos-radius-panel)] border border-[var(--mos-border)] bg-[var(--mos-panel)] p-5">
+    <section id="withdrawal-timing" className="scroll-mt-24 rounded-[var(--mos-radius-panel)] border border-[var(--mos-border)] bg-[var(--mos-panel)] p-5">
       <h2 className="text-[15px] font-[560]">Withdrawal timing split</h2>
       <p className="mt-1 mb-4 text-xs text-[var(--mos-text-muted)]">Share of withdrawal requests per week, Mon–Sun.</p>
       <table className={tableClass}>

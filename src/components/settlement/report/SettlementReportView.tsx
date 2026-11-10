@@ -51,12 +51,12 @@ export function SettlementReportView({
       {variant === 'screen' && <SectionNav mismatches={mismatches} pendingDays={report.summary.current.commission?.pendingDays ?? 0} />}
       <KpiStrip cards={cards} daily={report.daily} />
       <div className="grid gap-5 lg:grid-cols-[1.45fr_1fr]">
-        <section className="rounded-[var(--mos-radius-panel)] border border-[var(--mos-border)] bg-[var(--mos-panel)] p-4">
-          <div className="mb-2 flex items-center justify-between text-xs text-[var(--mos-text-muted)]"><span>Daily deposits & withdrawals</span><span>Deposits · Withdrawals · Net</span></div>
+        <section className="rounded-[var(--mos-radius-panel)] border border-[var(--mos-border)] bg-[var(--mos-panel)] p-5">
+          <div className="mb-3 flex items-center justify-between gap-3 text-xs text-[var(--mos-text-muted)]"><span className="font-medium text-[var(--mos-text-secondary)]">Daily deposits & withdrawals</span><span>Deposits · Withdrawals · Net</span></div>
           <FlowChart daily={report.daily} label={flowLabel} />
         </section>
-        <section className="rounded-[var(--mos-radius-panel)] border border-[var(--mos-border)] bg-[var(--mos-panel)] p-4">
-          <div className="mb-2 flex items-center justify-between text-xs text-[var(--mos-text-muted)]"><span>Processing time, office hour</span><span>Deposit API · Deposit manual · Withdrawal</span></div>
+        <section className="rounded-[var(--mos-radius-panel)] border border-[var(--mos-border)] bg-[var(--mos-panel)] p-5">
+          <div className="mb-3 flex items-center justify-between gap-3 text-xs text-[var(--mos-text-muted)]"><span className="font-medium text-[var(--mos-text-secondary)]">Processing time, office hour</span><span>Deposit API · Manual · Withdrawal</span></div>
           <ProcessingChart processing={report.processing} label={`Office-hour processing, ${report.period.range.from} to ${report.period.range.to}`} />
         </section>
       </div>

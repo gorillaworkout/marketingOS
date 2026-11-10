@@ -21,9 +21,9 @@ function valueText(card: KpiCard): string {
 }
 
 export function KpiStrip({ cards, daily }: { cards: KpiCard[]; daily: DailyFlow[] }) {
-  const columns = cards.length > 6 ? 'xl:grid-cols-7' : 'xl:grid-cols-6';
+  const columns = cards.length > 6 ? '2xl:grid-cols-7' : '2xl:grid-cols-6';
   return (
-    <section id="overview" className={`grid grid-cols-2 overflow-hidden rounded-[var(--mos-radius-panel)] border border-[var(--mos-border)] bg-[var(--mos-panel)] shadow-[var(--mos-shadow-panel)] md:grid-cols-3 ${columns}`}>
+    <section id="overview" className={`scroll-mt-24 grid grid-cols-2 overflow-hidden rounded-[var(--mos-radius-panel)] border border-[var(--mos-border)] bg-[var(--mos-panel)] shadow-[var(--mos-shadow-panel)] md:grid-cols-3 ${columns}`}>
       {cards.map(card => (
         <article key={card.id} className="min-w-0 border-l border-[var(--mos-border-subtle)] px-5 py-4 first:border-l-0">
           <p className="flex items-center gap-1.5 text-[11.5px] font-medium text-[var(--mos-text-muted)]">

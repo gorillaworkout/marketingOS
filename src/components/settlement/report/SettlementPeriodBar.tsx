@@ -20,11 +20,14 @@ export function SettlementPeriodBar({ period, previous, onPreset, onShift }: {
     <div className="flex flex-wrap items-center justify-between gap-3 rounded-[var(--mos-radius-panel)] border border-[var(--mos-border)] bg-[var(--mos-panel)] px-3 py-2.5">
       <div className="flex flex-wrap items-center gap-2">
         <div role="group" aria-label="Period" className="flex overflow-hidden rounded-[var(--mos-radius-control)] border border-[var(--mos-border)]">
-          {PRESETS.map(item => (
-            <button key={item.id} type="button" aria-pressed={period.preset === item.id} onClick={() => onPreset(item.id)} className={`border-l border-[var(--mos-border)] px-3 py-1.5 text-left text-xs font-medium first:border-l-0 ${period.preset === item.id ? 'bg-[#2EB5C4] text-white' : 'text-[var(--mos-text-muted)]'}`}>
-              {item.label}<small className="block text-[10px] font-normal opacity-75">{item.hint}</small>
-            </button>
-          ))}
+          {PRESETS.map(item => {
+            const selected = period.preset === item.id;
+            return (
+              <button key={item.id} type="button" aria-pressed={selected} onClick={() => onPreset(item.id)} className={`cursor-pointer border-l border-[var(--mos-border)] px-3 py-1.5 text-left text-xs font-medium transition duration-150 ease-out first:border-l-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--mos-accent-ring)] ${selected ? 'bg-[#2EB5C4] text-white hover:bg-[#3ec4d2] active:bg-[#1A8A96]' : 'text-[var(--mos-text-muted)] hover:bg-white/[0.06] hover:text-[var(--mos-text)] active:bg-white/[0.1]'}`}>
+                {item.label}<small className="block text-[10px] font-normal opacity-80">{item.hint}</small>
+              </button>
+            );
+          })}
         </div>
         <div className="flex items-center gap-1.5">
           <Button size="sm" aria-label="Previous period" onClick={() => onShift(-1)}>‹</Button>

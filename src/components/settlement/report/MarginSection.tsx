@@ -20,7 +20,7 @@ export function MarginSection({ months }: { months: MarginMonth[] }) {
   const sum = (field: 'deposit' | 'withdrawal' | 'net') => months.reduce((total, month) => total + (amount(month, field) ?? 0), 0);
   const imMissing = months.some(month => amount(month, 'im') === null);
   return (
-    <section id="margin" className="scroll-mt-16 rounded-[var(--mos-radius-panel)] border border-[var(--mos-border)] bg-[var(--mos-panel)] p-5">
+    <section id="margin" className="scroll-mt-24 rounded-[var(--mos-radius-panel)] border border-[var(--mos-border)] bg-[var(--mos-panel)] p-5">
       <div className="mb-4 flex items-start justify-between gap-3">
         <div>
           <h2 className="text-[15px] font-[560]">Margin in–out</h2>
@@ -28,7 +28,7 @@ export function MarginSection({ months }: { months: MarginMonth[] }) {
         </div>
         <div role="group" aria-label="Currency" className="flex overflow-hidden rounded-[6px] border border-[var(--mos-border)]">
           {(['IDR', 'USD'] as const).map(item => (
-            <button key={item} type="button" aria-pressed={currency === item} onClick={() => setCurrency(item)} className={`px-2.5 py-1 text-[11px] font-medium ${currency === item ? 'bg-[#2EB5C4] text-white' : 'text-[var(--mos-text-muted)]'}`}>{item}</button>
+            <button key={item} type="button" aria-pressed={currency === item} onClick={() => setCurrency(item)} className={`cursor-pointer px-2.5 py-1 text-[11px] font-medium transition duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--mos-accent-ring)] ${currency === item ? 'bg-[#2EB5C4] text-white hover:bg-[#3ec4d2] active:bg-[#1A8A96]' : 'text-[var(--mos-text-muted)] hover:bg-white/[0.06] hover:text-[var(--mos-text)] active:bg-white/[0.1]'}`}>{item}</button>
           ))}
         </div>
       </div>
