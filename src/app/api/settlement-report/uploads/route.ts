@@ -4,6 +4,7 @@ import { readUploadBody } from '@/lib/monthly-report/service';
 import { requireSettlementReport, settlementPermissions } from '@/lib/settlement/service';
 import { SETTLEMENT_KIND_LABELS } from '@/lib/settlement/detect';
 import { handleSettlementUpload } from '@/lib/settlement/upload-handlers';
+import { loadDealsHistoryThrough } from '@/lib/settlement/report-data';
 import { listSettlementUploadsPage, loadSettlementCoverage } from '@/lib/settlement/store';
 
 export const dynamic = 'force-dynamic';
@@ -17,14 +18,16 @@ export async function GET(request: NextRequest) {
   const user = await requireSettlementReport(request, { upload: true });
   if (user instanceof NextResponse) return user;
   const filter = parseUploadHistoryQuery(request.nextUrl.searchParams);
-  const [history, coverage] = await Promise.all([
+  const [history, coverage, dealsHistoryThrough] = await Promise.all([
     listSettlementUploadsPage(filter),
     loadSettlementCoverage(),
+    loadDealsHistoryThrough(),
   ]);
   return NextResponse.json({
     ...history,
     pageCount: pageCount(history.total, history.pageSize),
     coverage,
+    dealsHistoryThrough,
     labels: SETTLEMENT_KIND_LABELS,
     permissions: settlementPermissions(user),
   }, { headers: { 'Cache-Control': 'no-store' } });

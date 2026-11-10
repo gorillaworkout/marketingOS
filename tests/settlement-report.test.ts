@@ -4,7 +4,8 @@ import { parseCrmDeposits, parseCrmWithdrawals } from '../src/lib/settlement/crm
 import { parseMt5DepositWithdrawal } from '../src/lib/settlement/mt5-parse';
 import { parseSettlementFtd } from '../src/lib/settlement/ftd-parse';
 import { buildDailyReconciliation } from '../src/lib/settlement/reconcile';
-import { SWAP_LABEL, buildSettlementReport, mismatchState, resolveSettlementPeriod, shapeReconciliation, wibBounds, weeksTouching } from '../src/lib/settlement/report';
+import { reconciliationWindow } from '../src/lib/settlement/conventions';
+import { SWAP_LABEL, buildSettlementReport, mismatchState, resolveSettlementPeriod, settlementCrmRange, shapeReconciliation, wibBounds, weeksTouching } from '../src/lib/settlement/report';
 import { DAY, crmDepositXlsx, crmWithdrawalXlsx, dayDeals, dayDeposits, dayWithdrawals, ftdRows, ftdXlsx, mt5DwText } from './fixtures/settlement';
 
 const deposits = parseCrmDeposits(crmDepositXlsx(dayDeposits)).rows;
@@ -20,6 +21,12 @@ describe('settlement periods (weeks Monday–Sunday)', () => {
     assert.deepEqual(resolveSettlementPeriod('custom', '', '2026-10-01', '2026-10-31').range, { from: '2026-10-01', to: '2026-10-31' });
     assert.throws(() => resolveSettlementPeriod('custom', '', '2026-01-01', '2026-12-31'), /limited to 93 days/);
     assert.throws(() => resolveSettlementPeriod('year', '2026-01-01'), /not supported/);
+    const day = resolveSettlementPeriod('day', '2026-11-10');
+    assert.equal(day.basis, 'noon');
+    assert.deepEqual(day.window, reconciliationWindow('2026-11-10'));
+    assert.equal(resolveSettlementPeriod('week', '2026-11-08').basis, 'calendar');
+    assert.equal(resolveSettlementPeriod('month', '2026-02-10').basis, 'calendar');
+    assert.equal(resolveSettlementPeriod('custom', '', '2026-10-01', '2026-10-31').basis, 'calendar');
   });
 
   it('computes WIB bounds and full weeks', () => {
@@ -41,6 +48,13 @@ describe('settlement report assembly', () => {
     assert.equal(report.margin[0].idrInitialMargin, 900000);
     assert.equal(report.swap.totalSwap[10000], -1.5);
     assert.equal(report.swapLabel, SWAP_LABEL);
+    assert.deepEqual(report.previousRange, { from: '2026-10-26', to: '2026-11-01' });
+    assert.equal(report.summary.current.totals.deposit.count > 0, true);
+    assert.equal(report.summary.previous.range.from, '2026-10-26');
+    assert.equal(report.daily.length, 7);
+    assert.equal(report.daily[0].date, '2026-11-02');
+    const january = resolveSettlementPeriod('month', '2026-01-15');
+    assert.equal(settlementCrmRange(january).from, '2025-12-01');
   });
 
   it('pages and masks the mismatch list and marks pending vs missing', () => {

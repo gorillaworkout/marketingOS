@@ -25,7 +25,7 @@ test('parses published JISDOR rows and does not fill the missing weekend', () =>
 
 test('JISDOR is on-demand display, not a cron and not a report conversion', () => {
   const route = readFileSync('src/app/api/settlement-report/jisdor/route.ts', 'utf8');
-  const panel = readFileSync('src/components/settlement/JisdorPanel.tsx', 'utf8');
+  const panel = readFileSync('src/components/settlement/report/JisdorSection.tsx', 'utf8');
   const pkg = readFileSync('package.json', 'utf8');
   assert.match(route, /requireSettlementReport/);
   assert.match(route, /Unrecognized JISDOR page/);

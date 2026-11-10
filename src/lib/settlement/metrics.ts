@@ -2,7 +2,7 @@
  * Period metrics for the Settlement report (pure; inputs are already-loaded rows).
  * Days are WIB. Office hour = Mon–Fri 09:00–18:00 WIB minus holidays.
  */
-import { RATES, isOfficeHour, wibDateOf, wibParts, type Rate } from './conventions';
+import { RATES, isOfficeHour, wibDateOf, type Rate } from './conventions';
 import type { FtdEntry } from './ftd-parse';
 import type { CrmTransaction, Mt5Deal } from './types';
 
@@ -15,9 +15,9 @@ const mean = (values: number[]) => (values.length ? values.reduce((a, b) => a + 
 export interface Applications { deposit: number; depositRejected: number; withdrawal: number; withdrawalRejected: number }
 
 /** Requests by WIB request date; rejected = Unsuccessful. */
-export function applications(deposits: CrmTransaction[], withdrawals: CrmTransaction[], range: DateRange): Applications {
-  const dep = deposits.filter(tx => inRange(wibDateOf(tx.requestedAt), range));
-  const wd = withdrawals.filter(tx => inRange(wibDateOf(tx.requestedAt), range));
+export function applications(deposits: CrmTransaction[], withdrawals: CrmTransaction[], range: DateRange, dayKey: (iso: string) => string = wibDateOf): Applications {
+  const dep = deposits.filter(tx => inRange(dayKey(tx.requestedAt), range));
+  const wd = withdrawals.filter(tx => inRange(dayKey(tx.requestedAt), range));
   return {
     deposit: dep.length, depositRejected: dep.filter(tx => tx.status === 'Unsuccessful').length,
     withdrawal: wd.length, withdrawalRejected: wd.filter(tx => tx.status === 'Unsuccessful').length,
@@ -40,10 +40,10 @@ function cell(values: number[]): TimeCell { return { avgSeconds: mean(values), h
  * Deposits: rows with a completion (Processing excluded), by WIB request date, split office/after × API(Auto)/Manual.
  * Withdrawals office: Successful, requested in office hour, completed the same WIB day. 2nd withdrawal: completed a later WIB day.
  */
-export function processingTime(deposits: CrmTransaction[], withdrawals: CrmTransaction[], range: DateRange, holidays: ReadonlySet<string> = new Set()): ProcessingTime {
+export function processingTime(deposits: CrmTransaction[], withdrawals: CrmTransaction[], range: DateRange, holidays: ReadonlySet<string> = new Set(), dayKey: (iso: string) => string = wibDateOf): ProcessingTime {
   const depDays = new Map<string, Record<'officeApi' | 'officeManual' | 'afterApi' | 'afterManual', number[]>>();
   for (const tx of deposits) {
-    const day = wibDateOf(tx.requestedAt);
+    const day = dayKey(tx.requestedAt);
     const s = seconds(tx);
     if (!inRange(day, range) || s === null || tx.status === 'Processing') continue;
     const bucket = depDays.get(day) ?? { officeApi: [], officeManual: [], afterApi: [], afterManual: [] };
@@ -54,11 +54,11 @@ export function processingTime(deposits: CrmTransaction[], withdrawals: CrmTrans
   }
   const wdDays = new Map<string, { office: number[]; second: number[] }>();
   for (const tx of withdrawals) {
-    const day = wibDateOf(tx.requestedAt);
+    const day = dayKey(tx.requestedAt);
     const s = seconds(tx);
     if (!inRange(day, range) || s === null || tx.status !== 'Successful' || !tx.completedAt) continue;
     const bucket = wdDays.get(day) ?? { office: [], second: [] };
-    if (wibDateOf(tx.completedAt) > day) bucket.second.push(s);
+    if (wibDateOf(tx.completedAt) > wibDateOf(tx.requestedAt)) bucket.second.push(s);
     else if (isOfficeHour(tx.requestedAt, holidays)) bucket.office.push(s);
     wdDays.set(day, bucket);
   }
@@ -87,14 +87,15 @@ function addDaysIso(date: string, days: number): string { return new Date(Date.p
 const shortDay = (date: string) => `${MONTHS[Number(date.slice(5, 7)) - 1]} ${date.slice(8, 10)}`;
 
 /** Weeks Mon–Sun by WIB request date; 2nd withdrawal = completed on a later WIB day; label = Mon – Fri. */
-export function withdrawalPercentage(withdrawals: CrmTransaction[], holidays: ReadonlySet<string> = new Set()): WithdrawalWeek[] {
+export function withdrawalPercentage(withdrawals: CrmTransaction[], holidays: ReadonlySet<string> = new Set(), dayKey: (iso: string) => string = wibDateOf): WithdrawalWeek[] {
   const weeks = new Map<string, WithdrawalWeek>();
   for (const tx of withdrawals) {
-    const { date, weekday } = wibParts(tx.requestedAt);
+    const date = dayKey(tx.requestedAt);
+    const weekday = new Date(`${date}T00:00:00Z`).getUTCDay();
     const weekStart = addDaysIso(date, -((weekday + 6) % 7));
     const week = weeks.get(weekStart) ?? { weekStart, label: `${shortDay(weekStart)} – ${shortDay(addDaysIso(weekStart, 4))}`, office: 0, afterOffice: 0, secondWithdrawal: 0, total: 0 };
     week.total += 1;
-    if (tx.completedAt && wibDateOf(tx.completedAt) > date) week.secondWithdrawal += 1;
+    if (tx.completedAt && wibDateOf(tx.completedAt) > wibDateOf(tx.requestedAt)) week.secondWithdrawal += 1;
     else if (!isOfficeHour(tx.requestedAt, holidays)) week.afterOffice += 1;
     else week.office += 1;
     weeks.set(weekStart, week);
@@ -159,12 +160,12 @@ export interface SwapReport { days: SwapDay[]; totalSwap: Record<Rate, number>; 
 const zeroByRate = (): Record<Rate, number> => ({ 1: 0, 10000: 0, 12000: 0, 14000: 0 });
 
 /** CRM-S and CRM-SR by MT5 server posting date × rate. Excludes Deals History swap (phase 2). */
-export function swapReport(deals: Mt5Deal[], range: DateRange): SwapReport {
+export function swapReport(deals: Mt5Deal[], range: DateRange, dayKey?: (iso: string) => string): SwapReport {
   const days = new Map<string, SwapDay>();
   const totalSwap = zeroByRate(); const totalRefund = zeroByRate();
   for (const d of deals) {
     if ((d.kind !== 'S' && d.kind !== 'SR') || d.rate === null) continue;
-    const date = d.serverTime.slice(0, 10);
+    const date = dayKey ? dayKey(d.occurredAt) : d.serverTime.slice(0, 10);
     if (!inRange(date, range)) continue;
     const day = days.get(date) ?? { date, swap: zeroByRate(), refund: zeroByRate() };
     if (d.kind === 'S') { day.swap[d.rate] += d.amountUsd; totalSwap[d.rate] += d.amountUsd; }

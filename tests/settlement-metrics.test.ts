@@ -3,6 +3,7 @@ import { describe, it } from 'node:test';
 import { parseCrmDeposits, parseCrmWithdrawals } from '../src/lib/settlement/crm-parse';
 import { parseMt5DepositWithdrawal } from '../src/lib/settlement/mt5-parse';
 import { parseSettlementFtd } from '../src/lib/settlement/ftd-parse';
+import { settlementDayOf } from '../src/lib/settlement/conventions';
 import { applications, formatDuration, marginInOut, processingTime, swapReport, withdrawalPercentage } from '../src/lib/settlement/metrics';
 import { crmDepositXlsx, crmWithdrawalXlsx, dayDeals, dayDeposits, dayWithdrawals, ftdRows, ftdXlsx, mt5DwText, type CrmRowInput } from './fixtures/settlement';
 
@@ -64,6 +65,19 @@ describe('settlement period metrics', () => {
     assert.equal(nov.usdInitialMargin, 50);
     assert.equal(nov.idrDepositExIm, nov.idrDeposit - 900000);
     assert.equal(nov.usdDepositExIm, 0);
+  });
+
+  it('counts a noon window by settlement day and leaves the calendar key unchanged', () => {
+    const noon = { from: '2026-11-10', to: '2026-11-10' };
+    const rows = parseCrmWithdrawals(crmWithdrawalXlsx([
+      { reference: 'a', account: '2000001', request: '10/11/2026 11:59:00', complete: '10/11/2026 12:10:00', usd: 1 },
+      { reference: 'b', account: '2000001', request: '10/11/2026 12:30:00', complete: '10/11/2026 12:40:00', usd: 1 },
+    ])).rows;
+    assert.equal(applications([], rows, noon, settlementDayOf).withdrawal, 1);
+    assert.equal(applications([], rows, { from: '2026-11-11', to: '2026-11-11' }, settlementDayOf).withdrawal, 1);
+    const timed = processingTime([], rows, { from: '2026-11-10', to: '2026-11-11' }, new Set(), settlementDayOf);
+    assert.deepEqual(timed.withdrawals.map(row => row.date), ['2026-11-10', '2026-11-11']);
+    assert.equal(applications(deposits, withdrawals, { from: '2026-11-06', to: '2026-11-06' }).deposit, 4);
   });
 
   it('sums CRM-S and CRM-SR separately by MT5 server date and rate', () => {
