@@ -167,15 +167,6 @@ async function main() {
   assert.equal(details.total, 1);
   assert.equal(details.rows[0].remarks, 'NPWP Failed');
 
-  const member = await queryOne<{ id: string }>(`SELECT id FROM users WHERE role <> 'admin' ORDER BY username LIMIT 1`);
-  assert.ok(member);
-  await store.setUserAccess(member.id, { view: true, upload: true }, member.id);
-  let access = (await store.listAccessUsers()).find(u => u.id === member.id)!;
-  assert.deepEqual([access.personal_grant, access.can_upload], [true, true]);
-  await store.setUserAccess(member.id, { view: false, upload: false }, member.id);
-  access = (await store.listAccessUsers()).find(u => u.id === member.id)!;
-  assert.deepEqual([access.personal_grant, access.can_upload], [false, false]);
-
   const tables = await queryAll<{ table_name: string }>(`SELECT table_name FROM information_schema.tables WHERE table_name IN ('monthly_report_access','monthly_report_uploads','onboarding_events','onboarding_ftd','onboarding_rejection_reasons') ORDER BY 1`);
   assert.equal(tables.length, 5);
 

@@ -4,7 +4,6 @@ import test from 'node:test';
 import {
   ACCOUNT_FEATURES, SETTLEMENT_REPORT_FEATURE, accountFeatureFromPath, shouldBlockDashboardGenerationPath,
 } from '../src/lib/authorization';
-import { departmentFeaturesWithGrants } from '../src/lib/monthly-report/access';
 import {
   canUploadSettlementReport, settlementReportApiAccess, settlementReportPageAccess,
 } from '../src/lib/settlement/access';
@@ -24,11 +23,11 @@ test('Settlement Report is its own account feature and route tree', () => {
   assert.equal(shouldBlockDashboardGenerationPath({ role: 'member', features: ['settlement-report'] }, '/dashboard/monthly-report'), true);
 });
 
-test('Onboarding personal grants still apply; Settlement grants do not', () => {
-  assert.deepEqual(departmentFeaturesWithGrants(['seo'], null), ['seo']);
-  assert.deepEqual(departmentFeaturesWithGrants(['seo'], false), ['seo', 'monthly-report']);
-  assert.deepEqual(departmentFeaturesWithGrants(['monthly-report'], true), ['monthly-report']);
-  assert.deepEqual(departmentFeaturesWithGrants(['seo'], null), ['seo']);
+test('Settlement access does not depend on Onboarding features', () => {
+  const onboardingOnly = { role: 'member', features: ['monthly-report'] };
+  const viaDepartment = { role: 'member', features: ['settlement-report'] };
+  assert.equal(settlementReportPageAccess(onboardingOnly), 'forbidden');
+  assert.equal(settlementReportPageAccess(viaDepartment), 'allowed');
 });
 
 test('view and upload are the same predicate; Onboarding access is not enough', () => {

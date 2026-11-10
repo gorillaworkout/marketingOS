@@ -7,11 +7,10 @@ import { useMonthlyReportPermissions } from './MonthlyReportContext';
 
 export function ReportTabs() {
   const pathname = usePathname();
-  const { canUpload, isAdmin } = useMonthlyReportPermissions();
+  const { canUpload } = useMonthlyReportPermissions();
   const tabs = [
     { href: '/dashboard/monthly-report', label: 'Onboarding' },
     ...(canUpload ? [{ href: '/dashboard/monthly-report/uploads', label: 'Uploads' }] : []),
-    ...(isAdmin ? [{ href: '/dashboard/monthly-report/access', label: 'Access' }] : []),
   ];
   return (
     <nav aria-label="Onboarding Reports sections" className="flex gap-1 border-b border-[var(--mos-border-subtle)]">

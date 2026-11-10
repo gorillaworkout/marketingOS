@@ -1,6 +1,8 @@
 -- Monthly Report (Onboarding now, Settlement later).
 --  * `monthly-report` becomes an assignable department feature.
---  * monthly_report_access: per-user grants (view, optional upload rights).
+--  * monthly_report_access was created for per-user grants. The app no longer
+--    uses it (access is department-only via Accounts → Departments). The table
+--    is retained; no destructive drop.
 --  * Normalized data tables carry `source` ('upload' | 'api') so a future API
 --    sync writes the same rows as today's Excel/CSV uploads.
 -- Forward-only and idempotent: safe to run twice, never deletes data.
@@ -21,6 +23,8 @@ ALTER TABLE departments ADD CONSTRAINT departments_permitted_features_valid CHEC
   ]::text[]
 );
 
+-- Table retained after the Access tab was removed. Access is now department-only
+-- (Accounts → Departments). No destructive drop; this table is unused by the app.
 CREATE TABLE IF NOT EXISTS monthly_report_access (
   user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
   can_upload BOOLEAN NOT NULL DEFAULT FALSE,

@@ -15,8 +15,9 @@ export const INTERNAL_DOCS_FEATURE = 'internal-docs' as const;
 export const SEO_FEATURE = 'seo' as const;
 
 /**
- * Onboarding Reports. Assignable per department on Accounts
- * and per user on Onboarding Reports → Access (monthly_report_access).
+ * Onboarding Reports. Assignable per department on Accounts only.
+ * Access is admin, or the user's department has `monthly-report`.
+ * There is no per-user personal grant.
  */
 export const MONTHLY_REPORT_FEATURE = 'monthly-report' as const;
 

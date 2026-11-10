@@ -170,7 +170,7 @@ test('ftd-daily: Excel export has an "FTD daily" sheet with values, sources and 
 
 test('ftd-daily: permissions — same as view (admin or monthly-report access); legacy FTD file import is admin only', async () => {
   const admin = { role: 'admin', features: [] };
-  const viaDepartment = { role: 'user', features: ['monthly-report'], monthlyReportUpload: false };
+  const viaDepartment = { role: 'user', features: ['monthly-report'] };
   const outsider = { role: 'user', features: [] };
   assert.equal(canUploadMonthlyReport(admin), true);
   assert.equal(canUploadMonthlyReport(viaDepartment), true);
