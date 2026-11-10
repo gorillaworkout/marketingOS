@@ -49,6 +49,7 @@ export function SettlementDashboard({ reloadToken = 0, preset, anchor, onPreset,
       reconDate={reconDate}
       list={list}
       onPreset={onPreset}
+      onAnchor={onAnchor}
       onShift={direction => onAnchor(shiftAnchor(anchor, preset, direction))}
       onReconDate={date => { if (preset === 'day') onAnchor(date); else setPickedDate(date); setPage(1); }}
       onList={reason => { setList(reason); setPage(1); }}

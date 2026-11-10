@@ -18,7 +18,7 @@ import { WithdrawalTimingSection } from './WithdrawalTimingSection';
 type Fixing = { date: string; rate: number };
 
 export function SettlementReportView({
-  variant, report, recon, reconDate, list, generatedAt, jisdor, onPreset, onShift, onReconDate, onList, onPage,
+  variant, report, recon, reconDate, list, generatedAt, jisdor, onPreset, onShift, onAnchor, onReconDate, onList, onPage,
 }: {
   variant: 'screen' | 'print';
   report: SettlementReport;
@@ -29,6 +29,7 @@ export function SettlementReportView({
   jisdor?: Fixing[];
   onPreset?: (preset: SettlementPreset) => void;
   onShift?: (direction: number) => void;
+  onAnchor?: (anchor: string) => void;
   onReconDate?: (date: string) => void;
   onList?: (reason: string) => void;
   onPage?: (page: number) => void;
@@ -46,7 +47,7 @@ export function SettlementReportView({
           <div className="mt-3"><CoverageChips coverage={report.coverage} rangeEnd={report.period.range.to} commission={report.summary.current.commission} asText /></div>
         </header>
       )}
-      {variant === 'screen' && onPreset && onShift && <SettlementPeriodBar period={report.period} previous={report.previousRange} onPreset={onPreset} onShift={onShift} />}
+      {variant === 'screen' && onPreset && onShift && onAnchor && <SettlementPeriodBar period={report.period} previous={report.previousRange} onPreset={onPreset} onShift={onShift} onAnchor={onAnchor} />}
       {variant === 'screen' && <CoverageChips coverage={report.coverage} rangeEnd={report.period.range.to} commission={report.summary.current.commission} />}
       {variant === 'screen' && <SectionNav mismatches={mismatches} pendingDays={report.summary.current.commission?.pendingDays ?? 0} />}
       <KpiStrip cards={cards} daily={report.daily} />
