@@ -2,28 +2,57 @@
  * SQL for Deals History. Placeholders are `?`. Abort never deletes fact rows.
  * Commit upserts only the staged deals, then rebuilds the daily cache from the fact table.
  */
-import { execute, executeTransaction, queryAll } from '@/lib/database';
+import { executeTransaction, queryAll } from '@/lib/database';
 import { eachDate, MAX_CHUNK_DEALS } from './deals-parse';
 import { dealsHistoryFromDaily, type DealCoverageStatus, type DealsDay } from './deals-report';
-import { attestedRange, footerMatches, mergeIncoming, type DealFact } from './deals-engine';
+import { attestedRange, type DealFact } from './deals-engine';
 
-export const UPSERT_FACT_SQL = `INSERT INTO settlement_mt5_deal_facts
-  (deal, login, server_time, entry, volume, commission, fee, swap, profit, currency, rate, session_id)
-VALUES (?, ?, ?::timestamp, ?, ?::numeric, ?::numeric, ?::numeric, ?::numeric, ?::numeric, ?, ?::integer, ?)
-ON CONFLICT (deal) DO UPDATE SET
-  login = EXCLUDED.login, server_time = EXCLUDED.server_time, entry = EXCLUDED.entry,
-  volume = EXCLUDED.volume, commission = EXCLUDED.commission, fee = EXCLUDED.fee,
-  swap = EXCLUDED.swap, profit = EXCLUDED.profit, currency = EXCLUDED.currency,
-  rate = EXCLUDED.rate, session_id = EXCLUDED.session_id, updated_at = CURRENT_TIMESTAMP
-WHERE settlement_mt5_deal_facts.login IS DISTINCT FROM EXCLUDED.login
-   OR settlement_mt5_deal_facts.server_time IS DISTINCT FROM EXCLUDED.server_time
-   OR settlement_mt5_deal_facts.entry IS DISTINCT FROM EXCLUDED.entry
-   OR settlement_mt5_deal_facts.volume IS DISTINCT FROM EXCLUDED.volume
-   OR settlement_mt5_deal_facts.commission IS DISTINCT FROM EXCLUDED.commission
-   OR settlement_mt5_deal_facts.fee IS DISTINCT FROM EXCLUDED.fee
-   OR settlement_mt5_deal_facts.swap IS DISTINCT FROM EXCLUDED.swap
-   OR settlement_mt5_deal_facts.profit IS DISTINCT FROM EXCLUDED.profit
-   OR settlement_mt5_deal_facts.rate IS DISTINCT FROM EXCLUDED.rate`;
+/** One upload may be a full month. Two full months must not sit staged together. */
+export const MAX_SESSION_DEALS = 4_000_000;
+export const MAX_STAGED_DEALS = 4_000_000;
+export const MAX_OPEN_SESSIONS = 8;
+
+export function stagingRejection(sessionSoFar: number, totalSoFar: number, adding: number): string | null {
+  if (sessionSoFar + adding > MAX_SESSION_DEALS) return 'This upload is larger than one month of deals';
+  if (totalSoFar + adding > MAX_STAGED_DEALS) return 'Staged Deals History rows are at the limit';
+  return null;
+}
+
+/** Set-based upsert. The database returns two counts, not the deal rows. */
+export const UPSERT_FROM_STAGING_SQL = `WITH upserted AS (
+  INSERT INTO settlement_mt5_deal_facts
+    (deal, login, server_time, entry, volume, commission, fee, swap, profit, currency, rate, session_id)
+  SELECT deal, login, server_time, entry, volume, commission, fee, swap, profit, currency, rate, session_id
+  FROM settlement_dh_staging WHERE session_id = ?
+  ON CONFLICT (deal) DO UPDATE SET
+    login = EXCLUDED.login, server_time = EXCLUDED.server_time, entry = EXCLUDED.entry,
+    volume = EXCLUDED.volume, commission = EXCLUDED.commission, fee = EXCLUDED.fee,
+    swap = EXCLUDED.swap, profit = EXCLUDED.profit, currency = EXCLUDED.currency,
+    rate = EXCLUDED.rate, session_id = EXCLUDED.session_id, updated_at = CURRENT_TIMESTAMP
+  WHERE settlement_mt5_deal_facts.login IS DISTINCT FROM EXCLUDED.login
+     OR settlement_mt5_deal_facts.server_time IS DISTINCT FROM EXCLUDED.server_time
+     OR settlement_mt5_deal_facts.entry IS DISTINCT FROM EXCLUDED.entry
+     OR settlement_mt5_deal_facts.volume IS DISTINCT FROM EXCLUDED.volume
+     OR settlement_mt5_deal_facts.commission IS DISTINCT FROM EXCLUDED.commission
+     OR settlement_mt5_deal_facts.fee IS DISTINCT FROM EXCLUDED.fee
+     OR settlement_mt5_deal_facts.swap IS DISTINCT FROM EXCLUDED.swap
+     OR settlement_mt5_deal_facts.profit IS DISTINCT FROM EXCLUDED.profit
+     OR settlement_mt5_deal_facts.rate IS DISTINCT FROM EXCLUDED.rate
+  RETURNING (xmax = 0) AS inserted
+)
+SELECT COALESCE(COUNT(*) FILTER (WHERE inserted), 0)::int AS inserted,
+       COALESCE(COUNT(*) FILTER (WHERE NOT inserted), 0)::int AS updated
+FROM upserted`;
+
+export const STAGING_TOTALS_SQL = `SELECT COUNT(*)::int AS n, COALESCE(SUM(commission), 0)::text AS commission, COALESCE(SUM(swap), 0)::text AS swap
+FROM settlement_dh_staging WHERE session_id = ?`;
+
+export const STAGING_DATES_SQL = `SELECT to_char(day, 'YYYY-MM-DD') AS server_date FROM (
+  SELECT server_time::date AS day FROM settlement_dh_staging WHERE session_id = ?
+  UNION
+  SELECT f.server_time::date FROM settlement_mt5_deal_facts f
+  WHERE EXISTS (SELECT 1 FROM settlement_dh_staging s WHERE s.session_id = ? AND s.deal = f.deal)
+) days ORDER BY 1`;
 
 export const REBUILD_DELETE_SQL = 'DELETE FROM settlement_dh_daily WHERE server_date = ANY(?::date[])';
 
@@ -44,8 +73,8 @@ GROUP BY 1, 2`;
 export const LOCK_WRITER_SQL = `SELECT pg_advisory_xact_lock(hashtext('settlement-dh-writer')::bigint)`;
 /** After the writer lock, dates ascending. Same-day commits cannot rebuild past each other. */
 export const LOCK_DAYS_SQL = `SELECT pg_advisory_xact_lock(hashtext('dh-day:' || day)::bigint) FROM (SELECT unnest(?::text[]) AS day ORDER BY 1) days`;
-export const EXPIRE_STAGING_SQL = `DELETE FROM settlement_dh_staging WHERE session_id IN (
-  SELECT id FROM settlement_dh_sessions WHERE status = 'open' AND created_at < CURRENT_TIMESTAMP - INTERVAL '24 hours')`;
+export const EXPIRE_OPEN_SQL = `SELECT id FROM settlement_dh_sessions WHERE status = 'open' AND created_at < CURRENT_TIMESTAMP - INTERVAL '24 hours'`;
+export const LOCK_STAGING_BUDGET_SQL = `SELECT pg_advisory_xact_lock(hashtext('settlement-dh-staging-budget')::bigint)`;
 export const EXPIRE_SESSION_SQL = `UPDATE settlement_dh_sessions SET status = 'aborted'
   WHERE status = 'open' AND created_at < CURRENT_TIMESTAMP - INTERVAL '24 hours'`;
 export const ABORT_STAGING_SQL = 'DELETE FROM settlement_dh_staging WHERE session_id = ?';
@@ -55,12 +84,21 @@ export const REPLACE_CHUNK_SQL = 'DELETE FROM settlement_dh_staging WHERE sessio
 
 export const STAGE_SQL = `INSERT INTO settlement_dh_staging
   (session_id, deal, seq, login, server_time, entry, volume, commission, fee, swap, profit, currency, rate)
-VALUES (?, ?, ?, ?, ?::timestamp, ?, ?::numeric, ?::numeric, ?::numeric, ?::numeric, ?::numeric, ?, ?::integer)
+SELECT ?, d, ?, l, t::timestamp, e, v::numeric, c::numeric, f::numeric, s::numeric, p::numeric, cur, r
+FROM ROWS FROM (
+  unnest(?::text[]), unnest(?::text[]), unnest(?::text[]), unnest(?::text[]), unnest(?::text[]),
+  unnest(?::text[]), unnest(?::text[]), unnest(?::text[]), unnest(?::text[]), unnest(?::text[]), unnest(?::int[])
+) AS row(d, l, t, e, v, c, f, s, p, cur, r)
 ON CONFLICT (session_id, deal) DO UPDATE SET
   seq = EXCLUDED.seq, login = EXCLUDED.login, server_time = EXCLUDED.server_time, entry = EXCLUDED.entry,
   volume = EXCLUDED.volume, commission = EXCLUDED.commission, fee = EXCLUDED.fee, swap = EXCLUDED.swap,
   profit = EXCLUDED.profit, currency = EXCLUDED.currency, rate = EXCLUDED.rate
 WHERE settlement_dh_staging.seq <= EXCLUDED.seq`;
+
+export function stagingPartitionName(sessionId: string): string {
+  if (!/^[A-Za-z0-9_-]{1,48}$/.test(sessionId)) throw new Error('Session id is not a safe identifier');
+  return `settlement_dh_stg_${sessionId.toLowerCase().replace(/-/g, '_')}`;
+}
 
 interface SessionRow { id: string; owner_id: string; status: string; title_filter: string | null; range_from: string | null; range_to: string | null; footer_commission: string | null; footer_swap: string | null }
 
@@ -76,8 +114,19 @@ function toFact(row: Record<string, unknown>): DealFact {
 
 export type CommitResult = { aborted: true; error: string } | { aborted: false; inserted: number; updated: number; unchanged: number };
 
-async function abortOpenSession(tx: { execute(sql: string, values?: unknown[]): Promise<number> }, sessionId: string, error: string): Promise<CommitResult> {
-  await tx.execute(ABORT_STAGING_SQL, [sessionId]);
+type Sql = { execute(sql: string, values?: unknown[]): Promise<number> };
+
+async function dropStagingPartition(tx: Sql, sessionId: string): Promise<void> {
+  await tx.execute(`DROP TABLE IF EXISTS ${stagingPartitionName(sessionId)}`);
+}
+
+async function createStagingPartition(tx: Sql, sessionId: string): Promise<void> {
+  const name = stagingPartitionName(sessionId);
+  await tx.execute(`CREATE TABLE ${name} PARTITION OF settlement_dh_staging FOR VALUES IN ('${sessionId}')`);
+}
+
+async function abortOpenSession(tx: Sql, sessionId: string, error: string): Promise<CommitResult> {
+  await dropStagingPartition(tx, sessionId);
   await tx.execute(ABORT_CHUNKS_SQL, [sessionId]);
   await tx.execute(`UPDATE settlement_dh_sessions SET status = 'aborted', eof_confirmed = FALSE WHERE id = ?`, [sessionId]);
   return { aborted: true, error };
@@ -100,34 +149,29 @@ export async function commitOwnedSession(
     if (!session) throw new Error('Session not found');
     if (session.owner_id !== actorId) throw new Error('You cannot change another user\'s upload session');
     if (session.status !== 'open') throw new Error('Session is not open');
-    const staged = await tx.queryAll<Record<string, unknown>>('SELECT deal, login, server_time::text, entry, volume::text, commission::text, fee::text, swap::text, profit::text, currency, rate FROM settlement_dh_staging WHERE session_id = ?', [sessionId]);
-    const incoming = staged.map(toFact);
     const title = session.range_from && session.range_to && session.title_filter
       ? { filter: session.title_filter, from: session.range_from, to: session.range_to, star: session.title_filter === '*' }
       : null;
     const persistedFooter = { commission: Number(session.footer_commission), swap: Number(session.footer_swap) };
+    await tx.execute(LOCK_WRITER_SQL);
+    const totals = await tx.queryOne<{ n: number; commission: string; swap: string }>(STAGING_TOTALS_SQL, [sessionId]);
+    const stagedCount = Number(totals?.n ?? 0);
+    const outside = title
+      ? await tx.queryOne('SELECT 1 AS hit FROM settlement_dh_staging WHERE session_id = ? AND (server_time::date < ?::date OR server_time::date > ?::date) LIMIT 1', [sessionId, title.from, title.to])
+      : undefined;
     if (!title) return abortOpenSession(tx, sessionId, 'The file title was not parsed');
-    if (incoming.some(deal => deal.serverDate < title.from || deal.serverDate > title.to)) {
-      return abortOpenSession(tx, sessionId, 'A deal date is outside the title range');
-    }
-    if (!confirmation.eof || confirmation.declaredCount !== incoming.length || !footerMatches(incoming, persistedFooter)) {
+    if (outside) return abortOpenSession(tx, sessionId, 'A deal date is outside the title range');
+    const footerOk = Math.abs(Number(totals?.commission ?? 0) - persistedFooter.commission) <= 0.01
+      && Math.abs(Number(totals?.swap ?? 0) - persistedFooter.swap) <= 0.01;
+    if (!confirmation.eof || confirmation.declaredCount !== stagedCount || !footerOk) {
       return abortOpenSession(tx, sessionId, 'Footer, end of file, or deal count does not match the staged rows');
     }
-    await tx.execute(LOCK_WRITER_SQL);
-    const existingRows = await tx.queryAll<Record<string, unknown>>(
-      `SELECT f.deal, f.login, f.server_time::text, f.entry, f.volume::text, f.commission::text, f.fee::text, f.swap::text, f.profit::text, f.currency, f.rate
-       FROM settlement_mt5_deal_facts f
-       WHERE EXISTS (SELECT 1 FROM settlement_dh_staging s WHERE s.session_id = ? AND s.deal = f.deal)`,
-      [sessionId],
-    );
-    const existing: Record<string, DealFact> = {};
-    for (const row of existingRows) { const fact = toFact(row); existing[fact.deal] = fact; }
-    const merged = mergeIncoming(existing, incoming);
-    const dates = [...new Set([...merged.touchedDates, ...incoming.map(deal => deal.serverDate), ...Object.values(existing).map(deal => deal.serverDate)])].sort();
+    const dateRows = await tx.queryAll<{ server_date: string }>(STAGING_DATES_SQL, [sessionId, sessionId]);
+    const dates = dateRows.map(row => row.server_date);
     if (dates.length) await tx.execute(LOCK_DAYS_SQL, [dates]);
-    for (const deal of merged.upserts) {
-      await tx.execute(UPSERT_FACT_SQL, [deal.deal, deal.login, deal.serverTime, deal.entry, deal.volume, deal.commission, deal.fee, deal.swap, deal.profit, deal.currency, deal.rate, sessionId]);
-    }
+    const counts = await tx.queryOne<{ inserted: number; updated: number }>(UPSERT_FROM_STAGING_SQL, [sessionId]);
+    const inserted = Number(counts?.inserted ?? 0);
+    const updated = Number(counts?.updated ?? 0);
     await hooks?.beforeRebuild?.();
     if (dates.length) {
       await tx.execute(REBUILD_DELETE_SQL, [dates]);
@@ -143,9 +187,9 @@ export async function commitOwnedSession(
         ON CONFLICT (server_date) DO UPDATE SET status = CASE WHEN settlement_dh_coverage.status = 'attested' THEN 'attested' ELSE 'partial' END,
         session_id = CASE WHEN settlement_dh_coverage.status = 'attested' THEN settlement_dh_coverage.session_id ELSE EXCLUDED.session_id END`, [date, sessionId]);
     }
-    await tx.execute(`UPDATE settlement_dh_sessions SET status = 'committed', eof_confirmed = TRUE, deal_count = ?, committed_at = CURRENT_TIMESTAMP WHERE id = ?`, [incoming.length, sessionId]);
-    await tx.execute(ABORT_STAGING_SQL, [sessionId]);
-    return { aborted: false, inserted: merged.inserted, updated: merged.updated, unchanged: merged.unchanged };
+    await tx.execute(`UPDATE settlement_dh_sessions SET status = 'committed', eof_confirmed = TRUE, deal_count = ?, committed_at = CURRENT_TIMESTAMP WHERE id = ?`, [stagedCount, sessionId]);
+    await dropStagingPartition(tx, sessionId);
+    return { aborted: false, inserted, updated, unchanged: stagedCount - inserted - updated };
   });
 }
 
@@ -154,7 +198,8 @@ export async function abortOwnedSession(sessionId: string, actorId: string): Pro
     const session = await tx.queryOne<{ owner_id: string }>('SELECT owner_id FROM settlement_dh_sessions WHERE id = ? AND status = \'open\'', [sessionId]);
     if (!session) throw new Error('Session not found');
     if (session.owner_id !== actorId) throw new Error('You cannot change another user\'s upload session');
-    await tx.execute(ABORT_STAGING_SQL, [sessionId]);
+    await tx.execute(LOCK_WRITER_SQL);
+    await dropStagingPartition(tx, sessionId);
     await tx.execute(ABORT_CHUNKS_SQL, [sessionId]);
     await tx.execute(`UPDATE settlement_dh_sessions SET status = 'aborted' WHERE id = ?`, [sessionId]);
   });
@@ -193,7 +238,9 @@ export async function loadDealsFacts(from: string, to: string): Promise<DealFact
 
 export async function expireAbandonedSessions(): Promise<void> {
   await executeTransaction(async tx => {
-    await tx.execute(EXPIRE_STAGING_SQL);
+    await tx.execute(LOCK_WRITER_SQL);
+    const expired = await tx.queryAll<{ id: string }>(`${EXPIRE_OPEN_SQL} FOR UPDATE`);
+    for (const row of expired) await dropStagingPartition(tx, row.id);
     await tx.execute('DELETE FROM settlement_dh_chunks WHERE session_id IN (SELECT id FROM settlement_dh_sessions WHERE status = \'open\' AND created_at < CURRENT_TIMESTAMP - INTERVAL \'24 hours\')');
     await tx.execute(EXPIRE_SESSION_SQL);
   });
@@ -201,9 +248,15 @@ export async function expireAbandonedSessions(): Promise<void> {
 
 export async function openOwnedSession(input: { id: string; ownerId: string; fileName: string; titleFilter: string | null; from: string | null; to: string | null; footerCommission: number; footerSwap: number }): Promise<void> {
   await expireAbandonedSessions();
-  await execute(`INSERT INTO settlement_dh_sessions (id, owner_id, file_name, status, title_filter, range_from, range_to, footer_commission, footer_swap)
-    VALUES (?, ?, ?, 'open', ?, ?::date, ?::date, ?::numeric, ?::numeric)`,
-  [input.id, input.ownerId, input.fileName, input.titleFilter, input.from, input.to, input.footerCommission, input.footerSwap]);
+  await executeTransaction(async tx => {
+    await tx.execute(LOCK_STAGING_BUDGET_SQL);
+    const open = await tx.queryOne<{ n: number }>('SELECT COUNT(*)::int AS n FROM settlement_dh_sessions WHERE status = \'open\'');
+    if (Number(open?.n ?? 0) >= MAX_OPEN_SESSIONS) throw new Error('Too many open Deals History uploads');
+    await tx.execute(`INSERT INTO settlement_dh_sessions (id, owner_id, file_name, status, title_filter, range_from, range_to, footer_commission, footer_swap)
+      VALUES (?, ?, ?, 'open', ?, ?::date, ?::date, ?::numeric, ?::numeric)`,
+    [input.id, input.ownerId, input.fileName, input.titleFilter, input.from, input.to, input.footerCommission, input.footerSwap]);
+    await createStagingPartition(tx, input.id);
+  });
 }
 
 export async function stageOwnedChunk(input: { sessionId: string; actorId: string; seq: number; hash: string; deals: DealFact[] }): Promise<{ idempotent: boolean }> {
@@ -215,9 +268,28 @@ export async function stageOwnedChunk(input: { sessionId: string; actorId: strin
     if (input.deals.length > MAX_CHUNK_DEALS) throw new Error(`A chunk can contain at most ${MAX_CHUNK_DEALS} deals`);
     const prior = await tx.queryOne<{ content_hash: string }>('SELECT content_hash FROM settlement_dh_chunks WHERE session_id = ? AND seq = ?', [input.sessionId, input.seq]);
     if (prior?.content_hash === input.hash) return { idempotent: true };
+    await tx.execute(LOCK_STAGING_BUDGET_SQL);
+    const budget = await tx.queryOne<{ session_deals: number; total_deals: number }>(
+      `SELECT COALESCE(SUM(c.deal_count) FILTER (WHERE c.session_id = ? AND c.seq <> ?), 0)::int AS session_deals,
+              COALESCE(SUM(c.deal_count), 0)::int AS total_deals
+       FROM settlement_dh_chunks c
+       JOIN settlement_dh_sessions s ON s.id = c.session_id AND s.status = 'open'`,
+      [input.sessionId, input.seq],
+    );
+    const replacing = await tx.queryOne<{ deal_count: number }>('SELECT deal_count FROM settlement_dh_chunks WHERE session_id = ? AND seq = ?', [input.sessionId, input.seq]);
+    const sessionSoFar = Number(budget?.session_deals ?? 0);
+    const totalSoFar = Number(budget?.total_deals ?? 0) - Number(replacing?.deal_count ?? 0);
+    const rejection = stagingRejection(sessionSoFar, totalSoFar, input.deals.length);
+    if (rejection) throw new Error(rejection);
     await tx.execute(REPLACE_CHUNK_SQL, [input.sessionId, input.seq]);
-    for (const deal of input.deals) {
-      await tx.execute(STAGE_SQL, [input.sessionId, deal.deal, input.seq, deal.login, deal.serverTime, deal.entry, deal.volume, deal.commission, deal.fee, deal.swap, deal.profit, deal.currency, deal.rate]);
+    if (input.deals.length) {
+      await tx.execute(STAGE_SQL, [
+        input.sessionId, input.seq,
+        input.deals.map(deal => deal.deal), input.deals.map(deal => deal.login), input.deals.map(deal => deal.serverTime),
+        input.deals.map(deal => deal.entry), input.deals.map(deal => String(deal.volume)), input.deals.map(deal => String(deal.commission)),
+        input.deals.map(deal => String(deal.fee)), input.deals.map(deal => String(deal.swap)), input.deals.map(deal => String(deal.profit)),
+        input.deals.map(deal => deal.currency), input.deals.map(deal => deal.rate),
+      ]);
     }
     await tx.execute(`INSERT INTO settlement_dh_chunks (session_id, seq, content_hash, deal_count) VALUES (?, ?, ?, ?)
       ON CONFLICT (session_id, seq) DO UPDATE SET content_hash = EXCLUDED.content_hash, deal_count = EXCLUDED.deal_count`,

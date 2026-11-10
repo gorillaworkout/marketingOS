@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { after, before, describe, it } from 'node:test';
 import type { DealFact } from '../src/lib/settlement/deals-engine';
 import { MAX_CHUNK_DEALS } from '../src/lib/settlement/deals-parse';
-import { LOCK_DAYS_SQL, LOCK_WRITER_SQL } from '../src/lib/settlement/deals-store';
+import { LOCK_DAYS_SQL, LOCK_WRITER_SQL, MAX_SESSION_DEALS } from '../src/lib/settlement/deals-store';
 
 const testUrl = process.env.SETTLEMENT_TEST_DATABASE_URL ?? '';
 const local = /^postgres(?:ql)?:\/\/[^@]*@(127\.0\.0\.1|localhost)(?::\d+)?\//.test(testUrl);
@@ -65,6 +65,12 @@ describe('deals history on disposable postgres', { skip: local ? false : 'SETTLE
 
   async function reset() {
     await db.execute(`TRUNCATE settlement_dh_daily, settlement_dh_coverage, settlement_mt5_deal_facts, settlement_dh_staging, settlement_dh_chunks, settlement_dh_sessions`);
+    const parts = await db.queryAll<{ relname: string }>(
+      `SELECT c.relname FROM pg_class c JOIN pg_inherits i ON i.inhrelid = c.oid JOIN pg_class parent ON parent.oid = i.inhparent WHERE parent.relname = 'settlement_dh_staging'`,
+    );
+    for (const row of parts) {
+      if (/^settlement_dh_stg_[a-z0-9_]+$/.test(row.relname)) await db.execute(`DROP TABLE IF EXISTS ${row.relname}`);
+    }
   }
 
   async function openAndStage(id: string, title: { filter: string; from: string; to: string }, deals: DealFact[], footer = footerOf(deals)) {
@@ -343,5 +349,32 @@ describe('deals history on disposable postgres', { skip: local ? false : 'SETTLE
     );
     const leftover = await db.queryOne<{ count: string }>(`SELECT COUNT(*)::text AS count FROM settlement_dh_staging WHERE session_id = 'too-many'`);
     assert.equal(leftover?.count, '0');
+  });
+
+  it('reclaims one session partition and refuses a second month of staging', async () => {
+    await reset();
+    const title = { filter: '*', from: '2026-11-04', to: '2026-11-04' };
+    await openAndStage('keep', title, [deal('keep1', '2026-11-04', -2)]);
+    await openAndStage('drop-me', title, [deal('drop1', '2026-11-04', -3)]);
+    await store.abortOwnedSession('drop-me', OWNER);
+    const kept = await db.queryOne<{ deal: string }>(`SELECT deal FROM settlement_dh_staging WHERE session_id = 'keep'`);
+    assert.equal(kept?.deal, 'keep1');
+    const parts = await db.queryAll<{ relname: string }>(
+      `SELECT c.relname FROM pg_class c
+       JOIN pg_inherits i ON i.inhrelid = c.oid
+       JOIN pg_class parent ON parent.oid = i.inhparent
+       WHERE parent.relname = 'settlement_dh_staging' ORDER BY 1`,
+    );
+    const names = parts.map(row => row.relname);
+    assert.ok(names.includes('settlement_dh_stg_keep'));
+    assert.equal(names.includes('settlement_dh_stg_drop_me'), false);
+    await db.execute('UPDATE settlement_dh_chunks SET deal_count = ? WHERE session_id = ?', [MAX_SESSION_DEALS, 'keep']);
+    await store.openOwnedSession({ id: 'more', ownerId: OWNER, fileName: 'more.csv', titleFilter: '*', from: '2026-11-04', to: '2026-11-04', footerCommission: 0, footerSwap: 0 });
+    await assert.rejects(
+      () => store.stageOwnedChunk({ sessionId: 'more', actorId: OWNER, seq: 1, hash: 'more', deals: [deal('more1', '2026-11-04', -1)] }),
+      /limit|month/,
+    );
+    const stillKept = await db.queryOne<{ deal: string }>(`SELECT deal FROM settlement_dh_staging WHERE session_id = 'keep'`);
+    assert.equal(stillKept?.deal, 'keep1');
   });
 });
