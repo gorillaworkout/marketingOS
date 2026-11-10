@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { after, before, describe, it } from 'node:test';
 import type { DealFact } from '../src/lib/settlement/deals-engine';
 import { MAX_CHUNK_DEALS } from '../src/lib/settlement/deals-parse';
-import { LOCK_DAYS_SQL, LOCK_WRITER_SQL, MAX_SESSION_DEALS } from '../src/lib/settlement/deals-store';
+import { LOCK_DAYS_SQL, LOCK_WRITER_SQL, MAX_SESSION_DEALS, stagingPartitionName } from '../src/lib/settlement/deals-store';
 
 const testUrl = process.env.SETTLEMENT_TEST_DATABASE_URL ?? '';
 const local = /^postgres(?:ql)?:\/\/[^@]*@(127\.0\.0\.1|localhost)(?::\d+)?\//.test(testUrl);
@@ -32,6 +32,8 @@ describe('deals history on disposable postgres', { skip: local ? false : 'SETTLE
     db = await import('../src/lib/database');
     store = await import('../src/lib/settlement/deals-store');
     const { migrate } = await import('../scripts/migrate');
+    const stale = await db.queryAll<{ relname: string }>(`SELECT relname FROM pg_class WHERE relkind = 'r' AND relname LIKE 'settlement_dh_stg_%'`).catch(() => []);
+    for (const row of stale) if (/^settlement_dh_stg_[a-z0-9_]+$/.test(row.relname)) await db.execute(`DROP TABLE IF EXISTS ${row.relname}`);
     await db.execute(`DROP TABLE IF EXISTS settlement_dh_daily, settlement_dh_coverage, settlement_mt5_deal_facts, settlement_dh_staging, settlement_dh_chunks, settlement_dh_sessions`);
     await db.execute(`CREATE TABLE IF NOT EXISTS schema_migrations (name TEXT PRIMARY KEY, applied_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP)`);
     await db.execute(`DELETE FROM schema_migrations WHERE name = '047_settlement_deals_history.sql'`);
@@ -63,14 +65,25 @@ describe('deals history on disposable postgres', { skip: local ? false : 'SETTLE
     await db?.closeDb();
   });
 
+  async function stagingRows(sessionId?: string): Promise<number> {
+    const tables = await db.queryAll<{ relname: string }>(`SELECT relname FROM pg_class WHERE relkind = 'r' AND relname LIKE 'settlement_dh_stg_%'`);
+    const wanted = sessionId ? stagingPartitionName(sessionId) : null;
+    let total = 0;
+    for (const table of tables) {
+      if (!/^settlement_dh_stg_[a-z0-9_]+$/.test(table.relname)) continue;
+      if (wanted && table.relname !== wanted) continue;
+      const row = await db.queryOne<{ n: string }>(`SELECT COUNT(*)::text AS n FROM ${table.relname}`);
+      total += Number(row?.n ?? 0);
+    }
+    return total;
+  }
+
   async function reset() {
-    await db.execute(`TRUNCATE settlement_dh_daily, settlement_dh_coverage, settlement_mt5_deal_facts, settlement_dh_staging, settlement_dh_chunks, settlement_dh_sessions`);
-    const parts = await db.queryAll<{ relname: string }>(
-      `SELECT c.relname FROM pg_class c JOIN pg_inherits i ON i.inhrelid = c.oid JOIN pg_class parent ON parent.oid = i.inhparent WHERE parent.relname = 'settlement_dh_staging'`,
-    );
+    const parts = await db.queryAll<{ relname: string }>(`SELECT relname FROM pg_class WHERE relkind = 'r' AND relname LIKE 'settlement_dh_stg_%'`);
     for (const row of parts) {
       if (/^settlement_dh_stg_[a-z0-9_]+$/.test(row.relname)) await db.execute(`DROP TABLE IF EXISTS ${row.relname}`);
     }
+    await db.execute(`TRUNCATE settlement_dh_daily, settlement_dh_coverage, settlement_mt5_deal_facts, settlement_dh_staging, settlement_dh_chunks, settlement_dh_sessions`);
   }
 
   async function openAndStage(id: string, title: { filter: string; from: string; to: string }, deals: DealFact[], footer = footerOf(deals)) {
@@ -163,7 +176,7 @@ describe('deals history on disposable postgres', { skip: local ? false : 'SETTLE
     );
     assert.equal(session?.eof_confirmed, true);
     assert.equal(session?.deal_count, 1);
-    const stagedLeft = await db.queryOne<{ count: string }>(`SELECT COUNT(*)::text AS count FROM settlement_dh_staging`);
+    const stagedLeft = { count: String(await stagingRows()) };
     assert.equal(stagedLeft?.count, '0');
 
     await openAndStage('bad', monthTitle, [deal('m3', '2026-10-03', -4)]);
@@ -180,7 +193,7 @@ describe('deals history on disposable postgres', { skip: local ? false : 'SETTLE
     await db.execute(`UPDATE settlement_dh_sessions SET created_at = CURRENT_TIMESTAMP - INTERVAL '25 hours' WHERE id = 'old'`);
     await store.expireAbandonedSessions();
     const expired = await db.queryOne<{ status: string }>(`SELECT status FROM settlement_dh_sessions WHERE id = 'old'`);
-    const expiredStaging = await db.queryOne<{ count: string }>(`SELECT COUNT(*)::text AS count FROM settlement_dh_staging WHERE session_id = 'old'`);
+    const expiredStaging = { count: String(await stagingRows('old')) };
     const expiredFact = await db.queryOne(`SELECT deal FROM settlement_mt5_deal_facts WHERE deal = 'old1'`);
     assert.equal(expired?.status, 'aborted');
     assert.equal(expiredStaging?.count, '0');
@@ -210,7 +223,7 @@ describe('deals history on disposable postgres', { skip: local ? false : 'SETTLE
     assert.equal(refused.aborted, true);
     const facts = await db.queryOne<{ count: string }>(`SELECT COUNT(*)::text AS count FROM settlement_mt5_deal_facts`);
     const coverage = await db.queryOne<{ count: string }>(`SELECT COUNT(*)::text AS count FROM settlement_dh_coverage`);
-    const staging = await db.queryOne<{ count: string }>(`SELECT COUNT(*)::text AS count FROM settlement_dh_staging`);
+    const staging = { count: String(await stagingRows()) };
     const chunks = await db.queryOne<{ count: string }>(`SELECT COUNT(*)::text AS count FROM settlement_dh_chunks`);
     const status = await db.queryOne<{ status: string; eof_confirmed: boolean }>(`SELECT status, eof_confirmed FROM settlement_dh_sessions WHERE id = 'partial'`);
     assert.equal(facts?.count, '0');
@@ -286,7 +299,7 @@ describe('deals history on disposable postgres', { skip: local ? false : 'SETTLE
       ]);
       evidence.raceCommitted = Number(evidence.raceCommitted ?? 0);
       evidence.raceAborted = Number(evidence.raceAborted ?? 0);
-      const staging = await db.queryOne<{ count: string }>(`SELECT COUNT(*)::text AS count FROM settlement_dh_staging WHERE session_id = ?`, [id]);
+      const staging = { count: String(await stagingRows(id)) };
       const status = await db.queryOne<{ status: string; eof_confirmed: boolean }>(`SELECT status, eof_confirmed FROM settlement_dh_sessions WHERE id = ?`, [id]);
       const facts = await db.queryAll<{ deal: string }>(`SELECT deal FROM settlement_mt5_deal_facts WHERE deal LIKE ? ORDER BY 1`, [`race-%-${index}`]);
       assert.equal(staging?.count, '0');
@@ -311,7 +324,7 @@ describe('deals history on disposable postgres', { skip: local ? false : 'SETTLE
     assert.equal(interrupted.aborted, true);
     const interruptedFacts = await db.queryOne<{ count: string }>(`SELECT COUNT(*)::text AS count FROM settlement_mt5_deal_facts WHERE deal IN ('race-early', 'race-late')`);
     const interruptedCoverage = await db.queryOne<{ count: string }>(`SELECT COUNT(*)::text AS count FROM settlement_dh_coverage WHERE session_id = 'chunk-first'`);
-    const interruptedStaging = await db.queryOne<{ count: string }>(`SELECT COUNT(*)::text AS count FROM settlement_dh_staging WHERE session_id = 'chunk-first'`);
+    const interruptedStaging = { count: String(await stagingRows('chunk-first')) };
     assert.equal(interruptedFacts?.count, '0');
     assert.equal(interruptedCoverage?.count, '0');
     assert.equal(interruptedStaging?.count, '0');
@@ -347,7 +360,7 @@ describe('deals history on disposable postgres', { skip: local ? false : 'SETTLE
       () => store.stageOwnedChunk({ sessionId: 'too-many', actorId: OWNER, seq: 1, hash: 'too-many', deals: tooMany }),
       /2000/,
     );
-    const leftover = await db.queryOne<{ count: string }>(`SELECT COUNT(*)::text AS count FROM settlement_dh_staging WHERE session_id = 'too-many'`);
+    const leftover = { count: String(await stagingRows('too-many')) };
     assert.equal(leftover?.count, '0');
   });
 
@@ -357,13 +370,10 @@ describe('deals history on disposable postgres', { skip: local ? false : 'SETTLE
     await openAndStage('keep', title, [deal('keep1', '2026-11-04', -2)]);
     await openAndStage('drop-me', title, [deal('drop1', '2026-11-04', -3)]);
     await store.abortOwnedSession('drop-me', OWNER);
-    const kept = await db.queryOne<{ deal: string }>(`SELECT deal FROM settlement_dh_staging WHERE session_id = 'keep'`);
+    const kept = await db.queryOne<{ deal: string }>(`SELECT deal FROM settlement_dh_stg_keep`);
     assert.equal(kept?.deal, 'keep1');
     const parts = await db.queryAll<{ relname: string }>(
-      `SELECT c.relname FROM pg_class c
-       JOIN pg_inherits i ON i.inhrelid = c.oid
-       JOIN pg_class parent ON parent.oid = i.inhparent
-       WHERE parent.relname = 'settlement_dh_staging' ORDER BY 1`,
+      `SELECT relname FROM pg_class WHERE relkind = 'r' AND relname LIKE 'settlement_dh_stg_%' ORDER BY 1`,
     );
     const names = parts.map(row => row.relname);
     assert.ok(names.includes('settlement_dh_stg_keep'));
@@ -374,7 +384,7 @@ describe('deals history on disposable postgres', { skip: local ? false : 'SETTLE
       () => store.stageOwnedChunk({ sessionId: 'more', actorId: OWNER, seq: 1, hash: 'more', deals: [deal('more1', '2026-11-04', -1)] }),
       /limit|month/,
     );
-    const stillKept = await db.queryOne<{ deal: string }>(`SELECT deal FROM settlement_dh_staging WHERE session_id = 'keep'`);
+    const stillKept = await db.queryOne<{ deal: string }>(`SELECT deal FROM settlement_dh_stg_keep`);
     assert.equal(stillKept?.deal, 'keep1');
   });
 });

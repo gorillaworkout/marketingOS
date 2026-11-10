@@ -18,12 +18,19 @@ export function stagingRejection(sessionSoFar: number, totalSoFar: number, addin
   return null;
 }
 
+export function stagingPartitionName(sessionId: string): string {
+  if (!/^[A-Za-z0-9_-]{1,48}$/.test(sessionId)) throw new Error('Session id is not a safe identifier');
+  return `settlement_dh_stg_${sessionId.toLowerCase().replace(/-/g, '_')}`;
+}
+
 /** Set-based upsert. The database returns two counts, not the deal rows. */
-export const UPSERT_FROM_STAGING_SQL = `WITH upserted AS (
+export function upsertFromStagingSql(sessionId: string): string {
+  const name = stagingPartitionName(sessionId);
+  return `WITH upserted AS (
   INSERT INTO settlement_mt5_deal_facts
     (deal, login, server_time, entry, volume, commission, fee, swap, profit, currency, rate, session_id)
   SELECT deal, login, server_time, entry, volume, commission, fee, swap, profit, currency, rate, session_id
-  FROM settlement_dh_staging WHERE session_id = ?
+  FROM ${name}
   ON CONFLICT (deal) DO UPDATE SET
     login = EXCLUDED.login, server_time = EXCLUDED.server_time, entry = EXCLUDED.entry,
     volume = EXCLUDED.volume, commission = EXCLUDED.commission, fee = EXCLUDED.fee,
@@ -43,16 +50,38 @@ export const UPSERT_FROM_STAGING_SQL = `WITH upserted AS (
 SELECT COALESCE(COUNT(*) FILTER (WHERE inserted), 0)::int AS inserted,
        COALESCE(COUNT(*) FILTER (WHERE NOT inserted), 0)::int AS updated
 FROM upserted`;
+}
 
-export const STAGING_TOTALS_SQL = `SELECT COUNT(*)::int AS n, COALESCE(SUM(commission), 0)::text AS commission, COALESCE(SUM(swap), 0)::text AS swap
-FROM settlement_dh_staging WHERE session_id = ?`;
+export function stagingTotalsSql(sessionId: string): string {
+  return `SELECT COUNT(*)::int AS n, COALESCE(SUM(commission), 0)::text AS commission, COALESCE(SUM(swap), 0)::text AS swap
+FROM ${stagingPartitionName(sessionId)}`;
+}
 
-export const STAGING_DATES_SQL = `SELECT to_char(day, 'YYYY-MM-DD') AS server_date FROM (
-  SELECT server_time::date AS day FROM settlement_dh_staging WHERE session_id = ?
+export function stagingDatesSql(sessionId: string): string {
+  const name = stagingPartitionName(sessionId);
+  return `SELECT to_char(day, 'YYYY-MM-DD') AS server_date FROM (
+  SELECT server_time::date AS day FROM ${name}
   UNION
   SELECT f.server_time::date FROM settlement_mt5_deal_facts f
-  WHERE EXISTS (SELECT 1 FROM settlement_dh_staging s WHERE s.session_id = ? AND s.deal = f.deal)
+  WHERE EXISTS (SELECT 1 FROM ${name} s WHERE s.deal = f.deal)
 ) days ORDER BY 1`;
+}
+
+export function stageChunkSql(sessionId: string): string {
+  const name = stagingPartitionName(sessionId);
+  return `INSERT INTO ${name}
+  (session_id, deal, seq, login, server_time, entry, volume, commission, fee, swap, profit, currency, rate)
+SELECT ?, d, ?, l, t::timestamp, e, v::numeric, c::numeric, f::numeric, s::numeric, p::numeric, cur, r
+FROM ROWS FROM (
+  unnest(?::text[]), unnest(?::text[]), unnest(?::text[]), unnest(?::text[]), unnest(?::text[]),
+  unnest(?::text[]), unnest(?::text[]), unnest(?::text[]), unnest(?::text[]), unnest(?::text[]), unnest(?::int[])
+) AS row(d, l, t, e, v, c, f, s, p, cur, r)
+ON CONFLICT (session_id, deal) DO UPDATE SET
+  seq = EXCLUDED.seq, login = EXCLUDED.login, server_time = EXCLUDED.server_time, entry = EXCLUDED.entry,
+  volume = EXCLUDED.volume, commission = EXCLUDED.commission, fee = EXCLUDED.fee, swap = EXCLUDED.swap,
+  profit = EXCLUDED.profit, currency = EXCLUDED.currency, rate = EXCLUDED.rate
+WHERE ${name}.seq <= EXCLUDED.seq`;
+}
 
 export const REBUILD_DELETE_SQL = 'DELETE FROM settlement_dh_daily WHERE server_date = ANY(?::date[])';
 
@@ -80,24 +109,8 @@ export const EXPIRE_SESSION_SQL = `UPDATE settlement_dh_sessions SET status = 'a
 export const ABORT_STAGING_SQL = 'DELETE FROM settlement_dh_staging WHERE session_id = ?';
 export const ABORT_CHUNKS_SQL = 'DELETE FROM settlement_dh_chunks WHERE session_id = ?';
 
-export const REPLACE_CHUNK_SQL = 'DELETE FROM settlement_dh_staging WHERE session_id = ? AND seq = ?';
-
-export const STAGE_SQL = `INSERT INTO settlement_dh_staging
-  (session_id, deal, seq, login, server_time, entry, volume, commission, fee, swap, profit, currency, rate)
-SELECT ?, d, ?, l, t::timestamp, e, v::numeric, c::numeric, f::numeric, s::numeric, p::numeric, cur, r
-FROM ROWS FROM (
-  unnest(?::text[]), unnest(?::text[]), unnest(?::text[]), unnest(?::text[]), unnest(?::text[]),
-  unnest(?::text[]), unnest(?::text[]), unnest(?::text[]), unnest(?::text[]), unnest(?::text[]), unnest(?::int[])
-) AS row(d, l, t, e, v, c, f, s, p, cur, r)
-ON CONFLICT (session_id, deal) DO UPDATE SET
-  seq = EXCLUDED.seq, login = EXCLUDED.login, server_time = EXCLUDED.server_time, entry = EXCLUDED.entry,
-  volume = EXCLUDED.volume, commission = EXCLUDED.commission, fee = EXCLUDED.fee, swap = EXCLUDED.swap,
-  profit = EXCLUDED.profit, currency = EXCLUDED.currency, rate = EXCLUDED.rate
-WHERE settlement_dh_staging.seq <= EXCLUDED.seq`;
-
-export function stagingPartitionName(sessionId: string): string {
-  if (!/^[A-Za-z0-9_-]{1,48}$/.test(sessionId)) throw new Error('Session id is not a safe identifier');
-  return `settlement_dh_stg_${sessionId.toLowerCase().replace(/-/g, '_')}`;
+export function replaceChunkSql(sessionId: string): string {
+  return `DELETE FROM ${stagingPartitionName(sessionId)} WHERE session_id = ? AND seq = ?`;
 }
 
 interface SessionRow { id: string; owner_id: string; status: string; title_filter: string | null; range_from: string | null; range_to: string | null; footer_commission: string | null; footer_swap: string | null }
@@ -122,7 +135,7 @@ async function dropStagingPartition(tx: Sql, sessionId: string): Promise<void> {
 
 async function createStagingPartition(tx: Sql, sessionId: string): Promise<void> {
   const name = stagingPartitionName(sessionId);
-  await tx.execute(`CREATE TABLE ${name} PARTITION OF settlement_dh_staging FOR VALUES IN ('${sessionId}')`);
+  await tx.execute(`CREATE TABLE ${name} (LIKE settlement_dh_staging INCLUDING DEFAULTS INCLUDING CONSTRAINTS INCLUDING INDEXES)`);
 }
 
 async function abortOpenSession(tx: Sql, sessionId: string, error: string): Promise<CommitResult> {
@@ -154,10 +167,10 @@ export async function commitOwnedSession(
       : null;
     const persistedFooter = { commission: Number(session.footer_commission), swap: Number(session.footer_swap) };
     await tx.execute(LOCK_WRITER_SQL);
-    const totals = await tx.queryOne<{ n: number; commission: string; swap: string }>(STAGING_TOTALS_SQL, [sessionId]);
+    const totals = await tx.queryOne<{ n: number; commission: string; swap: string }>(stagingTotalsSql(sessionId));
     const stagedCount = Number(totals?.n ?? 0);
     const outside = title
-      ? await tx.queryOne('SELECT 1 AS hit FROM settlement_dh_staging WHERE session_id = ? AND (server_time::date < ?::date OR server_time::date > ?::date) LIMIT 1', [sessionId, title.from, title.to])
+      ? await tx.queryOne(`SELECT 1 AS hit FROM ${stagingPartitionName(sessionId)} WHERE server_time::date < ?::date OR server_time::date > ?::date LIMIT 1`, [title.from, title.to])
       : undefined;
     if (!title) return abortOpenSession(tx, sessionId, 'The file title was not parsed');
     if (outside) return abortOpenSession(tx, sessionId, 'A deal date is outside the title range');
@@ -166,10 +179,10 @@ export async function commitOwnedSession(
     if (!confirmation.eof || confirmation.declaredCount !== stagedCount || !footerOk) {
       return abortOpenSession(tx, sessionId, 'Footer, end of file, or deal count does not match the staged rows');
     }
-    const dateRows = await tx.queryAll<{ server_date: string }>(STAGING_DATES_SQL, [sessionId, sessionId]);
+    const dateRows = await tx.queryAll<{ server_date: string }>(stagingDatesSql(sessionId));
     const dates = dateRows.map(row => row.server_date);
     if (dates.length) await tx.execute(LOCK_DAYS_SQL, [dates]);
-    const counts = await tx.queryOne<{ inserted: number; updated: number }>(UPSERT_FROM_STAGING_SQL, [sessionId]);
+    const counts = await tx.queryOne<{ inserted: number; updated: number }>(upsertFromStagingSql(sessionId));
     const inserted = Number(counts?.inserted ?? 0);
     const updated = Number(counts?.updated ?? 0);
     await hooks?.beforeRebuild?.();
@@ -281,9 +294,9 @@ export async function stageOwnedChunk(input: { sessionId: string; actorId: strin
     const totalSoFar = Number(budget?.total_deals ?? 0) - Number(replacing?.deal_count ?? 0);
     const rejection = stagingRejection(sessionSoFar, totalSoFar, input.deals.length);
     if (rejection) throw new Error(rejection);
-    await tx.execute(REPLACE_CHUNK_SQL, [input.sessionId, input.seq]);
+    await tx.execute(replaceChunkSql(input.sessionId), [input.sessionId, input.seq]);
     if (input.deals.length) {
-      await tx.execute(STAGE_SQL, [
+      await tx.execute(stageChunkSql(input.sessionId), [
         input.sessionId, input.seq,
         input.deals.map(deal => deal.deal), input.deals.map(deal => deal.login), input.deals.map(deal => deal.serverTime),
         input.deals.map(deal => deal.entry), input.deals.map(deal => String(deal.volume)), input.deals.map(deal => String(deal.commission)),

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import {
-  ABORT_CHUNKS_SQL, EXPIRE_OPEN_SQL, LOCK_DAYS_SQL, LOCK_WRITER_SQL, MAX_SESSION_DEALS, MAX_STAGED_DEALS, REBUILD_INSERT_SQL, STAGE_SQL, UPSERT_FROM_STAGING_SQL, stagingRejection,
+  ABORT_CHUNKS_SQL, EXPIRE_OPEN_SQL, LOCK_DAYS_SQL, LOCK_WRITER_SQL, MAX_SESSION_DEALS, MAX_STAGED_DEALS, REBUILD_INSERT_SQL, stageChunkSql, stagingRejection, upsertFromStagingSql,
 } from '../src/lib/settlement/deals-store';
 
 const migration = readFileSync('db/migrations/047_settlement_deals_history.sql', 'utf8');
@@ -15,22 +15,23 @@ test('migration 047 creates deal facts without name or comment and documents rol
     assert.match(migration, new RegExp(`DROP TABLE IF EXISTS ${table}`));
   }
   assert.doesNotMatch(migration, /\bname TEXT|\bcomment TEXT/);
-  assert.match(migration, /PARTITION BY LIST \(session_id\)/);
+  assert.match(migration, /settlement_dh_stg_/);
   assert.match(migration, /pg_total_relation_size/);
   assert.doesNotMatch(migration.replace(/--.*$/gm, ''), /DELETE FROM settlement_mt5_deal_facts/);
 });
 
 test('commit SQL upserts from staging and does not load the deal rows into the process', () => {
-  assert.match(UPSERT_FROM_STAGING_SQL, /INSERT INTO settlement_mt5_deal_facts/);
-  assert.match(UPSERT_FROM_STAGING_SQL, /FROM settlement_dh_staging WHERE session_id = \?/);
-  assert.match(UPSERT_FROM_STAGING_SQL, /ON CONFLICT \(deal\) DO UPDATE/);
-  assert.match(UPSERT_FROM_STAGING_SQL, /IS DISTINCT FROM/);
-  assert.match(UPSERT_FROM_STAGING_SQL, /COUNT\(\*\) FILTER/);
+  const upsert = upsertFromStagingSql('session-1');
+  assert.match(upsert, /INSERT INTO settlement_mt5_deal_facts/);
+  assert.match(upsert, /FROM settlement_dh_stg_session_1/);
+  assert.match(upsert, /ON CONFLICT \(deal\) DO UPDATE/);
+  assert.match(upsert, /IS DISTINCT FROM/);
+  assert.match(upsert, /COUNT\(\*\) FILTER/);
   assert.doesNotMatch(store, /staged\.map\(toFact\)/);
   assert.doesNotMatch(store, /for \(const deal of merged\.upserts\)/);
   assert.match(REBUILD_INSERT_SQL, /FROM settlement_mt5_deal_facts/);
   assert.match(REBUILD_INSERT_SQL, /entry = 'in'/);
-  assert.match(STAGE_SQL, /settlement_dh_staging\.seq <= EXCLUDED\.seq/);
+  assert.match(stageChunkSql('session-1'), /settlement_dh_stg_session_1\.seq <= EXCLUDED\.seq/);
   assert.match(store, /DROP TABLE IF EXISTS/);
   assert.doesNotMatch(store, /TRUNCATE settlement_dh_staging/);
   assert.doesNotMatch(`${ABORT_CHUNKS_SQL}\n${store}`, /DELETE FROM settlement_mt5_deal_facts/);
