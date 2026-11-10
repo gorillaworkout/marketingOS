@@ -3,7 +3,6 @@ import { queryOne } from '@/lib/database';
 import { requiresAdminApiAccess } from '@/lib/admin-api-access';
 import { ACCOUNT_FEATURE_LABELS, canAccessFeature, enabledFeaturesForUser, type AccountFeature } from '@/lib/authorization';
 import { MONTHLY_REPORT_GRANT_SQL, departmentFeaturesWithGrants } from '@/lib/monthly-report/access';
-import { SETTLEMENT_REPORT_GRANT_SQL } from '@/lib/settlement/access';
 
 export interface AuthResult {
   userId: string;
@@ -33,11 +32,10 @@ type PrincipalRow = {
   department_name: string | null;
   permitted_features: string[] | null;
   monthly_report_grant: boolean | null;
-  settlement_report_grant: boolean | null;
 };
 
 function toAuthorizedUser(user: PrincipalRow): AuthorizedUser {
-  const features = enabledFeaturesForUser({ role: user.role, features: departmentFeaturesWithGrants(user.permitted_features, user.monthly_report_grant, user.settlement_report_grant) });
+  const features = enabledFeaturesForUser({ role: user.role, features: departmentFeaturesWithGrants(user.permitted_features, user.monthly_report_grant) });
   return {
     id: user.id, role: user.role, departmentId: user.department_id, departmentName: user.department_name, features,
     monthlyReportUpload: user.monthly_report_grant === true,
@@ -79,7 +77,7 @@ export async function getAuthorizedUser(request: NextRequest): Promise<Authorize
   const session = await getSession(request);
   if (!('userId' in session)) return session;
   const user = await queryOne<PrincipalRow>(`
-    SELECT u.id, u.role, u.department_id, d.name AS department_name, d.permitted_features, ${MONTHLY_REPORT_GRANT_SQL}, ${SETTLEMENT_REPORT_GRANT_SQL}
+    SELECT u.id, u.role, u.department_id, d.name AS department_name, d.permitted_features, ${MONTHLY_REPORT_GRANT_SQL}
     FROM users u LEFT JOIN departments d ON d.id = u.department_id WHERE u.id = ?
   `, [session.userId]);
   if (!user) return { error: 'Unauthorized', status: 401 };
@@ -108,7 +106,7 @@ export async function requireFeature(request: NextRequest, feature: AccountFeatu
 export async function getAuthorizedUserBySessionId(sessionId: string | undefined): Promise<AuthorizedUser | null> {
   if (!sessionId) return null;
   const user = await queryOne<PrincipalRow>(`
-    SELECT u.id, u.role, u.department_id, d.name AS department_name, d.permitted_features, ${MONTHLY_REPORT_GRANT_SQL}, ${SETTLEMENT_REPORT_GRANT_SQL}
+    SELECT u.id, u.role, u.department_id, d.name AS department_name, d.permitted_features, ${MONTHLY_REPORT_GRANT_SQL}
     FROM sessions s JOIN users u ON u.id = s.user_id LEFT JOIN departments d ON d.id = u.department_id
     WHERE s.id = ? AND s.expires_at > CURRENT_TIMESTAMP
   `, [sessionId]);

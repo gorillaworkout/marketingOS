@@ -7,9 +7,9 @@
 -- Settlement Report (its own menu) via POST /api/settlement-report/uploads.
 --
 -- Access: feature key `settlement-report`. The existing Settlement department
--- (003) gets it by default. Personal grants live in settlement_report_access
--- (view = upload, same rule as Onboarding). Onboarding's monthly-report feature
--- and monthly_report_access are not changed.
+-- (003) gets it by default. The settlement_report_access table was created for
+-- personal grants; the app no longer uses it (access is department-only).
+-- Onboarding's monthly-report feature and monthly_report_access are not changed.
 --
 -- Keys: CRM Reference per table (deposit and withdrawal References are separate sequences),
 -- MT5 Deal, FTD Login. Re-uploading the same export is a no-op (upsert with IS DISTINCT FROM).
@@ -77,6 +77,8 @@ SET permitted_features = permitted_features || ARRAY['settlement-report']::TEXT[
 WHERE name = 'Settlement'
   AND NOT (permitted_features @> ARRAY['settlement-report']::TEXT[]);
 
+-- Table retained after the Access tab was removed. Access is now department-only
+-- (Accounts → Departments). No destructive drop; this table is unused by the app.
 CREATE TABLE IF NOT EXISTS settlement_report_access (
   user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
   can_upload BOOLEAN NOT NULL DEFAULT FALSE,

@@ -29,11 +29,10 @@ const pages = [
   'src/app/dashboard/monthly-report/uploads/page.tsx',
   'src/app/dashboard/monthly-report/access/page.tsx',
   'src/app/dashboard/settlement-report/page.tsx',
-  'src/app/dashboard/settlement-report/access/page.tsx',
 ];
 
 test('all dashboard product pages use the shared page composition', async () => {
-  assert.equal(pages.length, 27);
+  assert.equal(pages.length, 26);
   for (const file of pages) {
     const source = await readFile(file, 'utf8');
     assert.match(source, /PageHeader/, `${file} must use PageHeader`);

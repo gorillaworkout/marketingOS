@@ -22,8 +22,9 @@ export const MONTHLY_REPORT_FEATURE = 'monthly-report' as const;
 
 /**
  * Settlement Report. Own menu and feature, separate from Onboarding.
- * Assignable per department on Accounts and per user on Settlement Report → Access
- * (settlement_report_access). The Settlement department has it by default (migration 046).
+ * Assignable per department on Accounts only. Access is admin, or the user's
+ * department has `settlement-report`. The Settlement department has it by default
+ * (migration 046). There is no per-user personal grant.
  */
 export const SETTLEMENT_REPORT_FEATURE = 'settlement-report' as const;
 

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import test from 'node:test';
 import {
   ACCOUNT_FEATURES, SETTLEMENT_REPORT_FEATURE, accountFeatureFromPath, shouldBlockDashboardGenerationPath,
@@ -15,20 +15,19 @@ test('Settlement Report is its own account feature and route tree', () => {
   assert.equal(SETTLEMENT_REPORT_FEATURE, 'settlement-report');
   assert.ok(ACCOUNT_FEATURES.includes('settlement-report'));
   assert.equal(accountFeatureFromPath('/dashboard/settlement-report'), 'settlement-report');
-  assert.equal(accountFeatureFromPath('/dashboard/settlement-report/access'), 'settlement-report');
+  assert.equal(accountFeatureFromPath('/dashboard/settlement-report/export'), 'settlement-report');
   assert.equal(accountFeatureFromPath('/dashboard/settlement-reports'), undefined);
   assert.equal(accountFeatureFromPath('/dashboard/monthly-report'), 'monthly-report');
   assert.equal(accountFeatureFromPath('/dashboard/monthly-report/settlement'), 'monthly-report');
   assert.equal(shouldBlockDashboardGenerationPath({ role: 'member', features: ['monthly-report'] }, '/dashboard/settlement-report'), true);
-  assert.equal(shouldBlockDashboardGenerationPath({ role: 'member', features: ['settlement-report'] }, '/dashboard/settlement-report/access'), false);
+  assert.equal(shouldBlockDashboardGenerationPath({ role: 'member', features: ['settlement-report'] }, '/dashboard/settlement-report/export'), false);
   assert.equal(shouldBlockDashboardGenerationPath({ role: 'member', features: ['settlement-report'] }, '/dashboard/monthly-report'), true);
 });
 
-test('a personal Settlement grant adds settlement-report without changing Onboarding grants', () => {
-  assert.deepEqual(departmentFeaturesWithGrants(['seo'], null, null), ['seo']);
-  assert.deepEqual(departmentFeaturesWithGrants(['seo'], false, null), ['seo', 'monthly-report']);
-  assert.deepEqual(departmentFeaturesWithGrants(['seo'], null, false), ['seo', 'settlement-report']);
-  assert.deepEqual(departmentFeaturesWithGrants(['monthly-report'], true, true), ['monthly-report', 'settlement-report']);
+test('Onboarding personal grants still apply; Settlement grants do not', () => {
+  assert.deepEqual(departmentFeaturesWithGrants(['seo'], null), ['seo']);
+  assert.deepEqual(departmentFeaturesWithGrants(['seo'], false), ['seo', 'monthly-report']);
+  assert.deepEqual(departmentFeaturesWithGrants(['monthly-report'], true), ['monthly-report']);
   assert.deepEqual(departmentFeaturesWithGrants(['seo'], null), ['seo']);
 });
 
@@ -50,19 +49,19 @@ test('view and upload are the same predicate; Onboarding access is not enough', 
   assert.equal(settlementReportApiAccess(viaDepartment, { upload: true }), null);
 });
 
-test('session queries load the personal Settlement grant and migration 046 seeds the department', () => {
+test('Settlement access is department-only; the unused access table is kept', () => {
   const auth = read('src/lib/auth.ts');
   const route = read('src/app/api/auth/route.ts');
-  assert.match(auth, /SETTLEMENT_REPORT_GRANT_SQL/);
-  assert.match(route, /SETTLEMENT_REPORT_GRANT_SQL/);
-  assert.match(read('src/lib/settlement/access.ts'), /FROM settlement_report_access/);
-  const accessRoute = read('src/app/api/settlement-report/access/route.ts');
-  assert.match(accessRoute, /typeof body\.view !== 'boolean'/);
-  assert.match(accessRoute, /upload:\s*true/);
-  assert.match(read('src/lib/settlement/store.ts'), /\[userId, true, grantedBy\]/);
-  const page = read('src/app/dashboard/settlement-report/access/page.tsx');
-  assert.match(page, /Personal access/);
-  assert.match(page, /JSON\.stringify\(\{ userId: user\.id, view \}\)/);
+  assert.doesNotMatch(auth, /SETTLEMENT_REPORT_GRANT_SQL/);
+  assert.doesNotMatch(route, /SETTLEMENT_REPORT_GRANT_SQL/);
+  assert.doesNotMatch(auth, /settlement_report_grant/);
+  assert.doesNotMatch(route, /settlement_report_grant/);
+  assert.doesNotMatch(read('src/lib/settlement/access.ts'), /SETTLEMENT_REPORT_GRANT_SQL/);
+  assert.doesNotMatch(read('src/lib/admin-api-access.ts'), /\/api\/settlement-report\/access/);
+  assert.doesNotMatch(read('src/components/settlement/SettlementNav.tsx'), /settlement-report\/access/);
+  assert.doesNotMatch(read('src/lib/settlement/store.ts'), /listSettlementAccessUsers|setSettlementAccess|settlement_report_access/);
+  assert.equal(existsSync(new URL('../src/app/dashboard/settlement-report/access/page.tsx', import.meta.url)), false);
+  assert.equal(existsSync(new URL('../src/app/api/settlement-report/access/route.ts', import.meta.url)), false);
   const sql = read('db/migrations/046_settlement_phase1.sql');
   assert.match(sql, /'settlement-report'/);
   assert.match(sql, /'Settlement'/);
