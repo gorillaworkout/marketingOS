@@ -44,8 +44,8 @@ export function DealsHistoryPanel({ onImported }: { onImported?: () => void }) {
           await post({ action: 'chunk', sessionId, seq, hash, deals });
           seq += 1;
         },
-        commit: async footer => {
-          await post({ action: 'commit', sessionId, footerCommission: footer.commission, footerSwap: footer.swap });
+        commit: async (footer, confirmation) => {
+          await post({ action: 'commit', sessionId, footerCommission: footer.commission, footerSwap: footer.swap, dealCount: confirmation.deals, eofConfirmed: true });
         },
       });
       setStatus(`Imported ${file.name}. Re-uploading the same deals does not double-count.`);

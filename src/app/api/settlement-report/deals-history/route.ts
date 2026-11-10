@@ -19,7 +19,7 @@ export async function POST(request: NextRequest) {
   const body = await readUploadBody(request);
   if (body instanceof NextResponse) return body;
   if (body.length > MAX_CHUNK_BYTES) return NextResponse.json({ error: 'The chunk is larger than 25 MB' }, { status: 413 });
-  const payload = JSON.parse(body.toString('utf8')) as { action?: string; fileName?: string; title?: string; footerCommission?: number; footerSwap?: number; sessionId?: string; seq?: number; hash?: string; deals?: ParsedDeal[] };
+  const payload = JSON.parse(body.toString('utf8')) as { action?: string; fileName?: string; title?: string; footerCommission?: number; footerSwap?: number; sessionId?: string; seq?: number; hash?: string; deals?: ParsedDeal[]; dealCount?: number; eofConfirmed?: boolean };
   if (payload.action === 'open') {
     const title = parseDealsTitle(payload.title ?? '');
     if (!title) return NextResponse.json({ error: 'The file title was not parsed' }, { status: 400 });
@@ -39,7 +39,9 @@ export async function POST(request: NextRequest) {
         return { ok: true, aborted: true };
       }
       if (payload.action === 'commit') {
-        return { ok: true, ...(await commitOwnedSession(payload.sessionId as string, user.id, { commission: Number(payload.footerCommission ?? 0), swap: Number(payload.footerSwap ?? 0) })) };
+        const committed = await commitOwnedSession(payload.sessionId as string, user.id, { commission: Number(payload.footerCommission ?? 0), swap: Number(payload.footerSwap ?? 0) }, { eof: payload.eofConfirmed === true, declaredCount: Number(payload.dealCount) });
+        if (committed.aborted) return { ok: false, error: committed.error, status: 409 };
+        return { ok: true, ...committed };
       }
       if (payload.action === 'chunk') {
         const deals = payload.deals ?? [];

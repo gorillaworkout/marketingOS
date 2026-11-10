@@ -20,7 +20,7 @@ export interface DhSession {
   staging: Record<string, StagedDeal>;
 }
 
-export interface CoverageCell { status: 'full' | 'partial'; sessionId: string }
+export interface CoverageCell { status: 'attested' | 'partial'; sessionId: string }
 
 export interface DhState {
   sessions: Record<string, DhSession>;
@@ -122,8 +122,16 @@ function sameFact(a: DealFact, b: DealFact): boolean {
     && a.swap === b.swap && a.profit === b.profit && a.currency === b.currency && a.rate === b.rate;
 }
 
+function withoutStaging(state: DhState, sessionId: string): DhState {
+  const next = clone(state);
+  next.sessions[sessionId].status = 'aborted';
+  next.sessions[sessionId].staging = {};
+  next.sessions[sessionId].chunks = {};
+  return next;
+}
+
 export function commitDhSession(state: DhState, input: {
-  sessionId: string; actorId: string; footer: { commission: number; swap: number }; beforePublish?: () => void;
+  sessionId: string; actorId: string; footer: { commission: number; swap: number }; declaredCount: number; eof: boolean; beforePublish?: () => void;
 }): EngineResult<MergeResult> {
   const session = owned(state, input.sessionId, input.actorId);
   if (typeof session === 'string') return { ok: false, state, error: session };
@@ -131,11 +139,13 @@ export function commitDhSession(state: DhState, input: {
     deal: row.deal, login: row.login, serverTime: row.serverTime, serverDate: row.serverDate, entry: row.entry,
     volume: row.volume, commission: row.commission, fee: row.fee, swap: row.swap, profit: row.profit, currency: row.currency, rate: row.rate,
   }));
-  if (!session.title) return { ok: false, state, error: 'The file title was not parsed' };
+  if (!session.title) return { ok: false, state: withoutStaging(state, input.sessionId), error: 'The file title was not parsed' };
   if (incoming.some(deal => deal.serverDate < session.title!.from || deal.serverDate > session.title!.to)) {
-    return { ok: false, state, error: 'A deal date is outside the title range' };
+    return { ok: false, state: withoutStaging(state, input.sessionId), error: 'A deal date is outside the title range' };
   }
-  if (!footerMatches(incoming, input.footer)) return { ok: false, state, error: 'Footer total does not match the parsed Commission and Swap columns' };
+  if (!input.eof || input.declaredCount !== incoming.length || !footerMatches(incoming, input.footer)) {
+    return { ok: false, state: withoutStaging(state, input.sessionId), error: 'Footer, end of file, or deal count does not match the staged rows' };
+  }
   const existing: Record<string, DealFact> = {};
   for (const deal of incoming) if (state.facts[deal.deal]) existing[deal.deal] = state.facts[deal.deal];
   const merged = mergeIncoming(existing, incoming);
@@ -145,24 +155,23 @@ export function commitDhSession(state: DhState, input: {
   const published = next.sessions[input.sessionId];
   published.status = 'committed';
   published.staging = {};
-  const covered = coverageDates(published.title, incoming);
-  for (const date of covered.full) next.coverage[date] = { status: 'full', sessionId: published.id };
+  const covered = attestedRange(published.title);
+  for (const date of covered.attested) next.coverage[date] = { status: 'attested', sessionId: published.id };
   for (const date of covered.partial) {
-    if (next.coverage[date]?.status !== 'full') next.coverage[date] = { status: 'partial', sessionId: published.id };
+    if (next.coverage[date]?.status !== 'attested') next.coverage[date] = { status: 'partial', sessionId: published.id };
   }
   return { ok: true, state: next, value: merged };
 }
 
 /**
- * Full coverage is the observed deal span, not the title the client claimed.
- * A star file marks every server date from the earliest staged deal through the latest,
- * including empty days in between, and only when that span sits inside the parsed title.
+ * Title dates are uploader attestation after the server has matched footer and count.
+ * They are not proof that an intermediate or edge day was complete. Earliest/latest
+ * staged dates are intentionally not expanded into covered days.
  */
-export function coverageDates(title: DealsTitle | null, deals: DealFact[]): { full: string[]; partial: string[] } {
-  if (!title || !deals.length) return { full: [], partial: [] };
-  const dates = deals.map(deal => deal.serverDate).sort();
-  const span = eachDate(dates[0], dates[dates.length - 1]).filter(date => date >= title.from && date <= title.to);
-  return title.star ? { full: span, partial: [] } : { full: [], partial: span };
+export function attestedRange(title: DealsTitle | null): { attested: string[]; partial: string[] } {
+  if (!title) return { attested: [], partial: [] };
+  const dates = eachDate(title.from, title.to);
+  return title.star ? { attested: dates, partial: [] } : { attested: [], partial: dates };
 }
 
 /** Drop open sessions older than 24 hours, including their staging. Facts stay. */
