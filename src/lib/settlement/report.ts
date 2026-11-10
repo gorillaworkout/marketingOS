@@ -9,6 +9,7 @@ import type { FtdEntry } from './ftd-parse';
 import { applications, marginInOut, processingTime, swapReport, withdrawalPercentage, type Applications, type MarginMonth, type ProcessingTime, type SwapReport, type WithdrawalWeek } from './metrics';
 import { buildDailyReconciliation, type DailyReconciliation, type MismatchItem } from './reconcile';
 import { loadCrm, loadFtd, loadHolidays, loadMt5Deals, loadSettlementCoverage } from './store';
+import type { DealsDay } from './deals-report';
 import type { CrmTransaction, Mt5Deal } from './types';
 
 export const SETTLEMENT_PRESETS = ['day', 'week', 'month', 'custom'] as const;
@@ -53,6 +54,8 @@ export interface SettlementReport {
   swap: SwapReport;
   swapLabel: string;
   coverage: Record<string, string | null>;
+  /** Absent until the report route attaches Deals History. Missing dates are Pending, not zero. */
+  dealsHistory?: DealsDay[];
 }
 
 export const SWAP_LABEL = 'Swap from Deposit & Withdrawal (CRM-S / CRM-SR), excludes Deals History swap';

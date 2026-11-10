@@ -1,0 +1,48 @@
+# Disposable PostgreSQL for the Deals History store tests.
+#
+# This job is separate from Deploy production. That workflow runs on the
+# MarketingOS VPS and deploys main. These tests must not run there and must
+# not use production credentials. The password below exists only inside the
+# GitHub-hosted Postgres service container for this job.
+
+name: Settlement Postgres
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  deals-history-postgres:
+    name: Deals History store on Postgres 16
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: settlement
+          POSTGRES_PASSWORD: settlement
+          POSTGRES_DB: settlement_phase2
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U settlement -d settlement_phase2"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      SETTLEMENT_TEST_DATABASE_URL: postgres://settlement:settlement@127.0.0.1:5432/settlement_phase2
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install
+        run: npm ci
+      - name: Run the store tests
+        run: npx tsx --test tests/settlement-deals-pg.test.ts

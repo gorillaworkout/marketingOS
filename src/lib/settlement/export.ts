@@ -1,6 +1,7 @@
 /** .xlsx export of the Settlement report, one sheet per section in the manual files' layout. */
 import * as XLSX from 'xlsx';
 import { RATES, type Rate } from './conventions';
+import { ATTESTED_EMPTY, PENDING_DEALS_HISTORY, type DealsDay } from './deals-report';
 import { formatDuration } from './metrics';
 import type { DailyReconciliation, ReconciliationBlock } from './reconcile';
 import type { SettlementReport } from './report';
@@ -68,6 +69,12 @@ export function swapRows(report: SettlementReport): Cell[][] {
     ['Total', ...RATES.map(r => s.totalSwap[r]), ...RATES.map(r => s.totalRefund[r])],
     [],
     ['IDR (Σ × rate, IDR buckets)', 'CRM-S', s.idrSwap, 'CRM-SR', s.idrRefund, 'S + SR', Math.round((s.idrSwap + s.idrRefund) * 100) / 100],
+    [],
+    ['Deals History swap (separate from CRM-S and CRM-SR)'],
+    ['Date (MT5 server)', ...RATES.map(rate => `DH swap ${RATE_LABEL(rate)}`)],
+    ...(report.dealsHistory?.length
+      ? report.dealsHistory.map(day => [day.date, ...RATES.map(rate => dealsHistoryCell(day, rate))])
+      : [['(no dates)', ...RATES.map(() => PENDING_DEALS_HISTORY)]]),
   ];
 }
 
@@ -78,6 +85,12 @@ export function buildSettlementWorkbook(report: SettlementReport): Buffer {
   };
   for (const name of SETTLEMENT_SHEETS) XLSX.utils.book_append_sheet(book, XLSX.utils.aoa_to_sheet(sheets[name]), name);
   return XLSX.write(book, { type: 'buffer', bookType: 'xlsx' }) as Buffer;
+}
+
+function dealsHistoryCell(day: DealsDay, rate: Rate): Cell {
+  if (day.status === 'observed' && day.swap) return day.swap[rate];
+  if (day.status === 'attested') return ATTESTED_EMPTY;
+  return PENDING_DEALS_HISTORY;
 }
 
 function blockRows(title: string, block: ReconciliationBlock): Cell[][] {
