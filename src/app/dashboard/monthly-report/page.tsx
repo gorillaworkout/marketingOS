@@ -108,7 +108,10 @@ export default function MonthlyReportOnboardingPage() {
         title="Onboarding Reports"
         description="Client onboarding from the CRM export: registrations, KYC, real account activations and first-time deposits. Days are counted in WIB (UTC+7)."
         actions={report && data?.hasAnyData ? (
-          <a href={`/api/monthly-report/export?${query}`}><Button variant="primary">Export .xlsx</Button></a>
+          <div className="flex items-center gap-2">
+            <a href={`/api/monthly-report/export?${query}&format=docx`}><Button>Export Word</Button></a>
+            <a href={`/api/monthly-report/export?${query}`}><Button variant="primary">Export .xlsx</Button></a>
+          </div>
         ) : undefined}
       />
       <ReportTabs />
@@ -322,7 +325,12 @@ export default function MonthlyReportOnboardingPage() {
           <DataTableFrame
             title="Summary"
             description="Total Real Account = Activated + Manual Approved Demo Not Done. Period rows count activations; the Total row counts unique accounts, so it can be lower than the sum."
-            action={<a href={`/api/monthly-report/export?${query}`}><Button size="sm">Export .xlsx</Button></a>}
+            action={(
+              <div className="flex items-center gap-2">
+                <a href={`/api/monthly-report/export?${query}&format=docx`}><Button size="sm">Export Word</Button></a>
+                <a href={`/api/monthly-report/export?${query}`}><Button size="sm">Export .xlsx</Button></a>
+              </div>
+            )}
           >
             <table className="w-full text-right text-xs">
               <thead className="text-[var(--mos-text-faint)]">
