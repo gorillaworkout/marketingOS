@@ -50,8 +50,10 @@ CREATE TABLE IF NOT EXISTS settlement_dh_chunks (
   PRIMARY KEY (session_id, seq)
 );
 
--- One list partition per upload session. Dropping that partition returns its disk
--- space and does not touch another session's rows. This migration does not VACUUM.
+-- The parent table is the column template. Each upload creates its own
+-- settlement_dh_stg_<session> table with LIKE and drops that table on commit,
+-- abort, or expiry. Dropping it returns disk for that session only.
+-- This migration does not VACUUM and does not truncate another session.
 CREATE TABLE IF NOT EXISTS settlement_dh_staging (
   session_id TEXT NOT NULL REFERENCES settlement_dh_sessions(id) ON DELETE CASCADE,
   deal TEXT NOT NULL,
@@ -67,7 +69,7 @@ CREATE TABLE IF NOT EXISTS settlement_dh_staging (
   currency TEXT,
   rate INTEGER,
   PRIMARY KEY (session_id, deal)
-) PARTITION BY LIST (session_id);
+);
 CREATE INDEX IF NOT EXISTS idx_settlement_dh_staging_seq ON settlement_dh_staging (session_id, seq);
 
 CREATE TABLE IF NOT EXISTS settlement_mt5_deal_facts (
