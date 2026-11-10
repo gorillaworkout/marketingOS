@@ -51,7 +51,7 @@ export async function ingestDealsBytes(chunks: AsyncIterable<Uint8Array>, sink: 
   }
   await take(finishUtf16LeLines(decoder));
   await flush();
-  if (!opened) throw new Error('The file title was not parsed');
+  if (!opened) throw new Error('This file is not an MT5 Deals History report. A Deposit and Withdrawal Report uses the standard upload.');
   if (!sawFooter) throw new Error('The file footer was not parsed');
   await sink.commit(footer, { deals });
   return { deals };

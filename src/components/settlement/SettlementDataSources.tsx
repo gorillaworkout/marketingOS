@@ -89,7 +89,8 @@ export function SettlementDataSources({ initial = null }: { initial?: History | 
       load(page);
     } catch (reason) {
       if (sessionId) await postDeals({ action: 'abort', sessionId }).catch(() => undefined);
-      setStatus(reason instanceof Error ? reason.message : 'Upload failed');
+      const message = reason instanceof Error && reason.message ? reason.message : 'This file could not be read as MT5 Deals History. A Deposit and Withdrawal Report uses the standard upload.';
+      setStatus(message);
     } finally {
       setBusy(false);
     }
