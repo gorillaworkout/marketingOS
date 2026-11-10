@@ -11,6 +11,8 @@ const html = `<table><tr><th>Tanggal</th><th>Kurs</th></tr>
 
 test('parses published JISDOR rows and does not fill the missing weekend', () => {
   assert.equal(parseJisdorRate('Rp 18.103,00'), 18103);
+  assert.equal(parseJisdorRate('18.103'), null);
+  assert.equal(parseJisdorHtml('<html>Attention Required Cloudflare</html>').length, 0);
   const rows = parseJisdorHtml(html);
   assert.deepEqual(rows.map(row => row.date), ['2026-10-30', '2026-11-06', '2026-11-09']);
   assert.equal(rows.find(row => row.date === '2026-11-07'), undefined);

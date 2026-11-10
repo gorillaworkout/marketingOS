@@ -20,9 +20,15 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   const user = await requireSettlementReport(request);
   if (user instanceof NextResponse) return user;
-  const load = await fetch(JISDOR_PAGE_URL, { headers: { 'User-Agent': 'MarketingOS settlement' } });
-  if (!load.ok) return NextResponse.json({ error: `JISDOR page returned ${load.status}` }, { status: 502 });
-  const parsed = parseJisdorHtml(await load.text());
+  let html = '';
+  try {
+    const load = await fetch(JISDOR_PAGE_URL, { headers: { 'User-Agent': 'MarketingOS settlement' } });
+    if (!load.ok) return NextResponse.json({ error: `JISDOR page returned ${load.status}. Nothing was stored.` }, { status: 502 });
+    html = await load.text();
+  } catch {
+    return NextResponse.json({ error: 'JISDOR page could not be fetched. Nothing was stored.' }, { status: 502 });
+  }
+  const parsed = parseJisdorHtml(html);
   if (!parsed.length) return NextResponse.json({ error: 'Unrecognized JISDOR page. Nothing was stored.' }, { status: 422 });
   await saveJisdorFixings(parsed);
   return NextResponse.json({ ok: true, stored: parsed.length, fixings: parsed });

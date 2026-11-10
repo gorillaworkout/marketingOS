@@ -26,11 +26,14 @@ export function parseJisdorDate(text: string): string | null {
   return date;
 }
 
-/** "Rp 18.103,00" → 18103. Indonesian grouping: dots are thousands, comma is decimals. */
+/**
+ * "Rp 18.103,00" → 18103. Dots are thousands and the comma is decimals.
+ * A value with no comma, such as 18.103, is rejected rather than guessed.
+ */
 export function parseJisdorRate(text: string): number | null {
-  const cleaned = text.replace(/rp/ig, '').trim().replace(/\./g, '').replace(',', '.');
-  if (!/^\d+(\.\d+)?$/.test(cleaned)) return null;
-  return Number(cleaned);
+  const raw = text.replace(/rp/ig, '').replace(/\s/g, '');
+  if (!/^\d{1,3}(\.\d{3})*,\d{2}$/.test(raw)) return null;
+  return Number(raw.replace(/\./g, '').replace(',', '.'));
 }
 
 /** Rows the page actually published. Dates that are absent stay absent. */
