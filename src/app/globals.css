@@ -48,9 +48,6 @@ body {
 *::-webkit-scrollbar-thumb { background: #34343a; border-radius: 8px; }
 *::-webkit-scrollbar-track { background: transparent; }
 
-.settlement-picker { color-scheme: dark; }
-.print-report .settlement-picker { color-scheme: light; }
-
 .print-report {
   --mos-bg: #ffffff;
   --mos-panel: #ffffff;

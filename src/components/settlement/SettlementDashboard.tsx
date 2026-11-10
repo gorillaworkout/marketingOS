@@ -15,6 +15,9 @@ export function SettlementDashboard({ reloadToken = 0, preset, anchor, onPreset,
 }) {
   const [report, setReport] = useState<SettlementReport | null>(null);
   const [error, setError] = useState('');
+  const reportKey = `${preset}|${anchor}|${reloadToken}`;
+  const [reportSettled, setReportSettled] = useState<string | null>(null);
+  const reportLoading = reportSettled !== reportKey;
   const [pickedDate, setPickedDate] = useState(defaultReconDate());
   const reconDate = preset === 'day' ? anchor : pickedDate;
   const [recon, setRecon] = useState<ReconciliationResponse | null>(null);
@@ -22,26 +25,34 @@ export function SettlementDashboard({ reloadToken = 0, preset, anchor, onPreset,
   const [page, setPage] = useState(1);
 
   useEffect(() => {
-    let cancelled = false;
-    fetch(`/api/settlement-report/report?preset=${preset}&anchor=${anchor}`)
+    const controller = new AbortController();
+    const key = reportKey;
+    fetch(`/api/settlement-report/report?preset=${preset}&anchor=${anchor}`, { signal: controller.signal })
       .then(async response => { const body = await response.json(); if (!response.ok) throw new Error(body.error ?? 'Could not load the report'); return body.report as SettlementReport; })
-      .then(value => { if (!cancelled) { setReport(value); setError(''); } })
-      .catch(err => { if (!cancelled) setError(err instanceof Error ? err.message : 'Could not load the report'); });
-    return () => { cancelled = true; };
-  }, [preset, anchor, reloadToken]);
+      .then(value => { if (controller.signal.aborted) return; setReport(value); setError(''); setReportSettled(key); })
+      .catch(err => {
+        if (controller.signal.aborted) return;
+        setError(err instanceof Error ? err.message : 'Could not load the report');
+        setReportSettled(key);
+      });
+    return () => controller.abort();
+  }, [reportKey, preset, anchor]);
 
   useEffect(() => {
-    let cancelled = false;
-    fetch(`/api/settlement-report/reconciliation?date=${reconDate}&list=${list}&page=${page}`)
+    const controller = new AbortController();
+    fetch(`/api/settlement-report/reconciliation?date=${reconDate}&list=${list}&page=${page}`, { signal: controller.signal })
       .then(response => response.json())
-      .then(value => { if (!cancelled) setRecon(value as ReconciliationResponse); })
-      .catch(() => { if (!cancelled) setRecon(null); });
-    return () => { cancelled = true; };
+      .then(value => { if (!controller.signal.aborted) setRecon(value as ReconciliationResponse); })
+      .catch(() => { if (!controller.signal.aborted) setRecon(null); });
+    return () => controller.abort();
   }, [reconDate, list, page, reloadToken]);
 
-  if (error) return <EmptyState title="Could not load the report" description={error} />;
+  if (error && !report) return <EmptyState title="Could not load the report" description={error} />;
   if (!report) return <LoadingState label="Loading settlement report" />;
   return (
+    <div aria-busy={reportLoading}>
+      {reportLoading && <p role="status" className="text-xs text-[var(--mos-text-muted)]">Updating report…</p>}
+      <div className={reportLoading ? 'opacity-70 transition-opacity duration-150' : 'transition-opacity duration-150'}>
     <SettlementReportView
       variant="screen"
       report={report}
@@ -55,5 +66,7 @@ export function SettlementDashboard({ reloadToken = 0, preset, anchor, onPreset,
       onList={reason => { setList(reason); setPage(1); }}
       onPage={setPage}
     />
+      </div>
+    </div>
   );
 }
