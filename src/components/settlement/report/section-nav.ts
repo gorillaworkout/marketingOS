@@ -41,3 +41,20 @@ export function activateSection(id: string, env: {
   env.setHash(`#${section}`);
   return section;
 }
+
+/**
+ * Which tab stays highlighted. A clicked section that is still sitting on the
+ * spy line wins over a sibling in the same row (Withdrawal timing beside Margin).
+ * Once that section scrolls away, the last section above the line takes over.
+ */
+export function sectionFromScroll(
+  tops: ReadonlyArray<{ id: ReportSectionId; top: number }>,
+  line: number,
+  hashId: ReportSectionId | null,
+): ReportSectionId {
+  const pinned = hashId ? tops.find(item => item.id === hashId) : undefined;
+  if (pinned && Math.abs(pinned.top - line) < 80) return pinned.id;
+  let active: ReportSectionId = REPORT_SECTIONS[0][0];
+  for (const item of tops) if (item.top <= line) active = item.id;
+  return active;
+}
