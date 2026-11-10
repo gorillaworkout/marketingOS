@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { todayWib } from '@/lib/monthly-report/service';
 import { requireSettlementReport } from '@/lib/settlement/service';
 import { buildReconciliationWorkbook, buildSettlementWorkbook, reconciliationExportFileName, settlementExportFileName } from '@/lib/settlement/export';
+import { buildSettlementHtml, settlementHtmlFileName } from '@/lib/settlement/html-export';
 import { listJisdorFixings } from '@/lib/settlement/jisdor-store';
 import { attachDealsHistory } from '@/lib/settlement/report-data';
 import { loadReconciliation, loadSettlementReport, resolveSettlementPeriod } from '@/lib/settlement/report';
@@ -30,5 +31,14 @@ export async function GET(request: NextRequest) {
   }
   const report = await attachDealsHistory(await loadSettlementReport(period));
   try { report.jisdor = await listJisdorFixings(); } catch { report.jisdor = []; }
+  if (params.get('format') === 'html') {
+    const requested = params.get('recon') ?? '';
+    const recon = /^\d{4}-\d{2}-\d{2}$/.test(requested) ? requested : period.anchor;
+    const reconciliation = await loadReconciliation(recon);
+    const html = buildSettlementHtml(report, { reconciliation });
+    return new NextResponse(html, {
+      headers: { 'Content-Type': 'text/html; charset=utf-8', 'Content-Disposition': `attachment; filename="${settlementHtmlFileName(report)}"`, 'Cache-Control': 'no-store' },
+    });
+  }
   return send(buildSettlementWorkbook(report), settlementExportFileName(report));
 }

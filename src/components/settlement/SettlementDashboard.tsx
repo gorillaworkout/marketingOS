@@ -6,20 +6,21 @@ import type { ReconciliationResponse, SettlementPreset, SettlementReport } from 
 import { defaultReconDate, shiftAnchor } from './report/labels';
 import { SettlementReportView } from './report/SettlementReportView';
 
-export function SettlementDashboard({ reloadToken = 0, preset, anchor, onPreset, onAnchor }: {
+export function SettlementDashboard({ reloadToken = 0, preset, anchor, reconDate: picked = defaultReconDate(), onPreset, onAnchor, onReconDate }: {
   reloadToken?: number;
   preset: SettlementPreset;
   anchor: string;
+  reconDate?: string;
   onPreset: (preset: SettlementPreset) => void;
   onAnchor: (anchor: string) => void;
+  onReconDate?: (date: string) => void;
 }) {
   const [report, setReport] = useState<SettlementReport | null>(null);
   const [error, setError] = useState('');
   const reportKey = `${preset}|${anchor}|${reloadToken}`;
   const [reportSettled, setReportSettled] = useState<string | null>(null);
   const reportLoading = reportSettled !== reportKey;
-  const [pickedDate, setPickedDate] = useState(defaultReconDate());
-  const reconDate = preset === 'day' ? anchor : pickedDate;
+  const reconDate = preset === 'day' ? anchor : picked;
   const [recon, setRecon] = useState<ReconciliationResponse | null>(null);
   const [list, setList] = useState('all');
   const [page, setPage] = useState(1);
@@ -62,7 +63,7 @@ export function SettlementDashboard({ reloadToken = 0, preset, anchor, onPreset,
       onPreset={onPreset}
       onAnchor={onAnchor}
       onShift={direction => onAnchor(shiftAnchor(anchor, preset, direction))}
-      onReconDate={date => { if (preset === 'day') onAnchor(date); else setPickedDate(date); setPage(1); }}
+      onReconDate={date => { if (preset === 'day') onAnchor(date); else onReconDate?.(date); setPage(1); }}
       onList={reason => { setList(reason); setPage(1); }}
       onPage={setPage}
     />
