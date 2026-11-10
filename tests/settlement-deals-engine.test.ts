@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { abortDhSession, applyDhChunk, commitDhSession, coverageDates, emptyDhState, expireOpenSessions, footerMatches, mergeIncoming, openDhSession, SESSION_TTL_MS, type DealFact, type DhState } from '../src/lib/settlement/deals-engine';
+import { abortDhSession, applyDhChunk, commitDhSession, emptyDhState, expireOpenSessions, footerMatches, mergeIncoming, openDhSession, SESSION_TTL_MS, type DealFact, type DhState } from '../src/lib/settlement/deals-engine';
 import { OFFICIAL_COMMISSION_BUCKETS, OFFICIAL_DH_OCT_1_5, PENDING_DEALS_HISTORY, composeSwap, dealsHistoryReport, officialBucketDeals } from '../src/lib/settlement/deals-report';
 import { swapReport } from '../src/lib/settlement/metrics';
 import { withSessionLock } from '../src/lib/settlement/deals-lock';
@@ -22,7 +22,7 @@ function publish(state: DhState, id: string, owner: string, deals: DealFact[], f
   const chunk = applyDhChunk(opened.state, { sessionId: id, actorId: owner, seq: 1, hash: `h-${id}`, deals, byteLength: 100 });
   if (!chunk.ok) throw new Error(chunk.error);
   const sum = (field: 'commission' | 'swap') => Math.round(deals.reduce((total, deal) => total + deal[field], 0) * 100) / 100;
-  const committed = commitDhSession(chunk.state, { sessionId: id, actorId: owner, footer: footer ?? { commission: sum('commission'), swap: sum('swap') } });
+  const committed = commitDhSession(chunk.state, { sessionId: id, actorId: owner, eof: true, declaredCount: deals.length, footer: footer ?? { commission: sum('commission'), swap: sum('swap') } });
   if (!committed.ok) throw new Error(committed.error);
   return committed;
 }
@@ -52,16 +52,20 @@ describe('deals history sessions', () => {
     assert.equal(changed.state.facts['1'].commission, -10);
   });
 
-  it('marks only a star file as full coverage and does not turn a real zero into pending', () => {
+  it('attests a finished star file and does not turn a stored zero into a gap', () => {
     const full = publish(emptyDhState(), 'full', 'owner', [fact({ deal: '9', serverDate: '2026-10-03', commission: 0, swap: 0 })]);
-    assert.equal(full.state.coverage['2026-10-03'].status, 'full');
+    assert.equal(full.state.coverage['2026-10-03'].status, 'attested');
+    assert.equal(full.state.coverage['2026-10-01'].status, 'attested');
     const partial = publish(full.state, 'part', 'owner', [fact({ deal: '8', serverDate: '2026-10-06' })], { filter: 'group', from: '2026-10-06', to: '2026-10-06', star: false });
     assert.equal(partial.state.coverage['2026-10-06'].status, 'partial');
-    assert.equal(partial.state.coverage['2026-10-03'].status, 'full');
-    const report = dealsHistoryReport(Object.values(partial.state.facts), partial.state.coverage, ['2026-10-03', '2026-10-06', '2026-10-07']);
+    assert.equal(partial.state.coverage['2026-10-03'].status, 'attested');
+    const report = dealsHistoryReport(Object.values(partial.state.facts), partial.state.coverage, ['2026-10-03', '2026-10-04', '2026-10-06', '2026-10-07']);
+    assert.equal(report[0].status, 'observed');
     assert.equal(report[0].swap?.[10000], 0);
+    assert.equal(report[1].status, 'attested');
     assert.equal(report[1].commission, null);
-    assert.equal(report[2].status, 'missing');
+    assert.equal(report[2].status, 'observed');
+    assert.equal(report[3].status, 'missing');
   });
 
   it('rejects another user, replays the same chunk, and refuses a lower sequence overwrite', () => {
@@ -89,7 +93,7 @@ describe('deals history sessions', () => {
     assert.equal(aborted.ok && aborted.state.facts['99'], undefined);
     assert.equal(aborted.ok && aborted.state.facts['1'].commission, -10);
     assert.throws(() => commitDhSession(staged.state, {
-      sessionId: 'bad', actorId: 'owner', footer: { commission: -50, swap: 0 }, beforePublish() { throw new Error('boom'); },
+      sessionId: 'bad', actorId: 'owner', eof: true, declaredCount: 1, footer: { commission: -50, swap: 0 }, beforePublish() { throw new Error('boom'); },
     }));
     assert.equal(staged.state.facts['99'], undefined);
     assert.equal(staged.state.facts['1'].commission, -10);
@@ -100,15 +104,18 @@ describe('deals history sessions', () => {
     if (!opened.ok) throw new Error(opened.error);
     const staged = applyDhChunk(opened.state, { sessionId: 'f', actorId: 'owner', seq: 1, hash: 'f', deals: [fact({ deal: '1', serverDate: '2026-10-01', commission: -10 })], byteLength: 10 });
     if (!staged.ok) throw new Error(staged.error);
-    const rejected = commitDhSession(staged.state, { sessionId: 'f', actorId: 'owner', footer: { commission: -11, swap: 0 } });
+    const rejected = commitDhSession(staged.state, { sessionId: 'f', actorId: 'owner', eof: true, declaredCount: 1, footer: { commission: -11, swap: 0 } });
     assert.equal(rejected.ok, false);
+    assert.equal(rejected.state.sessions.f.status, 'aborted');
+    assert.equal(Object.keys(rejected.state.sessions.f.staging).length, 0);
     assert.equal(rejected.state.facts['1'], undefined);
+    assert.deepEqual(rejected.state.coverage, {});
     assert.equal(footerMatches([fact({ deal: '1', serverDate: '2026-10-01', commission: -10 })], { commission: -10, swap: 0 }), true);
   });
 
   it('reproduces the audited 01–05 Oct buckets and keeps phase 1 swap beside a pending deals term', () => {
     const deals = officialBucketDeals();
-    const coverage = Object.fromEntries(['2026-10-01', '2026-10-02', '2026-10-03', '2026-10-05'].map(date => [date, { status: 'full' as const }]));
+    const coverage = Object.fromEntries(['2026-10-01', '2026-10-02', '2026-10-03', '2026-10-05'].map(date => [date, { status: 'attested' as const }]));
     const report = dealsHistoryReport(deals, coverage, ['2026-10-01', '2026-10-02', '2026-10-03', '2026-10-04', '2026-10-05']);
     for (const bucket of OFFICIAL_COMMISSION_BUCKETS) {
       const day = report.find(row => row.date === bucket.date);
@@ -158,8 +165,12 @@ describe('deals history sessions', () => {
   it('does not mark a claimed title day full when no staged deal reaches it, and a moved deal touches both dates', () => {
     const only = [fact({ deal: '1', serverDate: '2026-10-01', commission: -3 })];
     const wide = publish(emptyDhState(), 'wide', 'owner', only, { filter: '*', from: '2026-10-01', to: '2026-10-31', star: true });
-    assert.deepEqual(coverageDates(wide.state.sessions.wide.title, only).full, ['2026-10-01']);
-    assert.equal(wide.state.coverage['2026-10-31'], undefined);
+    assert.equal(wide.state.coverage['2026-10-31'].status, 'attested');
+    const wideReport = dealsHistoryReport(Object.values(wide.state.facts), wide.state.coverage, ['2026-10-01', '2026-10-15', '2026-10-31']);
+    assert.equal(wideReport[0].status, 'observed');
+    assert.equal(wideReport[1].status, 'attested');
+    assert.equal(wideReport[1].swap, null);
+    assert.equal(wideReport[2].commission, null);
     const moved = publish(wide.state, 'move', 'owner', [fact({ deal: '1', serverDate: '2026-10-05', commission: -3 })]);
     assert.deepEqual(moved.value.touchedDates, ['2026-10-01', '2026-10-05']);
     assert.equal(moved.state.facts['1'].serverDate, '2026-10-05');
@@ -167,8 +178,28 @@ describe('deals history sessions', () => {
     if (!outside.ok) throw new Error(outside.error);
     const staged = applyDhChunk(outside.state, { sessionId: 'out', actorId: 'owner', seq: 1, hash: 'o', deals: [fact({ deal: '9', serverDate: '2026-10-09', commission: -1 })], byteLength: 20 });
     if (!staged.ok) throw new Error(staged.error);
-    const rejected = commitDhSession(staged.state, { sessionId: 'out', actorId: 'owner', footer: { commission: -1, swap: 0 } });
+    const rejected = commitDhSession(staged.state, { sessionId: 'out', actorId: 'owner', eof: true, declaredCount: 1, footer: { commission: -1, swap: 0 } });
     assert.equal(rejected.ok, false);
+    assert.equal(rejected.state.sessions.out.status, 'aborted');
+    assert.deepEqual(rejected.state.coverage, {});
+  });
+
+  it('aborts a broad title when the last chunks never arrive', () => {
+    const wide = { filter: '*', from: '2026-10-01', to: '2026-10-31', star: true };
+    const opened = openDhSession(emptyDhState(), { id: 'cut', ownerId: 'owner', title: wide });
+    if (!opened.ok) throw new Error(opened.error);
+    const staged = applyDhChunk(opened.state, {
+      sessionId: 'cut', actorId: 'owner', seq: 1, hash: 'first', byteLength: 40,
+      deals: [fact({ deal: '10', serverDate: '2026-10-01', commission: -2.5 }), fact({ deal: '11', serverDate: '2026-10-02', commission: -1 })],
+    });
+    if (!staged.ok) throw new Error(staged.error);
+    const refused = commitDhSession(staged.state, { sessionId: 'cut', actorId: 'owner', eof: false, declaredCount: 5, footer: { commission: -3.5, swap: 0 } });
+    assert.equal(refused.ok, false);
+    assert.equal(refused.state.sessions.cut.status, 'aborted');
+    assert.equal(Object.keys(refused.state.sessions.cut.staging).length, 0);
+    assert.equal(refused.state.facts['10'], undefined);
+    assert.equal(refused.state.coverage['2026-10-01'], undefined);
+    assert.equal(refused.state.coverage['2026-10-31'], undefined);
   });
 
   it('expires an abandoned open session and drops only its staging', () => {

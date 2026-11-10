@@ -36,6 +36,8 @@ CREATE TABLE IF NOT EXISTS settlement_dh_sessions (
   range_to DATE,
   footer_commission NUMERIC(18,2),
   footer_swap NUMERIC(18,2),
+  deal_count INTEGER,
+  eof_confirmed BOOLEAN NOT NULL DEFAULT FALSE,
   created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
   committed_at TIMESTAMPTZ
 );
@@ -87,7 +89,7 @@ CREATE INDEX IF NOT EXISTS idx_settlement_mt5_deal_facts_login ON settlement_mt5
 
 CREATE TABLE IF NOT EXISTS settlement_dh_coverage (
   server_date DATE PRIMARY KEY,
-  status TEXT NOT NULL CHECK (status IN ('full', 'partial')),
+  status TEXT NOT NULL CHECK (status IN ('attested', 'partial')),
   session_id TEXT REFERENCES settlement_dh_sessions(id) ON DELETE SET NULL
 );
 

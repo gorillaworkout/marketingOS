@@ -9,7 +9,7 @@ import {
 export interface IngestSink {
   open(titleLine: string): Promise<void>;
   chunk(deals: ParsedDeal[]): Promise<void>;
-  commit(footer: { commission: number; swap: number }): Promise<void>;
+  commit(footer: { commission: number; swap: number }, confirmation: { deals: number }): Promise<void>;
 }
 
 export async function ingestDealsBytes(chunks: AsyncIterable<Uint8Array>, sink: IngestSink): Promise<{ deals: number }> {
@@ -53,6 +53,6 @@ export async function ingestDealsBytes(chunks: AsyncIterable<Uint8Array>, sink: 
   await flush();
   if (!opened) throw new Error('The file title was not parsed');
   if (!sawFooter) throw new Error('The file footer was not parsed');
-  await sink.commit(footer);
+  await sink.commit(footer, { deals });
   return { deals };
 }

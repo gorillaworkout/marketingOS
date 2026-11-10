@@ -1,12 +1,13 @@
 /**
  * Commission and Deals History swap from stored facts.
- * A date that is not fully covered is Pending, not zero.
+ * Numeric amounts are sums of stored deals. A date with no stored deals is not zero.
  */
 import { RATES, type Rate } from './conventions';
 import type { DealFact } from './deals-engine';
 import type { SwapReport } from './metrics';
 
 export const PENDING_DEALS_HISTORY = 'Pending: Deals History';
+export const ATTESTED_EMPTY = 'Attested, no deals stored';
 
 /** Audited 01–05 Oct file. CI does not generate 390,366 rows; the bucket fixture sums to the footer. */
 export const OFFICIAL_DH_OCT_1_5 = { uniqueDeals: 390366, commission: -51486.7, swap: 0 } as const;
@@ -41,9 +42,12 @@ export function officialBucketDeals(): DealFact[] {
   return deals;
 }
 
+export type DealCoverageStatus = 'attested' | 'partial';
+export type DealsDayStatus = 'observed' | 'attested' | 'partial' | 'missing';
+
 export interface DealsDay {
   date: string;
-  status: 'full' | 'partial' | 'missing';
+  status: DealsDayStatus;
   commission: Record<Rate, number> | null;
   swap: Record<Rate, number> | null;
   outCommission: number | null;
@@ -52,44 +56,53 @@ export interface DealsDay {
 const emptyRates = (): Record<Rate, number> => ({ 1: 0, 10000: 0, 12000: 0, 14000: 0 });
 const round2 = (value: number) => Math.round(value * 100) / 100;
 
+function unmarked(date: string, status: DealsDayStatus): DealsDay {
+  return { date, status, commission: null, swap: null, outCommission: null };
+}
+
 export function dealsHistoryFromDaily(
   rows: Array<{ date: string; rate: Rate; commissionIn: number; swap: number }>,
-  coverage: Record<string, { status: 'full' | 'partial' } | undefined>,
+  coverage: Record<string, { status: DealCoverageStatus } | undefined>,
   dates: string[],
 ): DealsDay[] {
   return dates.map(date => {
-    const status = coverage[date]?.status ?? 'missing';
-    if (status !== 'full') return { date, status, commission: null, swap: null, outCommission: null };
-    const commission = emptyRates();
-    const swap = emptyRates();
-    for (const row of rows) {
-      if (row.date !== date) continue;
-      commission[row.rate] = round2(row.commissionIn);
-      swap[row.rate] = round2(row.swap);
+    const matched = rows.filter(row => row.date === date);
+    if (matched.length) {
+      const commission = emptyRates();
+      const swap = emptyRates();
+      for (const row of matched) {
+        commission[row.rate] = round2(row.commissionIn);
+        swap[row.rate] = round2(row.swap);
+      }
+      return { date, status: 'observed', commission, swap, outCommission: null };
     }
-    return { date, status, commission, swap, outCommission: null };
+    const mark = coverage[date]?.status;
+    return unmarked(date, mark === 'attested' || mark === 'partial' ? mark : 'missing');
   });
 }
 
 export function dealsHistoryReport(
   facts: DealFact[],
-  coverage: Record<string, { status: 'full' | 'partial' } | undefined>,
+  coverage: Record<string, { status: DealCoverageStatus } | undefined>,
   dates: string[],
 ): DealsDay[] {
   return dates.map(date => {
-    const status = coverage[date]?.status ?? 'missing';
-    if (status !== 'full') return { date, status, commission: null, swap: null, outCommission: null };
-    const commission = emptyRates();
-    const swap = emptyRates();
-    let outCommission = 0;
-    for (const deal of facts) {
-      if (deal.serverDate !== date || deal.rate === null) continue;
-      if (deal.entry === 'in') commission[deal.rate] += deal.commission;
-      else outCommission += deal.commission;
-      swap[deal.rate] += deal.swap;
+    const matched = facts.filter(deal => deal.serverDate === date && deal.rate !== null);
+    if (matched.length) {
+      const commission = emptyRates();
+      const swap = emptyRates();
+      let outCommission = 0;
+      for (const deal of matched) {
+        if (deal.rate === null) continue;
+        if (deal.entry === 'in') commission[deal.rate] += deal.commission;
+        else outCommission += deal.commission;
+        swap[deal.rate] += deal.swap;
+      }
+      for (const rate of RATES) { commission[rate] = round2(commission[rate]); swap[rate] = round2(swap[rate]); }
+      return { date, status: 'observed', commission, swap, outCommission: round2(outCommission) };
     }
-    for (const rate of RATES) { commission[rate] = round2(commission[rate]); swap[rate] = round2(swap[rate]); }
-    return { date, status, commission, swap, outCommission: round2(outCommission) };
+    const mark = coverage[date]?.status;
+    return unmarked(date, mark === 'attested' || mark === 'partial' ? mark : 'missing');
   });
 }
 
@@ -112,7 +125,7 @@ export function composeSwap(crm: SwapReport, deals: DealsDay[]): ComposedSwapDay
       date,
       crmSwap: crmDay?.swap ?? emptyRates(),
       crmRefund: crmDay?.refund ?? emptyRates(),
-      dealsSwap: dh?.status === 'full' ? dh.swap : null,
+      dealsSwap: dh?.status === 'observed' ? dh.swap : null,
       dealsStatus: dh?.status ?? 'missing',
     };
   });
