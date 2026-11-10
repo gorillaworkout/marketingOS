@@ -4,19 +4,28 @@ import { test } from 'node:test';
 import { HISTORY_KINDS } from '../src/lib/monthly-report/upload-history';
 import { SETTLEMENT_UPLOAD_KINDS } from '../src/lib/settlement/detect';
 
-test('settlement page is its own route and uses the shared composition', async () => {
+test('settlement report page composes the report view and has no access tab', async () => {
   const page = await readFile('src/app/dashboard/settlement-report/page.tsx', 'utf8');
-  assert.match(page, /PageHeader/);
-  assert.match(page, /PageStack/);
   assert.match(page, /SettlementWorkspace/);
-  const workspace = await readFile('src/components/settlement/SettlementWorkspace.tsx', 'utf8');
-  assert.match(workspace, /SettlementDashboard/);
-  assert.match(workspace, /SettlementHome/);
   assert.doesNotMatch(page, /coming soon/i);
-  const home = await readFile('src/components/settlement/SettlementHome.tsx', 'utf8');
-  assert.match(home, /SettlementUploadPanel/);
-  assert.match(home, /Upload history/);
-  assert.match(home, /\/api\/settlement-report\/uploads/);
+  const workspace = await readFile('src/components/settlement/SettlementWorkspace.tsx', 'utf8');
+  assert.match(workspace, /PageHeader/);
+  assert.match(workspace, /PageStack/);
+  assert.match(workspace, /SettlementDashboard/);
+  assert.match(workspace, /SettlementReportView|SettlementDashboard/);
+  assert.doesNotMatch(workspace, /SettlementHome/);
+  assert.doesNotMatch(workspace, /Access/);
+  const nav = await readFile('src/components/settlement/SettlementNav.tsx', 'utf8');
+  assert.match(nav, /Report/);
+  assert.match(nav, /Data sources/);
+  assert.doesNotMatch(nav, /Access/);
+  const data = await readFile('src/app/dashboard/settlement-report/data/page.tsx', 'utf8');
+  assert.match(data, /SettlementDataSources/);
+  const sources = await readFile('src/components/settlement/SettlementDataSources.tsx', 'utf8');
+  assert.match(sources, /Upload history/);
+  assert.match(sources, /\/api\/settlement-report\/uploads/);
+  const printPage = await readFile('src/app/dashboard/settlement-report/print/page.tsx', 'utf8');
+  assert.match(printPage, /noprint/);
   const tabs = await readFile('src/components/monthly-report/ReportTabs.tsx', 'utf8');
   assert.doesNotMatch(tabs, /Settlement/);
   const layout = await readFile('src/app/dashboard/layout.tsx', 'utf8');

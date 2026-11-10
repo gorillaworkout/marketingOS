@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { forwardRef, useImperativeHandle, useState } from 'react';
 import { Button, DataTableFrame, Panel, SectionHeader, StatusBadge } from '@/components/ui/dashboard';
 import { formatInteger } from '@/components/monthly-report/brand';
 
@@ -21,12 +21,14 @@ async function post(file: File, query: string): Promise<Preview> {
   try { return (await response.json()) as Preview; } catch { return { ok: false, error: `Upload failed (${response.status})` }; }
 }
 
+export interface SettlementUploadHandle { choose: (files: FileList | File[] | null) => void }
+
 /** Settlement uploads: CRM deposit / withdrawal xlsx, MT5 Deposit & Withdrawal CSV, Dealing FTD list. Detected by content. */
-export function SettlementUploadPanel({ onImported }: { onImported?: () => void }) {
+export const SettlementUploadPanel = forwardRef<SettlementUploadHandle, { onImported?: () => void; hideInput?: boolean }>(function SettlementUploadPanel({ onImported, hideInput = false }, ref) {
   const [items, setItems] = useState<Item[]>([]);
   const update = (index: number, patch: Partial<Item>) => setItems(list => list.map((item, i) => (i === index ? { ...item, ...patch } : item)));
 
-  async function choose(files: FileList | null) {
+  async function choose(files: FileList | File[] | null) {
     const picked = Array.from(files ?? []).slice(0, 10);
     const start = items.length;
     setItems(list => [...list, ...picked.map(file => ({ file, state: 'previewing' as const }))]);
@@ -46,13 +48,18 @@ export function SettlementUploadPanel({ onImported }: { onImported?: () => void 
     if (result.ok) onImported?.();
   }
 
+  useImperativeHandle(ref, () => ({ choose }));
+
+  if (hideInput && items.length === 0) return null;
   return (
     <Panel>
-      <SectionHeader
-        title="Upload settlement data"
-        description="CRM deposit and withdrawal reports (.xlsx), MT5 Deposit and Withdrawal Report (.csv), and the Dealing FTD list (.xlsx). Re-uploading an overlapping export is safe: rows are matched by Reference / Deal / Login."
-        action={<input aria-label="Choose settlement files" type="file" multiple accept=".xlsx,.xls,.csv" onChange={event => { void choose(event.target.files); event.target.value = ''; }} />}
-      />
+      {!hideInput && (
+        <SectionHeader
+          title="Upload settlement data"
+          description="CRM deposit and withdrawal reports (.xlsx), MT5 Deposit and Withdrawal Report (.csv), and the Dealing FTD list (.xlsx). Re-uploading an overlapping export is safe: rows are matched by Reference / Deal / Login."
+          action={<input aria-label="Choose settlement files" type="file" multiple accept=".xlsx,.xls,.csv" onChange={event => { void choose(event.target.files); event.target.value = ''; }} />}
+        />
+      )}
       {items.length > 0 && (
         <DataTableFrame title="Files">
           <table className="w-full text-sm">
@@ -83,4 +90,4 @@ export function SettlementUploadPanel({ onImported }: { onImported?: () => void 
       )}
     </Panel>
   );
-}
+});

@@ -47,3 +47,30 @@ body {
 *::-webkit-scrollbar { width: 8px; height: 8px; }
 *::-webkit-scrollbar-thumb { background: #34343a; border-radius: 8px; }
 *::-webkit-scrollbar-track { background: transparent; }
+
+.print-report {
+  --mos-bg: #ffffff;
+  --mos-panel: #ffffff;
+  --mos-surface: #f4f7f8;
+  --mos-raised: #eef3f4;
+  --mos-border: rgba(26, 31, 36, 0.12);
+  --mos-border-subtle: rgba(26, 31, 36, 0.08);
+  --mos-border-strong: rgba(26, 31, 36, 0.2);
+  --mos-text: #1A1F24;
+  --mos-text-secondary: #243038;
+  --mos-text-muted: #5B6B73;
+  --mos-text-faint: #6d7c84;
+  --mos-accent: #1A8A96;
+  color: #1A1F24;
+  background: #fff;
+}
+
+@page { size: A4 landscape; margin: 12mm; }
+
+@media print {
+  aside, .no-print { display: none !important; }
+  .print-report { background: #fff !important; color: #1A1F24 !important; }
+  .print-report section, .print-report article { break-inside: avoid; }
+  .print-report thead { display: table-header-group; }
+  .print-report tr { break-inside: avoid; }
+}
