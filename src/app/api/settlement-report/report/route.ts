@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { todayWib } from '@/lib/monthly-report/service';
-import { loadDealsHistoryDays } from '@/lib/settlement/deals-store';
+import { attachDealsHistory } from '@/lib/settlement/report-data';
 import { loadSettlementReport, resolveSettlementPeriod } from '@/lib/settlement/report';
 import { requireSettlementReport, settlementPermissions } from '@/lib/settlement/service';
 
@@ -17,7 +17,6 @@ export async function GET(request: NextRequest) {
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : 'Invalid period' }, { status: 400 });
   }
-  const report = await loadSettlementReport(period);
-  report.dealsHistory = await loadDealsHistoryDays(period.range.from, period.range.to);
+  const report = await attachDealsHistory(await loadSettlementReport(period));
   return NextResponse.json({ report, permissions: settlementPermissions(user) }, { headers: { 'Cache-Control': 'no-store' } });
 }

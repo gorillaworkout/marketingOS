@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { inWindow, isOfficeHour, mt5ServerToUtc, parseCrmDate, parseMoney, rateFromAccount, reconciliationWindow, wibDateOf } from '../src/lib/settlement/conventions';
+import { inWindow, isOfficeHour, mt5ServerToUtc, parseCrmDate, parseMoney, rateFromAccount, reconciliationWindow, settlementDayOf, wibDateOf } from '../src/lib/settlement/conventions';
 import { parseMt5Comment } from '../src/lib/settlement/comment-parse';
 
 describe('settlement conventions', () => {
@@ -39,6 +39,12 @@ describe('settlement conventions', () => {
     assert.equal(inWindow(parseCrmDate('08/11/2026 12:00:01'), w), true);
     assert.equal(inWindow(parseCrmDate('09/11/2026 12:00:00'), w), true);
     assert.equal(inWindow(null, w), false);
+  });
+
+  it('assigns the 12:00 instant to the window that ends there', () => {
+    assert.equal(settlementDayOf('2026-11-10T05:00:00.000Z'), '2026-11-10');
+    assert.equal(settlementDayOf('2026-11-10T05:00:01.000Z'), '2026-11-11');
+    assert.equal(settlementDayOf('2026-11-09T05:00:01.000Z'), '2026-11-10');
   });
 
   it('classifies office hours (Mon–Fri 09:00–18:00 WIB, holidays excluded)', () => {

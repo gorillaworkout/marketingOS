@@ -2,25 +2,73 @@
 import * as XLSX from 'xlsx';
 import { RATES, type Rate } from './conventions';
 import { ATTESTED_EMPTY, PENDING_DEALS_HISTORY, type DealsDay } from './deals-report';
+import { WITHDRAWAL_PCT_KPI } from './kpi-config';
+import { withdrawalPctCards } from './kpis';
 import { formatDuration } from './metrics';
 import type { DailyReconciliation, ReconciliationBlock } from './reconcile';
 import type { SettlementReport } from './report';
+import { dealsHistorySummary } from './summary';
 
-export const SETTLEMENT_SHEETS = ['Overview', 'Processing Time', 'Withdrawal %', 'Margin In-Out', 'Swap'] as const;
+export const SETTLEMENT_SHEETS = ['Overview', 'Processing Time', 'Withdrawal %', 'Margin In-Out', 'Swap', 'Commission'] as const;
 const RATE_LABEL = (rate: Rate) => (rate === 1 ? 'USD' : String(rate));
 const PENDING_IM = 'Pending: Dealing FTD list';
 type Cell = string | number | null;
 
+const change = (current: number | null, previous: number | null): number | null => (current === null || previous === null ? null : current - previous);
+
 export function overviewRows(report: SettlementReport): Cell[][] {
   const a = report.applications;
+  const current = report.summary.current;
+  const previous = report.summary.previous;
+  const pct = withdrawalPctCards(current, WITHDRAWAL_PCT_KPI);
+  const previousPct = withdrawalPctCards(previous, WITHDRAWAL_PCT_KPI);
+  const commission = current.commission;
+  const previousCommission = previous.commission;
+  const commissionPending = !commission || commission.status !== 'complete';
+  const previousPending = !previousCommission || previousCommission.status !== 'complete';
   return [
     ['Settlement Report', `${report.period.range.from} – ${report.period.range.to} (WIB)`],
     [],
     ['Deposit applications', a.deposit], ['Deposit rejected', a.depositRejected],
     ['Withdrawal applications', a.withdrawal], ['Withdrawal rejected', a.withdrawalRejected],
     [],
+    ['KPI', 'Current', 'Previous', 'Change'],
+    ['Deposits IDR', current.totals.deposit.idr, previous.totals.deposit.idr, change(current.totals.deposit.idr, previous.totals.deposit.idr)],
+    ['Deposits USD', current.totals.deposit.usd, previous.totals.deposit.usd, change(current.totals.deposit.usd, previous.totals.deposit.usd)],
+    ['Withdrawals IDR', current.totals.withdrawal.idr, previous.totals.withdrawal.idr, change(current.totals.withdrawal.idr, previous.totals.withdrawal.idr)],
+    ['Withdrawals USD', current.totals.withdrawal.usd, previous.totals.withdrawal.usd, change(current.totals.withdrawal.usd, previous.totals.withdrawal.usd)],
+    ['Net IDR', current.totals.netIdr, previous.totals.netIdr, change(current.totals.netIdr, previous.totals.netIdr)],
+    ...pct.map((card, index) => [card.label, card.value, previousPct[index]?.value ?? null, change(card.value, previousPct[index]?.value ?? null)]),
+    ['Avg deposit processing', current.processing.deposit, previous.processing.deposit, change(current.processing.deposit, previous.processing.deposit)],
+    ['Avg withdrawal processing', current.processing.withdrawal, previous.processing.withdrawal, change(current.processing.withdrawal, previous.processing.withdrawal)],
+    ['Commission IDR', commissionPending ? PENDING_DEALS_HISTORY : commission.commissionIdr, previousPending ? PENDING_DEALS_HISTORY : previousCommission.commissionIdr, commissionPending || previousPending ? null : change(commission.commissionIdr, previousCommission.commissionIdr)],
+    ['Commission USD', commissionPending ? PENDING_DEALS_HISTORY : commission.commissionUsd, previousPending ? PENDING_DEALS_HISTORY : previousCommission.commissionUsd, commissionPending || previousPending ? null : change(commission.commissionUsd, previousCommission.commissionUsd)],
+    [],
     ['Data through (per upload kind)'],
     ...Object.entries(report.coverage).map(([kind, to]) => [kind, to]),
+  ];
+}
+
+function commissionCell(day: DealsDay, rate: Rate): Cell {
+  if (day.status === 'observed' && day.commission) return day.commission[rate];
+  if (day.status === 'attested') return ATTESTED_EMPTY;
+  return PENDING_DEALS_HISTORY;
+}
+
+export function commissionRows(report: SettlementReport): Cell[][] {
+  const days = report.dealsHistory ?? [];
+  const summary = report.summary.current.commission ?? dealsHistorySummary(days);
+  const pending = summary.status !== 'complete';
+  const totals = RATES.map(rate => {
+    if (pending) return PENDING_DEALS_HISTORY;
+    return days.reduce((sum, day) => sum + (day.status === 'observed' && day.commission ? day.commission[rate] : 0), 0);
+  });
+  return [
+    ['Date (MT5 server)', ...RATES.map(rate => (rate === 1 ? 'USD' : String(rate)))],
+    ...days.map(day => [day.date, ...RATES.map(rate => commissionCell(day, rate))]),
+    ['Total', ...totals],
+    ['Commission IDR (Σ × rate)', pending ? PENDING_DEALS_HISTORY : summary.commissionIdr],
+    ['Commission USD', pending ? PENDING_DEALS_HISTORY : summary.commissionUsd],
   ];
 }
 
@@ -81,7 +129,7 @@ export function swapRows(report: SettlementReport): Cell[][] {
 export function buildSettlementWorkbook(report: SettlementReport): Buffer {
   const book = XLSX.utils.book_new();
   const sheets: Record<typeof SETTLEMENT_SHEETS[number], Cell[][]> = {
-    Overview: overviewRows(report), 'Processing Time': processingRows(report), 'Withdrawal %': withdrawalRows(report), 'Margin In-Out': marginRows(report), Swap: swapRows(report),
+    Overview: overviewRows(report), 'Processing Time': processingRows(report), 'Withdrawal %': withdrawalRows(report), 'Margin In-Out': marginRows(report), Swap: swapRows(report), Commission: commissionRows(report),
   };
   for (const name of SETTLEMENT_SHEETS) XLSX.utils.book_append_sheet(book, XLSX.utils.aoa_to_sheet(sheets[name]), name);
   return XLSX.write(book, { type: 'buffer', bookType: 'xlsx' }) as Buffer;

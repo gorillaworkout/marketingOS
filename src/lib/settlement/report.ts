@@ -4,17 +4,20 @@
  */
 import type { DateRange } from '@/lib/monthly-report/periods';
 import { addDays, weekdayOf } from '@/lib/monthly-report/periods';
-import { RATES, reconciliationWindow, wibDateOf, type Rate } from './conventions';
+import { RATES, reconciliationWindow, settlementDayOf, wibDateOf, type Rate } from './conventions';
 import type { FtdEntry } from './ftd-parse';
 import { applications, marginInOut, processingTime, swapReport, withdrawalPercentage, type Applications, type MarginMonth, type ProcessingTime, type SwapReport, type WithdrawalWeek } from './metrics';
 import { buildDailyReconciliation, type DailyReconciliation, type MismatchItem } from './reconcile';
 import { loadCrm, loadFtd, loadHolidays, loadMt5Deals, loadSettlementCoverage } from './store';
 import type { DealsDay } from './deals-report';
+import { dailyFlows, periodTotals, previousSettlementRange, type PeriodSummary } from './summary';
 import type { CrmTransaction, Mt5Deal } from './types';
 
 export const SETTLEMENT_PRESETS = ['day', 'week', 'month', 'custom'] as const;
 export type SettlementPreset = typeof SETTLEMENT_PRESETS[number];
-export interface SettlementPeriod { preset: SettlementPreset; anchor: string; range: DateRange }
+export type PeriodBasis = 'noon' | 'calendar';
+export interface SettlementWindow { start: string; end: string; label: string }
+export interface SettlementPeriod { preset: SettlementPreset; anchor: string; range: DateRange; basis: PeriodBasis; window?: SettlementWindow }
 export const MAX_SETTLEMENT_DAYS = 93;
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -26,16 +29,21 @@ export function resolveSettlementPeriod(preset: string, anchor: string, from?: s
   if (preset === 'custom') {
     if (!from || !to || !DATE_RE.test(from) || !DATE_RE.test(to) || from > to) throw new Error('from/to must be YYYY-MM-DD with from ≤ to');
     if ((Date.parse(to) - Date.parse(from)) / 86_400_000 + 1 > MAX_SETTLEMENT_DAYS) throw new Error(`Custom ranges are limited to ${MAX_SETTLEMENT_DAYS} days`);
-    return { preset, anchor: from, range: { from, to } };
+    return { preset, anchor: from, range: { from, to }, basis: 'calendar' };
   }
   if (!DATE_RE.test(anchor)) throw new Error('anchor must be YYYY-MM-DD');
-  if (preset === 'day') return { preset, anchor, range: { from: anchor, to: anchor } };
+  if (preset === 'day') return { preset, anchor, range: { from: anchor, to: anchor }, basis: 'noon', window: reconciliationWindow(anchor) };
   if (preset === 'week') {
     const monday = addDays(anchor, 1 - weekdayOf(anchor));
-    return { preset, anchor, range: { from: monday, to: addDays(monday, 6) } };
+    return { preset, anchor, range: { from: monday, to: addDays(monday, 6) }, basis: 'calendar' };
   }
   const month = anchor.slice(0, 7);
-  return { preset: 'month', anchor, range: { from: `${month}-01`, to: lastDayOfMonth(month) } };
+  return { preset: 'month', anchor, range: { from: `${month}-01`, to: lastDayOfMonth(month) }, basis: 'calendar' };
+}
+
+/** Noon periods bucket by the 12:00 window. Calendar periods keep the WIB date. */
+export function dayKeyFor(period: SettlementPeriod): (iso: string) => string {
+  return period.basis === 'noon' ? settlementDayOf : wibDateOf;
 }
 
 /** WIB day bounds as ISO instants: [from 00:00 WIB, to+1 00:00 WIB). */
@@ -56,6 +64,9 @@ export interface SettlementReport {
   coverage: Record<string, string | null>;
   /** Absent until the report route attaches Deals History. Missing dates are Pending, not zero. */
   dealsHistory?: DealsDay[];
+  previousRange: DateRange;
+  summary: { current: PeriodSummary; previous: PeriodSummary };
+  daily: ReturnType<typeof dailyFlows>;
 }
 
 export const SWAP_LABEL = 'Swap from Deposit & Withdrawal (CRM-S / CRM-SR), excludes Deals History swap';
@@ -65,18 +76,41 @@ export function buildSettlementReport(input: {
   yearDeposits: CrmTransaction[]; yearWithdrawals: CrmTransaction[]; ftd: FtdEntry[]; holidays: ReadonlySet<string>; coverage: Record<string, string | null>;
 }): SettlementReport {
   const { period, holidays } = input;
+  const key = dayKeyFor(period);
   const weeks = weeksTouching(period.range);
-  const inWeeks = (tx: CrmTransaction) => { const d = wibDateOf(tx.requestedAt); return d >= weeks.from && d <= weeks.to; };
+  const weekSpan = period.basis === 'noon' ? period.range : weeks;
+  const inWeeks = (tx: CrmTransaction) => {
+    const day = period.basis === 'noon' ? key(tx.requestedAt) : wibDateOf(tx.requestedAt);
+    return day >= weekSpan.from && day <= weekSpan.to;
+  };
+  const previousRange = previousSettlementRange(period);
+  const processing = processingTime(input.deposits, input.withdrawals, period.range, holidays, key);
+  const previousProcessing = processingTime(input.deposits, input.withdrawals, previousRange, holidays, key);
+  const periodSummary = (range: DateRange, times: typeof processing): PeriodSummary => ({
+    range,
+    totals: periodTotals(input.deposits, input.withdrawals, range, key),
+    processing: { deposit: times.summary.deposit, withdrawal: times.summary.withdrawal },
+  });
   return {
     period,
-    applications: applications(input.deposits, input.withdrawals, period.range),
-    processing: processingTime(input.deposits, input.withdrawals, period.range, holidays),
-    withdrawalWeeks: withdrawalPercentage(input.withdrawals.filter(inWeeks), holidays),
+    applications: applications(input.deposits, input.withdrawals, period.range, key),
+    processing,
+    withdrawalWeeks: withdrawalPercentage(input.withdrawals.filter(inWeeks), holidays, period.basis === 'noon' ? key : undefined),
     margin: marginInOut(input.yearDeposits, input.yearWithdrawals, input.ftd),
-    swap: swapReport(input.swapDeals, period.range),
+    swap: swapReport(input.swapDeals, period.range, period.basis === 'noon' ? key : undefined),
     swapLabel: SWAP_LABEL,
     coverage: input.coverage,
+    previousRange,
+    summary: { current: periodSummary(period.range, processing), previous: periodSummary(previousRange, previousProcessing) },
+    daily: dailyFlows(input.deposits, input.withdrawals, period.range, key),
   };
+}
+
+/** CRM load starts at the earlier of the previous period and the weeks on screen, before the 1-day pad. */
+export function settlementCrmRange(period: SettlementPeriod): DateRange {
+  const previous = previousSettlementRange(period);
+  const weeks = weeksTouching(period.range);
+  return { from: previous.from < weeks.from ? previous.from : weeks.from, to: period.range.to };
 }
 
 /** Whole Monday–Sunday weeks touching the range (Withdrawal % always shows full weeks). */
@@ -85,7 +119,7 @@ export function weeksTouching(range: DateRange): DateRange {
 }
 
 export async function loadSettlementReport(period: SettlementPeriod): Promise<SettlementReport> {
-  const crm = wibBounds(weeksTouching(period.range), 1);
+  const crm = wibBounds(settlementCrmRange(period), 1);
   const year = period.range.to.slice(0, 4);
   const yearBounds = wibBounds({ from: `${year}-01-01`, to: `${year}-12-31` });
   // MT5 posting (server) dates are WIB − 4/5h: pad one day, swapReport filters by server date.
@@ -109,7 +143,7 @@ export const MISMATCH_PAGE_SIZE = 50;
 export interface ReconciliationResponse {
   reconciliation: Omit<DailyReconciliation, 'mismatches'>;
   mismatchCounts: Record<MismatchItem['reason'], number>;
-  list: { reason: MismatchItem['reason']; page: number; pageCount: number; items: Array<MismatchItem & { state: 'pending' | 'missing' }> } | null;
+  list: { reason: MismatchItem['reason'] | 'all'; page: number; pageCount: number; items: Array<MismatchItem & { state: 'pending' | 'missing' }> } | null;
 }
 
 /** Unmatched for more than 24h after the row's time → "missing"; younger → "pending". */
@@ -120,12 +154,12 @@ export function shapeReconciliation(daily: DailyReconciliation, list: string | n
   for (const item of daily.mismatches) counts[item.reason] += 1;
   const { mismatches, ...rest } = daily;
   let shaped: ReconciliationResponse['list'] = null;
-  if (list && (MISMATCH_REASONS as readonly string[]).includes(list)) {
-    const items = mismatches.filter(item => item.reason === list);
+  if (list === 'all' || (list && (MISMATCH_REASONS as readonly string[]).includes(list))) {
+    const items = list === 'all' ? mismatches : mismatches.filter(item => item.reason === list);
     const pageCount = Math.max(1, Math.ceil(items.length / MISMATCH_PAGE_SIZE));
     const current = Math.min(Math.max(1, page), pageCount);
     shaped = {
-      reason: list as MismatchItem['reason'], page: current, pageCount,
+      reason: list === 'all' ? 'all' : list as MismatchItem['reason'], page: current, pageCount,
       items: items.slice((current - 1) * MISMATCH_PAGE_SIZE, current * MISMATCH_PAGE_SIZE).map(item => ({ ...item, accountNo: mask(item.accountNo) ?? '', state: mismatchState(item.at, nowMs) })),
     };
   }

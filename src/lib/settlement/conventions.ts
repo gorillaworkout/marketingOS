@@ -84,6 +84,11 @@ export function wibParts(iso: string): WibParts {
 
 export const wibDateOf = (iso: string) => wibParts(iso).date;
 
+/** Report day of an instant: the 12:00 WIB window that contains it. D 12:00:00 belongs to D. */
+export function settlementDayOf(iso: string): string {
+  return wibDateOf(new Date(Date.parse(iso) + 12 * HOUR_MS - 1).toISOString());
+}
+
 export const OFFICE_START_HOUR = 9;
 export const OFFICE_END_HOUR = 18;
 
