@@ -3,6 +3,7 @@
 import { DataTableFrame } from '@/components/ui/dashboard';
 import { formatAmount, formatInteger, formatPct } from '@/components/monthly-report/brand';
 import { RATES, type Rate } from '@/lib/settlement/conventions';
+import { PENDING_DEALS_HISTORY, type DealsDay } from '@/lib/settlement/deals-report';
 import { formatDuration, type MarginMonth, type ProcessingTime, type SwapReport, type WithdrawalWeek } from '@/lib/settlement/metrics';
 import type { MismatchItem, ReconciliationBlock } from '@/lib/settlement/reconcile';
 
@@ -83,7 +84,7 @@ export function MarginTable({ months }: { months: MarginMonth[] }) {
   );
 }
 
-export function SwapTable({ swap, label }: { swap: SwapReport; label: string }) {
+export function SwapTable({ swap, label, dealsHistory }: { swap: SwapReport; label: string; dealsHistory?: DealsDay[] }) {
   return (
     <DataTableFrame title="Swap" description={`${label}. Grouped by MT5 posting (server) date.`}>
       <table className="w-full text-sm">
@@ -92,6 +93,9 @@ export function SwapTable({ swap, label }: { swap: SwapReport; label: string }) 
           {swap.days.map(d => <tr key={d.date}><td className={td}>{d.date}</td>{RATES.map(r => <td key={`s${r}`} className={num}>{formatAmount(d.swap[r])}</td>)}{RATES.map(r => <td key={`r${r}`} className={num}>{formatAmount(d.refund[r])}</td>)}</tr>)}
           <tr className="font-medium"><td className={td}>Total</td>{RATES.map(r => <td key={`s${r}`} className={num}>{formatAmount(swap.totalSwap[r])}</td>)}{RATES.map(r => <td key={`r${r}`} className={num}>{formatAmount(swap.totalRefund[r])}</td>)}</tr>
           <tr><td className={td}>IDR (Σ × rate)</td><td className={num} colSpan={4}>CRM-S {formatAmount(swap.idrSwap)}</td><td className={num} colSpan={4}>CRM-SR {formatAmount(swap.idrRefund)} · S + SR {formatAmount(swap.idrSwap + swap.idrRefund)}</td></tr>
+          {(dealsHistory ?? [{ date: '', status: 'missing' as const, commission: null, swap: null, outCommission: null }]).map(day => (
+            <tr key={`dh-${day.date || 'pending'}`}><td className={td}>Deals History swap {day.date}</td><td className={num} colSpan={8}>{day.status === 'full' && day.swap ? RATES.map(rate => `${rate === 1 ? 'USD' : rate} ${formatAmount(day.swap?.[rate])}`).join(' · ') : PENDING_DEALS_HISTORY}</td></tr>
+          ))}
         </tbody>
       </table>
     </DataTableFrame>

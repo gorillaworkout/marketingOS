@@ -37,6 +37,8 @@ export async function execute(sql: string, values: unknown[] = []): Promise<numb
 
 export interface DatabaseTransaction {
   execute(sql: string, values?: unknown[]): Promise<number>;
+  queryOne<T extends QueryResultRow = QueryResultRow>(sql: string, values?: unknown[]): Promise<T | undefined>;
+  queryAll<T extends QueryResultRow = QueryResultRow>(sql: string, values?: unknown[]): Promise<T[]>;
 }
 
 function transactionApi(client: PoolClient): DatabaseTransaction {
@@ -44,6 +46,14 @@ function transactionApi(client: PoolClient): DatabaseTransaction {
     execute: async (sql: string, values: unknown[] = []): Promise<number> => {
       const result = await client.query(postgresSql(sql), values);
       return result.rowCount ?? 0;
+    },
+    queryOne: async <T extends QueryResultRow>(sql: string, values: unknown[] = []): Promise<T | undefined> => {
+      const result = await client.query<T>(postgresSql(sql), values);
+      return result.rows[0];
+    },
+    queryAll: async <T extends QueryResultRow>(sql: string, values: unknown[] = []): Promise<T[]> => {
+      const result = await client.query<T>(postgresSql(sql), values);
+      return result.rows;
     },
   };
 }

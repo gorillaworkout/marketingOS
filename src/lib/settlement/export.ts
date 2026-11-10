@@ -1,6 +1,7 @@
 /** .xlsx export of the Settlement report, one sheet per section in the manual files' layout. */
 import * as XLSX from 'xlsx';
 import { RATES, type Rate } from './conventions';
+import { PENDING_DEALS_HISTORY } from './deals-report';
 import { formatDuration } from './metrics';
 import type { DailyReconciliation, ReconciliationBlock } from './reconcile';
 import type { SettlementReport } from './report';
@@ -68,6 +69,11 @@ export function swapRows(report: SettlementReport): Cell[][] {
     ['Total', ...RATES.map(r => s.totalSwap[r]), ...RATES.map(r => s.totalRefund[r])],
     [],
     ['IDR (Σ × rate, IDR buckets)', 'CRM-S', s.idrSwap, 'CRM-SR', s.idrRefund, 'S + SR', Math.round((s.idrSwap + s.idrRefund) * 100) / 100],
+    [],
+    ['Deals History swap (separate term, server date of the deal)'],
+    ...(report.dealsHistory?.length
+      ? report.dealsHistory.map(day => [day.date, day.status === 'full' && day.swap ? day.swap[1] : PENDING_DEALS_HISTORY, day.status === 'full' && day.swap ? day.swap[10000] : PENDING_DEALS_HISTORY])
+      : [[PENDING_DEALS_HISTORY]]),
   ];
 }
 

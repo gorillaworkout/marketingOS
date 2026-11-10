@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { DealsHistoryPanel } from './DealsHistoryPanel';
 import { SettlementDashboard } from './SettlementDashboard';
 import { SettlementHome } from './SettlementHome';
 
@@ -10,6 +11,7 @@ export function SettlementWorkspace() {
   return (
     <>
       <SettlementHome onImported={() => setReloadToken(token => token + 1)} />
+      <DealsHistoryPanel onImported={() => setReloadToken(token => token + 1)} />
       <SettlementDashboard reloadToken={reloadToken} />
     </>
   );

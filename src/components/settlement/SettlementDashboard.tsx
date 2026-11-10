@@ -104,7 +104,7 @@ export function SettlementDashboard({ reloadToken = 0 }: { reloadToken?: number 
           <ProcessingTable processing={p} />
           <WithdrawalPctTable weeks={report.withdrawalWeeks} />
           <MarginTable months={report.margin} />
-          <SwapTable swap={report.swap} label={report.swapLabel} />
+          <SwapTable swap={report.swap} label={report.swapLabel} dealsHistory={report.dealsHistory} />
         </>
       )}
     </>
