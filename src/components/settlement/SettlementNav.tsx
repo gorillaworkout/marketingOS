@@ -3,14 +3,11 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { DUPOIN } from '@/components/monthly-report/brand';
-import { useSettlementPermissions } from './SettlementContext';
 
 export function SettlementNav() {
   const pathname = usePathname();
-  const { isAdmin } = useSettlementPermissions();
   const tabs = [
     { href: '/dashboard/settlement-report', label: 'Report' },
-    ...(isAdmin ? [{ href: '/dashboard/settlement-report/access', label: 'Access' }] : []),
   ];
   return (
     <nav aria-label="Settlement Report sections" className="flex gap-1 border-b border-[var(--mos-border-subtle)]">

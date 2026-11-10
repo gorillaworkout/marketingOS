@@ -1,8 +1,9 @@
 /**
- * Settlement Report access rules. Mirrors Onboarding:
- *  - View:   admin, OR the user's department has `settlement-report`, OR a row in
- *            settlement_report_access (personal grant).
+ * Settlement Report access rules.
+ *  - View:   admin, OR the user's department has `settlement-report`.
  *  - Upload: same as view.
+ * Access is granted only via Accounts → Departments. The settlement_report_access
+ * table is unused leftover from phase 1 and is left in place (no destructive migration).
  */
 import { SETTLEMENT_REPORT_FEATURE, canAccessFeature } from '@/lib/authorization';
 
@@ -12,9 +13,6 @@ export interface SettlementReportPrincipal {
 }
 
 export type SettlementReportPageAccess = 'allowed' | 'login' | 'forbidden';
-
-/** Correlated sub-select. NULL = no personal grant. Expects users aliased `u`. */
-export const SETTLEMENT_REPORT_GRANT_SQL = '(SELECT sra.can_upload FROM settlement_report_access sra WHERE sra.user_id = u.id) AS settlement_report_grant';
 
 export function canViewSettlementReport(principal: SettlementReportPrincipal): boolean {
   return canAccessFeature(principal, SETTLEMENT_REPORT_FEATURE);

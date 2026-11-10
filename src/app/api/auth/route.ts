@@ -5,7 +5,6 @@ import { execute, queryOne } from '@/lib/database';
 import { getSession } from '@/lib/auth';
 import { enabledFeaturesForUser } from '@/lib/authorization';
 import { MONTHLY_REPORT_GRANT_SQL, departmentFeaturesWithGrants } from '@/lib/monthly-report/access';
-import { SETTLEMENT_REPORT_GRANT_SQL } from '@/lib/settlement/access';
 
 const SESSION_DURATION = 24 * 60 * 60 * 1000;
 
@@ -13,7 +12,7 @@ export async function POST(request: NextRequest) {
   const { action, username, password } = await request.json();
 
   if (action === 'login') {
-    const userResult = await queryOne<Record<string, unknown>>(`SELECT u.*, d.name AS department_name, d.permitted_features, ${MONTHLY_REPORT_GRANT_SQL}, ${SETTLEMENT_REPORT_GRANT_SQL}
+    const userResult = await queryOne<Record<string, unknown>>(`SELECT u.*, d.name AS department_name, d.permitted_features, ${MONTHLY_REPORT_GRANT_SQL}
       FROM users u LEFT JOIN departments d ON d.id = u.department_id WHERE u.username = ?`, [username]);
 
     if (!userResult?.id) {
@@ -33,7 +32,7 @@ export async function POST(request: NextRequest) {
       success: true,
       user: { id: userResult.id, username: userResult.username, name: userResult.name, role: userResult.role,
         department: userResult.department_id ? { id: userResult.department_id, name: userResult.department_name } : null,
-        enabledFeatures: enabledFeaturesForUser({ role: userResult.role as string, features: departmentFeaturesWithGrants(userResult.permitted_features as string[] | null, userResult.monthly_report_grant as boolean | null, userResult.settlement_report_grant as boolean | null) }) }
+        enabledFeatures: enabledFeaturesForUser({ role: userResult.role as string, features: departmentFeaturesWithGrants(userResult.permitted_features as string[] | null, userResult.monthly_report_grant as boolean | null) }) }
     });
 
     response.cookies.set('session_id', sessionId, {
@@ -60,7 +59,7 @@ export async function POST(request: NextRequest) {
   if (action === 'check') {
     const sid = request.cookies.get('session_id')?.value || '';
     const session = await queryOne<Record<string, unknown>>(`
-      SELECT s.*, u.username, u.name, u.role, u.department_id, d.name AS department_name, d.permitted_features, ${MONTHLY_REPORT_GRANT_SQL}, ${SETTLEMENT_REPORT_GRANT_SQL}
+      SELECT s.*, u.username, u.name, u.role, u.department_id, d.name AS department_name, d.permitted_features, ${MONTHLY_REPORT_GRANT_SQL}
       FROM sessions s JOIN users u ON s.user_id = u.id LEFT JOIN departments d ON d.id = u.department_id
       WHERE s.id = ? AND s.expires_at > CURRENT_TIMESTAMP
     `, [sid]);
@@ -76,7 +75,7 @@ export async function POST(request: NextRequest) {
       authenticated: true,
       user: { id: session.user_id, username: session.username, name: session.name, role: session.role,
         department: session.department_id ? { id: session.department_id, name: session.department_name } : null,
-        enabledFeatures: enabledFeaturesForUser({ role: session.role as string, features: departmentFeaturesWithGrants(session.permitted_features as string[] | null, session.monthly_report_grant as boolean | null, session.settlement_report_grant as boolean | null) }) }
+        enabledFeatures: enabledFeaturesForUser({ role: session.role as string, features: departmentFeaturesWithGrants(session.permitted_features as string[] | null, session.monthly_report_grant as boolean | null) }) }
     });
   }
 

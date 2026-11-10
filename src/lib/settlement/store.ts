@@ -3,7 +3,7 @@
  * upsertWithHistory (one monthly_report_uploads row per commit); report loaders read narrow
  * column lists for a period and hand plain rows to the pure functions in metrics.ts / reconcile.ts.
  */
-import { executeTransaction, queryAll, queryOne } from '@/lib/database';
+import { queryAll, queryOne } from '@/lib/database';
 import { upsertWithHistory, type UploadActor, type UploadRecord, type UpsertPlan } from '@/lib/monthly-report/store';
 import { pageOffset } from '@/lib/monthly-report/upload-history';
 import type { DateRange } from '@/lib/monthly-report/periods';
@@ -160,49 +160,6 @@ export async function listSettlementUploadsPage(filter: { page: number; pageSize
     page: filter.page,
     pageSize: filter.pageSize,
   };
-}
-
-export interface SettlementAccessUser {
-  id: string;
-  username: string;
-  name: string;
-  role: string;
-  department_name: string | null;
-  via_department: boolean;
-  personal_grant: boolean;
-  can_upload: boolean;
-}
-
-export async function listSettlementAccessUsers(): Promise<SettlementAccessUser[]> {
-  const rows = await queryAll<SettlementAccessUser & Record<string, unknown>>(
-    `SELECT u.id, u.username, u.name, u.role, d.name AS department_name,
-       COALESCE('settlement-report' = ANY(d.permitted_features), FALSE) AS via_department,
-       (sra.user_id IS NOT NULL) AS personal_grant,
-       COALESCE(sra.can_upload, FALSE) AS can_upload
-     FROM users u
-     LEFT JOIN departments d ON d.id = u.department_id
-     LEFT JOIN settlement_report_access sra ON sra.user_id = u.id
-     ORDER BY (u.role = 'admin') DESC, u.name`,
-  );
-  return rows.map(row => ({ ...row, via_department: Boolean(row.via_department), personal_grant: Boolean(row.personal_grant), can_upload: Boolean(row.can_upload) }));
-}
-
-/** view=false removes the personal grant; view=true always stores can_upload=true (upload = view). */
-export async function setSettlementAccess(userId: string, access: { view: boolean; upload?: boolean }, grantedBy: string): Promise<boolean> {
-  const user = await queryOne('SELECT id FROM users WHERE id = ?', [userId]);
-  if (!user) return false;
-  await executeTransaction(async transaction => {
-    if (!access.view) {
-      await transaction.execute('DELETE FROM settlement_report_access WHERE user_id = ?', [userId]);
-      return;
-    }
-    await transaction.execute(
-      `INSERT INTO settlement_report_access (user_id, can_upload, granted_by) VALUES (?, ?, ?)
-       ON CONFLICT (user_id) DO UPDATE SET can_upload = EXCLUDED.can_upload, granted_by = EXCLUDED.granted_by, updated_at = CURRENT_TIMESTAMP`,
-      [userId, true, grantedBy],
-    );
-  });
-  return true;
 }
 
 export type { SettlementUploadKind };
