@@ -3,6 +3,7 @@
 import { Button } from '@/components/ui/dashboard';
 import type { SettlementPeriod, SettlementPreset } from '@/lib/settlement/report';
 import { periodSubtitle, periodTitle, previousTitle } from './labels';
+import { PeriodDateField } from './PeriodDateField';
 
 const PRESETS: Array<{ id: SettlementPreset; label: string; hint: string }> = [
   { id: 'day', label: 'Daily', hint: '12:00–12:00 WIB' },
@@ -10,11 +11,12 @@ const PRESETS: Array<{ id: SettlementPreset; label: string; hint: string }> = [
   { id: 'month', label: 'Monthly', hint: 'Calendar month' },
 ];
 
-export function SettlementPeriodBar({ period, previous, onPreset, onShift }: {
+export function SettlementPeriodBar({ period, previous, onPreset, onShift, onAnchor }: {
   period: SettlementPeriod;
   previous: { from: string; to: string };
   onPreset: (preset: SettlementPreset) => void;
   onShift: (direction: number) => void;
+  onAnchor: (anchor: string) => void;
 }) {
   return (
     <div className="flex flex-wrap items-center justify-between gap-3 rounded-[var(--mos-radius-panel)] border border-[var(--mos-border)] bg-[var(--mos-panel)] px-3 py-2.5">
@@ -31,10 +33,10 @@ export function SettlementPeriodBar({ period, previous, onPreset, onShift }: {
         </div>
         <div className="flex items-center gap-1.5">
           <Button size="sm" aria-label="Previous period" onClick={() => onShift(-1)}>‹</Button>
-          <div className="min-w-[180px] text-center">
-            <div className="text-[13.5px] font-[560]">{periodTitle(period)}</div>
+          <PeriodDateField preset={period.preset === 'month' ? 'month' : period.preset === 'week' ? 'week' : 'day'} value={period.preset === 'week' ? period.range.from : period.anchor} onChange={onAnchor} label="Choose report period">
+            <div className="text-[13.5px] font-[560] text-[var(--mos-text)]">{periodTitle(period)}</div>
             <div className="text-[11px] text-[var(--mos-text-faint)]">{periodSubtitle(period)}</div>
-          </div>
+          </PeriodDateField>
           <Button size="sm" aria-label="Next period" onClick={() => onShift(1)}>›</Button>
         </div>
       </div>

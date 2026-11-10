@@ -1,4 +1,4 @@
-import { addDays, type DateRange } from '@/lib/monthly-report/periods';
+import { addDays, isIsoDate, weekdayOf, type DateRange } from '@/lib/monthly-report/periods';
 import { reconciliationWindow, wibDateOf } from '@/lib/settlement/conventions';
 import { formatDailySpan } from '@/lib/settlement/format';
 import type { SettlementPeriod, SettlementPreset } from '@/lib/settlement/report';
@@ -27,6 +27,22 @@ export function periodSubtitle(period: SettlementPeriod): string {
 
 export function previousTitle(preset: SettlementPreset, range: DateRange): string {
   return periodTitle({ preset, anchor: preset === 'day' ? range.to : range.from, range });
+}
+
+/**
+ * Value from the period picker. Daily stays the report day (the 12:00 window that ends that day).
+ * Weekly snaps to the Monday of the Mon–Sun week that contains the picked date.
+ * Monthly accepts YYYY-MM and returns the first of that month.
+ */
+export function anchorFromPicker(preset: string, raw: string): string | null {
+  if (preset === 'month') {
+    if (!/^\d{4}-\d{2}$/.test(raw)) return null;
+    const anchor = `${raw}-01`;
+    return isIsoDate(anchor) ? anchor : null;
+  }
+  if (!isIsoDate(raw)) return null;
+  if (preset === 'week') return addDays(raw, 1 - weekdayOf(raw));
+  return raw;
 }
 
 export function shiftAnchor(anchor: string, preset: string, direction: number): string {

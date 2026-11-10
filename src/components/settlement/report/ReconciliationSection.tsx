@@ -5,6 +5,7 @@ import { formatUsd } from '@/lib/settlement/format';
 import type { ReconciliationResponse } from '@/lib/settlement/report';
 import type { ReconciliationBlock } from '@/lib/settlement/reconcile';
 import { dailyPairLabel } from './labels';
+import { PeriodDateField } from './PeriodDateField';
 import { PendingChip } from './PendingChip';
 import { NumTd, Td, Th, tableClass } from './ReportTable';
 import { ReportSectionHeader } from './ReportSectionHeader';
@@ -65,7 +66,9 @@ export function ReconciliationSection({ date, recon, list, variant, onDate, onLi
             <div className="flex items-center gap-2">
               {mismatches > 0 ? <StatusBadge tone="danger" dot>{mismatches.toLocaleString('en-US')} mismatches</StatusBadge> : <StatusBadge tone="success" dot>Matched</StatusBadge>}
               <Button size="sm" aria-label="Previous report day" onClick={() => shift(-1)}>‹</Button>
-              <span className="text-xs tabular-nums">{date}</span>
+              <PeriodDateField preset="day" value={date} onChange={next => onDate?.(next)} label="Choose reconciliation day">
+                <span className="text-[13px] font-[560] text-[var(--mos-text)]">{dailyPairLabel(date)}</span>
+              </PeriodDateField>
               <Button size="sm" aria-label="Next report day" onClick={() => shift(1)}>›</Button>
             </div>
           ) : mismatches > 0 ? <StatusBadge tone="danger" dot>{mismatches.toLocaleString('en-US')} mismatches</StatusBadge> : <StatusBadge tone="success" dot>Matched</StatusBadge>}
