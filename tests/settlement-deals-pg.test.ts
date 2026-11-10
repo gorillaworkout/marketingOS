@@ -33,6 +33,7 @@ describe('deals history on disposable postgres', { skip: local ? false : 'SETTLE
     store = await import('../src/lib/settlement/deals-store');
     const { migrate } = await import('../scripts/migrate');
     await db.execute(`DROP TABLE IF EXISTS settlement_dh_daily, settlement_dh_coverage, settlement_mt5_deal_facts, settlement_dh_staging, settlement_dh_chunks, settlement_dh_sessions`);
+    await db.execute(`CREATE TABLE IF NOT EXISTS schema_migrations (name TEXT PRIMARY KEY, applied_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP)`);
     await db.execute(`DELETE FROM schema_migrations WHERE name = '047_settlement_deals_history.sql'`);
     await migrate(false);
     await db.execute(
