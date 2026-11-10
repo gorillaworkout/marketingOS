@@ -1,39 +1,19 @@
 /**
- * Monthly Report access rules.
- *  - View:   admin, OR the user's department has `monthly-report`, OR a row in
- *            monthly_report_access (personal grant).
+ * Onboarding Reports access rules.
+ *  - View:   admin, OR the user's department has `monthly-report`.
  *  - Upload: same as view (operators self-upload).
  * Everyone who can view sees the same report.
+ * Access is granted only via Accounts → Departments. The monthly_report_access
+ * table is unused leftover from the Access tab and is left in place (no destructive migration).
  */
 import { MONTHLY_REPORT_FEATURE, canAccessFeature } from '@/lib/authorization';
 
 export interface MonthlyReportPrincipal {
   role: string;
   features: readonly string[];
-  monthlyReportUpload?: boolean;
 }
 
 export type MonthlyReportPageAccess = 'allowed' | 'login' | 'forbidden';
-
-/**
- * Correlated sub-select used by every session query. NULL = no personal grant;
- * false/true = granted, with or without upload rights. Expects users aliased `u`.
- */
-export const MONTHLY_REPORT_GRANT_SQL = '(SELECT mra.can_upload FROM monthly_report_access mra WHERE mra.user_id = u.id) AS monthly_report_grant';
-
-/**
- * Department features plus `monthly-report` when the user has a personal Onboarding grant.
- * A missing grant argument leaves Onboarding untouched. Settlement Report is not added
- * here; that menu is department-only (Accounts → Departments).
- */
-export function departmentFeaturesWithGrants(
-  departmentFeatures: readonly string[] | null | undefined,
-  grant: boolean | null | undefined,
-): string[] {
-  const features = [...(departmentFeatures ?? [])];
-  if (grant !== null && grant !== undefined && !features.includes(MONTHLY_REPORT_FEATURE)) features.push(MONTHLY_REPORT_FEATURE);
-  return features;
-}
 
 export function canViewMonthlyReport(principal: MonthlyReportPrincipal): boolean {
   return canAccessFeature(principal, MONTHLY_REPORT_FEATURE);

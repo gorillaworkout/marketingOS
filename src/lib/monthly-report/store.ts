@@ -492,49 +492,6 @@ export async function listDetails(kind: DetailKind, range: DateRange, limit = 20
   return { total: Number(total?.count ?? 0), rows: rows.map(row => ({ ...row, event_at: new Date(row.event_at).toISOString() })) };
 }
 
-export interface AccessUser {
-  id: string;
-  username: string;
-  name: string;
-  role: string;
-  department_name: string | null;
-  via_department: boolean;
-  personal_grant: boolean;
-  can_upload: boolean;
-}
-
-export async function listAccessUsers(): Promise<AccessUser[]> {
-  const rows = await queryAll<AccessUser & Record<string, unknown>>(
-    `SELECT u.id, u.username, u.name, u.role, d.name AS department_name,
-       COALESCE('monthly-report' = ANY(d.permitted_features), FALSE) AS via_department,
-       (mra.user_id IS NOT NULL) AS personal_grant,
-       COALESCE(mra.can_upload, FALSE) AS can_upload
-     FROM users u
-     LEFT JOIN departments d ON d.id = u.department_id
-     LEFT JOIN monthly_report_access mra ON mra.user_id = u.id
-     ORDER BY (u.role = 'admin') DESC, u.name`,
-  );
-  return rows.map(row => ({ ...row, via_department: Boolean(row.via_department), personal_grant: Boolean(row.personal_grant), can_upload: Boolean(row.can_upload) }));
-}
-
-/** view=false removes the personal grant; view=true always stores can_upload=true (upload = view). */
-export async function setUserAccess(userId: string, access: { view: boolean; upload?: boolean }, grantedBy: string): Promise<boolean> {
-  const user = await queryOne('SELECT id FROM users WHERE id = ?', [userId]);
-  if (!user) return false;
-  await executeTransaction(async transaction => {
-    if (!access.view) {
-      await transaction.execute('DELETE FROM monthly_report_access WHERE user_id = ?', [userId]);
-      return;
-    }
-    await transaction.execute(
-      `INSERT INTO monthly_report_access (user_id, can_upload, granted_by) VALUES (?, ?, ?)
-       ON CONFLICT (user_id) DO UPDATE SET can_upload = EXCLUDED.can_upload, granted_by = EXCLUDED.granted_by, updated_at = CURRENT_TIMESTAMP`,
-      [userId, true, grantedBy],
-    );
-  });
-  return true;
-}
-
 /** Every stored event of these Document IDs, for the upload preview's duplicate check. */
 export async function loadStoredEvents(documentIds: string[]): Promise<StoredEvent[]> {
   const stored: StoredEvent[] = [];

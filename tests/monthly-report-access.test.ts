@@ -1,12 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import {
-  ACCOUNT_FEATURES, MONTHLY_REPORT_FEATURE, accountFeatureFromPath, enabledFeaturesForUser, hasGenerationFeature,
+  ACCOUNT_FEATURES, MONTHLY_REPORT_FEATURE, accountFeatureFromPath, hasGenerationFeature,
   shouldBlockDashboardGenerationPath,
 } from '../src/lib/authorization';
 import {
-  canUploadMonthlyReport, departmentFeaturesWithGrants, monthlyReportApiAccess, monthlyReportPageAccess,
+  canUploadMonthlyReport, monthlyReportApiAccess, monthlyReportPageAccess,
 } from '../src/lib/monthly-report/access';
 
 const read = (path: string) => readFileSync(new URL(`../${path}`, import.meta.url), 'utf8');
@@ -21,36 +21,22 @@ test('Monthly Report is an account feature with a prefix-matched route tree', ()
   assert.equal(hasGenerationFeature({ role: 'member', features: ['monthly-report'] }), false);
 });
 
-test('a per-user grant adds the feature on top of the department', () => {
-  assert.deepEqual(departmentFeaturesWithGrants(['seo'], null), ['seo']);
-  assert.deepEqual(departmentFeaturesWithGrants(['seo'], false), ['seo', 'monthly-report']);
-  assert.deepEqual(departmentFeaturesWithGrants(null, true), ['monthly-report']);
-  assert.deepEqual(departmentFeaturesWithGrants(['monthly-report'], true), ['monthly-report']);
-  assert.deepEqual(enabledFeaturesForUser({ role: 'member', features: departmentFeaturesWithGrants(['internal-docs'], false) }), ['internal-docs', 'monthly-report']);
-});
-
-test('view and upload: admin, department feature, or personal grant (same predicate)', () => {
-  const admin = { role: 'admin', features: [...ACCOUNT_FEATURES], monthlyReportUpload: false };
-  const viaDepartment = { role: 'member', features: ['monthly-report'], monthlyReportUpload: false };
-  const personalGrant = { role: 'member', features: ['monthly-report'], monthlyReportUpload: true };
-  const outsider = { role: 'member', features: ['seo'], monthlyReportUpload: false };
-  const staleUploadFlag = { role: 'member', features: [], monthlyReportUpload: true };
+test('view and upload are the same predicate; access is admin or department only', () => {
+  const admin = { role: 'admin', features: [...ACCOUNT_FEATURES] };
+  const viaDepartment = { role: 'member', features: ['monthly-report'] };
+  const outsider = { role: 'member', features: ['seo'] };
 
   assert.equal(monthlyReportPageAccess(null), 'login');
   assert.equal(monthlyReportPageAccess(viaDepartment), 'allowed');
   assert.equal(monthlyReportPageAccess(outsider), 'forbidden');
   assert.equal(monthlyReportPageAccess(viaDepartment, { upload: true }), 'allowed');
-  assert.equal(monthlyReportPageAccess(personalGrant, { upload: true }), 'allowed');
-  assert.equal(monthlyReportPageAccess(personalGrant, { adminOnly: true }), 'forbidden');
+  assert.equal(monthlyReportPageAccess(viaDepartment, { adminOnly: true }), 'forbidden');
   assert.equal(monthlyReportPageAccess(admin, { adminOnly: true }), 'allowed');
   assert.equal(monthlyReportPageAccess(admin, { upload: true }), 'allowed');
 
   assert.equal(canUploadMonthlyReport(admin), true);
   assert.equal(canUploadMonthlyReport(viaDepartment), true);
-  assert.equal(canUploadMonthlyReport(personalGrant), true);
   assert.equal(canUploadMonthlyReport(outsider), false);
-  // Stale upload flag without view still never allows upload.
-  assert.equal(canUploadMonthlyReport(staleUploadFlag), false);
 
   assert.deepEqual(monthlyReportApiAccess(outsider), { error: 'Forbidden: you do not have access to Onboarding Reports', status: 403 });
   assert.equal(monthlyReportApiAccess(viaDepartment), null);
@@ -58,33 +44,21 @@ test('view and upload: admin, department feature, or personal grant (same predic
   assert.equal(monthlyReportApiAccess(outsider, { upload: true })?.status, 403);
 });
 
-test('every session query loads the personal Monthly Report grant', () => {
+test('Onboarding access is department-only; the unused access table is kept', () => {
   const auth = read('src/lib/auth.ts');
   const route = read('src/app/api/auth/route.ts');
-  assert.equal((auth.match(/MONTHLY_REPORT_GRANT_SQL/g) ?? []).length >= 3, true);
-  assert.equal((route.match(/MONTHLY_REPORT_GRANT_SQL/g) ?? []).length >= 2, true);
-  assert.match(auth, /monthlyReportUpload/);
-  assert.match(read('src/lib/monthly-report/access.ts'), /FROM monthly_report_access/);
-});
-
-test('Access API: personal grant always stores can_upload=true; upload flag optional', () => {
-  const route = read('src/app/api/monthly-report/access/route.ts');
-  const store = read('src/lib/monthly-report/store.ts');
-  assert.match(route, /typeof body\.view !== 'boolean'/);
-  assert.doesNotMatch(route, /typeof body\.upload !== 'boolean'/);
-  assert.doesNotMatch(route, /Upload rights need view access/);
-  assert.match(route, /upload:\s*true/);
-  assert.match(store, /can_upload/);
-  assert.doesNotMatch(store, /access\.upload/);
-  // setUserAccess forces the literal true on insert when view is granted
-  assert.match(store, /VALUES \(\?, \?, \?\)/);
-  assert.match(store, /\[userId, true, grantedBy\]/);
-});
-
-test('Access page has Personal access only (no separate Upload toggle)', () => {
-  const page = read('src/app/dashboard/monthly-report/access/page.tsx');
-  assert.match(page, /Personal access/);
-  assert.doesNotMatch(page, /Upload rights for/);
-  assert.doesNotMatch(page, /'Can upload'/);
-  assert.match(page, /JSON\.stringify\(\{ userId: user\.id, view \}\)/);
+  assert.doesNotMatch(auth, /MONTHLY_REPORT_GRANT_SQL/);
+  assert.doesNotMatch(route, /MONTHLY_REPORT_GRANT_SQL/);
+  assert.doesNotMatch(auth, /monthly_report_grant|monthlyReportUpload|departmentFeaturesWithGrants/);
+  assert.doesNotMatch(route, /monthly_report_grant|departmentFeaturesWithGrants/);
+  assert.doesNotMatch(read('src/lib/monthly-report/access.ts'), /MONTHLY_REPORT_GRANT_SQL|departmentFeaturesWithGrants/);
+  assert.doesNotMatch(read('src/lib/monthly-report/access.ts'), /FROM monthly_report_access/);
+  assert.doesNotMatch(read('src/lib/admin-api-access.ts'), /\/api\/monthly-report\/access/);
+  assert.doesNotMatch(read('src/components/monthly-report/ReportTabs.tsx'), /monthly-report\/access/);
+  assert.doesNotMatch(read('src/lib/monthly-report/store.ts'), /listAccessUsers|setUserAccess|monthly_report_access/);
+  assert.equal(existsSync(new URL('../src/app/dashboard/monthly-report/access/page.tsx', import.meta.url)), false);
+  assert.equal(existsSync(new URL('../src/app/api/monthly-report/access/route.ts', import.meta.url)), false);
+  const sql = read('db/migrations/041_monthly_report.sql');
+  assert.match(sql, /CREATE TABLE IF NOT EXISTS monthly_report_access/);
+  assert.match(sql, /retained after the Access tab was removed/);
 });
