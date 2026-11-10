@@ -1,6 +1,6 @@
 # Settlement Report redesign — design spec
 
-**Date:** 2026-11-10 · **Status:** approved by Bayu (approach C, hybrid); Withdrawal % KPI definition still open (§15) · **Base:** `main` da35c73 (Access tabs removed)
+**Date:** 2026-11-10 · **Status:** approved by Bayu (approach C, hybrid); §15 decisions are final · **Base:** `main` da35c73 (Access tabs removed)
 **Plan:** `docs/superpowers/plans/2026-11-10-settlement-report-redesign.md`
 
 ## 1. Problem
@@ -75,8 +75,8 @@ Top to bottom:
 1. **Tabs:** `Report | Data sources` (`SettlementNav`, links `/dashboard/settlement-report` and `/dashboard/settlement-report/data`).
 2. **Period bar** (`SettlementPeriodBar`, inside the toolbar):
    - Segmented control: **Daily** (sub-label "12:00–12:00 WIB"), **Weekly** ("Mon–Sun"), **Monthly** ("Calendar month"). Built as buttons with `aria-pressed`, styled like the Onboarding control.
-   - `‹` / `›` buttons and a period label, e.g. "October 2026" with sub-label "1 – 31 Oct 2026 · WIB". For Daily the sub-label is the window, e.g. "9 Nov 12:00:01 – 10 Nov 12:00:00 WIB" (from `reconciliationWindow`).
-   - Period rules (confirmed by Bayu, see §7.1): **Daily = 12:00 WIB → 12:00 WIB** (report day D = (D−1 12:00:00, D 12:00:00]), **Weekly = Mon–Sun** WIB dates, **Monthly = calendar month** using the existing monthly logic (same as Initial margin / Margin in–out).
+   - `‹` / `›` buttons and a period label, e.g. "October 2026" with sub-label "1 – 31 Oct 2026 · WIB". For Daily the label is both dates of the window, e.g. "05–06 Nov" for 05 Nov 12:00 → 06 Nov 12:00 (report day D = 06 Nov, the window end). The sub-label is the precise window from `reconciliationWindow`, e.g. "2026-11-05 12:00:01 – 2026-11-06 12:00:00 WIB".
+   - Period rules (confirmed by Bayu, see §7.1 and §15): **Daily = 12:00 WIB → 12:00 WIB** (report day D = (D−1 12:00:00, D 12:00:00]), **Weekly = Mon–Sun** WIB dates, **Monthly = calendar month** using the existing monthly logic (same as Initial margin / Margin in–out).
    - Right side: "Compared with September 2026" (the previous-period label). Same-period-last-year was dropped (YAGNI).
 3. **Coverage chips** (`CoverageChips`): "Data through:" then one chip per source: CRM Deposit, CRM Withdrawal, MT5 D&W, Dealing FTD, Deals History.
    - Green (`ok`) when the data-through date ≥ the period end.
@@ -88,16 +88,16 @@ Top to bottom:
    | Deposits | IDR compact | relative % | up | `USD x · n requests` |
    | Withdrawals | IDR compact | relative % | down | `USD x · n requests` |
    | Net margin in–out | IDR compact (deposits − withdrawals, IDR) | relative % | up | "Deposits − withdrawals" |
-   | Withdrawal % (**definition open, §15.1**) | from the single config point `WITHDRAWAL_PCT_KPI` (§6.1) | points (`pt`) | see §6.1 | depends on mode |
+   | Withdrawal % (office hour, §15) | from `WITHDRAWAL_PCT_KPI = 'office-hour'` (§6.1) | points (`pt`) | up | "{office} of {total} same-day" |
    | Avg processing | deposit office-hour mean (`processing.summary.deposit`) | seconds | down | `WD {withdrawal office-hour mean}` |
    | Commission | IDR compact (Σ IDR-rate commission × rate), or `PendingChip` | relative % (only when both periods are complete) | neutral | `USD x` or "{observed} of {total} days imported" |
 
-   **6.1 Withdrawal % KPI — one configurable definition point.** Bayu has not chosen yet. All KPI code reads `WITHDRAWAL_PCT_KPI` in `src/lib/settlement/kpi-config.ts` (`'office-hour' | 'wd-over-dep' | 'both'`); no component, export or test hard-codes a definition.
+   **6.1 Withdrawal % KPI — one definition point.** Bayu decided `office-hour` (§15). All KPI code still reads `WITHDRAWAL_PCT_KPI` in `src/lib/settlement/kpi-config.ts` (`'office-hour' | 'wd-over-dep' | 'both'`); no component, export or test hard-codes a definition. The constant is `'office-hour'`.
    - `office-hour` (Excel, `Withdrawal Percentage - 2026.xlsx`): `office ÷ total × 100` of withdrawal requests in the period, where **office = total − 2nd withdrawal** (completed on the same WIB day as requested). Favourable = up. Label "Withdrawal % (office hour)", note "{office} of {total} same-day".
    - `wd-over-dep`: `withdrawals IDR ÷ deposits IDR × 100`. Favourable = down. Label "Withdrawal % (of deposits)", note "Withdrawals ÷ deposits (IDR)".
    - `both`: two cards side by side; the strip becomes 7 columns (4 on md, 2 on sm).
    - `PeriodSummary.withdrawalPct` carries both values (`officeHourPct`, `ofDepositsPct`) so switching mode is a one-line change with no data or API change. The xlsx Overview writes the row(s) for the active mode with the same labels; the Methodology card text comes from the same config.
-   - Default until Bayu decides: `office-hour` (matches the Excel the team already uses). Changing it = edit one constant + its expected label in one test.
+   - Decided value: `office-hour` (the Excel the team already uses). A later change is still one constant plus its expected label in one test.
 
    Delta text: `▲ 12.4%`, `▼ 38s`, `▲ 3.5 pt`, colored by favourability (good = green, bad = red, neutral = muted), followed by the muted text `vs {previous formatted value}`. If the previous value is `null` or 0, the delta is omitted and the note says "No previous data". A screen-reader text spells it out ("up 12.4% versus previous period").
 
@@ -107,7 +107,7 @@ Top to bottom:
    - `FlowChart`: daily IDR deposits (teal) and withdrawals (gray `#5e626b`) as grouped bars, with the net line in amber. Y axis is compact IDR.
    - `ProcessingChart`: three lines (deposit API, deposit manual, withdrawal office hour), daily office-hour averages, Y axis in minutes. Days without data are gaps, not 0.
 7. **01 · Daily reconciliation** (`ReconciliationSection`):
-   - Header: title "CRM vs MT5", a chip "{n} mismatches" (danger) or "Matched" (success), and a sub-line with the 12:00:01–12:00:00 WIB window.
+   - Header: title "CRM vs MT5", a chip "{n} mismatches" (danger) or "Matched" (success), the same both-dates label as the period bar ("05–06 Nov"), and a sub-line with the 12:00:01–12:00:00 WIB window. The window and the figures are the existing reconciliation (`buildDailyReconciliation('2026-11-06')` stays CRM 1,390/445/88 and MT5 1,306/445/2).
    - Its own date stepper (‹ date ›), defaulting to the existing `defaultReconDate()`. When the period preset is Daily, it follows the period anchor.
    - Body has three columns: the CRM statement, the MT5 statement (rate rows, Clients row, Total row), and a match panel. The match panel has a ring with `matched ÷ (matched + mismatches)` and four filter buttons with counts (CRM only, MT5 only, Amount differs, Account differs).
    - Below is the mismatch table: Reference (monospace), Account, Side, Time (WIB), CRM, MT5, Difference (signed, red when negative), State chip (pending → amber "Pending in CRM", missing → red "MT5 missing"), and pagination.
@@ -170,7 +170,7 @@ interface PeriodSummary {
 - **Weekly / Monthly / Custom (`basis: 'calendar'`):** unchanged WIB calendar dates; weeks Mon–Sun; month = calendar month with the existing `marginInOut` monthly logic (Initial margin, Margin in–out untouched).
 - Definitions inside a metric do not change with the basis: "2nd withdrawal" stays "completed on a later WIB calendar day than requested", and office hour stays `isOfficeHour`. Only period membership changes.
 - Deals History (commission, DH swap) stays per MT5 server date; for Daily the report shows the MT5 server date equal to D (stated in Methodology).
-- Assumption to confirm with Bayu: report day D is labelled by the window's **end** date, consistent with the existing reconciliation (`reconciliationWindow`).
+- Confirmed: report day D is the window's **end** date, the same instant `reconciliationWindow` already uses, so Daily 05–06 Nov figures do not move. The visible label shows **both** dates ("05–06 Nov" for the window ending 06 Nov 12:00), matching the team's Excel name "Daily Report Deposit and Withdrawal (05-06 November)". The xlsx daily sheet keeps the precise `window.label` string.
 
 - **Previous period** (`previousSettlementRange`):
   - day → the previous 12:00–12:00 window (D−1)
@@ -317,14 +317,18 @@ The Access-removal PRs (#136/#137) are merged; `main` is at da35c73. Implementat
 
 ## 15. Decisions
 
-**Open (Bayu to decide):**
-1. **Withdrawal % KPI definition.** (a) Excel office-hour % (office = total − 2nd withdrawal), (b) withdrawals ÷ deposits IDR, or (c) both. Isolated behind `WITHDRAWAL_PCT_KPI` (§6.1); default `office-hour` until decided.
-2. **Daily label date.** Report day D = window ending D 12:00 (as the existing reconciliation). Confirm vs. labelling by the start date.
+**Final (Bayu, 2026-11-10):**
+1. **Withdrawal % KPI** = the Excel office-hour definition: office ÷ total, where office = total − 2nd withdrawal and 2nd = completed on a later WIB calendar day than requested. Same split as the weekly Withdrawal % table and `Withdrawal Percentage - 2026.xlsx`. `WITHDRAWAL_PCT_KPI = 'office-hour'`. The other modes stay in `kpi-config.ts` so a future switch is still one constant; they are not the product choice.
+2. **Daily label** shows both dates of the 12:00 → 12:00 window. Window 05 Nov 12:00 → 06 Nov 12:00 (report day D = 2026-11-06) is labelled "05–06 Nov". Reconciliation uses that same label. The window math is unchanged, so phase 1 acceptance figures stay CRM 1,390 / 445 / 88 and MT5 1,306 / 445 / 2.
+3. **Weekly** = Mon–Sun. **Monthly** = calendar month (existing monthly logic).
+4. **Commission** is shown on the report and written to the xlsx workbook. A missing source is a Pending chip, never 0.
+5. **Access** stays department-only (Account menu, #136/#137). The report nav is Report | Data sources only.
+6. **Export PDF** is a print-friendly A4 route that calls the browser print dialog. No new runtime dependency.
 
-**Confirmed by Bayu:**
-- Daily = 12:00 WIB → 12:00 WIB; Weekly = Mon–Sun; Monthly = calendar month (existing monthly logic). Supersedes the earlier agent decision to keep the WIB calendar day.
+**Confirmed earlier by Bayu:**
+- Daily = 12:00 WIB → 12:00 WIB. Supersedes the earlier agent decision to keep the WIB calendar day for Daily.
 
-**Made by the agent (confirm with Bayu):**
+**Made by the agent (unchanged):**
 3. **Compare-with** is the previous period only. "Same period last year" was dropped.
 4. **Commission KPI** headline is IDR (Σ × rate) with USD in the note, consistent with the other KPIs. The mockup showed USD.
 5. **Net margin in–out** is never Pending, because it does not depend on the FTD list.

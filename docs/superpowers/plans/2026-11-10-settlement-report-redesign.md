@@ -12,7 +12,7 @@
 - TDD for every task: write the failing test, run it, implement, run it green, commit. Test runner: `npx tsx --test tests/<file>.test.ts`. Render tests: `renderToStaticMarkup`.
 - Pending is never 0. IDR on screen 0 decimals; exports exact.
 - **Period rules (confirmed):** Daily = 12:00–12:00 WIB (report day D = (D−1 12:00:00, D 12:00:00]); Weekly = Mon–Sun; Monthly = calendar month with the existing monthly logic.
-- **Withdrawal % KPI is NOT final.** Every use goes through `WITHDRAWAL_PCT_KPI` (Task 7). No other file hard-codes a definition.
+- **Withdrawal % KPI is final: `office-hour`.** Every use still goes through `WITHDRAWAL_PCT_KPI` (Task 7). No other file hard-codes a definition. Daily windows are labelled with both dates ("05–06 Nov"); the reconciliation window and its figures stay as they are.
 - After each task: `npx tsc --noEmit` and the touched tests. Before the PR: all `tests/settlement-*.test.ts` and `npm run build`.
 
 ## File map
@@ -121,7 +121,7 @@
 
 ### Task 14 — Sections
 
-`SettlementPeriodBar.tsx` (Daily "12:00–12:00 WIB" with the window as sub-label, Weekly "Mon–Sun", Monthly "Calendar month"; "Compared with …"), `SectionNav.tsx` (sticky, IntersectionObserver, `aria-current`), `ReportSectionHeader.tsx`, `ReconciliationSection.tsx`, `ProcessingSection.tsx`, `WithdrawalTimingSection.tsx` (title "Withdrawal timing split"), `MarginSection.tsx`, `CommissionSwapSection.tsx` (Pending chips, coverage strip), `JisdorSection.tsx` (from `JisdorPanel`), `MethodologySection.tsx` (includes period rules and `withdrawalPctMethodology(WITHDRAWAL_PCT_KPI)`). Render test per section; commit per 2–3 sections.
+`SettlementPeriodBar.tsx` (Daily preset sub-label "12:00–12:00 WIB"; the period label is both dates, "05–06 Nov", with the precise window under it; Weekly "Mon–Sun", Monthly "Calendar month"; "Compared with …"), `SectionNav.tsx` (sticky, IntersectionObserver, `aria-current`), `ReportSectionHeader.tsx`, `ReconciliationSection.tsx`, `ProcessingSection.tsx`, `WithdrawalTimingSection.tsx` (title "Withdrawal timing split"), `MarginSection.tsx`, `CommissionSwapSection.tsx` (Pending chips, coverage strip), `JisdorSection.tsx` (from `JisdorPanel`), `MethodologySection.tsx` (includes period rules and `withdrawalPctMethodology(WITHDRAWAL_PCT_KPI)`). Render test per section; commit per 2–3 sections.
 
 ### Task 15 — `SettlementReportView`
 
@@ -138,5 +138,5 @@ Pure composition from props with `variant: 'screen' | 'print'`. Render test with
 ### Task 18 — Verify and PR
 
 1. `npx tsc --noEmit`; every `tests/settlement-*.test.ts`; `npm run build`.
-2. Rebase on `origin/main`; push `feat/settlement-report-redesign`; open a PR (draft until Bayu reviews). Note in the PR: Withdrawal % mode currently `office-hour`, pending Bayu's choice.
+2. Rebase on `origin/main`; push `feat/settlement-report-redesign`; open a PR against `main`. Note in the PR: Withdrawal % is `office-hour` (Bayu, final) and the daily label is the both-dates form ("05–06 Nov"). This branch supersedes the docs PR #138.
 3. After Bayu's OK and deploy: on production open Report (Daily, Weekly, Monthly), Data sources and Print for Oct 2026; check Daily totals follow 12:00–12:00 against one reconciliation day; check Oct 1–5 commission equals the audited buckets.
