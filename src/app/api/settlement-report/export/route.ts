@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { todayWib } from '@/lib/monthly-report/service';
 import { requireSettlementReport } from '@/lib/settlement/service';
 import { buildReconciliationWorkbook, buildSettlementWorkbook, reconciliationExportFileName, settlementExportFileName } from '@/lib/settlement/export';
+import { listJisdorFixings } from '@/lib/settlement/jisdor-store';
 import { attachDealsHistory } from '@/lib/settlement/report-data';
 import { loadReconciliation, loadSettlementReport, resolveSettlementPeriod } from '@/lib/settlement/report';
 
@@ -28,5 +29,6 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: error instanceof Error ? error.message : 'Invalid period' }, { status: 400 });
   }
   const report = await attachDealsHistory(await loadSettlementReport(period));
+  try { report.jisdor = await listJisdorFixings(); } catch { report.jisdor = []; }
   return send(buildSettlementWorkbook(report), settlementExportFileName(report));
 }

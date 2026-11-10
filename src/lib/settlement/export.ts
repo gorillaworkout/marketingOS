@@ -4,12 +4,13 @@ import { RATES, type Rate } from './conventions';
 import { ATTESTED_EMPTY, PENDING_DEALS_HISTORY, type DealsDay } from './deals-report';
 import { WITHDRAWAL_PCT_KPI } from './kpi-config';
 import { withdrawalPctCards } from './kpis';
+import { JISDOR_MONTH_UNAVAILABLE, jisdorMonthTable } from './jisdor';
 import { formatDuration } from './metrics';
 import type { DailyReconciliation, ReconciliationBlock } from './reconcile';
 import type { SettlementReport } from './report';
 import { dealsHistorySummary } from './summary';
 
-export const SETTLEMENT_SHEETS = ['Overview', 'Processing Time', 'Withdrawal %', 'Margin In-Out', 'Swap', 'Commission'] as const;
+export const SETTLEMENT_SHEETS = ['Overview', 'Processing Time', 'Withdrawal %', 'Margin In-Out', 'Swap', 'Commission', 'JISDOR'] as const;
 const RATE_LABEL = (rate: Rate) => (rate === 1 ? 'USD' : String(rate));
 const PENDING_IM = 'Pending: Dealing FTD list';
 type Cell = string | number | null;
@@ -126,10 +127,21 @@ export function swapRows(report: SettlementReport): Cell[][] {
   ];
 }
 
+export function jisdorSheetRows(report: SettlementReport): Cell[][] {
+  const month = report.period.anchor.slice(0, 7);
+  const rows = jisdorMonthTable(report.jisdor ?? [], month);
+  if (!rows.length) return [['JISDOR', month], [JISDOR_MONTH_UNAVAILABLE]];
+  return [
+    ['JISDOR', month],
+    ['Date', 'Rate (IDR per USD)', 'Change'],
+    ...rows.map(row => [row.date, row.rate, row.change]),
+  ];
+}
+
 export function buildSettlementWorkbook(report: SettlementReport): Buffer {
   const book = XLSX.utils.book_new();
   const sheets: Record<typeof SETTLEMENT_SHEETS[number], Cell[][]> = {
-    Overview: overviewRows(report), 'Processing Time': processingRows(report), 'Withdrawal %': withdrawalRows(report), 'Margin In-Out': marginRows(report), Swap: swapRows(report), Commission: commissionRows(report),
+    Overview: overviewRows(report), 'Processing Time': processingRows(report), 'Withdrawal %': withdrawalRows(report), 'Margin In-Out': marginRows(report), Swap: swapRows(report), Commission: commissionRows(report), JISDOR: jisdorSheetRows(report),
   };
   for (const name of SETTLEMENT_SHEETS) XLSX.utils.book_append_sheet(book, XLSX.utils.aoa_to_sheet(sheets[name]), name);
   return XLSX.write(book, { type: 'buffer', bookType: 'xlsx' }) as Buffer;

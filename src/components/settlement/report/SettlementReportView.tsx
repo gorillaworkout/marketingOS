@@ -18,7 +18,7 @@ import { WithdrawalTimingSection } from './WithdrawalTimingSection';
 type Fixing = { date: string; rate: number };
 
 export function SettlementReportView({
-  variant, report, recon, reconDate, list, generatedAt, jisdor, onPreset, onShift, onAnchor, onReconDate, onList, onPage,
+  variant, report, recon, reconDate, list, generatedAt, jisdor, jisdorUnavailable, onPreset, onShift, onAnchor, onReconDate, onList, onPage,
 }: {
   variant: 'screen' | 'print';
   report: SettlementReport;
@@ -27,6 +27,7 @@ export function SettlementReportView({
   list: string;
   generatedAt?: string;
   jisdor?: Fixing[];
+  jisdorUnavailable?: boolean;
   onPreset?: (preset: SettlementPreset) => void;
   onShift?: (direction: number) => void;
   onAnchor?: (anchor: string) => void;
@@ -69,7 +70,7 @@ export function SettlementReportView({
       </div>
       <CommissionSwapSection swap={report.swap} days={report.dealsHistory ?? []} summary={report.summary.current.commission} />
       <div className="grid gap-5 lg:grid-cols-2">
-        <JisdorSection variant={variant} fixings={jisdor} />
+        <JisdorSection key={report.period.anchor.slice(0, 7)} variant={variant} month={report.period.anchor.slice(0, 7)} fixings={jisdor} unavailable={jisdorUnavailable} />
         <MethodologySection />
       </div>
     </div>
