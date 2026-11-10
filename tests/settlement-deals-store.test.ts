@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import {
-  ABORT_CHUNKS_SQL, ABORT_STAGING_SQL, EXPIRE_STAGING_SQL, LOCK_DAYS_SQL, LOCK_DEALS_SQL, REBUILD_INSERT_SQL, STAGE_SQL, UPSERT_FACT_SQL,
+  ABORT_CHUNKS_SQL, ABORT_STAGING_SQL, EXPIRE_STAGING_SQL, LOCK_DAYS_SQL, LOCK_WRITER_SQL, REBUILD_INSERT_SQL, STAGE_SQL, UPSERT_FACT_SQL,
 } from '../src/lib/settlement/deals-store';
 
 const migration = readFileSync('db/migrations/047_settlement_deals_history.sql', 'utf8');
@@ -27,9 +27,8 @@ test('commit SQL upserts on deal and rebuilds the cache from facts; abort does n
   assert.match(STAGE_SQL, /settlement_dh_staging\.seq <= EXCLUDED\.seq/);
   assert.match(abortSource, /settlement_dh_staging/);
   assert.doesNotMatch(abortSource, /settlement_mt5_deal_facts/);
-  assert.match(LOCK_DEALS_SQL, /pg_advisory_xact_lock\(hashtext\('dh-deal:' \|\| id\)::bigint\)/);
-  assert.match(LOCK_DEALS_SQL, /ORDER BY 1/);
-  assert.equal(LOCK_DEALS_SQL.match(/\?/g)?.length, 1);
+  assert.match(LOCK_WRITER_SQL, /pg_advisory_xact_lock\(hashtext\('settlement-dh-writer'\)::bigint\)/);
+  assert.equal(LOCK_WRITER_SQL.includes('unnest'), false);
   assert.match(LOCK_DAYS_SQL, /pg_advisory_xact_lock\(hashtext\('dh-day:' \|\| day\)::bigint\)/);
   assert.match(LOCK_DAYS_SQL, /ORDER BY 1/);
   assert.match(migration, /eof_confirmed/);

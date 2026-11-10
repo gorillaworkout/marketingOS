@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { after, before, describe, it } from 'node:test';
 import type { DealFact } from '../src/lib/settlement/deals-engine';
 import { MAX_CHUNK_DEALS } from '../src/lib/settlement/deals-parse';
-import { LOCK_DAYS_SQL, LOCK_DEALS_SQL } from '../src/lib/settlement/deals-store';
+import { LOCK_DAYS_SQL, LOCK_WRITER_SQL } from '../src/lib/settlement/deals-store';
 
 const testUrl = process.env.SETTLEMENT_TEST_DATABASE_URL ?? '';
 const local = /^postgres(?:ql)?:\/\/[^@]*@(127\.0\.0\.1|localhost)(?::\d+)?\//.test(testUrl);
@@ -97,18 +97,16 @@ describe('deals history on disposable postgres', { skip: local ? false : 'SETTLE
       /check|violates/i,
     );
     const explain = await db.queryAll<Record<string, string>>(
-      `EXPLAIN (VERBOSE, COSTS OFF)
-       SELECT pg_advisory_xact_lock(hashtext('dh-deal:' || id)::bigint)
-       FROM (SELECT unnest(ARRAY['1','2']::text[]) AS id ORDER BY 1) locked`,
+      `EXPLAIN (VERBOSE, COSTS OFF) ${LOCK_WRITER_SQL}`,
     );
     const plan = explain.map(row => Object.values(row).join(' ')).join('\n');
     evidence.explain = plan;
     assert.match(plan, /pg_advisory_xact_lock/);
     assert.match(plan, /bigint/);
-    assert.match(LOCK_DEALS_SQL, /::bigint/);
+    assert.match(LOCK_WRITER_SQL, /::bigint/);
     assert.match(LOCK_DAYS_SQL, /::bigint/);
     await db.executeTransaction(async tx => {
-      await tx.execute(LOCK_DEALS_SQL, [['101', '102']]);
+      await tx.execute(LOCK_WRITER_SQL);
       await tx.execute(LOCK_DAYS_SQL, [['2026-10-02', '2026-10-01']]);
       throw new Error('rollback-lock-probe');
     }).catch(error => {

@@ -36,9 +36,13 @@ FROM settlement_mt5_deal_facts
 WHERE rate IS NOT NULL AND server_time::date = ANY(?::date[])
 GROUP BY 1, 2`;
 
-/** One argument, cast to bigint, so the (integer, integer) advisory-lock overload cannot be chosen. hashtext returns int4. */
-export const LOCK_DEALS_SQL = `SELECT pg_advisory_xact_lock(hashtext('dh-deal:' || id)::bigint) FROM (SELECT unnest(?::text[]) AS id ORDER BY 1) locked`;
-/** Same transaction, after the deal locks, dates ascending. Serializes cache rebuilds for one server day. */
+/**
+ * One writer lock for the whole commit. A lock per Deal does not fit:
+ * max_locks_per_transaction is 64, and 390,366 deals exhaust shared memory.
+ * hashtext returns int4; the cast selects pg_advisory_xact_lock(bigint).
+ */
+export const LOCK_WRITER_SQL = `SELECT pg_advisory_xact_lock(hashtext('settlement-dh-writer')::bigint)`;
+/** After the writer lock, dates ascending. Same-day commits cannot rebuild past each other. */
 export const LOCK_DAYS_SQL = `SELECT pg_advisory_xact_lock(hashtext('dh-day:' || day)::bigint) FROM (SELECT unnest(?::text[]) AS day ORDER BY 1) days`;
 export const EXPIRE_STAGING_SQL = `DELETE FROM settlement_dh_staging WHERE session_id IN (
   SELECT id FROM settlement_dh_sessions WHERE status = 'open' AND created_at < CURRENT_TIMESTAMP - INTERVAL '24 hours')`;
@@ -109,11 +113,13 @@ export async function commitOwnedSession(
     if (!confirmation.eof || confirmation.declaredCount !== incoming.length || !footerMatches(incoming, persistedFooter)) {
       return abortOpenSession(tx, sessionId, 'Footer, end of file, or deal count does not match the staged rows');
     }
-    const ids = incoming.map(deal => deal.deal);
-    if (ids.length) await tx.execute(LOCK_DEALS_SQL, [ids]);
-    const existingRows = ids.length
-      ? await tx.queryAll<Record<string, unknown>>('SELECT deal, login, server_time::text, entry, volume::text, commission::text, fee::text, swap::text, profit::text, currency, rate FROM settlement_mt5_deal_facts WHERE deal = ANY(?::text[]) FOR UPDATE', [ids])
-      : [];
+    await tx.execute(LOCK_WRITER_SQL);
+    const existingRows = await tx.queryAll<Record<string, unknown>>(
+      `SELECT f.deal, f.login, f.server_time::text, f.entry, f.volume::text, f.commission::text, f.fee::text, f.swap::text, f.profit::text, f.currency, f.rate
+       FROM settlement_mt5_deal_facts f
+       WHERE EXISTS (SELECT 1 FROM settlement_dh_staging s WHERE s.session_id = ? AND s.deal = f.deal)`,
+      [sessionId],
+    );
     const existing: Record<string, DealFact> = {};
     for (const row of existingRows) { const fact = toFact(row); existing[fact.deal] = fact; }
     const merged = mergeIncoming(existing, incoming);
