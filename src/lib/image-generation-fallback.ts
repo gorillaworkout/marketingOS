@@ -33,6 +33,7 @@ export function parseImageApiErrorStatus(reason: string): number {
  * body contains capacity markers ("exhausted your capacity", quota, rate limit).
  */
 export function isCapacityOrRateLimitFailure(reason: string): boolean {
+  if (reason.includes('image generation needs OpenRouter credits') || reason.includes('OpenRouter free-model rate limit')) return false;
   const status = parseImageApiErrorStatus(reason);
   const lower = reason.toLowerCase();
   if (status === 429) return true;

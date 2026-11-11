@@ -245,6 +245,8 @@ export async function streamWithModelFallback<M extends { role: string }, U>(opt
   onFallback?: FallbackLogger;
   /** Called right before the next model starts, so the UI can be told. */
   onSwitch?: (event: FallbackEvent) => void;
+  /** Stop the chain. Used when another model would only repeat a provider rate limit. */
+  shouldStop?: (error: string) => boolean;
   mergeUsage?: (a: U | null, b: U | null) => U | null;
   now?: () => Date;
 }): Promise<
@@ -283,6 +285,10 @@ export async function streamWithModelFallback<M extends { role: string }, U>(opt
     }
     if (outcome.aborted) {
       return { ok: false, aborted: true, content: accumulated + (outcome.content || '') };
+    }
+    if (options.shouldStop?.(outcome.error)) {
+      failures.push({ model, error: outcome.error });
+      return { ok: false, aborted: false, error: new AllModelsFailedError(failures), content: accumulated + outcome.content, events };
     }
     const hadTextBefore = accumulated.length > 0;
     accumulated += outcome.content;

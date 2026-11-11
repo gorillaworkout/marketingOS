@@ -56,7 +56,8 @@ test('AI Research user-facing brand is Dupoin AI, not GorillaWorkout AI', () => 
   assert.match(page, /AI_RESEARCH_ASSISTANT_NAME/);
   assert.match(admin, /AI_RESEARCH_ASSISTANT_NAME/);
   assert.match(lib, /Dupoin AI Assistant/);
-  assert.match(route, /X-Title': 'Dupoin AI Research'/);
+  assert.match(route, /title: 'Dupoin AI Research'/);
+  assert.match(read('src/lib/llm-provider.ts'), /'X-Title': title/);
   for (const source of [page, admin, route, lib]) {
     assert.doesNotMatch(source, /GorillaWorkout AI/);
   }

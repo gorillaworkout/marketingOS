@@ -129,7 +129,7 @@ test('AI Research chat route forwards multimodal content to the existing gateway
   assert.match(route, /type: 'start'/);
   assert.match(route, /jsonb_array_elements\(messages\)/);
   assert.match(route, /resolveFeatureModel\(auth\.id, 'ai-research'\)/);
-  assert.match(route, /GORILLAWORKOUT_API_BASE.*\/chat\/completions/);
+  assert.match(route, /postChat\(/);
   assert.doesNotMatch(route, /SELECT id, model, updated_at, messages FROM ai_research_conversations/);
   assert.doesNotMatch(route, /catch \(\(\) => 'ag\/gemini-3-flash-agent'\)/);
   assert.doesNotMatch(route, /OPENROUTER_API_KEY|callCodex|callClaude/);
