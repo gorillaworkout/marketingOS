@@ -9,6 +9,7 @@ export async function GET(request: NextRequest) {
 
   const status = GORILLAWORKOUT_API_KEY ? 'available' : 'not_configured';
   // /dashboard/models library + Organization checkboxes render this array.
+  // This catalog stays the Dupoin model list. Provider failover lives on LLM Provider.
   return NextResponse.json({
     provider: {
       id: 'gorillaworkout',

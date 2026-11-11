@@ -140,7 +140,7 @@ test('labels ai-research and image-gen clearly and logs them from their routes',
   assert.match(chat, /stream_options:\s*\{\s*include_usage:\s*true\s*\}/);
   assert.match(chat, /resolveTokenUsage/);
   assert.match(chat, /taskId:\s*null/);
-  assert.match(chat, /provider:\s*'gorillaworkout'/);
+  assert.match(chat, /provider: options\.provider \|\| 'gorillaworkout'/);
   assert.match(chat, /accountSource:\s*'office'/);
   assert.doesNotMatch(chat, /INSERT INTO token_logs/);
 
@@ -148,7 +148,8 @@ test('labels ai-research and image-gen clearly and logs them from their routes',
   assert.match(image, /logTokenUsage/);
   assert.match(image, /parseImageGenerationUsage/);
   assert.match(image, /taskType:\s*'image-gen'/);
-  assert.match(image, /provider:\s*'gorillaworkout'/);
+  assert.match(image, /'gorillaworkout' \| 'openrouter' = 'gorillaworkout'/);
+  assert.match(image, /logImageGenerationUsage\(job\.ownerId, taskId, usedModel, payload, payload\.provider\)/);
   assert.match(image, /accountSource:\s*'office'/);
   assert.doesNotMatch(image, /INSERT INTO token_logs/);
   assert.match(image, /export function explainImageFailure/);

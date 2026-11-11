@@ -17,7 +17,10 @@ test('routes every generation through GorillaWorkout environment credentials', a
   const source = await import('node:fs/promises').then(fs => fs.readFile('src/lib/openai.ts', 'utf8'));
   assert.match(source, /GORILLAWORKOUT_API_BASE/);
   assert.match(source, /GORILLAWORKOUT_API_KEY/);
-  assert.match(source, /fetch\(`\$\{GORILLAWORKOUT_API_BASE\}\/chat\/completions`/);
+  assert.match(source, /postChat\(/);
+  const provider = await import('node:fs/promises').then(fs => fs.readFile('src/lib/llm-provider.ts', 'utf8'));
+  assert.match(provider, /resolveGorillaWorkoutApiBase/);
+  assert.match(provider, /\/chat\/completions/);
   assert.doesNotMatch(source, /OPENROUTER_API_KEY|callCodex|callClaude/);
 });
 

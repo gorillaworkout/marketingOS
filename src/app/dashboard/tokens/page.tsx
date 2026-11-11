@@ -39,6 +39,7 @@ const providerNames: Record<string, string> = {
   'claude-code': 'Claude Code',
   openrouter: 'OpenRouter',
   gorillaworkout: 'GorillaWorkout LLM API',
+  dupoin: 'LLM Dupoin',
 };
 
 export default function TokensPage() {

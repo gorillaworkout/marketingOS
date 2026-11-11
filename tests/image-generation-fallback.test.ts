@@ -145,7 +145,7 @@ test('logging contract uses the actual model that produced the image', async () 
 
   const route = read('src/app/api/generate-image/route.ts');
   assert.match(route, /generateWithAntigravityCapacityFallback/);
-  assert.match(route, /logImageGenerationUsage\(job\.ownerId, taskId, usedModel, payload\)/);
+  assert.match(route, /logImageGenerationUsage\(job\.ownerId, taskId, usedModel, payload, payload\.provider\)/);
   assert.match(route, /taskType: 'image-gen'/);
   assert.doesNotMatch(route, /logImageGenerationUsage\(job\.ownerId, taskId, safeModel/);
   assert.match(route, /explainImageFailure\(reason, safeModel\)/, 'errors name the model that was actually sent');

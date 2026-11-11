@@ -1,7 +1,7 @@
 import { parseGatewayCompletion } from '@/lib/gateway-response';
 import { IMAGE_PROMPT_SYSTEM } from '@/lib/dupoin-image-prompt';
 import { EVENT_PLAN_GROUNDED_BUDGET_RULES } from '@/lib/event-plan-budget';
-import { GORILLAWORKOUT_API_BASE, GORILLAWORKOUT_API_KEY } from '@/lib/gateway-config';
+import { isTerminalProviderError, postChat, explainLlmHttpError } from '@/lib/llm-provider';
 import { parseStoredSourceUrls } from '@/lib/knowledge-pin';
 import { logTokenUsage } from '@/lib/token-log';
 import { runWithModelFallback, type FallbackEvent } from '@/lib/model-fallback';
@@ -288,6 +288,7 @@ type CallApiResult = {
   content: string;
   model: string;
   usage: GatewayTokenUsage | null;
+  provider?: 'gorillaworkout' | 'openrouter';
   fallbackLabel: string | null;
   fallbackEvents: FallbackEvent[];
 };
@@ -305,6 +306,7 @@ async function callApi(
   const outcome = await runWithModelFallback({
     chosenModel,
     attempt: model => callApiOnce(messages, { ...options, model }),
+    shouldAbort: isTerminalProviderError,
     onFallback: async event => {
       const { recordModelFallback } = await import('@/lib/model-fallback-log');
       await recordModelFallback(feature, event, options.userId);
@@ -320,7 +322,7 @@ async function callApi(
 async function callApiOnce(
   messages: Array<{ role: string; content: string }>,
   options: CallApiOptions & { model: string },
-): Promise<{ content: string; model: string; usage: GatewayTokenUsage | null }> {
+): Promise<{ content: string; model: string; usage: GatewayTokenUsage | null; provider: 'gorillaworkout' | 'openrouter' }> {
   const model = options.model;
   getModelProvider(model);
 
@@ -334,30 +336,26 @@ async function callApiOnce(
     body.response_format = options.responseFormat;
   }
 
-  if (!GORILLAWORKOUT_API_KEY) throw new Error('GORILLAWORKOUT_API_KEY is not configured.');
-
-  const response = await fetch(`${GORILLAWORKOUT_API_BASE}/chat/completions`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${GORILLAWORKOUT_API_KEY}`,
-      'HTTP-Referer': 'https://marketingos.local',
-      'X-Title': 'MarketingOS',
-    },
-    body: JSON.stringify(body),
-    signal: AbortSignal.timeout(LLM_REQUEST_TIMEOUT_MS),
+  // Default provider remains GORILLAWORKOUT_API_BASE / GORILLAWORKOUT_API_KEY via the LLM provider resolver.
+  const exchange = await postChat({
+    model,
+    body,
+    referer: 'https://marketingos.local',
+    title: 'MarketingOS',
+    timeoutMs: LLM_REQUEST_TIMEOUT_MS,
   });
+  const response = exchange.response;
 
   if (!response.ok) {
     const errText = await response.text();
-    throw new Error(`API error ${response.status}: ${errText}`);
+    throw new Error(explainLlmHttpError(exchange.provider, response.status, errText, 'chat'));
   }
 
   const responseBody = await response.text();
   const contentType = response.headers.get('content-type');
   const content = parseGatewayCompletion(responseBody, contentType);
   if (!content.trim()) throw new Error(`Empty response from ${model}`);
-  return { content, model, usage: parseGatewayResponseUsage(responseBody, contentType) };
+  return { content, model, usage: parseGatewayResponseUsage(responseBody, contentType), provider: exchange.provider };
 }
 
 /**
@@ -470,7 +468,7 @@ export async function generateContent(
     userId,
     taskId,
     model: result.model,
-    provider: getModelProvider(result.model),
+    provider: result.provider || getModelProvider(result.model),
     accountSource: 'office',
     taskType: options?.taskType || '',
     inputTokens,
@@ -612,7 +610,7 @@ Output the same JSON structure as the draft, but improved. Output valid JSON onl
     userId,
     taskId,
     model: totalUsage.model,
-    provider: getModelProvider(totalUsage.model),
+    provider: [draftResult, reviewResult, refineResult].some(result => result.provider === 'openrouter') ? 'openrouter' : 'gorillaworkout',
     accountSource: 'office',
     taskType: module || '',
     inputTokens: totalUsage.inputTokens,

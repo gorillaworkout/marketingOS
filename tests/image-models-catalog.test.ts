@@ -48,8 +48,11 @@ assert.deepEqual(stale.models.map(model => model.id), ids);
 assert.equal(stale.defaultModel, DEFAULT_IMAGE_MODEL);
 
 const generateImage = readFileSync('src/app/api/generate-image/route.ts', 'utf8');
-assert.match(generateImage, /GORILLAWORKOUT_API_BASE/);
+const llmProvider = readFileSync('src/lib/llm-provider.ts', 'utf8');
+assert.match(generateImage, /postImage/);
 assert.match(generateImage, /\/images\/generations/);
+assert.match(llmProvider, /resolveGorillaWorkoutApiBase/);
+assert.match(llmProvider, /images\/generations/);
 assert.match(generateImage, /resolveImageModel/);
 assert.match(generateImage, /generateWithAntigravityCapacityFallback/);
 assert.doesNotMatch(generateImage, /gpt-5\.4-image|ag\/nanobanana/);

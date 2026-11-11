@@ -1,6 +1,7 @@
 /**
  * Local embedding system. Knowledge similarity stays inside MarketingOS and
- * does not open a second external model-provider path.
+ * does not open a second external model-provider path. LLM provider failover
+ * must not call OpenRouter embeddings or write those vectors into this index.
  *
  * Vectors are a hashed bag of words (1024 buckets) with stopwords, light IDF,
  * and L2 normalisation. Older 256-dimension rows stay readable: cosine

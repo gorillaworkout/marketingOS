@@ -66,7 +66,7 @@ import {
   buildResearchSsePayload,
   parsePinnedSourceUrls,
 } from '@/lib/ai-research-inspector';
-import { GORILLAWORKOUT_API_BASE, GORILLAWORKOUT_API_KEY } from '@/lib/gateway-config';
+import { explainLlmHttpError, isLlmTimeoutError, isTerminalProviderError, postChat, type UsageProvider } from '@/lib/llm-provider';
 import { AVAILABLE_MODELS, fetchKnowledgeContext } from '@/lib/openai';
 import { AI_RESEARCH_KNOWLEDGE_MIN_SCORE, AI_RESEARCH_RETRIEVAL_TASK_TYPES } from '@/lib/knowledge-task-types';
 import {
@@ -87,7 +87,6 @@ import { persistCompletedResearchAnswer } from '@/lib/knowledge-persist';
 import {
   isAbortError,
   linkAbortSignal,
-  mergeAbortSignals,
   throwIfResearchAborted,
 } from '@/lib/ai-research-abort';
 import { logTokenUsage } from '@/lib/token-log';
@@ -114,9 +113,9 @@ const STREAM_FIRST_TOKEN_TIMEOUT_MS = 60_000;
 const STREAM_IDLE_TIMEOUT_MS = 60_000;
 
 type StreamOnceResult =
-  | { ok: true; content: string; usage: GatewayTokenUsage | null }
+  | { ok: true; content: string; usage: GatewayTokenUsage | null; provider: UsageProvider }
   | { ok: false; aborted: true; content: string }
-  | { ok: false; aborted?: false; error: string; content: string; usage: GatewayTokenUsage | null };
+  | { ok: false; aborted?: false; error: string; content: string; usage: GatewayTokenUsage | null; provider: UsageProvider };
 
 /**
  * One streaming attempt against one model. Forwards tokens to the client and
@@ -135,54 +134,58 @@ async function streamChatCompletionOnce(options: {
   const attemptAbort = linkAbortSignal(options.signal);
   let timedOut: string | null = null;
   let timer: ReturnType<typeof setTimeout> | null = null;
+  let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
   const arm = (ms: number, reason: string) => {
     if (timer) clearTimeout(timer);
     timer = setTimeout(() => {
       timedOut = reason;
       attemptAbort.abort();
+      void reader?.cancel().catch(() => {});
     }, ms);
   };
   const userAborted = () => options.signal.aborted;
   let fullContent = '';
   let reportedUsage: GatewayTokenUsage | null = null;
-  const fail = (error: string): StreamOnceResult => ({ ok: false, error, content: fullContent, usage: reportedUsage });
+  let provider: UsageProvider = 'gorillaworkout';
+  const fail = (error: string): StreamOnceResult => ({ ok: false, error, content: fullContent, usage: reportedUsage, provider });
 
   try {
-    arm(STREAM_FIRST_TOKEN_TIMEOUT_MS, `No response from ${options.model} within ${STREAM_FIRST_TOKEN_TIMEOUT_MS / 1000}s`);
     let response: Response;
     try {
-      response = await fetch(`${GORILLAWORKOUT_API_BASE}/chat/completions`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${GORILLAWORKOUT_API_KEY}`,
-          'HTTP-Referer': 'https://marketing-aws.gorillaworkout.id',
-          'X-Title': 'Dupoin AI Research',
-        },
-        body: JSON.stringify({
-          model: options.model,
+      // Provider failover happens before any token is emitted. A stall after
+      // HTTP 200 stays on the existing model fallback and is not retried.
+      const exchange = await postChat({
+        model: options.model,
+        body: {
           messages: options.apiMessages,
           stream: true,
           stream_options: { include_usage: true },
           temperature: options.temperature,
           max_tokens: options.maxTokens ?? AI_RESEARCH_MAX_OUTPUT_TOKENS,
-        }),
-        signal: attemptAbort.signal,
+        },
+        referer: 'https://marketing-aws.gorillaworkout.id',
+        title: 'Dupoin AI Research',
+        timeoutMs: STREAM_FIRST_TOKEN_TIMEOUT_MS,
+        userSignal: options.signal,
       });
+      response = exchange.response;
+      provider = exchange.provider;
     } catch (error) {
       if (userAborted()) return { ok: false, aborted: true, content: '' };
       if (timedOut) return fail(timedOut);
+      if (isLlmTimeoutError(error)) return fail(`No response from ${options.model} within ${STREAM_FIRST_TOKEN_TIMEOUT_MS / 1000}s`);
       return fail(error instanceof Error ? error.message : 'Stream request failed');
     }
+    arm(STREAM_FIRST_TOKEN_TIMEOUT_MS, `No response from ${options.model} within ${STREAM_FIRST_TOKEN_TIMEOUT_MS / 1000}s`);
 
     if (userAborted()) return { ok: false, aborted: true, content: '' };
 
     if (!response.ok) {
       const errText = await response.text().catch(() => '');
-      return fail(`API error ${response.status}: ${errText}`);
+      return fail(explainLlmHttpError(provider, response.status, errText, 'chat'));
     }
 
-    const reader = response.body?.getReader();
+    reader = response.body?.getReader();
     if (!reader) return fail('No stream body');
 
     const decoder = new TextDecoder();
@@ -233,7 +236,7 @@ async function streamChatCompletionOnce(options: {
     }
 
     if (!fullContent.trim()) return fail(`Empty response from ${options.model}`);
-    return { ok: true, content: fullContent, usage: reportedUsage };
+    return { ok: true, content: fullContent, usage: reportedUsage, provider };
   } finally {
     if (timer) clearTimeout(timer);
   }
@@ -254,17 +257,22 @@ async function streamChatCompletion(options: {
   signal: AbortSignal;
   userId: string;
 }): Promise<
-  | { ok: true; content: string; usage: GatewayTokenUsage | null; model: string; fallbackLabel: string | null }
+  | { ok: true; content: string; usage: GatewayTokenUsage | null; model: string; fallbackLabel: string | null; provider: UsageProvider }
   | { ok: false; aborted?: boolean }
 > {
+  let provider: UsageProvider = 'gorillaworkout';
   const outcome = await streamWithModelFallback<GatewayMessage, GatewayTokenUsage>({
     chosenModel: options.model,
     messages: options.apiMessages,
-    attempt: (model, apiMessages) => streamChatCompletionOnce({
-      ...options,
-      model,
-      apiMessages: apiMessages as GatewayMessage[],
-    }),
+    attempt: async (model, apiMessages) => {
+      const result = await streamChatCompletionOnce({
+        ...options,
+        model,
+        apiMessages: apiMessages as GatewayMessage[],
+      });
+      if ('provider' in result && result.provider) provider = result.provider;
+      return result;
+    },
     mergeUsage: mergeGatewayUsage,
     onSwitch: event => {
       options.emit({
@@ -275,6 +283,7 @@ async function streamChatCompletion(options: {
       });
     },
     onFallback: modelFallbackLogger('ai-research', options.userId),
+    shouldStop: error => isTerminalProviderError(error),
   });
   if (outcome.ok) {
     return {
@@ -283,6 +292,7 @@ async function streamChatCompletion(options: {
       usage: outcome.usage,
       model: outcome.finalModel,
       fallbackLabel: outcome.label,
+      provider,
     };
   }
   if (outcome.aborted) return { ok: false, aborted: true };
@@ -294,17 +304,10 @@ async function requestDeepResearchPlan(
   model: string,
   query: string,
   signal: AbortSignal,
-): Promise<{ text: string; usage: GatewayTokenUsage | null }> {
-  const response = await fetch(`${GORILLAWORKOUT_API_BASE}/chat/completions`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${GORILLAWORKOUT_API_KEY}`,
-      'HTTP-Referer': 'https://marketing-aws.gorillaworkout.id',
-      'X-Title': 'Dupoin AI Research',
-    },
-    body: JSON.stringify({
-      model,
+): Promise<{ text: string; usage: GatewayTokenUsage | null; provider: UsageProvider }> {
+  const exchange = await postChat({
+    model,
+    body: {
       messages: [
         { role: 'system', content: AI_RESEARCH_DEEP_PLAN_PROMPT },
         { role: 'user', content: query.slice(0, 2_000) },
@@ -312,14 +315,19 @@ async function requestDeepResearchPlan(
       stream: false,
       temperature: 0.2,
       max_tokens: AI_RESEARCH_DEEP_PLAN_MAX_TOKENS,
-    }),
-    signal: mergeAbortSignals(AbortSignal.timeout(AI_RESEARCH_DEEP_PLAN_TIMEOUT_MS), signal),
+    },
+    referer: 'https://marketing-aws.gorillaworkout.id',
+    title: 'Dupoin AI Research',
+    timeoutMs: AI_RESEARCH_DEEP_PLAN_TIMEOUT_MS,
+    userSignal: signal,
   });
+  const response = exchange.response;
   const body = await response.text();
   if (!response.ok) throw new Error(`Deep plan failed (${response.status})`);
   return {
     text: parseGatewayCompletion(body, response.headers.get('content-type')),
     usage: parseGatewayResponseUsage(body, response.headers.get('content-type')),
+    provider: exchange.provider,
   };
 }
 
@@ -442,6 +450,7 @@ async function logAiResearchUsage(options: {
   inputText: string;
   outputText: string;
   reported: GatewayTokenUsage | null;
+  provider?: UsageProvider;
 }) {
   if (!options.outputText.trim()) return;
   const usage = resolveTokenUsage({
@@ -453,7 +462,7 @@ async function logAiResearchUsage(options: {
     userId: options.userId,
     taskId: null,
     model: options.model,
-    provider: 'gorillaworkout',
+    provider: options.provider || 'gorillaworkout',
     accountSource: 'office',
     taskType: 'ai-research',
     inputTokens: usage.inputTokens,
@@ -610,10 +619,12 @@ export async function POST(request: NextRequest) {
           const skipped = urlOnly ? 'url-only' : !shouldResearchQuery(query) ? 'not-needed' : null;
           let plan = fallbackDeepResearchPlan(query);
           let planUsage: GatewayTokenUsage | null = null;
+          let planProvider: UsageProvider = 'gorillaworkout';
           if (!skipped) {
             try {
               const planned = await requestDeepResearchPlan(model, query, signal);
               planUsage = planned.usage;
+              planProvider = planned.provider;
               const parsedPlan = parseDeepResearchPlan(planned.text, query);
               if (parsedPlan) plan = parsedPlan;
             } catch (error) {
@@ -786,6 +797,7 @@ export async function POST(request: NextRequest) {
             inputText: gatewayMessagesText(apiMessages),
             outputText: fullContent,
             reported: mergeGatewayUsage(planUsage, streamed.usage),
+            provider: planProvider === 'openrouter' || streamed.provider === 'openrouter' ? 'openrouter' : 'gorillaworkout',
           });
           session.complete({ type: 'done', conversationId: convId, model, mode: 'deep', answeredBy: streamed.model, fallbackLabel: streamed.fallbackLabel });
           await memoryWrite;
@@ -909,6 +921,7 @@ export async function POST(request: NextRequest) {
           inputText: gatewayMessagesText(apiMessages),
           outputText: streamed.content,
           reported: streamed.usage,
+          provider: streamed.provider,
         });
 
         session.complete({ type: 'done', conversationId: convId, model, answeredBy: streamed.model, fallbackLabel: streamed.fallbackLabel });

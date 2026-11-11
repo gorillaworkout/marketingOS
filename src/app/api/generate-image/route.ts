@@ -14,7 +14,7 @@ import {
   parseImageApiErrorStatus,
 } from '@/lib/image-generation-fallback';
 import { DEFAULT_IMAGE_MODEL, imageModelLabel, resolveImageModel } from '@/lib/image-models';
-import { GORILLAWORKOUT_API_BASE, GORILLAWORKOUT_API_KEY } from '@/lib/gateway-config';
+import { postImage } from '@/lib/llm-provider';
 import { logTokenUsage } from '@/lib/token-log';
 import { parseImageGenerationUsage } from '@/lib/token-usage';
 import fs from 'fs';
@@ -101,10 +101,6 @@ async function runImageJob(job: ImageJob, prompt: string, brief: string, type: s
       status: 'generating', progress: 30, message: `🤖 Generating image with ${imageModelLabel(safeModel)} (30-90s)...`,
     });
 
-    if (!GORILLAWORKOUT_API_KEY) {
-      throw new Error('GORILLAWORKOUT_API_KEY is not configured.');
-    }
-
     const generationSpec = getImageGenerationSpec(aspectRatio);
     const swipeLeft = type === 'social-post' && includeSwipeLeft;
     const academy = type === 'social-post' && dupoinAcademy;
@@ -112,7 +108,7 @@ async function runImageJob(job: ImageJob, prompt: string, brief: string, type: s
 
     const { payload, usedModel, fallbackFrom, fallbackMessage } = await generateWithAntigravityCapacityFallback(
       safeModel,
-      (attemptModel) => requestGatewayImage(attemptModel, gatewayPrompt, generationSpec),
+      (attemptModel) => requestGatewayImage(attemptModel, gatewayPrompt, generationSpec, aspectRatio),
       {
         onRetry: (fallbackModel, fromModel) => {
           console.warn(`[generate-image] ${fromModel} capacity/quota exhausted; retrying once with ${fallbackModel}`);
@@ -175,7 +171,7 @@ async function runImageJob(job: ImageJob, prompt: string, brief: string, type: s
       result,
     });
     try {
-      await logImageGenerationUsage(job.ownerId, taskId, usedModel, payload);
+      await logImageGenerationUsage(job.ownerId, taskId, usedModel, payload, payload.provider);
     } catch (error) {
       console.error('[generate-image] Failed to log token usage:', error);
     }
@@ -202,36 +198,23 @@ type GatewayImagePayload = {
   data?: Array<{ b64_json?: string; url?: string }>;
   usage?: unknown;
   cost?: unknown;
+  provider?: 'gorillaworkout' | 'openrouter';
 };
 
 async function requestGatewayImage(
   model: string,
   gatewayPrompt: string,
   generationSpec: { size: string },
+  aspectRatio: ImageAspectRatio,
 ): Promise<GatewayImagePayload> {
-  const response = await fetch(`${GORILLAWORKOUT_API_BASE}/images/generations`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${GORILLAWORKOUT_API_KEY}`,
-      'HTTP-Referer': 'https://marketingos.local',
-      'X-Title': 'MarketingOS',
-    },
-    body: JSON.stringify({
-      model,
-      prompt: gatewayPrompt,
-      n: 1,
-      size: generationSpec.size,
-    }),
-    signal: AbortSignal.timeout(240_000),
+  // Dupoin keeps POST /images/generations. OpenRouter uses POST /api/v1/images.
+  return postImage({
+    model,
+    prompt: gatewayPrompt,
+    size: generationSpec.size,
+    aspectRatio,
+    timeoutMs: 240_000,
   });
-
-  if (!response.ok) {
-    const errText = await response.text();
-    throw new Error(`Image API error ${response.status}: ${errText.slice(0, 500)}`);
-  }
-
-  return await response.json() as GatewayImagePayload;
 }
 
 /**
@@ -245,6 +228,8 @@ async function requestGatewayImage(
  * `generateWithAntigravityCapacityFallback`.
  */
 export function explainImageFailure(reason: string, model: string): string {
+  if (reason.includes('image generation needs OpenRouter credits')) return 'image generation needs OpenRouter credits. Add credits in OpenRouter, then try again.';
+  if (reason.includes('OpenRouter free-model rate limit')) return reason;
   const status = parseImageApiErrorStatus(reason);
   const lower = reason.toLowerCase();
   const reset = /reset after ([^)"]+)/i.exec(reason)?.[1]?.trim();
@@ -351,13 +336,14 @@ async function logImageGenerationUsage(
   taskId: string | null,
   model: string,
   payload: unknown,
+  provider: 'gorillaworkout' | 'openrouter' = 'gorillaworkout',
 ) {
   const usage = parseImageGenerationUsage(payload);
   await logTokenUsage({
     userId,
     taskId,
     model,
-    provider: 'gorillaworkout',
+    provider,
     accountSource: 'office',
     taskType: 'image-gen',
     inputTokens: usage.inputTokens,

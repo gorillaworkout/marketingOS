@@ -235,7 +235,8 @@ test('labels are English and name the final and failed models', () => {
 test('every gateway path is wired through the fallback', () => {
   const openai = read('src/lib/openai.ts');
   assert.match(openai, /runWithModelFallback\(/);
-  assert.match(openai, /AbortSignal\.timeout\(LLM_REQUEST_TIMEOUT_MS\)/);
+  assert.match(openai, /timeoutMs: LLM_REQUEST_TIMEOUT_MS/);
+  assert.match(read('src/lib/llm-provider.ts'), /AbortSignal\.timeout\(input\.timeoutMs\)/);
   const chat = read('src/app/api/ai-research/chat/route.ts');
   assert.match(chat, /streamWithModelFallback</);
   assert.match(chat, /type: 'model-fallback'/);

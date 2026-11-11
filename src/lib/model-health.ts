@@ -205,6 +205,8 @@ function result(
 /**
  * Cheap non-streaming chat/completions ping against the GorillaWorkout gateway.
  * Uses GORILLAWORKOUT_API_BASE / GORILLAWORKOUT_API_KEY. Never returns API keys.
+ * This probe stays on LLM Dupoin on purpose: it answers "is this gateway model up?"
+ * Production chat and images go through src/lib/llm-provider.ts.
  */
 export async function probeGatewayModel(
   modelId: string,

@@ -121,7 +121,8 @@ test('gateway defaults to llmdupoin and is overridable by env', () => {
   assert.match(gatewayConfig, /process\.env\.GORILLAWORKOUT_API_BASE/);
   assert.match(gatewayConfig, /process\.env\.GORILLAWORKOUT_API_KEY/);
   assert.doesNotMatch(gatewayConfig, /llm\.gorillaworkout\.id/);
-  assert.match(openai, /from '@\/lib\/gateway-config'/);
+  assert.match(read('src/lib/llm-provider.ts'), /from '@\/lib\/gateway-config'/);
+  assert.match(openai, /postChat\(/);
   assert.doesNotMatch(openai, /https:\/\/llm\.gorillaworkout\.id/);
   assert.doesNotMatch(modelsRoute, /https:\/\/llm\.gorillaworkout\.id/);
   assert.match(envExample, /llmdupoin\.gorillaworkout\.id\/v1/);
