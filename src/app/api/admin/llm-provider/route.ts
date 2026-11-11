@@ -11,6 +11,7 @@ import {
   assertMapping,
   getLlmSettings,
   listLlmAudit,
+  listModelHealth,
   saveLlmProviderSettings,
 } from '@/lib/llm-provider-store';
 
@@ -43,7 +44,9 @@ export async function GET(request: NextRequest) {
     defaultChatModel: settings.defaultChatModel,
     defaultImageModel: settings.defaultImageModel,
     defaultEmbeddingModel: settings.defaultEmbeddingModel,
+    chatFallbacks: settings.chatFallbacks,
     mappings: settings.mappings,
+    health: await listModelHealth(),
     status: settings.status,
     audit,
     notes: { embeddings: EMBEDDINGS_FAILOVER_NOTE, images: IMAGES_FAILOVER_NOTE, freeModels: FREE_MODEL_LIMIT_NOTE },
@@ -62,6 +65,7 @@ export async function PUT(request: NextRequest) {
     defaultEmbeddingModel?: unknown;
     openrouterKey?: unknown;
     mappings?: unknown;
+    chatFallbacks?: unknown;
   } | null;
   if (!body) return NextResponse.json({ error: 'Invalid JSON.' }, { status: 400 });
 
@@ -84,6 +88,19 @@ export async function PUT(request: NextRequest) {
     return NextResponse.json({ error: 'OpenRouter API key must be between 8 and 500 characters.' }, { status: 400 });
   }
 
+  const current = await getLlmSettings();
+  let chatFallbacks = current.chatFallbacks;
+  if (Array.isArray(body.chatFallbacks)) {
+    if (body.chatFallbacks.length > 8) return NextResponse.json({ error: 'Use at most 8 OpenRouter chat fallbacks.' }, { status: 400 });
+    const parsed: string[] = [];
+    for (const item of body.chatFallbacks) {
+      const id = modelId(item);
+      if (!id) return NextResponse.json({ error: 'Each fallback model id must be a valid model id.' }, { status: 400 });
+      if (!parsed.includes(id)) parsed.push(id);
+    }
+    chatFallbacks = parsed;
+  }
+
   try {
     const mappings = body.mappings.map(row => assertMapping({
       dupoinModel: String((row as { dupoinModel?: unknown }).dupoinModel || ''),
@@ -102,6 +119,7 @@ export async function PUT(request: NextRequest) {
       defaultChatModel,
       defaultImageModel,
       defaultEmbeddingModel,
+      chatFallbacks,
       openrouterKey,
       mappings,
       actorId: user.id,

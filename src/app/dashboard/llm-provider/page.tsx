@@ -2,9 +2,20 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { Button, FormField, LoadingState, PageHeader, PageStack, Panel, SectionHeader, StatusBadge, TextInput } from '@/components/ui/dashboard';
-import type { LlmMode } from '@/lib/llm-provider-defaults';
+import { OPENROUTER_FREE_CHAT_MODELS, OPENROUTER_FREE_EMBEDDING_MODELS, type LlmMode } from '@/lib/llm-provider-defaults';
 
 type Mapping = { dupoinModel: string; openrouterModel: string; kind: 'chat' | 'image' | 'embedding' };
+type HealthStatus = 'active' | 'rate_limited' | 'blocked' | 'credits' | 'error';
+type Health = {
+  provider: 'dupoin' | 'openrouter';
+  model: string;
+  kind: Mapping['kind'];
+  status: HealthStatus;
+  httpStatus: number | null;
+  latencyMs: number;
+  message: string;
+  testedAt: string;
+};
 type Audit = { id: string; actorId: string | null; action: string; detail: string; createdAt: string };
 type View = {
   mode: LlmMode;
@@ -14,7 +25,9 @@ type View = {
   defaultChatModel: string;
   defaultImageModel: string;
   defaultEmbeddingModel: string;
+  chatFallbacks: string[];
   mappings: Mapping[];
+  health: Health[];
   status: {
     activeProvider: 'dupoin' | 'openrouter';
     lastFailoverAt: string | null;
@@ -33,6 +46,40 @@ const MODES: Array<{ id: LlmMode; label: string; detail: string }> = [
   { id: 'auto', label: 'Automatic', detail: 'Try LLM Dupoin first. If it times out or returns a network error, 429, or 5xx, use OpenRouter.' },
 ];
 
+function healthTone(status: HealthStatus): 'success' | 'warning' | 'danger' {
+  if (status === 'active') return 'success';
+  if (status === 'rate_limited' || status === 'credits') return 'warning';
+  return 'danger';
+}
+
+function rowTargets(mapping: Mapping) {
+  return [
+    mapping.dupoinModel.trim() ? { provider: 'dupoin' as const, model: mapping.dupoinModel.trim(), kind: mapping.kind } : null,
+    mapping.openrouterModel.trim() ? { provider: 'openrouter' as const, model: mapping.openrouterModel.trim(), kind: mapping.kind } : null,
+  ].filter((target): target is { provider: 'dupoin' | 'openrouter'; model: string; kind: Mapping['kind'] } => target !== null);
+}
+
+function ModelHealthBadge({ health, provider, model, kind }: { health: Health[]; provider: 'dupoin' | 'openrouter'; model: string; kind: Mapping['kind'] }) {
+  const row = health.find(item => item.provider === provider && item.model === model && item.kind === kind);
+  const name = provider === 'dupoin' ? 'Dupoin' : 'OpenRouter';
+  if (!model.trim()) return null;
+  if (!row) return <span className="text-[11px] text-[var(--mos-text-faint)]">{name} not tested</span>;
+  return (
+    <span className="flex flex-wrap items-center gap-2" title={row.message}>
+      <StatusBadge tone={healthTone(row.status)}>{name} {healthLabel(row.status)}{row.status === 'active' && row.latencyMs ? ` ${row.latencyMs}ms` : ''}</StatusBadge>
+      <span className="text-[11px] text-[var(--mos-text-faint)]">{formatWhen(row.testedAt)}{row.status === 'rate_limited' ? ' · try again later' : ''}</span>
+    </span>
+  );
+}
+
+function healthLabel(status: HealthStatus): string {
+  if (status === 'active') return 'Active';
+  if (status === 'rate_limited') return 'Rate-limited';
+  if (status === 'blocked') return 'Blocked/Unavailable';
+  if (status === 'credits') return 'Needs credits';
+  return 'Error';
+}
+
 function formatWhen(value: string | null): string {
   if (!value) return 'Never';
   const date = new Date(value);
@@ -49,6 +96,9 @@ export default function LlmProviderPage() {
   const [defaultImageModel, setDefaultImageModel] = useState('');
   const [defaultEmbeddingModel, setDefaultEmbeddingModel] = useState('');
   const [mappings, setMappings] = useState<Mapping[]>([]);
+  const [chatFallbacks, setChatFallbacks] = useState('');
+  const [health, setHealth] = useState<Health[]>([]);
+  const [includeImages, setIncludeImages] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [saving, setSaving] = useState(false);
@@ -69,6 +119,8 @@ export default function LlmProviderPage() {
     setDefaultImageModel(data.defaultImageModel);
     setDefaultEmbeddingModel(data.defaultEmbeddingModel);
     setMappings(data.mappings || []);
+    setChatFallbacks((data.chatFallbacks || []).join('\n'));
+    setHealth(data.health || []);
     setKey('');
     setClearKey(false);
   }, []);
@@ -91,6 +143,8 @@ export default function LlmProviderPage() {
         setDefaultImageModel(data.defaultImageModel);
         setDefaultEmbeddingModel(data.defaultEmbeddingModel);
         setMappings(data.mappings || []);
+        setChatFallbacks((data.chatFallbacks || []).join('\n'));
+        setHealth(data.health || []);
         setKey('');
         setClearKey(false);
       })
@@ -113,6 +167,7 @@ export default function LlmProviderPage() {
           defaultChatModel,
           defaultImageModel,
           defaultEmbeddingModel,
+          chatFallbacks: chatFallbacks.split('\n').map(line => line.trim()).filter(Boolean),
           mappings,
           ...(clearKey ? { openrouterKey: null } : key.trim() ? { openrouterKey: key.trim() } : {}),
         }),
@@ -156,6 +211,44 @@ export default function LlmProviderPage() {
     }
   }
 
+  function rememberHealth(results: Health[]) {
+    setHealth(current => {
+      const next = [...current];
+      for (const result of results) {
+        const index = next.findIndex(row => row.provider === result.provider && row.model === result.model && row.kind === result.kind);
+        if (index >= 0) next[index] = result;
+        else next.unshift(result);
+      }
+      return next;
+    });
+  }
+
+  async function probe(body: Record<string, unknown>, token: string) {
+    setTesting(token);
+    setNotice('');
+    setError('');
+    try {
+      const response = await fetch('/api/admin/llm-provider/probe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        setError(data.error || 'Model test failed.');
+        return;
+      }
+      const results = Array.isArray(data.results) ? data.results as Health[] : [];
+      rememberHealth(results);
+      const limited = results.filter(result => result.status === 'rate_limited').length;
+      setNotice(`Tested ${results.length} model${results.length === 1 ? '' : 's'}${limited ? `. ${limited} rate-limited (try again later).` : '.'}`);
+    } catch {
+      setError('Model test failed.');
+    } finally {
+      setTesting('');
+    }
+  }
+
   if (!view && !error) return <LoadingState label="Loading LLM provider" />;
 
   const active = view?.status.activeProvider === 'openrouter' ? 'OpenRouter' : 'LLM Dupoin';
@@ -163,6 +256,10 @@ export default function LlmProviderPage() {
 
   return (
     <PageStack>
+      <datalist id="openrouter-models">
+        {OPENROUTER_FREE_CHAT_MODELS.map(id => <option key={id} value={id} />)}
+        {OPENROUTER_FREE_EMBEDDING_MODELS.map(id => <option key={`embed-${id}`} value={id} />)}
+      </datalist>
       <PageHeader
         eyebrow="Administration"
         title="LLM Provider"
@@ -216,13 +313,16 @@ export default function LlmProviderPage() {
             )}
           </div>
           <FormField label="Default chat model" hint="Used when a Dupoin model has no mapping">
-            <TextInput value={defaultChatModel} onChange={event => setDefaultChatModel(event.target.value)} />
+            <TextInput list="openrouter-models" value={defaultChatModel} onChange={event => setDefaultChatModel(event.target.value)} />
           </FormField>
           <FormField label="Default image model" hint="No free image model exists">
             <TextInput value={defaultImageModel} onChange={event => setDefaultImageModel(event.target.value)} />
           </FormField>
           <FormField label="Default embedding model" hint="Not written into the local index">
-            <TextInput value={defaultEmbeddingModel} onChange={event => setDefaultEmbeddingModel(event.target.value)} />
+            <TextInput list="openrouter-models" value={defaultEmbeddingModel} onChange={event => setDefaultEmbeddingModel(event.target.value)} />
+          </FormField>
+          <FormField label="Chat fallback order" hint="One OpenRouter id per line. Each is tried once on 429 or 404." className="md:col-span-2">
+            <textarea value={chatFallbacks} onChange={event => setChatFallbacks(event.target.value)} className="min-h-24 w-full rounded-[var(--mos-radius-control)] border border-[var(--mos-border)] bg-[var(--mos-surface)] px-3 py-2 text-sm" />
           </FormField>
         </div>
         </div>
@@ -262,7 +362,19 @@ export default function LlmProviderPage() {
       </Panel>
 
       <Panel>
-        <SectionHeader title="Model mapping" action={<Button size="sm" variant="ghost" onClick={() => setMappings(current => [...current, { dupoinModel: '', openrouterModel: '', kind: 'chat' }])}>Add row</Button>} />
+        <SectionHeader
+          title="Model mapping"
+          action={(
+            <div className="flex flex-wrap items-center gap-2">
+              <label className="flex items-center gap-2 text-xs text-[var(--mos-text-muted)]">
+                <input type="checkbox" checked={includeImages} onChange={event => setIncludeImages(event.target.checked)} />
+                Include image tests (uses credits)
+              </label>
+              <Button size="sm" disabled={testing !== ''} onClick={() => void probe({ all: true, includeImages }, 'all')}>{testing === 'all' ? 'Testing…' : 'Test all models'}</Button>
+              <Button size="sm" variant="ghost" onClick={() => setMappings(current => [...current, { dupoinModel: '', openrouterModel: '', kind: 'chat' }])}>Add row</Button>
+            </div>
+          )}
+        />
         <div className="mt-4">
         <p className="mb-3 text-xs leading-5 text-[var(--mos-text-muted)]">
           Default text rows use google/gemma-4-31b-it:free. Other verified free text models include nvidia/nemotron-3-ultra-550b-a55b:free and openrouter/free. Image rows stay on a paid model because OpenRouter lists no free image model. The embedding row is liquid/lfm-2.5-embedding-350m:free and is not written into the local index. Edit any row to a paid id after credits are added.
@@ -274,6 +386,7 @@ export default function LlmProviderPage() {
                 <th className="pb-2 pr-3 font-medium">Dupoin model</th>
                 <th className="pb-2 pr-3 font-medium">OpenRouter model</th>
                 <th className="pb-2 pr-3 font-medium">Kind</th>
+                <th className="pb-2 pr-3 font-medium">Status</th>
                 <th className="pb-2 font-medium" />
               </tr>
             </thead>
@@ -281,7 +394,7 @@ export default function LlmProviderPage() {
               {mappings.map((mapping, index) => (
                 <tr key={`${mapping.dupoinModel}-${index}`} className="border-t border-[var(--mos-border-subtle)]">
                   <td className="py-2 pr-3"><TextInput value={mapping.dupoinModel} onChange={event => setMappings(current => current.map((row, rowIndex) => rowIndex === index ? { ...row, dupoinModel: event.target.value } : row))} /></td>
-                  <td className="py-2 pr-3"><TextInput value={mapping.openrouterModel} onChange={event => setMappings(current => current.map((row, rowIndex) => rowIndex === index ? { ...row, openrouterModel: event.target.value } : row))} /></td>
+                  <td className="py-2 pr-3"><TextInput list="openrouter-models" value={mapping.openrouterModel} onChange={event => setMappings(current => current.map((row, rowIndex) => rowIndex === index ? { ...row, openrouterModel: event.target.value } : row))} /></td>
                   <td className="py-2 pr-3">
                     <select className="h-9 rounded-[var(--mos-radius-control)] border border-[var(--mos-border)] bg-[var(--mos-surface)] px-2 text-sm" value={mapping.kind} onChange={event => setMappings(current => current.map((row, rowIndex) => rowIndex === index ? { ...row, kind: event.target.value === 'image' ? 'image' : event.target.value === 'embedding' ? 'embedding' : 'chat' } : row))}>
                       <option value="chat">Chat</option>
@@ -289,7 +402,18 @@ export default function LlmProviderPage() {
                       <option value="embedding">Embedding</option>
                     </select>
                   </td>
-                  <td className="py-2"><Button size="sm" variant="ghost" onClick={() => setMappings(current => current.filter((_, rowIndex) => rowIndex !== index))}>Remove</Button></td>
+                  <td className="py-2 pr-3">
+                    <div className="flex flex-col gap-1">
+                      <ModelHealthBadge health={health} provider="dupoin" model={mapping.dupoinModel} kind={mapping.kind} />
+                      <ModelHealthBadge health={health} provider="openrouter" model={mapping.openrouterModel} kind={mapping.kind} />
+                    </div>
+                  </td>
+                  <td className="py-2">
+                    <div className="flex gap-1">
+                      <Button size="sm" disabled={testing !== ''} onClick={() => void probe({ targets: rowTargets(mapping) }, `row:${index}`)}>{testing === `row:${index}` ? 'Testing…' : 'Test'}</Button>
+                      <Button size="sm" variant="ghost" onClick={() => setMappings(current => current.filter((_, rowIndex) => rowIndex !== index))}>Remove</Button>
+                    </div>
+                  </td>
                 </tr>
               ))}
             </tbody>

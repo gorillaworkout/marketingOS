@@ -16,18 +16,25 @@ import {
 } from '../src/lib/llm-provider-defaults';
 import {
   IMAGE_CREDITS_MESSAGE,
+  MODEL_PROBE_GAP_MS,
+  MODEL_PROBE_MAX_TOKENS,
   OPENROUTER_RATE_LIMIT_MESSAGE,
   PROVIDER_CIRCUIT_OPEN_MS,
   PROVIDER_FAILURES_TO_OPEN,
   applyProviderResult,
   canManageLlmProvider,
   chooseProvider,
+  classifyModelProbe,
   failoverEmbeddingWriteAllowed,
+  healthProbePlan,
+  openRouterChatChain,
   imageRequestPath,
   isProviderFailoverStatus,
   mapModel,
   postChat,
   postImage,
+  probeModel,
+  probeModelsInOrder,
   readCircuit,
   resetLlmProviderForTests,
   resolveProviderTarget,
@@ -317,7 +324,7 @@ test('OpenRouter 429 is explained once and is not retried in a loop', async () =
     () => postChat({ model: 'ag/gemini-3-flash', body: {}, referer: 'https://marketingos.local', title: 'MarketingOS', timeoutMs: 1000 }),
     new RegExp(OPENROUTER_RATE_LIMIT_MESSAGE.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')),
   );
-  assert.equal(calls, 2);
+  assert.equal(calls, 4);
 
   calls = 0;
   resetLlmProviderForTests();
@@ -330,7 +337,76 @@ test('OpenRouter 429 is explained once and is not retried in a loop', async () =
     () => postChat({ model: 'ag/gemini-3-flash', body: {}, referer: 'https://marketingos.local', title: 'MarketingOS', timeoutMs: 1000 }),
     /OpenRouter free-model rate limit/,
   );
-  assert.equal(calls, 1);
+  assert.equal(calls, 3);
+});
+
+test('a 429 on the first OpenRouter chat model tries the next id once and stops when it answers', async () => {
+  const bodies: string[] = [];
+  setLlmSettingsReaderForTests(async () => settings({ mode: 'openrouter' }));
+  setLlmFetchForTests(async (_url, init) => {
+    bodies.push(String(init?.body));
+    return jsonResponse(bodies.length === 1 ? 429 : 200);
+  });
+  const exchange = await postChat({ model: 'ag/gemini-3-flash', body: { max_tokens: 100 }, referer: 'https://marketingos.local', title: 'MarketingOS', timeoutMs: 1000 });
+  assert.equal(bodies.length, 2);
+  assert.equal(JSON.parse(bodies[0]).model, 'google/gemma-4-31b-it:free');
+  assert.equal(JSON.parse(bodies[1]).model, 'nvidia/nemotron-3-ultra-550b-a55b:free');
+  assert.equal(exchange.upstreamModel, 'nvidia/nemotron-3-ultra-550b-a55b:free');
+  assert.deepEqual(openRouterChatChain('google/gemma-4-31b-it:free', ['google/gemma-4-31b-it:free', 'nvidia/nemotron-3-ultra-550b-a55b:free', 'openrouter/free']), [
+    'google/gemma-4-31b-it:free',
+    'nvidia/nemotron-3-ultra-550b-a55b:free',
+    'openrouter/free',
+  ]);
+});
+
+test('model probes use the real id, headroom for reasoning models, and skip images unless asked', async () => {
+  assert.equal(classifyModelProbe(429, 'rate limit'), 'rate_limited');
+  assert.equal(classifyModelProbe(404, 'no endpoints found'), 'blocked');
+  assert.equal(classifyModelProbe(402, 'Insufficient credits'), 'credits');
+  assert.equal(classifyModelProbe(200, ''), 'active');
+  const plan = healthProbePlan({
+    mappings: [
+      { dupoinModel: 'ag/gemini-3-flash', openrouterModel: 'google/gemma-4-31b-it:free', kind: 'chat' },
+      { dupoinModel: 'ag/gemini-3.1-flash-image', openrouterModel: 'google/gemini-3.1-flash-image', kind: 'image' },
+    ],
+    chatFallbacks: ['openrouter/free'],
+    defaultChatModel: 'google/gemma-4-31b-it:free',
+    defaultImageModel: 'google/gemini-3.1-flash-image',
+    defaultEmbeddingModel: 'liquid/lfm-2.5-embedding-350m:free',
+    includeImages: false,
+  });
+  assert.equal(plan.some(target => target.kind === 'image'), false);
+  assert.equal(plan.some(target => target.model === 'openrouter/free' && target.kind === 'chat'), true);
+
+  const bodies: Array<{ url: string; body: string }> = [];
+  setLlmSettingsReaderForTests(async () => settings({ mode: 'openrouter' }));
+  setLlmFetchForTests(async (url, init) => {
+    bodies.push({ url: String(url), body: String(init?.body) });
+    if (String(url).endsWith('/embeddings')) {
+      return jsonResponse(200, { data: [{ embedding: new Array(1024).fill(0.1) }] });
+    }
+    return jsonResponse(200, { choices: [{ message: { content: 'ok' } }] });
+  });
+  const chat = await probeModel({ provider: 'openrouter', model: 'nvidia/nemotron-3-ultra-550b-a55b:free', kind: 'chat' });
+  assert.equal(JSON.parse(bodies[0].body).model, 'nvidia/nemotron-3-ultra-550b-a55b:free');
+  assert.ok(JSON.parse(bodies[0].body).max_tokens >= MODEL_PROBE_MAX_TOKENS);
+  assert.equal(chat.status, 'active');
+  const embedding = await probeModel({ provider: 'openrouter', model: 'liquid/lfm-2.5-embedding-350m:free', kind: 'embedding' });
+  assert.match(bodies[1].url, /\/embeddings$/);
+  assert.equal(embedding.dimension, 1024);
+  assert.match(embedding.message, /Not stored/);
+  assert.equal(JSON.stringify(embedding).includes('sk-or-test-key'), false);
+
+  const gaps: number[] = [];
+  await probeModelsInOrder([
+    { provider: 'openrouter', model: 'google/gemma-4-31b-it:free', kind: 'chat' },
+    { provider: 'openrouter', model: 'openrouter/free', kind: 'chat' },
+  ], async ms => { gaps.push(ms); });
+  assert.deepEqual(gaps, [MODEL_PROBE_GAP_MS]);
+  assert.match(readFileSync('db/migrations/050_llm_model_health.sql', 'utf8'), /llm_model_health/);
+  assert.match(readFileSync('db/migrations/050_llm_model_health.sql', 'utf8'), /nvidia\/nemotron-3-ultra-550b-a55b:free/);
+  assert.match(readFileSync('src/app/api/admin/llm-provider/probe/route.ts', 'utf8'), /requireAdmin\(request\)/);
+  assert.match(readFileSync('src/app/dashboard/llm-provider/page.tsx', 'utf8'), /Test all models/);
 });
 
 test('an OpenRouter image key without credits fails with a clear message', async () => {

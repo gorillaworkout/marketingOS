@@ -162,7 +162,47 @@ export function explainLlmHttpError(provider: UsageProvider, status: number, bod
 
 export function isTerminalProviderError(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error || '');
-  return message.includes(OPENROUTER_RATE_LIMIT_MESSAGE) || message.includes(IMAGE_CREDITS_MESSAGE);
+  return message.includes(OPENROUTER_RATE_LIMIT_MESSAGE)
+    || message.includes(IMAGE_CREDITS_MESSAGE)
+    || message.includes('OpenRouter model unavailable');
+}
+
+export const MAX_OPENROUTER_CHAT_ATTEMPTS = 8;
+
+/** Mapped model first, then the admin list. Each id is tried at most once. */
+export function openRouterChatChain(primary: string, fallbacks: readonly string[]): string[] {
+  const seen = new Set<string>();
+  const chain: string[] = [];
+  for (const candidate of [primary, ...fallbacks]) {
+    const model = candidate.trim();
+    if (!model || seen.has(model)) continue;
+    seen.add(model);
+    chain.push(model);
+    if (chain.length >= MAX_OPENROUTER_CHAT_ATTEMPTS) break;
+  }
+  return chain;
+}
+
+export function shouldTryNextOpenRouterChat(status: number): boolean {
+  return status === 429 || status === 404;
+}
+
+export type ModelHealthStatus = 'active' | 'rate_limited' | 'blocked' | 'credits' | 'error';
+
+export function classifyModelProbe(httpStatus: number, body: string): ModelHealthStatus {
+  if (httpStatus >= 200 && httpStatus < 300) return 'active';
+  if (httpStatus === 429) return 'rate_limited';
+  if (httpStatus === 402 || /insufficient credit|payment required|needs credits|requires more credits/i.test(body)) return 'credits';
+  if (httpStatus === 404 || /guardrail|data policy|not a valid model|no endpoints found|model not found|unavailable/i.test(body)) return 'blocked';
+  return 'error';
+}
+
+export function healthStatusLabel(status: ModelHealthStatus): string {
+  if (status === 'active') return 'Active';
+  if (status === 'rate_limited') return 'Rate-limited';
+  if (status === 'blocked') return 'Blocked/Unavailable';
+  if (status === 'credits') return 'Needs credits';
+  return 'Error';
 }
 
 /**
@@ -312,6 +352,58 @@ export type ChatExchange = {
   failoverReason?: string;
 };
 
+async function completeOpenRouterChat(input: {
+  settings: LlmSettings;
+  body: Record<string, unknown>;
+  referer: string;
+  title: string;
+  timeoutMs: number;
+  userSignal?: AbortSignal;
+  requestedModel: string;
+  now: number;
+  failoverReason?: string;
+}): Promise<ChatExchange> {
+  const primary = resolveProviderTarget({ settings: input.settings, provider: 'openrouter', kind: 'chat', model: input.requestedModel });
+  const chain = openRouterChatChain(primary.model, input.settings.chatFallbacks || []);
+  if (!primary.apiKey) throw new Error(primary.missingKeyMessage);
+  let last: Attempt | null = null;
+  let lastModel = chain[0] || primary.model;
+  for (let index = 0; index < chain.length; index += 1) {
+    const model = chain[index];
+    lastModel = model;
+    const attempt = await attemptFetch({
+      url: `${primary.baseUrl}/chat/completions`,
+      apiKey: primary.apiKey,
+      missingKeyMessage: primary.missingKeyMessage,
+      body: { ...input.body, model },
+      referer: input.referer,
+      title: input.title,
+      timeoutMs: input.timeoutMs,
+      userSignal: input.userSignal,
+    });
+    last = attempt;
+    if (attempt.kind === 'http' && attempt.response.ok) {
+      return {
+        response: attempt.response,
+        provider: 'openrouter',
+        upstreamModel: model,
+        failoverReason: index > 0 ? `Answered by ${model} after ${chain.slice(0, index).join(', ')}` : input.failoverReason,
+      };
+    }
+    const status = attempt.kind === 'http' ? attempt.response.status : 0;
+    if (!(attempt.kind === 'http' && shouldTryNextOpenRouterChat(status) && index < chain.length - 1)) break;
+  }
+  if (last?.kind === 'http') {
+    await rejectTerminal('openrouter', last.response, 'chat');
+    if (last.response.status === 404) {
+      throw new Error(`OpenRouter model unavailable (HTTP 404). Tried ${chain.join(', ')} once each.`);
+    }
+    return { response: last.response, provider: 'openrouter', upstreamModel: lastModel, failoverReason: input.failoverReason };
+  }
+  if (last?.kind === 'thrown' || last?.kind === 'config') throw last.error;
+  throw new Error('OpenRouter chat failed');
+}
+
 export async function postChat(input: {
   model: string;
   body: Record<string, unknown>;
@@ -344,6 +436,10 @@ export async function postChat(input: {
     };
   };
 
+  if (first === 'openrouter') {
+    return completeOpenRouterChat({ settings, body: input.body, referer: input.referer, title: input.title, timeoutMs: input.timeoutMs, userSignal: input.userSignal, requestedModel: input.model, now });
+  }
+
   const started = run(first);
   const attempt = await started.attempt;
   const decision = applyProviderResult({
@@ -358,18 +454,18 @@ export async function postChat(input: {
 
   if (decision.failover) {
     const reason = await describeAttempt(attempt);
-    const fallback = run('openrouter');
-    const second = await fallback.attempt;
-    await remember({ provider: 'openrouter', reason, upstreamModel: fallback.target.model, now });
-    if (second.kind === 'http') {
-      await rejectTerminal('openrouter', second.response, 'chat');
-      return { response: second.response, provider: 'openrouter', upstreamModel: fallback.target.model, failoverReason: reason };
+    try {
+      const exchange = await completeOpenRouterChat({ settings, body: input.body, referer: input.referer, title: input.title, timeoutMs: input.timeoutMs, userSignal: input.userSignal, requestedModel: input.model, now, failoverReason: reason });
+      await remember({ provider: 'openrouter', reason, upstreamModel: exchange.upstreamModel, now });
+      return exchange;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'OpenRouter chat failed';
+      await remember({ provider: 'openrouter', reason: `${reason}; ${scrubSecrets(message)}`, upstreamModel: openRouterChatChain(resolveProviderTarget({ settings, provider: 'openrouter', kind: 'chat', model: input.model }).model, settings.chatFallbacks)[0] || '', now });
+      throw new Error(`LLM Dupoin failed (${reason}). ${message}`);
     }
-    throw new Error(`LLM Dupoin failed (${reason}). OpenRouter fallback failed: ${second.error.message}`);
   }
 
   if (attempt.kind === 'http') {
-    if (first === 'openrouter') await rejectTerminal('openrouter', attempt.response, 'chat');
     if (attempt.outcome === 'ok' && first === 'dupoin' && (before.consecutiveFailures > 0 || before.openUntil > now)) {
       writeCircuit({ consecutiveFailures: 0, openUntil: 0 });
       void markProviderRecovered('dupoin').catch(error => {
@@ -519,7 +615,7 @@ export async function testLlmProvider(input: {
       body: {
         messages: [{ role: 'user', content: 'Reply with the single word ok.' }],
         temperature: 0,
-        max_tokens: 8,
+        max_tokens: 100,
       },
       referer: 'https://marketing-aws.gorillaworkout.id',
       title: 'MarketingOS LLM Provider test',
@@ -535,4 +631,115 @@ export async function testLlmProvider(input: {
   } finally {
     settingsReader = previous;
   }
+}
+
+export const MODEL_PROBE_GAP_MS = 400;
+export const MODEL_PROBE_MAX_TOKENS = 100;
+
+export type ProbeTarget = { provider: ProviderChoice; model: string; kind: LlmKind };
+
+export type ModelProbeResult = ProbeTarget & {
+  status: ModelHealthStatus;
+  httpStatus: number | null;
+  latencyMs: number;
+  message: string;
+  dimension: number | null;
+};
+
+export function healthProbePlan(input: {
+  mappings: readonly LlmModelMapping[];
+  chatFallbacks: readonly string[];
+  defaultChatModel: string;
+  defaultImageModel: string;
+  defaultEmbeddingModel: string;
+  includeImages: boolean;
+}): ProbeTarget[] {
+  const targets: ProbeTarget[] = [];
+  const seen = new Set<string>();
+  const add = (provider: ProviderChoice, model: string, kind: LlmKind) => {
+    const id = model.trim();
+    if (!id) return;
+    if (!input.includeImages && kind === 'image') return;
+    const key = `${provider}:${kind}:${id}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    targets.push({ provider, model: id, kind });
+  };
+  for (const row of input.mappings) {
+    add('dupoin', row.dupoinModel, row.kind);
+    add('openrouter', row.openrouterModel, row.kind);
+  }
+  add('openrouter', input.defaultChatModel, 'chat');
+  add('openrouter', input.defaultEmbeddingModel, 'embedding');
+  for (const model of input.chatFallbacks) add('openrouter', model, 'chat');
+  if (input.includeImages) add('openrouter', input.defaultImageModel, 'image');
+  return targets;
+}
+
+function probeMessage(status: ModelHealthStatus, httpStatus: number | null, latencyMs: number, body: string, dimension: number | null): string {
+  if (status === 'active' && dimension != null) return `HTTP ${httpStatus} in ${latencyMs}ms. Dimension ${dimension}. Not stored.`;
+  if (status === 'active') return `HTTP ${httpStatus} in ${latencyMs}ms.`;
+  if (status === 'rate_limited') return 'HTTP 429. Try again later. This is a rate limit, not a broken model.';
+  if (status === 'credits') return IMAGE_CREDITS_MESSAGE;
+  if (status === 'blocked') return `Blocked or unavailable${httpStatus ? ` (HTTP ${httpStatus})` : ''}. ${scrubSecrets(body).slice(0, 160)}`;
+  return scrubSecrets(body || `HTTP ${httpStatus ?? 'error'}`).slice(0, 240);
+}
+
+export async function probeModel(target: ProbeTarget, timeoutMs = 30_000): Promise<ModelProbeResult> {
+  if (target.model.startsWith('local/')) {
+    return { ...target, status: 'active', httpStatus: null, latencyMs: 0, dimension: 1024, message: 'Local 1024-dimension hash. Not sent to a provider and not stored from OpenRouter.' };
+  }
+  const settings = await loadSettings(Date.now());
+  const model = target.model;
+  const baseUrl = target.provider === 'dupoin' ? resolveGorillaWorkoutApiBase() : OPENROUTER_API_BASE;
+  const apiKey = target.provider === 'dupoin' ? resolveGorillaWorkoutApiKey() : settings.openrouterKey;
+  if (!apiKey) {
+    const message = target.provider === 'dupoin'
+      ? 'GORILLAWORKOUT_API_KEY is not configured.'
+      : 'OpenRouter API key is not configured. Add it in LLM Provider settings.';
+    return { ...target, model, status: 'error', httpStatus: null, latencyMs: 0, dimension: null, message };
+  }
+  const started = Date.now();
+  const path = target.kind === 'embedding' ? '/embeddings' : target.kind === 'image' ? imageRequestPath(target.provider) : '/chat/completions';
+  const body = target.kind === 'embedding'
+    ? { model, input: 'ping' }
+    : target.kind === 'image'
+      ? (target.provider === 'openrouter' ? { model, prompt: 'A flat blue square', n: 1, aspect_ratio: '1:1' } : { model, prompt: 'A flat blue square', n: 1, size: '1024x1024' })
+      : { model, messages: [{ role: 'user', content: 'Reply with the single word ok.' }], temperature: 0, max_tokens: MODEL_PROBE_MAX_TOKENS };
+  try {
+    const response = await fetchImpl(`${baseUrl}${path}`, {
+      method: 'POST',
+      headers: providerHeaders(apiKey, 'https://marketing-aws.gorillaworkout.id', 'MarketingOS LLM Provider test'),
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    const text = await response.text();
+    const latencyMs = Date.now() - started;
+    let dimension: number | null = null;
+    if (target.kind === 'embedding' && response.ok) {
+      try {
+        const parsed = JSON.parse(text) as { data?: Array<{ embedding?: unknown }> };
+        const vector = parsed.data?.[0]?.embedding;
+        dimension = Array.isArray(vector) ? vector.length : null;
+      } catch {
+        dimension = null;
+      }
+    }
+    const status = classifyModelProbe(response.status, text);
+    return { ...target, model, status, httpStatus: response.status, latencyMs, dimension, message: probeMessage(status, response.status, latencyMs, text, dimension) };
+  } catch (error) {
+    return { ...target, model, status: 'error', httpStatus: null, latencyMs: Date.now() - started, dimension: null, message: scrubSecrets(error instanceof Error ? error.message : 'Probe failed') };
+  }
+}
+
+export async function probeModelsInOrder(
+  targets: readonly ProbeTarget[],
+  sleep: (ms: number) => Promise<void> = ms => new Promise(resolve => setTimeout(resolve, ms)),
+): Promise<ModelProbeResult[]> {
+  const results: ModelProbeResult[] = [];
+  for (let index = 0; index < targets.length; index += 1) {
+    if (index > 0) await sleep(MODEL_PROBE_GAP_MS);
+    results.push(await probeModel(targets[index]));
+  }
+  return results;
 }

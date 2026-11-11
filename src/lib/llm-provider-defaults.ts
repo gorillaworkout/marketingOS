@@ -13,6 +13,37 @@ export type UsageProvider = 'gorillaworkout' | 'openrouter';
 export const OPENROUTER_API_BASE = 'https://openrouter.ai/api/v1';
 /** Verified on https://openrouter.ai/api/v1/models. No paid id is the default. */
 export const DEFAULT_OPENROUTER_CHAT_MODEL = 'google/gemma-4-31b-it:free';
+/** Tried in order when the mapped chat model returns 429 or 404. Each id once. */
+export const DEFAULT_OPENROUTER_CHAT_FALLBACKS = [
+  'google/gemma-4-31b-it:free',
+  'nvidia/nemotron-3-ultra-550b-a55b:free',
+  'openrouter/free',
+] as const;
+/** Free text ids from https://openrouter.ai/api/v1/models on 2026-11-11. */
+export const OPENROUTER_FREE_CHAT_MODELS = [
+  'baidu/ernie-5.5-flash-preview:free',
+  'cohere/north-mini-code:free',
+  'dots-studio/dots-3-note-preview:free',
+  'google/gemma-4-26b-a4b-it:free',
+  'google/gemma-4-31b-it:free',
+  'liquid/lfm-2.5-2.6b:free',
+  'liquid/lfm-3-1.7b:free',
+  'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free',
+  'nvidia/nemotron-3-ultra-550b-a55b:free',
+  'nvidia/nemotron-3.5-lightning:free',
+  'nvidia/nemotron-3.5-super-vl:free',
+  'openrouter/free',
+  'recursive/flint-v1.0:free',
+  'thinkingmachines/inkling-2-small:free',
+] as const;
+/** Free embedding ids from https://openrouter.ai/api/v1/embeddings/models on 2026-11-11. */
+export const OPENROUTER_FREE_EMBEDDING_MODELS = [
+  'liquid/lfm-2.5-embedding-350m:free',
+  'nvidia/llama-nemotron-embed-vl-1b-v2:free',
+  'nvidia/nemotron-3-embed-1b:free',
+  'nvidia/nemotron-3.5-embed-1b:free',
+  'nvidia/nemotron-3.5-embed-8b:free',
+] as const;
 /** No free image model is listed on https://openrouter.ai/api/v1/images/models. */
 export const DEFAULT_OPENROUTER_IMAGE_MODEL = 'google/gemini-3.1-flash-image';
 /**
@@ -25,7 +56,7 @@ export const DEFAULT_OPENROUTER_EMBEDDING_MODEL = 'liquid/lfm-2.5-embedding-350m
 export const LOCAL_EMBEDDING_MODEL_ID = 'local/hashed-1024';
 
 export const FREE_MODEL_LIMIT_NOTE =
-  'Free OpenRouter models (ids ending in :free, and openrouter/free) have a request limit. HTTP 429 means that limit was hit. Automatic mode calls LLM Dupoin once, then OpenRouter once, and stops. After credits are added, change a row to a paid model.';
+  'Free OpenRouter models have a request limit. HTTP 429 means try again later; the model is not broken. On 429 or 404 the next chat model in the fallback list is tried once. The list is not repeated.';
 
 export const EMBEDDINGS_FAILOVER_NOTE =
   'The stored knowledge vectors are a local 1024-number hash, saved as JSON text, not an external embedding. liquid/lfm-2.5-embedding-350m:free is the only free OpenRouter embedding model whose catalog text says it produces 1,024 dimensions. That width matches, but the vector space does not. Failover therefore does not write OpenRouter embeddings into the index. Retrieval stays on the local hash either way.';
