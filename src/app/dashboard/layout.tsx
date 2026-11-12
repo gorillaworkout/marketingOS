@@ -108,7 +108,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       const data = await response.json();
       if (data.authenticated) {
         setUser(data.user);
-        const adminOnlyPages = ['/dashboard/tokens', '/dashboard/analytics', '/dashboard/accounts', '/dashboard/templates', '/dashboard/calendar', '/dashboard/knowledge', '/dashboard/knowledge-graph', '/dashboard/brand-guidelines', '/dashboard/history', '/dashboard/ai-research/admin', '/dashboard/seo/settings', '/dashboard/llm-provider'];
+        const adminOnlyPages = ['/dashboard/tokens', '/dashboard/analytics', '/dashboard/accounts', '/dashboard/templates', '/dashboard/calendar', '/dashboard/knowledge', '/dashboard/knowledge-graph', '/dashboard/brand-guidelines', '/dashboard/history', '/dashboard/ai-research/admin', '/dashboard/seo/settings'];
         const principal = { role: data.user.role, features: data.user.enabledFeatures || [] };
         if (data.user.role !== 'admin' && (adminOnlyPages.includes(pathname) || shouldBlockDashboardGenerationPath(principal, pathname))) {
           router.replace('/dashboard');
@@ -182,7 +182,6 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         { href: '/dashboard/analytics', label: 'Analytics', icon: 'analytics', adminOnly: true },
         { href: '/dashboard/ai-research/admin', label: 'AI Research log', icon: 'research', adminOnly: true },
         { href: '/dashboard/accounts', label: 'Accounts', icon: 'accounts', adminOnly: true },
-        { href: '/dashboard/llm-provider', label: 'LLM Provider', icon: 'models', adminOnly: true },
       ],
     },
   ];

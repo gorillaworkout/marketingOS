@@ -68,9 +68,9 @@ test('user model preference API only returns and accepts models allowed for that
 });
 
 test('models page is a dedicated learning and assignment workspace while layout stays navigation-only', () => {
-  assert.match(modelsPage, /Model library/i);
+  assert.match(modelsPage, /AI Models/);
   assert.match(modelsPage, /Allowed models/i);
-  assert.match(modelsPage, /Organization default/i);
+  assert.match(modelsPage, /organization default/i);
   assert.match(modelsPage, /Social Post/);
   assert.match(modelsPage, /Video Script/);
   assert.match(layout, /href: '\/dashboard\/models', label: 'Models'/);

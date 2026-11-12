@@ -1472,10 +1472,11 @@ export default function AIResearchPage() {
           <select
             value={selectedModelId}
             disabled={savingModel}
-            onChange={e => saveModelPreference(e.target.value)}
+            onChange={e => saveModelPreference(e.target.value === '__org__' ? null : e.target.value)}
             aria-label="AI Research model"
             className="min-h-7 rounded-lg border border-[var(--mos-border)] bg-[var(--mos-raised)] px-2 py-1 text-[11px] text-[var(--mos-text)] outline-none focus:border-indigo-400/60 max-w-[140px] sm:max-w-[160px] truncate"
           >
+            <option value="__org__">Use org default</option>
             {groupModelsByProvider(allowedModels).map(group => <optgroup key={group.label} label={group.label}>{group.models.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}</optgroup>)}
           </select>
           <button

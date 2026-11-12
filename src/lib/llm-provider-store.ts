@@ -3,6 +3,7 @@ import { execute, executeTransaction, queryAll, queryOne } from '@/lib/database'
 import { decryptSecret, encryptSecret, maskSecret, scrubSecrets } from '@/lib/llm-crypto';
 import {
   DEFAULT_LLM_MODEL_MAPPINGS,
+  DEFAULT_OPENROUTER_CHAT_FALLBACKS,
   DEFAULT_OPENROUTER_CHAT_MODEL,
   DEFAULT_OPENROUTER_EMBEDDING_MODEL,
   DEFAULT_OPENROUTER_IMAGE_MODEL,
@@ -10,6 +11,7 @@ import {
   type LlmMode,
   type LlmModelMapping,
 } from '@/lib/llm-provider-defaults';
+import { IMAGE_SHORTLIST, MODEL_TIERS, TEXT_SHORTLIST, TIER_FEATURES, TIER_PAID_TARGET, TIER_PRIMARY, type ModelTier } from '@/lib/model-tiers';
 
 export const LLM_SETTINGS_CACHE_MS = 5_000;
 
@@ -22,6 +24,9 @@ export type LlmSettings = {
   defaultChatModel: string;
   defaultImageModel: string;
   defaultEmbeddingModel: string;
+  chatFallbacks: string[];
+  usePaidOpenRouter: boolean;
+  tiers: Array<{ tier: ModelTier; dupoinPrimary: string; paidTarget: string }>;
   mappings: LlmModelMapping[];
   status: {
     activeProvider: 'dupoin' | 'openrouter';
@@ -47,6 +52,8 @@ type SettingsRow = {
   default_chat_model: string;
   default_image_model: string;
   default_embedding_model: string;
+  chat_fallbacks: string | null;
+  use_paid_openrouter: boolean | null;
 };
 
 type StatusRow = {
@@ -77,6 +84,9 @@ export function defaultLlmSettings(): LlmSettings {
     defaultChatModel: DEFAULT_OPENROUTER_CHAT_MODEL,
     defaultImageModel: DEFAULT_OPENROUTER_IMAGE_MODEL,
     defaultEmbeddingModel: DEFAULT_OPENROUTER_EMBEDDING_MODEL,
+    chatFallbacks: [...DEFAULT_OPENROUTER_CHAT_FALLBACKS],
+    usePaidOpenRouter: false,
+    tiers: MODEL_TIERS.map(tier => ({ tier, dupoinPrimary: TIER_PRIMARY[tier], paidTarget: TIER_PAID_TARGET[tier] })),
     mappings: DEFAULT_LLM_MODEL_MAPPINGS.map(row => ({ ...row })),
     status: { ...EMPTY_STATUS },
   };
@@ -84,6 +94,35 @@ export function defaultLlmSettings(): LlmSettings {
 
 export function invalidateLlmSettingsCache(): void {
   cache = null;
+}
+
+export function parseChatFallbacks(raw: string | null | undefined): string[] {
+  if (raw == null || raw.trim() === '') return [...DEFAULT_OPENROUTER_CHAT_FALLBACKS];
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [...DEFAULT_OPENROUTER_CHAT_FALLBACKS];
+    return parsed
+      .filter((item): item is string => typeof item === 'string')
+      .map(item => item.trim())
+      .filter(Boolean)
+      .slice(0, 8);
+  } catch {
+    return [...DEFAULT_OPENROUTER_CHAT_FALLBACKS];
+  }
+}
+
+async function readTierConfig(): Promise<LlmSettings['tiers']> {
+  const base = MODEL_TIERS.map(tier => ({ tier, dupoinPrimary: TIER_PRIMARY[tier], paidTarget: TIER_PAID_TARGET[tier] }));
+  try {
+    const rows = await queryAll<{ tier: string; dupoin_primary: string; paid_target: string }>('SELECT tier, dupoin_primary, paid_target FROM llm_tier_config');
+    if (rows.length === 0) return base;
+    return base.map(item => {
+      const saved = rows.find(row => row.tier === item.tier);
+      return saved ? { tier: item.tier, dupoinPrimary: saved.dupoin_primary || item.dupoinPrimary, paidTarget: saved.paid_target || item.paidTarget } : item;
+    });
+  } catch {
+    return base;
+  }
 }
 
 function asMode(value: string): LlmMode {
@@ -97,7 +136,7 @@ function stamp(value: Date | string | null): string | null {
 }
 
 async function readSettings(): Promise<LlmSettings> {
-  const row = await queryOne<SettingsRow>('SELECT mode, openrouter_key_ciphertext, openrouter_key_hint, default_chat_model, default_image_model, default_embedding_model FROM llm_provider_settings WHERE id = ?', ['default']);
+  const row = await queryOne<SettingsRow>('SELECT mode, openrouter_key_ciphertext, openrouter_key_hint, default_chat_model, default_image_model, default_embedding_model, chat_fallbacks, use_paid_openrouter FROM llm_provider_settings WHERE id = ?', ['default']);
   const mappingRows = await queryAll<{ dupoin_model: string; openrouter_model: string; kind: string }>('SELECT dupoin_model, openrouter_model, kind FROM llm_model_mappings ORDER BY kind, dupoin_model');
   const status = await queryOne<StatusRow>('SELECT active_provider, last_failover_at, last_error, circuit_open_until, consecutive_failures FROM llm_provider_status WHERE id = ?', ['default']);
   const base = defaultLlmSettings();
@@ -124,6 +163,9 @@ async function readSettings(): Promise<LlmSettings> {
     defaultChatModel: row?.default_chat_model || base.defaultChatModel,
     defaultImageModel: row?.default_image_model || base.defaultImageModel,
     defaultEmbeddingModel: row?.default_embedding_model || base.defaultEmbeddingModel,
+    chatFallbacks: parseChatFallbacks(row?.chat_fallbacks),
+    usePaidOpenRouter: row?.use_paid_openrouter === true,
+    tiers: await readTierConfig(),
     mappings: mappingRows.length > 0
       ? mappingRows.map(mapping => ({
         dupoinModel: mapping.dupoin_model,
@@ -189,6 +231,9 @@ export async function saveLlmProviderSettings(input: {
   defaultChatModel: string;
   defaultImageModel: string;
   defaultEmbeddingModel: string;
+  chatFallbacks: string[];
+  usePaidOpenRouter: boolean;
+  tiers: LlmSettings['tiers'];
   openrouterKey: string | null | undefined;
   mappings: LlmModelMapping[];
   actorId: string;
@@ -217,8 +262,8 @@ export async function saveLlmProviderSettings(input: {
 
   await executeTransaction(async tx => {
     await tx.execute(
-      `INSERT INTO llm_provider_settings (id, mode, openrouter_key_ciphertext, openrouter_key_hint, default_chat_model, default_image_model, default_embedding_model, updated_by, updated_at)
-       VALUES ('default', ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+      `INSERT INTO llm_provider_settings (id, mode, openrouter_key_ciphertext, openrouter_key_hint, default_chat_model, default_image_model, default_embedding_model, chat_fallbacks, use_paid_openrouter, updated_by, updated_at)
+       VALUES ('default', ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
        ON CONFLICT (id) DO UPDATE SET
          mode = EXCLUDED.mode,
          openrouter_key_ciphertext = EXCLUDED.openrouter_key_ciphertext,
@@ -226,16 +271,38 @@ export async function saveLlmProviderSettings(input: {
          default_chat_model = EXCLUDED.default_chat_model,
          default_image_model = EXCLUDED.default_image_model,
          default_embedding_model = EXCLUDED.default_embedding_model,
+         chat_fallbacks = EXCLUDED.chat_fallbacks,
+         use_paid_openrouter = EXCLUDED.use_paid_openrouter,
          updated_by = EXCLUDED.updated_by,
          updated_at = CURRENT_TIMESTAMP`,
-      [input.mode, ciphertext, hint, input.defaultChatModel, input.defaultImageModel, input.defaultEmbeddingModel, input.actorId],
+      [input.mode, ciphertext, hint, input.defaultChatModel, input.defaultImageModel, input.defaultEmbeddingModel, JSON.stringify(input.chatFallbacks), input.usePaidOpenRouter, input.actorId],
     );
+    for (const tier of input.tiers) {
+      await tx.execute(
+        `INSERT INTO llm_tier_config (tier, dupoin_primary, paid_target, updated_at)
+         VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+         ON CONFLICT (tier) DO UPDATE SET dupoin_primary = EXCLUDED.dupoin_primary, paid_target = EXCLUDED.paid_target, updated_at = CURRENT_TIMESTAMP`,
+        [tier.tier, tier.dupoinPrimary, tier.paidTarget],
+      );
+      const features = tier.tier === 'image' ? [] : TIER_FEATURES[tier.tier];
+      const allowed = JSON.stringify(tier.tier === 'image' ? [...IMAGE_SHORTLIST] : [...TEXT_SHORTLIST]);
+      for (const feature of features) {
+        await tx.execute(
+          `INSERT INTO feature_model_assignments (feature_key, allowed_models, default_model)
+           VALUES (?, ?::jsonb, ?)
+           ON CONFLICT (feature_key) DO UPDATE SET allowed_models = EXCLUDED.allowed_models, default_model = EXCLUDED.default_model, updated_at = CURRENT_TIMESTAMP`,
+          [feature, allowed, tier.dupoinPrimary],
+        );
+      }
+    }
+    if (input.mappings.length > 0) {
     await tx.execute('DELETE FROM llm_model_mappings');
     for (const mapping of input.mappings) {
       await tx.execute(
         'INSERT INTO llm_model_mappings (dupoin_model, openrouter_model, kind) VALUES (?, ?, ?)',
         [mapping.dupoinModel, mapping.openrouterModel, mapping.kind],
       );
+    }
     }
     await tx.execute(
       'INSERT INTO llm_provider_audit (id, actor_id, action, detail) VALUES (?, ?, ?, ?)',
@@ -244,6 +311,7 @@ export async function saveLlmProviderSettings(input: {
         defaultChatModel: input.defaultChatModel,
         defaultImageModel: input.defaultImageModel,
         defaultEmbeddingModel: input.defaultEmbeddingModel,
+        chatFallbacks: input.chatFallbacks,
         keyUpdated,
         keyCleared,
         mappingCount: input.mappings.length,
@@ -296,6 +364,59 @@ export async function recordProviderFailover(input: {
     circuitOpen: Boolean(openUntil),
   }, null);
   invalidateLlmSettingsCache();
+}
+
+export type StoredModelHealth = {
+  provider: 'dupoin' | 'openrouter';
+  model: string;
+  kind: 'chat' | 'image' | 'embedding';
+  status: 'active' | 'rate_limited' | 'blocked' | 'credits' | 'error';
+  httpStatus: number | null;
+  latencyMs: number;
+  message: string;
+  testedAt: string;
+};
+
+export async function listModelHealth(): Promise<StoredModelHealth[]> {
+  try {
+    const rows = await queryAll<{
+      provider: string;
+      model: string;
+      kind: string;
+      status: string;
+      http_status: number | null;
+      latency_ms: number;
+      message: string;
+      tested_at: Date | string;
+    }>('SELECT provider, model, kind, status, http_status, latency_ms, message, tested_at FROM llm_model_health ORDER BY tested_at DESC');
+    return rows.map(row => ({
+      provider: row.provider === 'openrouter' ? 'openrouter' : 'dupoin',
+      model: row.model,
+      kind: row.kind === 'image' ? 'image' : row.kind === 'embedding' ? 'embedding' : 'chat',
+      status: row.status === 'active' || row.status === 'rate_limited' || row.status === 'blocked' || row.status === 'credits' ? row.status : 'error',
+      httpStatus: row.http_status,
+      latencyMs: Number(row.latency_ms) || 0,
+      message: scrubSecrets(row.message || ''),
+      testedAt: stamp(row.tested_at) || new Date(0).toISOString(),
+    }));
+  } catch (error) {
+    console.error('[llm-provider] health unavailable:', error instanceof Error ? error.message : error);
+    return [];
+  }
+}
+
+export async function saveModelHealth(row: StoredModelHealth): Promise<void> {
+  await execute(
+    `INSERT INTO llm_model_health (provider, model, kind, status, http_status, latency_ms, message, tested_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+     ON CONFLICT (provider, model, kind) DO UPDATE SET
+       status = EXCLUDED.status,
+       http_status = EXCLUDED.http_status,
+       latency_ms = EXCLUDED.latency_ms,
+       message = EXCLUDED.message,
+       tested_at = CURRENT_TIMESTAMP`,
+    [row.provider, row.model, row.kind, row.status, row.httpStatus, row.latencyMs, scrubSecrets(row.message).slice(0, 300)],
+  );
 }
 
 export function assertMapping(row: LlmModelMapping): LlmModelMapping {

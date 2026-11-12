@@ -6,9 +6,19 @@ export type SeoSiteStatus = 'not-configured' | 'missing-key' | 'never-synced' | 
 export interface SeoSite { id: string; name: string; site_url: string; gsc_property: string | null; active: boolean; last_synced_at: string | null; status: SeoSiteStatus }
 export interface SeoSitesResponse { sites: SeoSite[]; defaultSiteId: string | null; isAdmin: boolean }
 
+function statusFallbackText(status: number): string {
+  if (status === 429) return 'The AI model is rate-limited. Try again later.';
+  if (status === 402) return 'image generation needs OpenRouter credits';
+  if (status === 424) return 'The AI provider could not complete this request.';
+  if (status === 503) return 'The AI provider is temporarily unavailable. Try again later.';
+  if (status >= 500) return 'The server could not complete this request. Try again.';
+  return 'The request failed.';
+}
+
 export async function fetchJson<T = Record<string, unknown>>(url: string, init?: RequestInit): Promise<{ ok: boolean; status: number; data: T & { error?: string } }> {
   const response = await fetch(url, init);
-  const data = await response.json().catch(() => ({}));
+  const data = await response.json().catch(() => ({})) as T & { error?: string };
+  if (!response.ok && !data.error) data.error = statusFallbackText(response.status);
   return { ok: response.ok, status: response.status, data };
 }
 

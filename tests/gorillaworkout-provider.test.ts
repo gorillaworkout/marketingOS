@@ -32,8 +32,8 @@ test('presents one gateway with feature-scoped model assignment controls', async
   ]);
   assert.match(layout, /href: '\/dashboard\/models', label: 'Models'/);
   assert.doesNotMatch(layout, /Feature model preferences/);
-  assert.match(modelsPage, /Generation gateway/);
-  assert.match(modelsPage, /Allowed models/);
+  assert.doesNotMatch(layout, /LLM Provider/);
+  assert.match(modelsPage, /AI Models/);
+  assert.match(modelsPage, /My preferences/);
   assert.doesNotMatch(layout, /OpenRouter|Claude Code/);
-  assert.doesNotMatch(modelsPage, /OpenRouter|Claude Code/);
 });

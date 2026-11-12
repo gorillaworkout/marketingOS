@@ -57,6 +57,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
     console.error('[ai-research] Excel export failed:', error);
-    return NextResponse.json({ error: 'Could not create the Excel file. Please try again.' }, { status: 502 });
+    const { aiProviderErrorBody, aiProviderStatus } = await import('@/lib/ai-http-status');
+    return NextResponse.json({ error: aiProviderErrorBody(error).error || 'Could not create the Excel file. Please try again.' }, { status: aiProviderStatus(error) });
   }
 }

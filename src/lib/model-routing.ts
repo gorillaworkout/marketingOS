@@ -1,4 +1,5 @@
 import { queryOne } from '@/lib/database';
+import { resolveDupoinModel, shortlistForFeature, TIER_PRIMARY, tierForFeature } from '@/lib/model-tiers';
 import { AVAILABLE_MODELS, CLAUDE_OPUS_5_5_MODEL, CLAUDE_OPUS_5_MODEL, CLAUDE_SONNET_5_5_MODEL, CLAUDE_SONNET_5_MODEL, PREFERRED_CODEX_MODEL, WORKING_TEXT_MODELS, type ModelInfo } from '@/lib/openai';
 
 export const GENERATION_FEATURES = [
@@ -149,19 +150,6 @@ export function isGatewayModel(modelId: unknown): modelId is string {
     && AVAILABLE_MODELS.some(model => model.id === modelId);
 }
 
-function parseAllowedModels(value: unknown): string[] {
-  if (Array.isArray(value)) return value.filter((item): item is string => typeof item === 'string');
-  if (typeof value !== 'string') return [];
-  try {
-    const parsed = JSON.parse(value);
-    return Array.isArray(parsed)
-      ? parsed.filter((item): item is string => typeof item === 'string')
-      : [];
-  } catch {
-    return [];
-  }
-}
-
 export function validateFeatureAssignment(
   feature: unknown,
   allowedModels: unknown,
@@ -185,26 +173,33 @@ export function validateFeatureAssignment(
 
 export async function getFeatureModelOptions(feature: GenerationFeature): Promise<FeatureModelOptions> {
   const catalogById = new Map(AVAILABLE_MODELS.map(model => [model.id, model]));
-  let assignment = DEFAULT_FEATURE_ASSIGNMENTS[feature];
-
-  const row = await queryOne<AssignmentRow>(
-    'SELECT allowed_models, default_model FROM feature_model_assignments WHERE feature_key = ?',
-    [feature],
-  );
-  if (row) {
-    const allowedModels = [...new Set(parseAllowedModels(row.allowed_models))]
-      .filter(modelId => catalogById.has(modelId));
-    if (allowedModels.length === 0 || !allowedModels.includes(row.default_model)) {
-      throw new Error(`Invalid model assignment for ${feature}`);
+  const tier = tierForFeature(feature);
+  const shortlist = shortlistForFeature(feature).filter(modelId => catalogById.has(modelId));
+  const primary = tier ? TIER_PRIMARY[tier] : DEFAULT_FEATURE_ASSIGNMENTS[feature].defaultModel;
+  let orgDefault = primary;
+  try {
+    const row = await queryOne<AssignmentRow>(
+      'SELECT allowed_models, default_model FROM feature_model_assignments WHERE feature_key = ?',
+      [feature],
+    );
+    if (row?.default_model && shortlist.includes(row.default_model)) orgDefault = row.default_model;
+  } catch {
+    orgDefault = primary;
+  }
+  if (orgDefault === primary && tier) {
+    try {
+      const tierRow = await queryOne<{ dupoin_primary: string }>('SELECT dupoin_primary FROM llm_tier_config WHERE tier = ?', [tier]);
+      if (tierRow?.dupoin_primary && shortlist.includes(tierRow.dupoin_primary)) orgDefault = tierRow.dupoin_primary;
+    } catch {
+      orgDefault = primary;
     }
-    assignment = { allowedModels, defaultModel: row.default_model };
   }
 
   return {
     feature,
     metadata: FEATURE_METADATA[feature],
-    allowedModels: assignment.allowedModels.map(modelId => catalogById.get(modelId)!),
-    defaultModel: assignment.defaultModel,
+    allowedModels: shortlist.map(modelId => catalogById.get(modelId)!),
+    defaultModel: resolveDupoinModel({ preference: null, orgDefault, primary, shortlist }),
   };
 }
 

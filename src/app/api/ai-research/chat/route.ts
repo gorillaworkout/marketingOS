@@ -167,6 +167,7 @@ async function streamChatCompletionOnce(options: {
         title: 'Dupoin AI Research',
         timeoutMs: STREAM_FIRST_TOKEN_TIMEOUT_MS,
         userSignal: options.signal,
+        feature: 'ai-research',
       });
       response = exchange.response;
       provider = exchange.provider;
@@ -320,6 +321,7 @@ async function requestDeepResearchPlan(
     title: 'Dupoin AI Research',
     timeoutMs: AI_RESEARCH_DEEP_PLAN_TIMEOUT_MS,
     userSignal: signal,
+    feature: 'ai-research',
   });
   const response = exchange.response;
   const body = await response.text();
