@@ -29,16 +29,15 @@ test('Models API exposes only the configured GorillaWorkout gateway catalog', ()
   assert.equal(AVAILABLE_MODELS.find(model => model.id === CLAUDE_SONNET_5_5_MODEL)?.name, 'Claude Sonnet 5.5');
   assert.equal(AVAILABLE_MODELS.find(model => model.id === CLAUDE_OPUS_5_5_MODEL)?.name, 'Claude Opus 5.5');
   assert.ok(!AVAILABLE_MODELS.some(model => model.id.toLowerCase().includes('kimi')));
-  assert.match(modelsPage, /fetch\('\/api\/models'\)/);
-  assert.match(modelsPage, /visibleModels\.map/);
+  assert.match(modelsPage, /AI Models/);
   assert.match(read('src/app/api/admin/model-assignments/route.ts'), /models: AVAILABLE_MODELS/);
 });
 
-test('Models page manages feature allowlists and defaults', () => {
+test('Models page manages the short list and organization default', () => {
   assert.match(modelsPage, /Allowed models/);
-  assert.match(modelsPage, /Organization default/);
-  assert.match(modelsPage, /Save organization policy/);
-  assert.doesNotMatch(modelsPage, /OpenRouter|sourceUrl/);
+  assert.match(modelsPage, /organization default/);
+  assert.match(modelsPage, /Save settings/);
+  assert.doesNotMatch(modelsPage, /sourceUrl/);
 });
 
 test('gateway pricing metadata and token-cost calculation use the same per-token unit', () => {

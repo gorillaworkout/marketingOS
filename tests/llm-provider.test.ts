@@ -67,13 +67,12 @@ test('admin access is role admin only', () => {
   assert.equal(canManageLlmProvider(null), false);
   const route = readFileSync('src/app/api/admin/llm-provider/route.ts', 'utf8');
   const testRoute = readFileSync('src/app/api/admin/llm-provider/test/route.ts', 'utf8');
-  const layout = readFileSync('src/app/dashboard/llm-provider/layout.tsx', 'utf8');
   const nav = readFileSync('src/app/dashboard/layout.tsx', 'utf8');
   assert.match(route, /requireAdmin\(request\)/);
   assert.match(testRoute, /requireAdmin\(request\)/);
-  assert.match(layout, /canManageLlmProvider\(user\)/);
-  assert.match(nav, /href: '\/dashboard\/llm-provider', label: 'LLM Provider'[\s\S]*adminOnly: true/);
-  assert.match(nav, /'\/dashboard\/llm-provider'/);
+  assert.match(readFileSync('src/app/dashboard/models/page.tsx', 'utf8'), /role === 'admin'/);
+  assert.match(nav, /href: '\/dashboard\/models', label: 'Models'/);
+  assert.doesNotMatch(nav, /LLM Provider/);
 });
 
 test('default Dupoin mode keeps the env gateway, model, and key', async () => {
@@ -113,7 +112,7 @@ test('OpenRouter mode maps a verified model and sends the recommended headers', 
     timeoutMs: 1000,
   });
   assert.equal(calls[0].url, 'https://openrouter.ai/api/v1/chat/completions');
-  assert.equal(JSON.parse(calls[0].body).model, 'google/gemma-4-31b-it:free');
+  assert.equal(JSON.parse(calls[0].body).model, 'thinkingmachines/inkling-2-small:free');
   assert.equal(calls[0].headers.get('authorization'), 'Bearer sk-or-test-key-1234');
   assert.equal(calls[0].headers.get('http-referer'), 'https://marketing-aws.gorillaworkout.id');
   assert.equal(calls[0].headers.get('x-title'), 'Dupoin AI Research');
@@ -123,9 +122,9 @@ test('OpenRouter mode maps a verified model and sends the recommended headers', 
 test('an unmapped model uses the admin default substitute', () => {
   const mapped = mapModel('cx/gpt-6-sol', DEFAULT_LLM_MODEL_MAPPINGS, DEFAULT_OPENROUTER_CHAT_MODEL, 'chat');
   assert.equal(mapped.mapped, false);
-  assert.equal(mapped.model, 'google/gemma-4-31b-it:free');
+  assert.equal(mapped.model, 'thinkingmachines/inkling-2-small:free');
   const known = mapModel('ag/gemini-3-flash', DEFAULT_LLM_MODEL_MAPPINGS, DEFAULT_OPENROUTER_CHAT_MODEL, 'chat');
-  assert.equal(known.model, 'google/gemma-4-31b-it:free');
+  assert.equal(known.model, 'thinkingmachines/inkling-2-small:free');
   assert.equal(known.mapped, true);
 });
 
@@ -151,7 +150,7 @@ test('automatic mode failovers on 429, 5xx, and network errors, not on a bad pro
   });
   const failedOver = await postChat({ model: 'cc/claude-sonnet-5-5', body: {}, referer: 'https://marketingos.local', title: 'MarketingOS', timeoutMs: 1000 });
   assert.equal(failedOver.provider, 'openrouter');
-  assert.equal(failedOver.upstreamModel, 'google/gemma-4-31b-it:free');
+  assert.equal(failedOver.upstreamModel, 'thinkingmachines/inkling-2-small:free');
   assert.equal(calls.length, 2);
   assert.match(calls[1], /openrouter.ai/);
 
@@ -297,14 +296,15 @@ test('migration seeds the verified map and stores no secrets', () => {
   const sql = readFileSync('db/migrations/049_llm_provider.sql', 'utf8');
   for (const mapping of DEFAULT_LLM_MODEL_MAPPINGS) {
     assert.match(sql, new RegExp(mapping.dupoinModel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
-    assert.match(sql, new RegExp(mapping.openrouterModel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+    if (mapping.kind !== 'chat') assert.match(sql, new RegExp(mapping.openrouterModel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
   }
+  assert.match(readFileSync('db/migrations/051_model_tiers.sql', 'utf8'), /thinkingmachines\/inkling-2-small:free/);
   assert.match(sql, /ON CONFLICT \(dupoin_model\) DO NOTHING/);
   assert.match(sql, /DROP TABLE IF EXISTS llm_provider_settings/);
   assert.doesNotMatch(sql, /sk-|api[_-]?key\s*=/i);
-  assert.match(readFileSync('src/app/dashboard/llm-provider/page.tsx', 'utf8'), /EMBEDDINGS|1024-dimension|local 1024/i);
+  assert.match(readFileSync('src/app/dashboard/models/page.tsx', 'utf8'), /EMBEDDINGS_FAILOVER_NOTE|1024/);
   assert.match(EMBEDDINGS_FAILOVER_NOTE, /does not write OpenRouter embeddings/i);
-  assert.match(readFileSync('src/app/dashboard/llm-provider/page.tsx', 'utf8'), /Free model limits/);
+  assert.match(readFileSync('src/app/dashboard/models/page.tsx', 'utf8'), /OpenRouter text chain/);
   assert.equal(failoverEmbeddingWriteAllowed(), false);
   assert.equal(EMBEDDING_DIM, 1024);
   assert.equal(DEFAULT_OPENROUTER_EMBEDDING_MODEL, 'liquid/lfm-2.5-embedding-350m:free');
@@ -349,11 +349,11 @@ test('a 429 on the first OpenRouter chat model tries the next id once and stops 
   });
   const exchange = await postChat({ model: 'ag/gemini-3-flash', body: { max_tokens: 100 }, referer: 'https://marketingos.local', title: 'MarketingOS', timeoutMs: 1000 });
   assert.equal(bodies.length, 2);
-  assert.equal(JSON.parse(bodies[0]).model, 'google/gemma-4-31b-it:free');
+  assert.equal(JSON.parse(bodies[0]).model, 'thinkingmachines/inkling-2-small:free');
   assert.equal(JSON.parse(bodies[1]).model, 'nvidia/nemotron-3-ultra-550b-a55b:free');
   assert.equal(exchange.upstreamModel, 'nvidia/nemotron-3-ultra-550b-a55b:free');
-  assert.deepEqual(openRouterChatChain('google/gemma-4-31b-it:free', ['google/gemma-4-31b-it:free', 'nvidia/nemotron-3-ultra-550b-a55b:free', 'openrouter/free']), [
-    'google/gemma-4-31b-it:free',
+  assert.deepEqual(openRouterChatChain('thinkingmachines/inkling-2-small:free', ['thinkingmachines/inkling-2-small:free', 'nvidia/nemotron-3-ultra-550b-a55b:free', 'openrouter/free']), [
+    'thinkingmachines/inkling-2-small:free',
     'nvidia/nemotron-3-ultra-550b-a55b:free',
     'openrouter/free',
   ]);
@@ -366,11 +366,11 @@ test('model probes use the real id, headroom for reasoning models, and skip imag
   assert.equal(classifyModelProbe(200, ''), 'active');
   const plan = healthProbePlan({
     mappings: [
-      { dupoinModel: 'ag/gemini-3-flash', openrouterModel: 'google/gemma-4-31b-it:free', kind: 'chat' },
+      { dupoinModel: 'ag/gemini-3-flash', openrouterModel: 'thinkingmachines/inkling-2-small:free', kind: 'chat' },
       { dupoinModel: 'ag/gemini-3.1-flash-image', openrouterModel: 'google/gemini-3.1-flash-image', kind: 'image' },
     ],
     chatFallbacks: ['openrouter/free'],
-    defaultChatModel: 'google/gemma-4-31b-it:free',
+    defaultChatModel: 'thinkingmachines/inkling-2-small:free',
     defaultImageModel: 'google/gemini-3.1-flash-image',
     defaultEmbeddingModel: 'liquid/lfm-2.5-embedding-350m:free',
     includeImages: false,
@@ -399,14 +399,14 @@ test('model probes use the real id, headroom for reasoning models, and skip imag
 
   const gaps: number[] = [];
   await probeModelsInOrder([
-    { provider: 'openrouter', model: 'google/gemma-4-31b-it:free', kind: 'chat' },
+    { provider: 'openrouter', model: 'thinkingmachines/inkling-2-small:free', kind: 'chat' },
     { provider: 'openrouter', model: 'openrouter/free', kind: 'chat' },
   ], async ms => { gaps.push(ms); });
   assert.deepEqual(gaps, [MODEL_PROBE_GAP_MS]);
   assert.match(readFileSync('db/migrations/050_llm_model_health.sql', 'utf8'), /llm_model_health/);
   assert.match(readFileSync('db/migrations/050_llm_model_health.sql', 'utf8'), /nvidia\/nemotron-3-ultra-550b-a55b:free/);
   assert.match(readFileSync('src/app/api/admin/llm-provider/probe/route.ts', 'utf8'), /requireAdmin\(request\)/);
-  assert.match(readFileSync('src/app/dashboard/llm-provider/page.tsx', 'utf8'), /Test all models/);
+  assert.match(readFileSync('src/app/dashboard/models/page.tsx', 'utf8'), /Test all models/);
 });
 
 test('an OpenRouter image key without credits fails with a clear message', async () => {

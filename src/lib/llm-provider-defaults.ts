@@ -12,29 +12,22 @@ export type UsageProvider = 'gorillaworkout' | 'openrouter';
 
 export const OPENROUTER_API_BASE = 'https://openrouter.ai/api/v1';
 /** Verified on https://openrouter.ai/api/v1/models. No paid id is the default. */
-export const DEFAULT_OPENROUTER_CHAT_MODEL = 'google/gemma-4-31b-it:free';
-/** Tried in order when the mapped chat model returns 429 or 404. Each id once. */
+export const DEFAULT_OPENROUTER_CHAT_MODEL = 'thinkingmachines/inkling-2-small:free';
+/** Tried in order on 429, 404, or no credits. Each id once. Gemma is not included. */
 export const DEFAULT_OPENROUTER_CHAT_FALLBACKS = [
-  'google/gemma-4-31b-it:free',
+  'thinkingmachines/inkling-2-small:free',
   'nvidia/nemotron-3-ultra-550b-a55b:free',
   'openrouter/free',
 ] as const;
-/** Free text ids from https://openrouter.ai/api/v1/models on 2026-11-11. */
+/** Free text ids from https://openrouter.ai/api/v1/models on 2026-11-12. Gemma is omitted on purpose. */
 export const OPENROUTER_FREE_CHAT_MODELS = [
-  'baidu/ernie-5.5-flash-preview:free',
-  'cohere/north-mini-code:free',
-  'dots-studio/dots-3-note-preview:free',
-  'google/gemma-4-26b-a4b-it:free',
-  'google/gemma-4-31b-it:free',
-  'liquid/lfm-2.5-2.6b:free',
-  'liquid/lfm-3-1.7b:free',
-  'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free',
+  'thinkingmachines/inkling-2-small:free',
   'nvidia/nemotron-3-ultra-550b-a55b:free',
+  'openrouter/free',
   'nvidia/nemotron-3.5-lightning:free',
   'nvidia/nemotron-3.5-super-vl:free',
-  'openrouter/free',
-  'recursive/flint-v1.0:free',
-  'thinkingmachines/inkling-2-small:free',
+  'liquid/lfm-2.5-2.6b:free',
+  'cohere/north-mini-code:free',
 ] as const;
 /** Free embedding ids from https://openrouter.ai/api/v1/embeddings/models on 2026-11-11. */
 export const OPENROUTER_FREE_EMBEDDING_MODELS = [

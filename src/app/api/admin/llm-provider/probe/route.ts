@@ -2,12 +2,12 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireAdmin } from '@/lib/auth';
 import {
   canManageLlmProvider,
-  healthProbePlan,
   probeModelsInOrder,
   type ProbeTarget,
 } from '@/lib/llm-provider';
 import type { LlmKind } from '@/lib/llm-provider-defaults';
 import { getLlmSettings, saveModelHealth } from '@/lib/llm-provider-store';
+import { modelsInUse, TIER_PRIMARY } from '@/lib/model-tiers';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 300;
@@ -34,12 +34,13 @@ export async function POST(request: NextRequest) {
   let targets: ProbeTarget[] = [];
   if (body.all === true) {
     const settings = await getLlmSettings();
-    targets = healthProbePlan({
-      mappings: settings.mappings,
-      chatFallbacks: settings.chatFallbacks,
-      defaultChatModel: settings.defaultChatModel,
-      defaultImageModel: settings.defaultImageModel,
-      defaultEmbeddingModel: settings.defaultEmbeddingModel,
+    targets = modelsInUse({
+      primaries: settings.tiers.map(tier => tier.dupoinPrimary),
+      freeChain: settings.chatFallbacks,
+      paidTargets: settings.tiers.map(tier => tier.paidTarget),
+      usePaid: settings.usePaidOpenRouter,
+      embeddingModel: settings.defaultEmbeddingModel,
+      imageModel: TIER_PRIMARY.image,
       includeImages: body.includeImages === true,
     });
   } else if (Array.isArray(body.targets)) {

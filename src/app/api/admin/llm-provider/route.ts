@@ -7,6 +7,7 @@ import {
   canManageLlmProvider,
 } from '@/lib/llm-provider';
 import type { LlmMode } from '@/lib/llm-provider-defaults';
+import { IMAGE_SHORTLIST, isVerifiedPaidTarget, MODEL_TIERS, TEXT_SHORTLIST, type ModelTier } from '@/lib/model-tiers';
 import {
   assertMapping,
   getLlmSettings,
@@ -45,6 +46,8 @@ export async function GET(request: NextRequest) {
     defaultImageModel: settings.defaultImageModel,
     defaultEmbeddingModel: settings.defaultEmbeddingModel,
     chatFallbacks: settings.chatFallbacks,
+    usePaidOpenRouter: settings.usePaidOpenRouter,
+    tiers: settings.tiers,
     mappings: settings.mappings,
     health: await listModelHealth(),
     status: settings.status,
@@ -66,6 +69,8 @@ export async function PUT(request: NextRequest) {
     openrouterKey?: unknown;
     mappings?: unknown;
     chatFallbacks?: unknown;
+    usePaidOpenRouter?: unknown;
+    tiers?: unknown;
   } | null;
   if (!body) return NextResponse.json({ error: 'Invalid JSON.' }, { status: 400 });
 
@@ -89,6 +94,22 @@ export async function PUT(request: NextRequest) {
   }
 
   const current = await getLlmSettings();
+  const usePaidOpenRouter = typeof body.usePaidOpenRouter === 'boolean' ? body.usePaidOpenRouter : current.usePaidOpenRouter;
+  let tiers = current.tiers;
+  if (Array.isArray(body.tiers)) {
+    tiers = MODEL_TIERS.map(tier => {
+      const incoming = (body.tiers as Array<{ tier?: string; dupoinPrimary?: string; paidTarget?: string }>).find(item => item?.tier === tier);
+      const currentTier = current.tiers.find(item => item.tier === tier)!;
+      const shortlist: readonly string[] = tier === 'image' ? IMAGE_SHORTLIST : TEXT_SHORTLIST;
+      const dupoinPrimary = typeof incoming?.dupoinPrimary === 'string' && shortlist.includes(incoming.dupoinPrimary)
+        ? incoming.dupoinPrimary
+        : currentTier.dupoinPrimary;
+      const paidTarget = typeof incoming?.paidTarget === 'string' && isVerifiedPaidTarget(tier as ModelTier, incoming.paidTarget)
+        ? incoming.paidTarget
+        : currentTier.paidTarget;
+      return { tier, dupoinPrimary, paidTarget };
+    });
+  }
   let chatFallbacks = current.chatFallbacks;
   if (Array.isArray(body.chatFallbacks)) {
     if (body.chatFallbacks.length > 8) return NextResponse.json({ error: 'Use at most 8 OpenRouter chat fallbacks.' }, { status: 400 });
@@ -120,6 +141,8 @@ export async function PUT(request: NextRequest) {
       defaultImageModel,
       defaultEmbeddingModel,
       chatFallbacks,
+      usePaidOpenRouter,
+      tiers,
       openrouterKey,
       mappings,
       actorId: user.id,

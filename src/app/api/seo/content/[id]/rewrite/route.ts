@@ -6,6 +6,7 @@ import { editResetsStatus } from '@/lib/seo/content-status';
 import { VersionConflictError, getDraft, saveVersion } from '@/lib/seo/content-store';
 import { getSop } from '@/lib/seo/sop-store';
 import { sopInstructions } from '@/lib/seo/sops';
+import { aiProviderErrorBody, aiProviderStatus } from '@/lib/ai-http-status';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 300;
@@ -39,7 +40,8 @@ export async function POST(request: NextRequest, context: RouteContext) {
     }, guideline!);
   } catch (error) {
     console.error('SEO content rewrite failed:', error instanceof Error ? error.message : error);
-    return NextResponse.json({ error: `AI rewrite failed: ${error instanceof Error ? error.message : 'unknown error'}` }, { status: 502 });
+    const body = aiProviderErrorBody(error);
+    return NextResponse.json({ error: `AI rewrite failed: ${body.error}` }, { status: aiProviderStatus(error) });
   }
   try {
     const version = await saveVersion({

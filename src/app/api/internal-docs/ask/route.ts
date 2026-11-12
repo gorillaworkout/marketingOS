@@ -81,6 +81,7 @@ export async function POST(request: NextRequest) {
     });
   } catch (error) {
     console.error('Internal docs ask failed:', error);
-    return NextResponse.json({ error: 'Could not answer from FAQ & Guides right now.' }, { status: 502 });
+    const { aiProviderErrorBody, aiProviderStatus } = await import('@/lib/ai-http-status');
+    return NextResponse.json({ error: aiProviderErrorBody(error).error || 'Could not answer from FAQ & Guides right now.' }, { status: aiProviderStatus(error) });
   }
 }

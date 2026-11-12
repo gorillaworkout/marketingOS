@@ -343,6 +343,7 @@ async function callApiOnce(
     referer: 'https://marketingos.local',
     title: 'MarketingOS',
     timeoutMs: LLM_REQUEST_TIMEOUT_MS,
+    feature: options.feature,
   });
   const response = exchange.response;
 

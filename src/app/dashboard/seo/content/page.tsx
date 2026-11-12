@@ -79,7 +79,7 @@ export default function ContentStudioPage() {
       });
       if (ok) { router.push(`/dashboard/seo/content/${data.id}`); return; }
       if (status === 409 && data.draftId) { router.push(`/dashboard/seo/content/${data.draftId}`); return; }
-      setMessage(data.error || 'Could not create the article.');
+      setMessage(data.error || (status === 429 ? 'The AI model is rate-limited. Try again later.' : 'Could not create the article.'));
       setVersion(value => value + 1);
     } catch {
       setMessage('Could not create the article.');

@@ -8,6 +8,7 @@ import { siteRootHost, validateTargetUrl } from '@/lib/seo/keywords';
 import { getSeoSite } from '@/lib/seo/sites';
 import { getSop } from '@/lib/seo/sop-store';
 import { sopInstructions } from '@/lib/seo/sops';
+import { aiProviderErrorBody, aiProviderStatus } from '@/lib/ai-http-status';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 300;
@@ -75,7 +76,8 @@ export async function POST(request: NextRequest) {
       fallbackLabel = draft.fallbackLabel;
     } catch (error) {
       console.error('SEO content draft generation failed:', error instanceof Error ? error.message : error);
-      return NextResponse.json({ error: `AI draft failed: ${error instanceof Error ? error.message : 'unknown error'}` }, { status: 502 });
+      const body = aiProviderErrorBody(error);
+      return NextResponse.json({ error: `AI draft failed: ${body.error}` }, { status: aiProviderStatus(error) });
     }
   }
 

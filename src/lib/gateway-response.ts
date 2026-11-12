@@ -1,6 +1,6 @@
 interface CompletionPayload {
   choices?: Array<{
-    message?: { content?: string };
+    message?: { content?: string | null; reasoning?: string | null };
     delta?: { content?: string };
     text?: string;
   }>;
@@ -8,6 +8,7 @@ interface CompletionPayload {
 
 function completionContent(payload: CompletionPayload): string {
   const choice = payload.choices?.[0];
+  // Reasoning is chain-of-thought, not the answer. Inkling always emits it.
   return choice?.message?.content || choice?.delta?.content || choice?.text || '';
 }
 

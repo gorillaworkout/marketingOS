@@ -11,6 +11,7 @@ import {
   type LlmMode,
   type LlmModelMapping,
 } from '@/lib/llm-provider-defaults';
+import { IMAGE_SHORTLIST, MODEL_TIERS, TEXT_SHORTLIST, TIER_FEATURES, TIER_PAID_TARGET, TIER_PRIMARY, type ModelTier } from '@/lib/model-tiers';
 
 export const LLM_SETTINGS_CACHE_MS = 5_000;
 
@@ -24,6 +25,8 @@ export type LlmSettings = {
   defaultImageModel: string;
   defaultEmbeddingModel: string;
   chatFallbacks: string[];
+  usePaidOpenRouter: boolean;
+  tiers: Array<{ tier: ModelTier; dupoinPrimary: string; paidTarget: string }>;
   mappings: LlmModelMapping[];
   status: {
     activeProvider: 'dupoin' | 'openrouter';
@@ -50,6 +53,7 @@ type SettingsRow = {
   default_image_model: string;
   default_embedding_model: string;
   chat_fallbacks: string | null;
+  use_paid_openrouter: boolean | null;
 };
 
 type StatusRow = {
@@ -81,6 +85,8 @@ export function defaultLlmSettings(): LlmSettings {
     defaultImageModel: DEFAULT_OPENROUTER_IMAGE_MODEL,
     defaultEmbeddingModel: DEFAULT_OPENROUTER_EMBEDDING_MODEL,
     chatFallbacks: [...DEFAULT_OPENROUTER_CHAT_FALLBACKS],
+    usePaidOpenRouter: false,
+    tiers: MODEL_TIERS.map(tier => ({ tier, dupoinPrimary: TIER_PRIMARY[tier], paidTarget: TIER_PAID_TARGET[tier] })),
     mappings: DEFAULT_LLM_MODEL_MAPPINGS.map(row => ({ ...row })),
     status: { ...EMPTY_STATUS },
   };
@@ -105,6 +111,20 @@ export function parseChatFallbacks(raw: string | null | undefined): string[] {
   }
 }
 
+async function readTierConfig(): Promise<LlmSettings['tiers']> {
+  const base = MODEL_TIERS.map(tier => ({ tier, dupoinPrimary: TIER_PRIMARY[tier], paidTarget: TIER_PAID_TARGET[tier] }));
+  try {
+    const rows = await queryAll<{ tier: string; dupoin_primary: string; paid_target: string }>('SELECT tier, dupoin_primary, paid_target FROM llm_tier_config');
+    if (rows.length === 0) return base;
+    return base.map(item => {
+      const saved = rows.find(row => row.tier === item.tier);
+      return saved ? { tier: item.tier, dupoinPrimary: saved.dupoin_primary || item.dupoinPrimary, paidTarget: saved.paid_target || item.paidTarget } : item;
+    });
+  } catch {
+    return base;
+  }
+}
+
 function asMode(value: string): LlmMode {
   return value === 'openrouter' || value === 'auto' ? value : 'dupoin';
 }
@@ -116,7 +136,7 @@ function stamp(value: Date | string | null): string | null {
 }
 
 async function readSettings(): Promise<LlmSettings> {
-  const row = await queryOne<SettingsRow>('SELECT mode, openrouter_key_ciphertext, openrouter_key_hint, default_chat_model, default_image_model, default_embedding_model, chat_fallbacks FROM llm_provider_settings WHERE id = ?', ['default']);
+  const row = await queryOne<SettingsRow>('SELECT mode, openrouter_key_ciphertext, openrouter_key_hint, default_chat_model, default_image_model, default_embedding_model, chat_fallbacks, use_paid_openrouter FROM llm_provider_settings WHERE id = ?', ['default']);
   const mappingRows = await queryAll<{ dupoin_model: string; openrouter_model: string; kind: string }>('SELECT dupoin_model, openrouter_model, kind FROM llm_model_mappings ORDER BY kind, dupoin_model');
   const status = await queryOne<StatusRow>('SELECT active_provider, last_failover_at, last_error, circuit_open_until, consecutive_failures FROM llm_provider_status WHERE id = ?', ['default']);
   const base = defaultLlmSettings();
@@ -144,6 +164,8 @@ async function readSettings(): Promise<LlmSettings> {
     defaultImageModel: row?.default_image_model || base.defaultImageModel,
     defaultEmbeddingModel: row?.default_embedding_model || base.defaultEmbeddingModel,
     chatFallbacks: parseChatFallbacks(row?.chat_fallbacks),
+    usePaidOpenRouter: row?.use_paid_openrouter === true,
+    tiers: await readTierConfig(),
     mappings: mappingRows.length > 0
       ? mappingRows.map(mapping => ({
         dupoinModel: mapping.dupoin_model,
@@ -210,6 +232,8 @@ export async function saveLlmProviderSettings(input: {
   defaultImageModel: string;
   defaultEmbeddingModel: string;
   chatFallbacks: string[];
+  usePaidOpenRouter: boolean;
+  tiers: LlmSettings['tiers'];
   openrouterKey: string | null | undefined;
   mappings: LlmModelMapping[];
   actorId: string;
@@ -238,8 +262,8 @@ export async function saveLlmProviderSettings(input: {
 
   await executeTransaction(async tx => {
     await tx.execute(
-      `INSERT INTO llm_provider_settings (id, mode, openrouter_key_ciphertext, openrouter_key_hint, default_chat_model, default_image_model, default_embedding_model, chat_fallbacks, updated_by, updated_at)
-       VALUES ('default', ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+      `INSERT INTO llm_provider_settings (id, mode, openrouter_key_ciphertext, openrouter_key_hint, default_chat_model, default_image_model, default_embedding_model, chat_fallbacks, use_paid_openrouter, updated_by, updated_at)
+       VALUES ('default', ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
        ON CONFLICT (id) DO UPDATE SET
          mode = EXCLUDED.mode,
          openrouter_key_ciphertext = EXCLUDED.openrouter_key_ciphertext,
@@ -248,16 +272,37 @@ export async function saveLlmProviderSettings(input: {
          default_image_model = EXCLUDED.default_image_model,
          default_embedding_model = EXCLUDED.default_embedding_model,
          chat_fallbacks = EXCLUDED.chat_fallbacks,
+         use_paid_openrouter = EXCLUDED.use_paid_openrouter,
          updated_by = EXCLUDED.updated_by,
          updated_at = CURRENT_TIMESTAMP`,
-      [input.mode, ciphertext, hint, input.defaultChatModel, input.defaultImageModel, input.defaultEmbeddingModel, JSON.stringify(input.chatFallbacks), input.actorId],
+      [input.mode, ciphertext, hint, input.defaultChatModel, input.defaultImageModel, input.defaultEmbeddingModel, JSON.stringify(input.chatFallbacks), input.usePaidOpenRouter, input.actorId],
     );
+    for (const tier of input.tiers) {
+      await tx.execute(
+        `INSERT INTO llm_tier_config (tier, dupoin_primary, paid_target, updated_at)
+         VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+         ON CONFLICT (tier) DO UPDATE SET dupoin_primary = EXCLUDED.dupoin_primary, paid_target = EXCLUDED.paid_target, updated_at = CURRENT_TIMESTAMP`,
+        [tier.tier, tier.dupoinPrimary, tier.paidTarget],
+      );
+      const features = tier.tier === 'image' ? [] : TIER_FEATURES[tier.tier];
+      const allowed = JSON.stringify(tier.tier === 'image' ? [...IMAGE_SHORTLIST] : [...TEXT_SHORTLIST]);
+      for (const feature of features) {
+        await tx.execute(
+          `INSERT INTO feature_model_assignments (feature_key, allowed_models, default_model)
+           VALUES (?, ?::jsonb, ?)
+           ON CONFLICT (feature_key) DO UPDATE SET allowed_models = EXCLUDED.allowed_models, default_model = EXCLUDED.default_model, updated_at = CURRENT_TIMESTAMP`,
+          [feature, allowed, tier.dupoinPrimary],
+        );
+      }
+    }
+    if (input.mappings.length > 0) {
     await tx.execute('DELETE FROM llm_model_mappings');
     for (const mapping of input.mappings) {
       await tx.execute(
         'INSERT INTO llm_model_mappings (dupoin_model, openrouter_model, kind) VALUES (?, ?, ?)',
         [mapping.dupoinModel, mapping.openrouterModel, mapping.kind],
       );
+    }
     }
     await tx.execute(
       'INSERT INTO llm_provider_audit (id, actor_id, action, detail) VALUES (?, ?, ?, ?)',

@@ -14,6 +14,8 @@ import {
   type UsageProvider,
 } from '@/lib/llm-provider-defaults';
 import { scrubSecrets } from '@/lib/llm-crypto';
+import { parseGatewayCompletion } from '@/lib/gateway-response';
+import { openRouterChainForTier, tierForFeature } from '@/lib/model-tiers';
 import {
   getLlmSettings,
   markProviderRecovered,
@@ -184,7 +186,7 @@ export function openRouterChatChain(primary: string, fallbacks: readonly string[
 }
 
 export function shouldTryNextOpenRouterChat(status: number): boolean {
-  return status === 429 || status === 404;
+  return status === 429 || status === 404 || status === 402;
 }
 
 export type ModelHealthStatus = 'active' | 'rate_limited' | 'blocked' | 'credits' | 'error';
@@ -360,11 +362,17 @@ async function completeOpenRouterChat(input: {
   timeoutMs: number;
   userSignal?: AbortSignal;
   requestedModel: string;
+  feature?: string;
   now: number;
   failoverReason?: string;
 }): Promise<ChatExchange> {
   const primary = resolveProviderTarget({ settings: input.settings, provider: 'openrouter', kind: 'chat', model: input.requestedModel });
-  const chain = openRouterChatChain(primary.model, input.settings.chatFallbacks || []);
+  const tier = input.feature ? tierForFeature(input.feature) : null;
+  const freeChain = input.settings.chatFallbacks?.length ? input.settings.chatFallbacks : [];
+  const paidTarget = tier ? input.settings.tiers?.find(row => row.tier === tier)?.paidTarget : undefined;
+  const chain = tier && tier !== 'image'
+    ? openRouterChainForTier({ tier, usePaid: input.settings.usePaidOpenRouter === true, freeChain, paidTarget })
+    : openRouterChatChain(freeChain[0] || primary.model, freeChain.slice(1));
   if (!primary.apiKey) throw new Error(primary.missingKeyMessage);
   let last: Attempt | null = null;
   let lastModel = chain[0] || primary.model;
@@ -383,12 +391,22 @@ async function completeOpenRouterChat(input: {
     });
     last = attempt;
     if (attempt.kind === 'http' && attempt.response.ok) {
-      return {
-        response: attempt.response,
-        provider: 'openrouter',
-        upstreamModel: model,
-        failoverReason: index > 0 ? `Answered by ${model} after ${chain.slice(0, index).join(', ')}` : input.failoverReason,
-      };
+      const preview = await attempt.response.clone().text().catch(() => '');
+      let usable = true;
+      try {
+        usable = parseGatewayCompletion(preview, attempt.response.headers.get('content-type')).trim().length > 0;
+      } catch {
+        usable = false;
+      }
+      if (usable || index === chain.length - 1) {
+        return {
+          response: attempt.response,
+          provider: 'openrouter',
+          upstreamModel: model,
+          failoverReason: index > 0 ? `Answered by ${model} after ${chain.slice(0, index).join(', ')}` : input.failoverReason,
+        };
+      }
+      continue;
     }
     const status = attempt.kind === 'http' ? attempt.response.status : 0;
     if (!(attempt.kind === 'http' && shouldTryNextOpenRouterChat(status) && index < chain.length - 1)) break;
@@ -413,6 +431,7 @@ export async function postChat(input: {
   userSignal?: AbortSignal;
   /** Set when tokens were already sent to the user. Failover must not retry. */
   streamedToUser?: boolean;
+  feature?: string;
   now?: number;
 }): Promise<ChatExchange> {
   const now = input.now ?? Date.now();
@@ -437,7 +456,7 @@ export async function postChat(input: {
   };
 
   if (first === 'openrouter') {
-    return completeOpenRouterChat({ settings, body: input.body, referer: input.referer, title: input.title, timeoutMs: input.timeoutMs, userSignal: input.userSignal, requestedModel: input.model, now });
+    return completeOpenRouterChat({ settings, body: input.body, referer: input.referer, title: input.title, timeoutMs: input.timeoutMs, userSignal: input.userSignal, requestedModel: input.model, feature: input.feature, now });
   }
 
   const started = run(first);
@@ -455,7 +474,7 @@ export async function postChat(input: {
   if (decision.failover) {
     const reason = await describeAttempt(attempt);
     try {
-      const exchange = await completeOpenRouterChat({ settings, body: input.body, referer: input.referer, title: input.title, timeoutMs: input.timeoutMs, userSignal: input.userSignal, requestedModel: input.model, now, failoverReason: reason });
+      const exchange = await completeOpenRouterChat({ settings, body: input.body, referer: input.referer, title: input.title, timeoutMs: input.timeoutMs, userSignal: input.userSignal, requestedModel: input.model, feature: input.feature, now, failoverReason: reason });
       await remember({ provider: 'openrouter', reason, upstreamModel: exchange.upstreamModel, now });
       return exchange;
     } catch (error) {
