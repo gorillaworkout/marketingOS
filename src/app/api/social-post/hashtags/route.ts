@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { queryOne } from '@/lib/database';
 import { requireFeature } from '@/lib/auth';
 import { aiProviderErrorBody, aiProviderStatus } from '@/lib/ai-http-status';
 import { generateContent, getUserPreferredModel, runQC } from '@/lib/openai';
@@ -22,11 +23,20 @@ export async function POST(request: NextRequest) {
   if (!topic) return NextResponse.json({ error: 'A topic or caption is required.' }, { status: 400 });
   const range = hashtagRange(platform);
   const model = await getUserPreferredModel(auth.id, 'social-post');
+  let campaignTags: string[] = [];
+  const campaignId = typeof body?.campaignId === 'string' ? body.campaignId.trim() : '';
+  if (campaignId) {
+    try {
+      const row = await queryOne<{ hashtags: string }>('SELECT hashtags FROM campaigns WHERE id = ?', [campaignId]);
+      const parsed = JSON.parse(row?.hashtags || '[]');
+      campaignTags = Array.isArray(parsed) ? parsed.filter((item: unknown) => typeof item === 'string') : [];
+    } catch { campaignTags = []; }
+  }
 
   try {
     const result = await generateContent(
       `You write compliant Dupoin Futures hashtags. ${platformOptimization(platform)} Never invent trend volumes. Never use guaranteed-profit wording. Return JSON only.`,
-      `Topic or caption:\n${topic}\nContent type: ${typeof body?.contentType === 'string' ? body.contentType : 'photo'}\nReturn between ${range.min} and ${range.max} hashtags in total, grouped as brand, campaign, niche, and broad. Brand should include Dupoin tags when they fit. JSON: { "groups": { "brand": [], "campaign": [], "niche": [], "broad": [] }, "avoid": [{ "tag": "", "reason": "" }], "notes": "" }`,
+      `Topic or caption:\n${topic}\nContent type: ${typeof body?.contentType === 'string' ? body.contentType : 'photo'}\nCampaign hashtags to keep when they fit: ${campaignTags.join(' ') || 'none'}\nReturn between ${range.min} and ${range.max} hashtags in total, grouped as brand, campaign, niche, and broad. Brand should include Dupoin tags when they fit. JSON: { "groups": { "brand": [], "campaign": [], "niche": [], "broad": [] }, "avoid": [{ "tag": "", "reason": "" }], "notes": "" }`,
       auth.id,
       undefined,
       { model, responseFormat: { type: 'json_object' }, temperature: 0.4, taskType: 'social-post' },
@@ -34,7 +44,7 @@ export async function POST(request: NextRequest) {
     const parsed = JSON.parse(result.content) as { groups?: Record<string, unknown>; avoid?: unknown; notes?: unknown };
     const groups = {
       brand: dedupeHashtags([...BRAND_TAGS, ...groupOf(parsed.groups?.brand)]),
-      campaign: groupOf(parsed.groups?.campaign),
+      campaign: dedupeHashtags([...campaignTags, ...groupOf(parsed.groups?.campaign)]),
       niche: groupOf(parsed.groups?.niche),
       broad: groupOf(parsed.groups?.broad),
     };

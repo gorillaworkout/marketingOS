@@ -4,6 +4,16 @@ import { requireFeature } from '@/lib/auth';
 import { rateLimit } from '@/lib/rate-limit';
 import { generateContent, getSmartSystemPrompt, fetchContextMemory, fetchStyleContext, fetchKnowledgeContext, getUserPreferredModel, runQC, generateDupoinFileName, type BrandGuidelines, type QCResult } from '@/lib/openai';
 import { buildBriefPromptBlock, outputShape, parseSocialPostBrief, type SocialPostBriefInput } from '@/lib/social-post-brief';
+import { getEmbedding } from '@/lib/embeddings';
+import {
+  buildBrandVoiceBlock,
+  buildCampaignBlock,
+  campaignAllowedText,
+  pickVoiceSamples,
+  type CampaignInput,
+  type VoiceSample,
+} from '@/lib/social-post-library';
+import { rankCampaignSuggestion } from '@/lib/social-post-campaign-match';
 import { buildSocialPostImagePromptUserMessage } from '@/lib/dupoin-image-prompt';
 import { DEFAULT_IMAGE_ASPECT_RATIO } from '@/lib/image-aspect-ratio';
 import {
@@ -77,9 +87,10 @@ export async function POST(request: NextRequest) {
   }
   const userId = auth.id;
   const payload = await request.json();
-  const { brief, platform, targetAudience, goal, brandGuidelineId } = payload as {
-    brief?: string; platform?: string; targetAudience?: string; goal?: string; brandGuidelineId?: string;
+  const { brief, platform, targetAudience, goal, brandGuidelineId, campaignId } = payload as {
+    brief?: string; platform?: string; targetAudience?: string; goal?: string; brandGuidelineId?: string; campaignId?: string;
   };
+  const selectedCampaignId = typeof campaignId === 'string' ? campaignId.trim() : '';
   const parsedBrief = parseSocialPostBrief(payload);
   if (!parsedBrief.ok) {
     return new Response(sseEvent({ step: 'error', message: parsedBrief.error }), {
@@ -97,9 +108,12 @@ export async function POST(request: NextRequest) {
 
   // Fetch brand guidelines if specified
   let brandGuidelines: BrandGuidelines | undefined;
+  let voiceCharacter = '';
+  let bannedPhrases: string[] = [];
+  let voiceSamples: VoiceSample[] = [];
   if (brandGuidelineId) {
     try {
-      const row = await queryOne('SELECT id, brand_name, tone_of_voice, target_market, key_messages, do_list, dont_list, examples FROM brand_guidelines WHERE id = ? AND user_id = ?', [brandGuidelineId, userId]) as Record<string, unknown> | undefined;
+      const row = await queryOne('SELECT id, brand_name, tone_of_voice, target_market, key_messages, do_list, dont_list, examples, voice_character, banned_phrases FROM brand_guidelines WHERE id = ? AND (user_id = ? OR is_shared = TRUE)', [brandGuidelineId, userId]) as Record<string, unknown> | undefined;
       if (row) {
         brandGuidelines = {
           id: row.id as string,
@@ -111,11 +125,55 @@ export async function POST(request: NextRequest) {
           dont_list: JSON.parse((row.dont_list as string) || '[]'),
           examples: (row.examples as string) || undefined,
         };
+        voiceCharacter = typeof row.voice_character === 'string' ? row.voice_character : '';
+        bannedPhrases = Array.isArray(JSON.parse(String(row.banned_phrases || '[]'))) ? JSON.parse(String(row.banned_phrases || '[]')).filter((item: unknown) => typeof item === 'string') : [];
+        const sampleRows = await queryAll('SELECT platform, content_type, caption, note FROM brand_voice_samples WHERE brand_guideline_id = ? ORDER BY created_at DESC LIMIT 20', [brandGuidelineId]) as Array<{ platform: string | null; content_type: string | null; caption: string; note: string | null }>;
+        voiceSamples = sampleRows.map(sample => ({ platform: sample.platform, contentType: sample.content_type, caption: sample.caption, note: sample.note }));
       }
     } catch (e) {
       console.warn('Failed to fetch brand guidelines:', e);
     }
   }
+
+  let campaign: CampaignInput | null = null;
+  let campaignSuggestion: { id: string; name: string; score: number } | null = null;
+  try {
+    if (selectedCampaignId) {
+      const row = await queryOne<{
+        name: string; status: string; starts_on: string | null; ends_on: string | null; objective: string | null;
+        key_facts: string; approved_claims: string; links: string; hashtags: string; notes: string | null;
+      }>('SELECT name, status, starts_on, ends_on, objective, key_facts, approved_claims, links, hashtags, notes FROM campaigns WHERE id = ?', [selectedCampaignId]);
+      if (row) {
+        const parsed = {
+          name: row.name,
+          status: (['planned', 'active', 'ended', 'archived'].includes(row.status) ? row.status : 'active') as CampaignInput['status'],
+          startsOn: row.starts_on,
+          endsOn: row.ends_on,
+          objective: row.objective,
+          keyFacts: JSON.parse(row.key_facts || '[]'),
+          approvedClaims: JSON.parse(row.approved_claims || '[]'),
+          links: JSON.parse(row.links || '[]'),
+          hashtags: JSON.parse(row.hashtags || '[]'),
+          notes: row.notes,
+        };
+        campaign = parsed;
+      }
+    } else {
+      const rows = await queryAll<{ id: string; name: string; status: string; embedding: string | null }>(
+        `SELECT id, name, status, embedding FROM campaigns WHERE status = 'active' ORDER BY updated_at DESC LIMIT 50`,
+      );
+      const match = rankCampaignSuggestion(await getEmbedding(String(brief).slice(0, 2_000)), rows);
+      campaignSuggestion = match ? { id: match.id, name: match.name, score: Number(match.score.toFixed(3)) } : null;
+    }
+  } catch (error) {
+    console.warn('Campaign memory unavailable:', error);
+  }
+  const voiceBlock = buildBrandVoiceBlock({
+    character: voiceCharacter,
+    banned: bannedPhrases,
+    samples: pickVoiceSamples(voiceSamples, platform, generationBrief.contentType),
+  });
+  const campaignBlock = campaign ? buildCampaignBlock(campaign) : '';
 
   // Fetch context memory
   const contextMemory = await fetchContextMemory(userId, 'social-post', 5);
@@ -263,6 +321,8 @@ Platform: ${platform || 'Instagram'}
 Target Audience: ${targetAudience || 'General'}
 Goal: ${goal || 'Awareness'}
 ${buildBriefPromptBlock(generationBrief)}
+${voiceBlock}
+${campaignBlock}
 
 ${variant.instruction}
 ${bestExamples}
@@ -330,6 +390,10 @@ Follow the SOP strictly. Return citationIds for every WEB_RESEARCH excerpt you u
               keyMessage: generationBrief.keyMessage,
               cta: generationBrief.cta,
               ctaUrl: generationBrief.ctaUrl,
+              allowedUrls: campaign?.links.map(link => link.url) || [],
+              restrictUrls: Boolean(campaign),
+              bannedPhrases,
+              campaignFacts: campaign ? campaignAllowedText(campaign, `${brief || ''}\n${generationBrief.keyMessage}`) : undefined,
             }),
             opt.caption,
             opt.citations,
@@ -364,7 +428,7 @@ Follow the SOP strictly. Return citationIds for every WEB_RESEARCH excerpt you u
               hook: selectedCaption.hook,
               caption: selectedCaption.caption,
               aspectRatio: DEFAULT_IMAGE_ASPECT_RATIO,
-            })}\nContent type: ${generationBrief.contentType}\nKey message: ${generationBrief.keyMessage}\nCTA: ${generationBrief.cta}${knowledgeContext}`,
+            })}\nContent type: ${generationBrief.contentType}\nKey message: ${generationBrief.keyMessage}\nCTA: ${generationBrief.cta}${campaign ? `\nPromo facts allowed on the image: ${campaign.keyFacts.join('; ').slice(0, 400)}. Do not invent prices or URLs.` : ''}${knowledgeContext}`,
             userId,
             taskId,
             { brandGuidelines, model: preferredModel, taskType: 'social-post' }
@@ -398,6 +462,7 @@ Follow the SOP strictly. Return citationIds for every WEB_RESEARCH excerpt you u
               keyMessage: generationBrief.keyMessage,
               reference: generationBrief.reference,
               brandGuidelineId: brandGuidelineId || null,
+              campaignId: selectedCampaignId || null,
               platform: platform || 'Instagram',
               targetAudience: targetAudience || '',
               goal: goal || '',
@@ -435,6 +500,7 @@ Follow the SOP strictly. Return citationIds for every WEB_RESEARCH excerpt you u
               researchPosts,
               webResearch,
               status: 'draft',
+              campaignSuggestion,
             },
           })));
         })();

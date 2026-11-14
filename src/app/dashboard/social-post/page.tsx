@@ -15,6 +15,7 @@ import {
   Toolbar,
 } from '@/components/ui/dashboard';
 import InlineModelSelector from '@/components/InlineModelSelector';
+import { SocialPostAdvanced } from '@/components/social-post-advanced';
 import { DEFAULT_IMAGE_ASPECT_RATIO, IMAGE_ASPECT_RATIOS, type ImageAspectRatio } from '@/lib/image-aspect-ratio';
 import { applyDupoinImagePromptLocks } from '@/lib/dupoin-image-prompt';
 import { AVAILABLE_IMAGE_MODELS, DEFAULT_IMAGE_MODEL, imageModelLabel, selectableImageModel } from '@/lib/image-models';
@@ -33,6 +34,7 @@ import {
   socialPostGenerateRequestBody,
   type SocialPostBrandGuideline,
 } from '@/lib/social-post-brand-guideline';
+import { readBrandVoiceChoices, type BrandVoiceChoice } from '@/lib/social-post-library';
 
 interface QCCheck {
   name: string;
@@ -306,7 +308,10 @@ export default function SocialPostPage() {
   const [targetAudience, setTargetAudience] = useState('');
   const [goal, setGoal] = useState('Awareness');
   const [brandGuidelines, setBrandGuidelines] = useState<SocialPostBrandGuideline[]>([]);
+  const [voices, setVoices] = useState<BrandVoiceChoice[]>([]);
+  const [voiceVersion, setVoiceVersion] = useState(0);
   const [brandGuidelineId, setBrandGuidelineId] = useState('');
+  const [campaignId, setCampaignId] = useState('');
   const brandGuidelineTouched = useRef(false);
   const [loading, setLoading] = useState(false);
   const [options, setOptions] = useState<PostOption[] | null>(null);
@@ -400,6 +405,7 @@ export default function SocialPostPage() {
         if (cancelled || data == null) return;
         const guidelines = readSocialPostBrandGuidelines(data);
         setBrandGuidelines(guidelines);
+        setVoices(readBrandVoiceChoices(data));
         if (!brandGuidelineTouched.current) {
           setBrandGuidelineId(defaultSocialPostBrandGuidelineId(guidelines));
         }
@@ -408,7 +414,7 @@ export default function SocialPostPage() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [voiceVersion]);
 
   const fetchPosts = async () => {
     try {
@@ -511,6 +517,7 @@ export default function SocialPostPage() {
         keyMessage,
         cta,
         ctaUrl,
+        campaignId,
       }),
     });
     const data = await response.json().catch(() => ({}));
@@ -581,6 +588,7 @@ export default function SocialPostPage() {
           ctaUrl,
           keyMessage,
           reference,
+          campaignId,
         })),
         signal: controller.signal,
       });
@@ -942,6 +950,7 @@ export default function SocialPostPage() {
           brandGuidelineTouched.current = true;
           setBrandGuidelineId(stored.brandGuidelineId);
         }
+        setCampaignId(stored.campaignId || '');
       }
       // Replay previously generated images for this post
       setImageHistory(history);
@@ -1411,6 +1420,21 @@ export default function SocialPostPage() {
                                   Open in Video Script
                                 </button>
                               )}
+                              <button type="button" onClick={() => {
+                                if (!brandGuidelineId) { setError('Choose a brand voice before saving a sample.'); return; }
+                                void fetch(`/api/brand-guidelines/${brandGuidelineId}/samples`, {
+                                  method: 'POST',
+                                  headers: { 'Content-Type': 'application/json' },
+                                  body: JSON.stringify({ caption: opt.caption, platform, contentType, note: 'Saved from a generated option' }),
+                                }).then(async response => {
+                                  const data = await response.json().catch(() => ({}));
+                                  setError(response.ok ? '' : data.error || 'Could not save the voice sample.');
+                                  if (response.ok) setVoiceVersion(version => version + 1);
+                                });
+                              }}
+                                className="text-xs px-3 py-1.5 bg-[var(--mos-raised)] hover:bg-[var(--mos-raised)] text-[var(--mos-text-secondary)] rounded-lg">
+                                Save as voice sample
+                              </button>
                               <button onClick={() => copyToClipboard(opt.hook + '\n\n' + opt.caption + '\n\n' + opt.hashtags.join(' '))}
                                 className="text-xs px-3 py-1.5 bg-[var(--mos-raised)] hover:bg-[var(--mos-raised)] text-[var(--mos-text-secondary)] rounded-lg">
                                 Copy All
@@ -1802,12 +1826,16 @@ export default function SocialPostPage() {
         {/* Right: Recent Posts */}
         <div className="lg:col-span-1 space-y-4">
           <Panel>
-            <SectionHeader title="Advanced" description="Brand voice, campaigns, and competitor references arrive in the next releases." />
-            <div className="mt-3 space-y-2 text-xs text-[var(--mos-text-muted)]">
-              <p className="rounded-[var(--mos-radius-control)] border border-[var(--mos-border)] px-3 py-2">Brand voice — coming soon</p>
-              <p className="rounded-[var(--mos-radius-control)] border border-[var(--mos-border)] px-3 py-2">Campaign — coming soon</p>
-              <p className="rounded-[var(--mos-radius-control)] border border-[var(--mos-border)] px-3 py-2">Competitor — coming soon</p>
-            </div>
+            <SectionHeader title="Advanced" description="Choose a brand voice and, only if you want it used, a campaign." />
+            <SocialPostAdvanced
+              voices={voices}
+              brandGuidelineId={brandGuidelineId}
+              onBrandGuidelineId={id => { brandGuidelineTouched.current = true; setBrandGuidelineId(id); }}
+              onVoicesChanged={() => setVoiceVersion(version => version + 1)}
+              campaignId={campaignId}
+              onCampaignId={setCampaignId}
+              brief={brief}
+            />
             <form className="mt-4 space-y-3" onSubmit={event => { event.preventDefault(); void suggestHashtags(); }}>
               <SectionHeader title="Hashtag generator" description="Grouped brand, campaign, niche, and broad tags for this platform." />
               <TextArea value={hashtagTopic} onChange={e => setHashtagTopic(e.target.value)} rows={3} placeholder="Topic or paste a caption" />

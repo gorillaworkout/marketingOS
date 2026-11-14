@@ -51,6 +51,7 @@ export type SocialPostGenerateFields = {
   ctaUrl?: string;
   keyMessage?: string;
   reference?: { kind: string; text?: string; url?: string; imageKey?: string } | null;
+  campaignId?: string | null;
 };
 
 /** Caption-generation body. Omits `brandGuidelineId` when the picker is None. */
@@ -67,6 +68,7 @@ export function socialPostGenerateRequestBody(fields: SocialPostGenerateFields):
   ctaUrl?: string;
   keyMessage?: string;
   reference?: SocialPostGenerateFields['reference'];
+  campaignId?: string;
 } {
   const body: {
     brief: string;
@@ -81,6 +83,7 @@ export function socialPostGenerateRequestBody(fields: SocialPostGenerateFields):
     ctaUrl?: string;
     keyMessage?: string;
     reference?: SocialPostGenerateFields['reference'];
+    campaignId?: string;
   } = {
     brief: fields.brief,
     platform: fields.platform,
@@ -96,5 +99,7 @@ export function socialPostGenerateRequestBody(fields: SocialPostGenerateFields):
   if (fields.ctaUrl) body.ctaUrl = fields.ctaUrl;
   if (fields.keyMessage) body.keyMessage = fields.keyMessage;
   if (fields.reference) body.reference = fields.reference;
+  const campaignId = fields.campaignId?.trim();
+  if (campaignId) body.campaignId = campaignId;
   return body;
 }

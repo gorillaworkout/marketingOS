@@ -3,6 +3,7 @@ import { IMAGE_PROMPT_SYSTEM } from '@/lib/dupoin-image-prompt';
 import { EVENT_PLAN_GROUNDED_BUDGET_RULES } from '@/lib/event-plan-budget';
 import { isTerminalProviderError, postChat, explainLlmHttpError } from '@/lib/llm-provider';
 import { captionUrls, ctaPresent, emojiLimit, hashtagRange, keyMessagePresent, platformKey, platformOptimization, urlsMatch } from '@/lib/social-post-brief';
+import { inventedPromoTokens } from '@/lib/social-post-library';
 import { parseStoredSourceUrls } from '@/lib/knowledge-pin';
 import { logTokenUsage } from '@/lib/token-log';
 import { runWithModelFallback, type FallbackEvent } from '@/lib/model-fallback';
@@ -885,7 +886,16 @@ export function runQC(
   caption: string,
   hashtags: string[],
   platform?: string,
-  options?: { style?: string; keyMessage?: string; cta?: string; ctaUrl?: string },
+  options?: {
+    style?: string;
+    keyMessage?: string;
+    cta?: string;
+    ctaUrl?: string;
+    allowedUrls?: string[];
+    restrictUrls?: boolean;
+    bannedPhrases?: string[];
+    campaignFacts?: string;
+  },
 ): QCResult {
   const checks: QCCheck[] = [];
 
@@ -977,16 +987,35 @@ export function runQC(
       passed: present,
       detail: present ? 'The caption includes the requested call to action.' : 'The requested call to action is missing.',
     });
+  }
+  if ((options?.cta && options.cta !== 'none') || options?.restrictUrls) {
     const urls = captionUrls(caption);
-    const allowed = options.ctaUrl?.trim();
-    const invented = allowed
-      ? urls.filter(url => !urlsMatch(url, allowed))
-      : urls;
+    const allowed = [options.ctaUrl, ...(options.allowedUrls || [])].map(url => url?.trim() || '').filter(Boolean);
+    const invented = urls.filter(url => !allowed.some(item => urlsMatch(url, item)));
     checks.push({
       name: 'no_invented_url',
       label: 'Links',
       passed: invented.length === 0,
       detail: invented.length === 0 ? 'No invented URL.' : `Unexpected URL: ${invented[0]}`,
+    });
+  }
+  const bannedPhrases = (options?.bannedPhrases || []).map(phrase => phrase.trim()).filter(phrase => phrase.length > 1);
+  if (bannedPhrases.length) {
+    const found = bannedPhrases.filter(phrase => caption.toLowerCase().includes(phrase.toLowerCase()));
+    checks.push({
+      name: 'voice_banned_phrases',
+      label: 'Brand voice',
+      passed: found.length === 0,
+      detail: found.length === 0 ? 'No banned brand phrases.' : `Banned phrase: "${found[0]}"`,
+    });
+  }
+  if (options?.campaignFacts) {
+    const inventedFacts = inventedPromoTokens(caption, options.campaignFacts);
+    checks.push({
+      name: 'campaign_facts',
+      label: 'Campaign facts',
+      passed: inventedFacts.length === 0,
+      detail: inventedFacts.length === 0 ? 'Promo figures match Campaign Memory.' : `Not in Campaign Memory: ${inventedFacts[0]}`,
     });
   }
 

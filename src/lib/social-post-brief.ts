@@ -299,6 +299,7 @@ export function readStoredSocialPostInput(raw: unknown): (SocialPostBriefInput &
   targetAudience?: string;
   goal?: string;
   brandGuidelineId?: string;
+  campaignId?: string;
 }) | null {
   if (!raw || typeof raw !== 'object') return null;
   const parsed = parseSocialPostBrief(raw);
@@ -310,5 +311,6 @@ export function readStoredSocialPostInput(raw: unknown): (SocialPostBriefInput &
     ...(typeof body.targetAudience === 'string' ? { targetAudience: body.targetAudience } : {}),
     ...(typeof body.goal === 'string' ? { goal: body.goal } : {}),
     ...(typeof body.brandGuidelineId === 'string' && body.brandGuidelineId ? { brandGuidelineId: body.brandGuidelineId } : {}),
+    ...(typeof body.campaignId === 'string' && body.campaignId ? { campaignId: body.campaignId } : {}),
   };
 }
