@@ -45,6 +45,6 @@ jobs:
       - name: Install
         run: npm ci
       - name: Run the store tests
-        run: npx tsx --test tests/settlement-deals-pg.test.ts tests/model-tiers-pg.test.ts tests/social-post-voice-pg.test.ts tests/social-post-competitor-pg.test.ts tests/content-studio-v2-pg.test.ts
+        run: npx tsx --test tests/settlement-deals-pg.test.ts tests/model-tiers-pg.test.ts tests/social-post-voice-pg.test.ts tests/social-post-competitor-pg.test.ts tests/content-studio-v2-pg.test.ts tests/seo-audit-pg.test.ts
         env:
           MODEL_TIERS_TEST_DATABASE_URL: postgres://settlement:settlement@127.0.0.1:5432/settlement_phase2

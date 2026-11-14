@@ -153,6 +153,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         { href: '/dashboard/seo/content', label: 'Content Studio', icon: 'content', feature: 'seo' },
         { href: '/dashboard/seo/visibility', label: 'AI Visibility', icon: 'visibility', feature: 'seo' },
         { href: '/dashboard/seo/sops', label: 'SOPs', icon: 'sop', feature: 'seo' },
+        { href: '/dashboard/seo/audit', label: 'Website Audit', icon: 'report', feature: 'seo' },
         { href: '/dashboard/seo/settings', label: 'SEO settings', icon: 'settings', adminOnly: true },
       ],
     },
