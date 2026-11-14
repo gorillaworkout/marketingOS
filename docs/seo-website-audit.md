@@ -4,7 +4,7 @@ Website Audit is a page under SEO OS. Anyone with the `seo` feature can run it. 
 
 ## Crawl
 
-The crawler stays on the final host of the start URL. It reads robots.txt and skips disallowed paths. It does not fetch private hosts, localhost, or URLs with a username. The page cap defaults to 100 and cannot go above 200. Two pages are fetched at a time, with a short pause and a 10 second timeout. The user agent is `MarketingOS-SEO-Audit/1.0`.
+The crawler stays on the final host of the start URL. It reads robots.txt and skips disallowed paths. It does not fetch private hosts, localhost, or URLs with a username. Before every request, including each redirect hop, it resolves the hostname with DNS and refuses the hop when any address is private, loopback, link-local, CGNAT (100.64/10), unique-local, or an IPv4-mapped form of those ranges. The page cap defaults to 100 and cannot go above 200. Two pages are fetched at a time, with a short pause and a 10 second timeout. The user agent is `MarketingOS-SEO-Audit/1.0`.
 
 Checks cover status codes, redirect chains, missing or duplicate titles and meta descriptions, title and description length, missing or multiple H1s, missing alt text, canonicals, noindex, broken internal links, thin pages, large responses, mixed content, and whether robots.txt and sitemap.xml exist.
 

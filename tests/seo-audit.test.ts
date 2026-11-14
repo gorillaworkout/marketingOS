@@ -6,7 +6,7 @@ import { pagesToCsv } from '../src/lib/seo/audit-export.ts';
 import { applyIssueCounts, buildAuditIssues, healthScore, indexingRows, notConnectedCards } from '../src/lib/seo/audit-page.ts';
 import { parsePsiResponse, psiRequestUrl, resolvePsiKey, scrubPsiKey, topPsiPages } from '../src/lib/seo/audit-psi.ts';
 import { parseRobots, pathAllowed } from '../src/lib/seo/audit-robots.ts';
-import { auditUrlError, clampMaxPages, defaultAuditUrl, isPublicHost } from '../src/lib/seo/audit-url.ts';
+import { auditUrlError, clampMaxPages, defaultAuditUrl, isPrivateAddress, isPublicHost } from '../src/lib/seo/audit-url.ts';
 import type { CrawledPage } from '../src/lib/seo/audit-types.ts';
 
 const HOME = `<!doctype html><html><head>
@@ -49,7 +49,7 @@ test('the crawler stays on the host, honors robots, and scores the fixture', asy
     fetched.push(url);
     return pages.get(url) ?? response(404, '', 'text/plain');
   };
-  const crawl = await crawlSite({ startUrl: 'https://example.com/', maxPages: 10, fetchPage, concurrency: 2 });
+  const crawl = await crawlSite({ startUrl: 'https://example.com/', maxPages: 10, fetchPage, concurrency: 2, delayMs: 0, lookup: async () => ['93.184.216.34'] });
   assert.equal(fetched.includes('https://example.com/private'), false);
   assert.equal(fetched.includes('https://other.test/out'), false);
   assert.equal(crawl.robotsBlocked.some(url => url.endsWith('/private')), true);
@@ -107,6 +107,34 @@ test('PageSpeed parsing keeps lab and field data and hides the key', () => {
   const home = { url: 'https://dupoin.co.id/', finalUrl: 'https://dupoin.co.id/', status: 200, depth: 0, html: true };
   const deep = { url: 'https://dupoin.co.id/a', finalUrl: 'https://dupoin.co.id/a', status: 200, depth: 2, html: true };
   assert.deepEqual(topPsiPages('https://dupoin.co.id/', [deep, home], 1), ['https://dupoin.co.id/']);
+});
+
+test('private addresses include CGNAT, unique-local, link-local, and IPv4-mapped IPv6', () => {
+  for (const address of ['10.1.2.3', '127.0.0.1', '0.1.2.3', '169.254.169.254', '172.16.0.1', '172.31.255.255', '192.168.1.1', '100.64.0.1', '100.127.255.255', '::1', '::', 'fc00::1', 'fd12:3456::1', 'fe80::1', '::ffff:10.0.0.1', '::ffff:127.0.0.1', '::ffff:7f00:1', '[::ffff:192.168.0.1]']) {
+    assert.equal(isPrivateAddress(address), true, address);
+    assert.equal(isPublicHost(address), false, address);
+  }
+  for (const address of ['8.8.8.8', '100.63.255.255', '100.128.0.1', '172.15.255.255', '172.32.0.1', '11.0.0.1', '2606:4700:4700::1111']) {
+    assert.equal(isPrivateAddress(address), false, address);
+  }
+  assert.equal(isPublicHost('fc.example.com'), true);
+  assert.equal(isPublicHost('metadata.google.internal'), false);
+});
+
+test('the crawler resolves every hop and skips a private address', async () => {
+  const fetched: string[] = [];
+  const fetchPage: AuditFetch = async url => {
+    fetched.push(url);
+    if (url === 'https://public.test/') return response(302, '', 'text/plain', 'https://rebind.test/secret');
+    return response(200, '<html><title>Secret</title></html>', 'text/html');
+  };
+  const lookup = async (hostname: string) => hostname === 'public.test' ? ['93.184.216.34', '8.8.8.8'] : ['127.0.0.1'];
+  await crawlSite({ startUrl: 'https://public.test/', maxPages: 5, fetchPage, lookup, delayMs: 0 });
+  assert.deepEqual(fetched, ['https://public.test/']);
+
+  fetched.length = 0;
+  await crawlSite({ startUrl: 'https://split.test/', maxPages: 1, fetchPage, lookup: async () => ['93.184.216.34', '10.0.0.1'], delayMs: 0 });
+  assert.deepEqual(fetched, []);
 });
 
 test('URL defaults, public-host checks, and CSV export', () => {

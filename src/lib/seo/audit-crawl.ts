@@ -1,6 +1,7 @@
+import { lookup } from 'node:dns/promises';
 import { analyzeHtml, type PageFacts } from './audit-page';
 import { parseRobots, pathAllowed } from './audit-robots';
-import { AUDIT_CONCURRENCY, AUDIT_TIMEOUT_MS, AUDIT_USER_AGENT, isPublicHost, normalizeAuditUrl, sameHost } from './audit-url';
+import { AUDIT_CONCURRENCY, AUDIT_TIMEOUT_MS, AUDIT_USER_AGENT, isIpLiteral, isPublicHost, normalizeAuditUrl, sameHost } from './audit-url';
 import type { CrawledPage } from './audit-types';
 
 export interface AuditResponse {
@@ -11,6 +12,25 @@ export interface AuditResponse {
 }
 
 export type AuditFetch = (url: string, timeoutMs: number) => Promise<AuditResponse>;
+export type HostLookup = (hostname: string) => Promise<string[]>;
+
+/** Every address from DNS. One private answer rejects the host. */
+export async function defaultHostLookup(hostname: string): Promise<string[]> {
+  const records = await lookup(hostname, { all: true, verbatim: true });
+  return records.map(record => record.address);
+}
+
+export async function hostResolvesPublic(hostname: string, lookupHost: HostLookup): Promise<boolean> {
+  const host = hostname.toLowerCase().replace(/^\[|\]$/g, '');
+  if (!isPublicHost(host)) return false;
+  if (isIpLiteral(host)) return true;
+  try {
+    const addresses = await lookupHost(host);
+    return addresses.length > 0 && addresses.every(address => isPublicHost(address));
+  } catch {
+    return false;
+  }
+}
 
 const ASSET = /\.(png|jpe?g|gif|webp|svg|pdf|zip|css|js|mp4|webm|woff2?)$/i;
 const MAX_REDIRECTS = 5;
@@ -42,10 +62,14 @@ function isHtml(headers: Record<string, string>, body: string): boolean {
   return /<html[\s>]/i.test(body.slice(0, 500));
 }
 
-async function follow(url: string, fetchPage: AuditFetch, timeoutMs: number): Promise<{ finalUrl: string; status: number; hops: number; headers: Record<string, string>; body: string; bytes: number; error: boolean }> {
+async function follow(url: string, fetchPage: AuditFetch, timeoutMs: number, lookupHost: HostLookup): Promise<{ finalUrl: string; status: number; hops: number; headers: Record<string, string>; body: string; bytes: number; error: boolean }> {
   let current = url;
   let hops = 0;
   for (let attempt = 0; attempt <= MAX_REDIRECTS; attempt += 1) {
+    const currentHost = new URL(current).hostname;
+    if (!(await hostResolvesPublic(currentHost, lookupHost))) {
+      return { finalUrl: current, status: 0, hops, headers: {}, body: '', bytes: 0, error: true };
+    }
     let response: AuditResponse;
     try {
       response = await fetchPage(current, timeoutMs);
@@ -56,7 +80,6 @@ async function follow(url: string, fetchPage: AuditFetch, timeoutMs: number): Pr
     const bytes = Math.max(declared, Buffer.byteLength(response.body));
     if (response.status >= 300 && response.status < 400 && response.location && hops < MAX_REDIRECTS) {
       const next = new URL(response.location, current);
-      if (!isPublicHost(next.hostname)) return { finalUrl: current, status: response.status, hops: hops + 1, headers: response.headers, body: '', bytes, error: false };
       current = normalizeAuditUrl(next.toString());
       hops += 1;
       continue;
@@ -92,11 +115,14 @@ export async function crawlSite(input: {
   /** Raw HTML for each fetched HTML page. Audit does not set this. */
   onHtml?: (page: { url: string; html: string }) => void;
   delayMs?: number;
+  /** Resolves a hostname to every address. Defaults to dns.lookup({ all: true }). */
+  lookup?: HostLookup;
 }): Promise<CrawlOutput> {
   const fetchPage = input.fetchPage ?? createAuditFetch();
+  const lookupHost = input.lookup ?? defaultHostLookup;
   const timeoutMs = input.timeoutMs ?? AUDIT_TIMEOUT_MS;
   const concurrency = input.concurrency ?? AUDIT_CONCURRENCY;
-  const start = await follow(normalizeAuditUrl(input.startUrl), fetchPage, timeoutMs);
+  const start = await follow(normalizeAuditUrl(input.startUrl), fetchPage, timeoutMs, lookupHost);
   const originUrl = new URL(start.finalUrl);
   const origin = originUrl.origin;
   const host = originUrl.hostname;
@@ -104,7 +130,7 @@ export async function crawlSite(input: {
   let robotsPresent = false;
   let disallow: string[] = [];
   let sitemapHints: string[] = [];
-  const robots = await follow(robotsUrl, fetchPage, timeoutMs);
+  const robots = await follow(robotsUrl, fetchPage, timeoutMs, lookupHost);
   if (robots.status >= 200 && robots.status < 300 && robots.body) {
     robotsPresent = true;
     const rules = parseRobots(robots.body);
@@ -116,7 +142,7 @@ export async function crawlSite(input: {
   let sitemapPresent = false;
   for (const target of sitemapTargets) {
     if (!sameHost(target, origin)) continue;
-    const file = await follow(target, fetchPage, timeoutMs);
+    const file = await follow(target, fetchPage, timeoutMs, lookupHost);
     if (file.status < 200 || file.status >= 300 || !file.body) continue;
     sitemapPresent = true;
     const locs = sitemapLocs(file.body);
@@ -126,7 +152,7 @@ export async function crawlSite(input: {
     }
     for (const child of children) {
       if (!sameHost(child, origin)) continue;
-      const nested = await follow(child, fetchPage, timeoutMs);
+      const nested = await follow(child, fetchPage, timeoutMs, lookupHost);
       if (nested.status >= 200 && nested.status < 300) {
         for (const loc of sitemapLocs(nested.body)) {
           try { if (sameHost(loc, origin)) sitemapUrls.add(normalizeAuditUrl(loc)); } catch { /* skip a bad sitemap URL */ }
@@ -175,7 +201,7 @@ export async function crawlSite(input: {
     : null;
 
   async function take(url: string, depth: number, preset?: typeof start): Promise<void> {
-    const fetched = preset ?? await follow(url, fetchPage, timeoutMs);
+    const fetched = preset ?? await follow(url, fetchPage, timeoutMs, lookupHost);
     if (!sameHost(fetched.finalUrl, origin) && fetched.finalUrl !== url) {
       pages.push(blankPage(url, fetched.finalUrl, fetched.status, fetched.hops, depth, false));
       return;
