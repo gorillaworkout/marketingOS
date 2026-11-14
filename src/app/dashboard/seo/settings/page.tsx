@@ -56,6 +56,8 @@ export default function SeoSettingsPage() {
     {error && <Panel><p className="text-sm text-red-300">{error}</p></Panel>}
 
     {settings && <>
+      <PagespeedKeyForm />
+
       <Panel>
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
@@ -94,6 +96,63 @@ export default function SeoSettingsPage() {
       </DataTableFrame>
     </>}
   </PageStack>;
+}
+
+function PagespeedKeyForm() {
+  const [hint, setHint] = useState('');
+  const [source, setSource] = useState('none');
+  const [key, setKey] = useState('');
+  const [message, setMessage] = useState('');
+  const [error, setError] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const load = useCallback(async () => {
+    const response = await fetch('/api/seo/settings/pagespeed', { cache: 'no-store' });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) return;
+    setHint(data.hint || '');
+    setSource(data.source || 'none');
+  }, []);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => { void load(); }, 0);
+    return () => window.clearTimeout(timer);
+  }, [load]);
+
+  const save = async (clear = false) => {
+    setSaving(true); setMessage(''); setError('');
+    try {
+      const response = await fetch('/api/seo/settings/pagespeed', {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(clear ? { clear: true } : { pagespeedKey: key }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) { setError(data.error || 'Could not save the key.'); return; }
+      setKey('');
+      setMessage(clear ? 'Saved key cleared.' : 'Key saved.');
+      await load();
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return <Panel>
+    <div className="flex flex-wrap items-center justify-between gap-3">
+      <div>
+        <h2 className="text-sm font-medium text-[var(--mos-text)]">PageSpeed Insights API key</h2>
+        <p className="mt-1 text-xs text-[var(--mos-text-muted)]">Optional. Website Audit calls PageSpeed without a key on the public quota. A saved key is encrypted and is never shown again.</p>
+      </div>
+      <StatusBadge tone={source === 'none' ? 'warning' : 'success'} dot>{source === 'environment' ? 'Server environment' : source === 'settings' ? `Saved ${hint}` : 'Not configured'}</StatusBadge>
+    </div>
+    <div className="mt-4 flex flex-wrap items-end gap-2">
+      <FormField label="API key" hint="Leave blank to keep the current key" error={error || undefined} className="min-w-[260px] flex-1">
+        <TextInput type="password" value={key} onChange={event => setKey(event.target.value)} autoComplete="off" spellCheck={false} />
+      </FormField>
+      <Button variant="primary" disabled={saving || !key.trim()} onClick={() => save(false)}>{saving ? 'Saving…' : 'Save key'}</Button>
+      <Button disabled={saving || source !== 'settings'} onClick={() => save(true)}>Clear saved key</Button>
+    </div>
+    {message && <p className="mt-2 text-xs text-emerald-300">{message}</p>}
+  </Panel>;
 }
 
 function SiteForm({ site, onSaved }: { site: Site; onSaved: () => Promise<void> }) {
