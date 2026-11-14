@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { Button, FormField, SectionHeader, Select, TextArea, TextInput } from '@/components/ui/dashboard';
+import { CompetitorReferences } from '@/components/social-post-competitors';
 import type { BrandVoiceChoice } from '@/lib/social-post-library';
 
 type CampaignRecord = {
@@ -35,6 +36,8 @@ export function SocialPostAdvanced({
   campaignId,
   onCampaignId,
   brief,
+  competitorIds,
+  onCompetitorIds,
 }: {
   voices: BrandVoiceChoice[];
   brandGuidelineId: string;
@@ -43,6 +46,8 @@ export function SocialPostAdvanced({
   campaignId: string;
   onCampaignId: (id: string) => void;
   brief: string;
+  competitorIds: string[];
+  onCompetitorIds: (ids: string[]) => void;
 }) {
   const voice = voices.find(item => item.id === brandGuidelineId) || null;
   const [samples, setSamples] = useState<Sample[]>([]);
@@ -247,7 +252,7 @@ export function SocialPostAdvanced({
         )}
       </section>
       {message && <p className="text-xs text-[var(--mos-text-secondary)]">{message}</p>}
-      <p className="rounded-[var(--mos-radius-control)] border border-[var(--mos-border)] px-3 py-2 text-xs text-[var(--mos-text-muted)]">Competitor — coming soon</p>
+      <CompetitorReferences selectedIds={competitorIds} onChange={onCompetitorIds} />
     </div>
   );
 }

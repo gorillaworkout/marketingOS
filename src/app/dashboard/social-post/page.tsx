@@ -16,6 +16,7 @@ import {
 } from '@/components/ui/dashboard';
 import InlineModelSelector from '@/components/InlineModelSelector';
 import { SocialPostAdvanced } from '@/components/social-post-advanced';
+import { CaptionAnalyzer } from '@/components/caption-analyzer';
 import { DEFAULT_IMAGE_ASPECT_RATIO, IMAGE_ASPECT_RATIOS, type ImageAspectRatio } from '@/lib/image-aspect-ratio';
 import { applyDupoinImagePromptLocks } from '@/lib/dupoin-image-prompt';
 import { AVAILABLE_IMAGE_MODELS, DEFAULT_IMAGE_MODEL, imageModelLabel, selectableImageModel } from '@/lib/image-models';
@@ -312,6 +313,10 @@ export default function SocialPostPage() {
   const [voiceVersion, setVoiceVersion] = useState(0);
   const [brandGuidelineId, setBrandGuidelineId] = useState('');
   const [campaignId, setCampaignId] = useState('');
+  const [competitorIds, setCompetitorIds] = useState<string[]>([]);
+  const [workspace, setWorkspace] = useState<'generate' | 'analyze'>('generate');
+  const [analyzeSeed, setAnalyzeSeed] = useState<{ caption: string; platform: string; goal: string; cta: string; taskId?: string | null; key: number } | null>(null);
+  const [briefNotice, setBriefNotice] = useState('');
   const brandGuidelineTouched = useRef(false);
   const [loading, setLoading] = useState(false);
   const [options, setOptions] = useState<PostOption[] | null>(null);
@@ -589,6 +594,7 @@ export default function SocialPostPage() {
           keyMessage,
           reference,
           campaignId,
+          competitorRefIds: competitorIds,
         })),
         signal: controller.signal,
       });
@@ -951,6 +957,7 @@ export default function SocialPostPage() {
           setBrandGuidelineId(stored.brandGuidelineId);
         }
         setCampaignId(stored.campaignId || '');
+        setCompetitorIds(stored.competitorRefIds || []);
       }
       // Replay previously generated images for this post
       setImageHistory(history);
@@ -1057,14 +1064,29 @@ export default function SocialPostPage() {
     <PageStack className="max-w-6xl">
       <PageHeader eyebrow="Create / Social" title="Social media post" description="Generate three structured options with research, quality control, naming, and delivery review." />
       <InlineModelSelector feature="social-post" />
+      <div className="flex gap-2">
+        <Button type="button" variant={workspace === 'generate' ? 'primary' : 'secondary'} onClick={() => setWorkspace('generate')}>Generate</Button>
+        <Button type="button" variant={workspace === 'analyze' ? 'primary' : 'secondary'} onClick={() => setWorkspace('analyze')}>Caption Analyzer</Button>
+      </div>
+      {workspace === 'analyze' && (
+        <CaptionAnalyzer
+          seed={analyzeSeed}
+          onUseCaption={caption => {
+            setBrief(caption);
+            setBriefNotice('Improved caption copied into the brief. Generated options were left unchanged.');
+            setWorkspace('generate');
+          }}
+        />
+      )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      {workspace === 'generate' && <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Left: Form + Result */}
         <div className="lg:col-span-2 space-y-6">
           {/* Form */}
           <Panel>
           <form onSubmit={handleGenerate} className="space-y-5">
             <SectionHeader title="Generation brief" description="Define the channel, audience, objective, and content direction." />
+            {briefNotice && <p className="text-xs text-[var(--mos-text-secondary)]">{briefNotice}</p>}
             {researchHandoff && (
               <p role="status" data-testid="social-post-research-handoff" className="rounded-xl border border-indigo-400/30 bg-indigo-500/10 px-3 py-2 text-xs leading-5 text-indigo-100">
                 Filled from Dupoin AI Research. Not published yet — edit this brief before you generate.
@@ -1434,6 +1456,10 @@ export default function SocialPostPage() {
                               }}
                                 className="text-xs px-3 py-1.5 bg-[var(--mos-raised)] hover:bg-[var(--mos-raised)] text-[var(--mos-text-secondary)] rounded-lg">
                                 Save as voice sample
+                              </button>
+                              <button type="button" onClick={() => { setAnalyzeSeed({ caption: opt.caption, platform, goal, cta, taskId, key: Date.now() }); setWorkspace('analyze'); }}
+                                className="text-xs px-3 py-1.5 bg-[var(--mos-raised)] hover:bg-[var(--mos-raised)] text-[var(--mos-text-secondary)] rounded-lg">
+                                Analyze
                               </button>
                               <button onClick={() => copyToClipboard(opt.hook + '\n\n' + opt.caption + '\n\n' + opt.hashtags.join(' '))}
                                 className="text-xs px-3 py-1.5 bg-[var(--mos-raised)] hover:bg-[var(--mos-raised)] text-[var(--mos-text-secondary)] rounded-lg">
@@ -1835,6 +1861,8 @@ export default function SocialPostPage() {
               campaignId={campaignId}
               onCampaignId={setCampaignId}
               brief={brief}
+              competitorIds={competitorIds}
+              onCompetitorIds={setCompetitorIds}
             />
             <form className="mt-4 space-y-3" onSubmit={event => { event.preventDefault(); void suggestHashtags(); }}>
               <SectionHeader title="Hashtag generator" description="Grouped brand, campaign, niche, and broad tags for this platform." />
@@ -1887,7 +1915,7 @@ export default function SocialPostPage() {
             </div>
           </Panel>
         </div>
-      </div>
+      </div>}
 
       {previewImage && (
         <div

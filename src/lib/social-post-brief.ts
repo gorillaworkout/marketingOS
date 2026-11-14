@@ -300,6 +300,7 @@ export function readStoredSocialPostInput(raw: unknown): (SocialPostBriefInput &
   goal?: string;
   brandGuidelineId?: string;
   campaignId?: string;
+  competitorRefIds?: string[];
 }) | null {
   if (!raw || typeof raw !== 'object') return null;
   const parsed = parseSocialPostBrief(raw);
@@ -312,5 +313,6 @@ export function readStoredSocialPostInput(raw: unknown): (SocialPostBriefInput &
     ...(typeof body.goal === 'string' ? { goal: body.goal } : {}),
     ...(typeof body.brandGuidelineId === 'string' && body.brandGuidelineId ? { brandGuidelineId: body.brandGuidelineId } : {}),
     ...(typeof body.campaignId === 'string' && body.campaignId ? { campaignId: body.campaignId } : {}),
+    ...(Array.isArray(body.competitorRefIds) ? { competitorRefIds: body.competitorRefIds.filter((item): item is string => typeof item === 'string').slice(0, 3) } : {}),
   };
 }
