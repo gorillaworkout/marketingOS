@@ -7,6 +7,7 @@ import { fetchKnowledgeContext, fetchStyleContext, generateContent, getUserPrefe
 import { persistKnowledgeQuietly, summarizeArticleKnowledge } from '@/lib/knowledge-persist';
 import { articleDraftProtectedPhrases, articleWordCountRepairGuidance, buildArticleMarketNewsPrompts, describeArticlePublicationGateFailure, ensureEndingDupoinAccountCta, fitArticleMarkdownWordCount, normalizeArticleMarketNewsInput, parseGeneratedArticle, validateGeneratedArticle } from '@/lib/article-market-news';
 import { researchArticleMarketNews } from '@/lib/article-market-news-research';
+import { marketNewsCoverage, topicForKeyword } from '@/lib/market-news-topics';
 
 export const maxDuration = 300;
 
@@ -60,7 +61,11 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: error instanceof Error ? error.message : 'Invalid article request.' }, { status: 400 });
   }
 
-  const model = await getUserPreferredModel(auth.id, 'article-market-news');
+  const topic = topicForKeyword(input.keyword);
+  const researchFallback = topic ? marketNewsCoverage(topic) === 'research-fallback' : false;
+  const articleModel = await getUserPreferredModel(auth.id, 'article-market-news');
+  const researchModel = researchFallback ? await getUserPreferredModel(auth.id, 'ai-research') : articleModel;
+  const model = researchFallback ? researchModel : articleModel;
 
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
@@ -83,7 +88,13 @@ export async function POST(request: NextRequest) {
         const builtPrompts = buildArticleMarketNewsPrompts(effectiveInput);
         const systemPrompt = `${builtPrompts.systemPrompt}${knowledgeContext}${styleContext}\n\nStyle notes, if present, apply to voice only. Do not use them to add facts, numbers, or sources.`;
         const userPrompt = builtPrompts.userPrompt;
-        controller.enqueue(encoder.encode(sseEvent({ step: 'draft', progress: 35, message: 'Writing the SOP-compliant article draft…' })));
+        controller.enqueue(encoder.encode(sseEvent({
+          step: 'draft',
+          progress: 35,
+          message: researchFallback
+            ? 'This symbol is not in the market-data catalog. Writing from web and news research with the research-tier model…'
+            : 'Writing the SOP-compliant article draft…',
+        })));
 
         let generated: Awaited<ReturnType<typeof generateContent>> | undefined;
         let article: Record<string, unknown> | undefined;

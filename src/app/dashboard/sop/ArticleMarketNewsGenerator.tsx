@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { jakartaDate, validateGeneratedArticle, type ArticleMarketNewsInput, type ArticleQualityCheck } from '@/lib/article-market-news';
+import { filterMarketNewsTopics, groupMarketNewsTopics, marketNewsCoverage, topicForKeyword } from '@/lib/market-news-topics';
 import { articleDocxFilename, buildArticleDocxBlob } from '@/lib/article-market-news-docx';
 import {
   ARTICLE_MARKET_NEWS_HISTORY_TYPE,
@@ -71,6 +72,8 @@ function ExampleSample({
 
 export default function ArticleMarketNewsGenerator() {
   const [keyword, setKeyword] = useState('');
+  const [topicId, setTopicId] = useState('');
+  const [topicQuery, setTopicQuery] = useState('');
   const [researchDate, setResearchDate] = useState(jakartaDate);
   const [angle, setAngle] = useState('');
   const [competitorHeadings, setCompetitorHeadings] = useState('');
@@ -113,6 +116,7 @@ export default function ArticleMarketNewsGenerator() {
     // Prefill only. Do not call generateArticle.
     // eslint-disable-next-line react-hooks/set-state-in-effect -- read a same-tab handoff once on mount
     setKeyword(handoff.keyword);
+    setTopicId(topicForKeyword(handoff.keyword)?.id || '');
     setAngle(handoff.angle);
     setResearchHandoff(true);
   }, []);
@@ -121,6 +125,7 @@ export default function ArticleMarketNewsGenerator() {
     try {
       const restored = restoreArticleMarketNews(task);
       setKeyword(restored.keyword);
+      setTopicId(topicForKeyword(restored.keyword)?.id || '');
       setResearchDate(restored.researchDate);
       setAngle(restored.angle);
       setCompetitorHeadings(restored.competitorHeadings);
@@ -175,6 +180,7 @@ export default function ArticleMarketNewsGenerator() {
 
   const fillExample = () => {
     setKeyword(ARTICLE_MARKET_NEWS_EXAMPLE_KEYWORD);
+    setTopicId(topicForKeyword(ARTICLE_MARKET_NEWS_EXAMPLE_KEYWORD)?.id || 'gold');
     setAngle(ARTICLE_MARKET_NEWS_EXAMPLE_ANGLE);
     setCompetitorHeadings(exampleCompetitorHeadings);
     setPaaText(examplePaaText);
@@ -317,7 +323,31 @@ export default function ArticleMarketNewsGenerator() {
 
       <div className="mt-6 grid gap-5 lg:grid-cols-2">
         <div className="space-y-4">
-          <FormField label="Main keyword"><TextInput value={keyword} onChange={event => setKeyword(event.target.value)} placeholder="Example: Gold price today" /></FormField>
+          <FormField label="Topic" hint="Search, then choose a market. The article uses that instrument name.">
+            <TextInput aria-label="Search topics" value={topicQuery} onChange={event => setTopicQuery(event.target.value)} placeholder="Search gold, Tesla, USD/JPY…" />
+            <select
+              aria-label="Market topic"
+              className="mt-2 h-9 w-full rounded-[var(--mos-radius-control)] border border-[var(--mos-border)] bg-[var(--mos-surface)] px-3 text-sm"
+              value={topicId}
+              onChange={event => {
+                const topic = filterMarketNewsTopics('').find(item => item.id === event.target.value);
+                setTopicId(event.target.value);
+                setKeyword(topic?.keyword || '');
+              }}
+            >
+              <option value="">Choose a topic</option>
+              {groupMarketNewsTopics(filterMarketNewsTopics(topicQuery)).map(group => (
+                <optgroup key={group.category} label={group.category}>
+                  {group.topics.map(topic => <option key={topic.id} value={topic.id}>{topic.label}</option>)}
+                </optgroup>
+              ))}
+            </select>
+            {topicForKeyword(keyword) && (
+              <p className="mt-1 text-xs text-[var(--mos-text-muted)]">
+                {topicForKeyword(keyword)?.instrumentName}. {marketNewsCoverage(topicForKeyword(keyword)!) === 'catalog' ? 'Matched in the market-news catalog.' : 'Not in the market-news catalog. The draft uses web and news research with the research-tier model.'}
+              </p>
+            )}
+          </FormField>
           <FormField label="Research date"><TextInput type="date" value={researchDate} min={jakartaDate()} max={jakartaDate()} onChange={event => setResearchDate(event.target.value)} /></FormField>
           <FormField label="Article angle"><TextArea value={angle} onChange={event => setAngle(event.target.value)} rows={3} placeholder="Main angle chosen from the research" /></FormField>
           <FormField label="Competitor H1/H2/H3 structure" hint="Exactly 5 articles">
