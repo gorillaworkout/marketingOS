@@ -2,11 +2,12 @@ import { parseGatewayCompletion } from '@/lib/gateway-response';
 import { IMAGE_PROMPT_SYSTEM } from '@/lib/dupoin-image-prompt';
 import { EVENT_PLAN_GROUNDED_BUDGET_RULES } from '@/lib/event-plan-budget';
 import { isTerminalProviderError, postChat, explainLlmHttpError } from '@/lib/llm-provider';
-import { captionUrls, ctaPresent, emojiLimit, hashtagRange, keyMessagePresent, platformKey, platformOptimization, urlsMatch } from '@/lib/social-post-brief';
+import { authFailoverNotice, isAuthFailureMessage } from '@/lib/llm-auth';
+import { modelDisplayName, runWithModelFallback, type FallbackEvent } from '@/lib/model-fallback';
+import { captionUrls, ctaPresent, emojiLimit, extractHashtags, hashtagRange, keyMessagePresent, platformKey, platformOptimization, urlsMatch } from '@/lib/social-post-brief';
 import { inventedPromoTokens } from '@/lib/social-post-library';
 import { parseStoredSourceUrls } from '@/lib/knowledge-pin';
 import { logTokenUsage } from '@/lib/token-log';
-import { runWithModelFallback, type FallbackEvent } from '@/lib/model-fallback';
 import {
   mergeGatewayUsage,
   parseGatewayResponseUsage,
@@ -293,6 +294,7 @@ type CallApiResult = {
   provider?: 'gorillaworkout' | 'openrouter';
   fallbackLabel: string | null;
   fallbackEvents: FallbackEvent[];
+  authNotice: string | null;
 };
 
 /**
@@ -314,17 +316,19 @@ async function callApi(
       await recordModelFallback(feature, event, options.userId);
     },
   });
+  const authNotice = outcome.result.authNotice || (outcome.label && isAuthFailureMessage(outcome.events.map(event => event.error).join(' ')) ? outcome.label : null);
   return {
     ...outcome.result,
-    fallbackLabel: outcome.label,
+    fallbackLabel: authNotice || outcome.label,
     fallbackEvents: outcome.events,
+    authNotice,
   };
 }
 
 async function callApiOnce(
   messages: Array<{ role: string; content: string }>,
   options: CallApiOptions & { model: string },
-): Promise<{ content: string; model: string; usage: GatewayTokenUsage | null; provider: 'gorillaworkout' | 'openrouter' }> {
+): Promise<{ content: string; model: string; usage: GatewayTokenUsage | null; provider: 'gorillaworkout' | 'openrouter'; authNotice: string | null }> {
   const model = options.model;
   getModelProvider(model);
 
@@ -358,7 +362,10 @@ async function callApiOnce(
   const contentType = response.headers.get('content-type');
   const content = parseGatewayCompletion(responseBody, contentType);
   if (!content.trim()) throw new Error(`Empty response from ${model}`);
-  return { content, model, usage: parseGatewayResponseUsage(responseBody, contentType), provider: exchange.provider };
+  const authNotice = exchange.failoverReason && isAuthFailureMessage(exchange.failoverReason)
+    ? authFailoverNotice(modelDisplayName(model), modelDisplayName(exchange.upstreamModel))
+    : null;
+  return { content, model: exchange.upstreamModel || model, usage: parseGatewayResponseUsage(responseBody, contentType), provider: exchange.provider, authNotice };
 }
 
 /**
@@ -929,7 +936,15 @@ export function runQC(
   });
 
   // 2. Hashtag count follows the same range as the platform prompt.
-  const tagCount = hashtags.length;
+  const counted = [...hashtags, ...extractHashtags(caption)];
+  const seen = new Set<string>();
+  const uniqueTags = counted.filter(tag => {
+    const key = tag.replace(/^#/, '').toLowerCase();
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  const tagCount = uniqueTags.length;
   const range = hashtagRange(platform);
   const tagOk = tagCount >= range.min && tagCount <= range.max;
   checks.push({

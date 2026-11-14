@@ -167,7 +167,7 @@ async function runImageJob(job: ImageJob, prompt: string, brief: string, type: s
     imageJobs.update(job.id, job.ownerId, {
       status: 'done',
       progress: 100,
-      message: fallbackMessage ? `✅ ${fallbackMessage}` : '✅ Image generated!',
+      message: payload.authNotice || (fallbackMessage ? `✅ ${fallbackMessage}` : '✅ Image generated!'),
       result,
     });
     try {
@@ -199,6 +199,7 @@ type GatewayImagePayload = {
   usage?: unknown;
   cost?: unknown;
   provider?: 'gorillaworkout' | 'openrouter';
+  authNotice?: string | null;
 };
 
 async function requestGatewayImage(
@@ -249,8 +250,8 @@ export function explainImageFailure(reason: string, model: string): string {
     }
     return `Usage limit reached for ${model}.${waitHint} You can also pick a different image model.`;
   }
-  if (status === 401 || lower.includes('token is expired') || lower.includes('authentication')) {
-    return `The image service rejected our credentials for ${model} (expired or invalid token). This needs an administrator to reconnect the account — retrying will not help.`;
+  if (status === 401 || lower.includes('token is expired') || lower.includes('token expired') || lower.includes('authentication')) {
+    return `Model ${imageModelLabel(model)} token expired. Please re-authenticate it in AI Models.`;
   }
   if (status === 403) {
     return `This account is not allowed to use ${model}. Please choose another image model or contact the administrator.`;

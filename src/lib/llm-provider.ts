@@ -14,6 +14,8 @@ import {
   type UsageProvider,
 } from '@/lib/llm-provider-defaults';
 import { scrubSecrets } from '@/lib/llm-crypto';
+import { authCooldownModels, authFailoverNotice, clearAuthExpired, isAuthFailure, isAuthFailureMessage, noteAuthExpired } from '@/lib/llm-auth';
+import { imageModelLabel } from '@/lib/image-models';
 import { parseGatewayCompletion } from '@/lib/gateway-response';
 import { openRouterChainForTier, tierForFeature } from '@/lib/model-tiers';
 import {
@@ -59,7 +61,7 @@ export function canManageLlmProvider(user: { role?: string | null } | null | und
 }
 
 export function isProviderFailoverStatus(status: number): boolean {
-  return status === 408 || status === 429 || status >= 500;
+  return status === 401 || status === 408 || status === 429 || status >= 500;
 }
 
 export function isLlmTimeoutError(error: unknown): boolean {
@@ -189,10 +191,11 @@ export function shouldTryNextOpenRouterChat(status: number): boolean {
   return status === 429 || status === 404 || status === 402;
 }
 
-export type ModelHealthStatus = 'active' | 'rate_limited' | 'blocked' | 'credits' | 'error';
+export type ModelHealthStatus = 'active' | 'rate_limited' | 'blocked' | 'credits' | 'auth_expired' | 'error';
 
 export function classifyModelProbe(httpStatus: number, body: string): ModelHealthStatus {
   if (httpStatus >= 200 && httpStatus < 300) return 'active';
+  if (isAuthFailure(httpStatus, body)) return 'auth_expired';
   if (httpStatus === 429) return 'rate_limited';
   if (httpStatus === 402 || /insufficient credit|payment required|needs credits|requires more credits/i.test(body)) return 'credits';
   if (httpStatus === 404 || /guardrail|data policy|not a valid model|no endpoints found|model not found|unavailable/i.test(body)) return 'blocked';
@@ -204,6 +207,7 @@ export function healthStatusLabel(status: ModelHealthStatus): string {
   if (status === 'rate_limited') return 'Rate-limited';
   if (status === 'blocked') return 'Blocked/Unavailable';
   if (status === 'credits') return 'Needs credits';
+  if (status === 'auth_expired') return 'Auth expired';
   return 'Error';
 }
 
@@ -301,6 +305,13 @@ async function attemptFetch(input: {
       signal,
     });
     if (response.ok) return { kind: 'http', response, outcome: 'ok' };
+    if (response.status === 401 || response.status === 503) {
+      const text = await response.clone().text().catch(() => '');
+      if (isAuthFailure(response.status, text)) {
+        const model = typeof input.body.model === 'string' ? input.body.model : '';
+        if (model) noteAuthExpired(model);
+      }
+    }
     return { kind: 'http', response, outcome: isProviderFailoverStatus(response.status) ? 'transport' : 'client' };
   } catch (error) {
     const thrown = error instanceof Error ? error : new Error('LLM request failed');
@@ -510,6 +521,7 @@ export type ImageExchange = {
   cost?: unknown;
   provider: UsageProvider;
   upstreamModel: string;
+  authNotice?: string | null;
 };
 
 export async function postImage(input: {
@@ -527,7 +539,11 @@ export async function postImage(input: {
   const before = readCircuit();
   const referer = input.referer || 'https://marketingos.local';
   const title = input.title || 'MarketingOS';
-  const first = chooseProvider(settings.mode, circuit, now);
+  const cooled = authCooldownModels(now).includes(input.model);
+  if (cooled && settings.mode !== 'auto' && settings.mode !== 'openrouter') {
+    throw new Error(`Model ${imageModelLabel(input.model)} token expired. Please re-authenticate it in AI Models.`);
+  }
+  const first = cooled && settings.mode === 'auto' ? 'openrouter' : chooseProvider(settings.mode, circuit, now);
 
   const send = async (provider: ProviderChoice) => {
     const target = resolveProviderTarget({ settings, provider, kind: 'image', model: input.model });
@@ -585,7 +601,11 @@ export async function postImage(input: {
     try {
       const fallback = await send('openrouter');
       await remember({ provider: 'openrouter', reason, upstreamModel: fallback.target.model, now });
-      return await finish('openrouter', fallback.target.model, fallback.attempt);
+      const exchange = await finish('openrouter', fallback.target.model, fallback.attempt);
+      const authNotice = isAuthFailureMessage(reason)
+        ? authFailoverNotice(imageModelLabel(input.model), imageModelLabel(exchange.upstreamModel))
+        : null;
+      return authNotice ? { ...exchange, authNotice } : exchange;
     } catch (error) {
       const message = error instanceof Error ? error.message : 'OpenRouter image request failed';
       throw new Error(`LLM Dupoin image failed (${reason}). ${message}`);
@@ -598,7 +618,11 @@ export async function postImage(input: {
       console.error('[llm-provider] could not record recovery:', error instanceof Error ? error.message : error);
     });
   }
-  return finish(first, started.target.model, started.attempt);
+  const exchange = await finish(first, started.target.model, started.attempt);
+  if (cooled && first === 'openrouter') {
+    return { ...exchange, authNotice: authFailoverNotice(imageModelLabel(input.model), imageModelLabel(exchange.upstreamModel)) };
+  }
+  return exchange;
 }
 
 export async function testLlmProvider(input: {
@@ -700,6 +724,7 @@ function probeMessage(status: ModelHealthStatus, httpStatus: number | null, late
   if (status === 'active') return `HTTP ${httpStatus} in ${latencyMs}ms.`;
   if (status === 'rate_limited') return 'HTTP 429. Try again later. This is a rate limit, not a broken model.';
   if (status === 'credits') return IMAGE_CREDITS_MESSAGE;
+  if (status === 'auth_expired') return `Auth expired${httpStatus ? ` (HTTP ${httpStatus})` : ''}. Re-authenticate this model in AI Models.`;
   if (status === 'blocked') return `Blocked or unavailable${httpStatus ? ` (HTTP ${httpStatus})` : ''}. ${scrubSecrets(body).slice(0, 160)}`;
   return scrubSecrets(body || `HTTP ${httpStatus ?? 'error'}`).slice(0, 240);
 }
@@ -745,6 +770,8 @@ export async function probeModel(target: ProbeTarget, timeoutMs = 30_000): Promi
       }
     }
     const status = classifyModelProbe(response.status, text);
+    if (status === 'active') clearAuthExpired(model);
+    else if (status === 'auth_expired') noteAuthExpired(model);
     return { ...target, model, status, httpStatus: response.status, latencyMs, dimension, message: probeMessage(status, response.status, latencyMs, text, dimension) };
   } catch (error) {
     return { ...target, model, status: 'error', httpStatus: null, latencyMs: Date.now() - started, dimension: null, message: scrubSecrets(error instanceof Error ? error.message : 'Probe failed') };

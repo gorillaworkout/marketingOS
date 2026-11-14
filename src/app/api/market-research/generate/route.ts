@@ -216,7 +216,7 @@ async function runSelection(
       step: 'done',
       progress: 100,
       message: 'No High Importance developments passed the evidence gate. Nothing was saved — try again later or broaden the brief.',
-      result: { items: [], ...meta, evidenceSnapshot: [], historyId: null, usage: generated.usage },
+      result: { items: [], ...meta, evidenceSnapshot: [], historyId: null, usage: generated.usage, fallbackLabel: generated.fallbackLabel || null },
     });
     return;
   }
@@ -254,6 +254,6 @@ async function runSelection(
     step: 'done',
     progress: 100,
     message: 'Market research complete. Open every source link and review the full article before external use.',
-    result: { ...report, ...meta, evidenceSnapshot, historyId, usage: generated.usage },
+    result: { ...report, ...meta, evidenceSnapshot, historyId, usage: generated.usage, fallbackLabel: generated.fallbackLabel || null },
   });
 }

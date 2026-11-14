@@ -4,6 +4,7 @@
  * Pure logic only: no database, no fetch. Callers pass an `attempt` function
  * that talks to the 9router/llmdupoin gateway. Safe to import from tests.
  */
+import { authCooldownModels, authFailoverNotice, isAuthFailureMessage, noteAuthExpired } from '@/lib/llm-auth';
 
 /** Global fallback order. The chosen model runs first, then these in order. */
 export const GLOBAL_FALLBACK_ORDER = [
@@ -100,6 +101,8 @@ export interface FallbackEvent {
   error: string;
   /** True when the failed model had already streamed some text. */
   afterPartial: boolean;
+  /** True when the failure was an expired or invalid provider token. */
+  authExpired?: boolean;
   at: string;
 }
 
@@ -134,6 +137,8 @@ export function errorMessage(error: unknown): string {
  * - "Answered by GPT-5.6 Sol (Claude Sonnet 5.5 unavailable)" otherwise.
  */
 export function formatFallbackLabel(finalModel: string, events: FallbackEvent[]): string | null {
+  const auth = events.find(event => event.authExpired);
+  if (auth) return authFailoverNotice(modelDisplayName(auth.failedModel), modelDisplayName(finalModel));
   if (!events.length) return null;
   const failed = [...new Set(events.map(event => modelDisplayName(event.failedModel)))];
   const failedText = failed.length === 1
@@ -198,7 +203,7 @@ export async function runWithModelFallback<T>(options: {
   const now = options.now ?? (() => new Date());
   const failures: Array<{ model: string; error: string }> = [];
   const events: FallbackEvent[] = [];
-  const chain = buildFallbackChain(options.chosenModel);
+  const chain = buildFallbackChain(options.chosenModel, authCooldownModels());
   for (let index = 0; index < chain.length; index += 1) {
     const model = chain[index];
     try {
@@ -207,6 +212,8 @@ export async function runWithModelFallback<T>(options: {
     } catch (error) {
       if (options.shouldAbort?.(error)) throw error;
       const message = errorMessage(error);
+      const authExpired = isAuthFailureMessage(message);
+      if (authExpired) noteAuthExpired(model, now().getTime());
       failures.push({ model, error: message });
       const next = chain[index + 1];
       if (next) {
@@ -215,6 +222,7 @@ export async function runWithModelFallback<T>(options: {
           fallbackModel: next,
           error: message,
           afterPartial: false,
+          authExpired,
           at: now().toISOString(),
         };
         events.push(event);
@@ -261,7 +269,7 @@ export async function streamWithModelFallback<M extends { role: string }, U>(opt
   const merge = options.mergeUsage ?? ((a: U | null, b: U | null) => b ?? a);
   let accumulated = '';
   let usage: U | null = null;
-  const chain = buildFallbackChain(options.chosenModel);
+  const chain = buildFallbackChain(options.chosenModel, authCooldownModels());
 
   for (let index = 0; index < chain.length; index += 1) {
     const model = chain[index];
@@ -293,6 +301,8 @@ export async function streamWithModelFallback<M extends { role: string }, U>(opt
     const hadTextBefore = accumulated.length > 0;
     accumulated += outcome.content;
     usage = merge(usage, outcome.usage ?? null);
+    const authExpired = isAuthFailureMessage(outcome.error);
+    if (authExpired) noteAuthExpired(model, now().getTime());
     failures.push({ model, error: outcome.error });
     const next = chain[index + 1];
     if (next) {
@@ -301,6 +311,7 @@ export async function streamWithModelFallback<M extends { role: string }, U>(opt
         fallbackModel: next,
         error: outcome.error,
         afterPartial: hadTextBefore || outcome.content.length > 0,
+        authExpired,
         at: now().toISOString(),
       };
       events.push(event);

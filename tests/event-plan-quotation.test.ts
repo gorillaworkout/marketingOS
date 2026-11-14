@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
+  applyConfirmedQuotationNarrative,
   eventPlanInputBlock,
   mergeQuotedBudget,
   parseParticipantCount,
@@ -46,6 +47,10 @@ test('speakers, participants, and the venue reach the plan brief', () => {
   assert.match(block, /Rina/);
   assert.match(block, /CONFIRMED_QUOTATIONS/);
   assert.match(block, /AI estimate/);
+  assert.match(block, /Confirmed grand total/);
+  const narrative = applyConfirmedQuotationNarrative('Professional option. Confirmed subtotal / grand total: No public price found.', parseQuotationLines([{ vendor: 'Kempinski', item: 'Ballroom', category: 'Venue', qty: 1, unitPrice: 1000, total: 1000 }]), 10);
+  assert.doesNotMatch(narrative, /No public price found/i);
+  assert.match(narrative, /Confirmed grand total IDR/);
 });
 
 test('quotation uploads accept documents and images and reject other files', () => {

@@ -68,6 +68,7 @@ export default function KeywordGapPage() {
       if (cancelled || !ok) return;
       setGap(body.gap);
       if (body.gap.status === 'queued' || body.gap.status === 'running') timer = window.setTimeout(() => { void pull(); }, 2000);
+      else void loadList(shownDomain);
     };
     timer = window.setTimeout(() => { void pull(); }, 0);
     return () => { cancelled = true; window.clearTimeout(timer); };

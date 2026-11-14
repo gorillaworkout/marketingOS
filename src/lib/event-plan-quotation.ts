@@ -130,6 +130,15 @@ export function eventPlanInputBlock(input: {
   return lines.join('\n');
 }
 
+/** Replace the "no public price" line when a confirmed quotation total exists. */
+export function applyConfirmedQuotationNarrative(text: string, lines: QuotationLine[], contingencyPercent: number): string {
+  if (!lines.length) return text;
+  const totals = quotationGrandTotal(lines, contingencyPercent);
+  const sentence = `Confirmed quotation subtotal IDR ${totals.subtotal.toLocaleString('en-US')}. Contingency ${parseContingencyPercent(contingencyPercent)}% is IDR ${totals.contingency.toLocaleString('en-US')}. Confirmed grand total IDR ${totals.total.toLocaleString('en-US')}.`;
+  const replaced = text.replace(/No public price found[^.]*\./gi, sentence);
+  return /Confirmed quotation subtotal/i.test(replaced) ? replaced : `${replaced.trim()}\n\n${sentence}`.trim();
+}
+
 export function mergeQuotedBudget(aiBudget: Record<string, unknown> | null | undefined, lines: QuotationLine[], contingencyPercent: number): Record<string, unknown> {
   const confirmed = lines.map(line => ({
     category: line.category,

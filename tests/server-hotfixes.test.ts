@@ -7,7 +7,8 @@ import { explainImageFailure } from '../src/app/api/generate-image/route';
 test('image failures preserve actionable upstream causes', () => {
   const model = 'gpt-5.6-terra';
   assert.match(explainImageFailure('Image API error 429: usage limit (reset after 8m 56s)', model), /8m 56s/);
-  assert.match(explainImageFailure('Image API error 401: token is expired', model), /retrying will not help/);
+  assert.match(explainImageFailure('Image API error 401: token is expired', model), /token expired/);
+  assert.match(explainImageFailure('Image API error 401: token is expired', model), /re-authenticate it in AI Models/);
   assert.match(explainImageFailure('Image API error 402: insufficient credit', model), /administrator/);
   assert.match(explainImageFailure('Image API error 404: model not found', model), /unavailable/);
   assert.match(explainImageFailure('timeout after 240s', model), /timed out/);

@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { jakartaDate, validateGeneratedArticle, type ArticleMarketNewsInput, type ArticleQualityCheck } from '@/lib/article-market-news';
-import { filterMarketNewsTopics, groupMarketNewsTopics, marketNewsCoverage, topicForKeyword } from '@/lib/market-news-topics';
+import { filterMarketNewsTopics, groupMarketNewsTopics, marketNewsCatalogNotice, topicsInKeyword } from '@/lib/market-news-topics';
 import { articleDocxFilename, buildArticleDocxBlob } from '@/lib/article-market-news-docx';
 import {
   ARTICLE_MARKET_NEWS_HISTORY_TYPE,
@@ -39,6 +39,7 @@ interface ArticleResult {
   qc: ArticleQualityCheck;
   historyId?: string;
   normalizedInput?: ArticleMarketNewsInput;
+  fallbackLabel?: string | null;
 }
 
 const emptySource = (): SourceForm => ({ outlet: '', title: '', url: '', publishedAt: '', verifiedFacts: '' });
@@ -72,7 +73,7 @@ function ExampleSample({
 
 export default function ArticleMarketNewsGenerator() {
   const [keyword, setKeyword] = useState('');
-  const [topicId, setTopicId] = useState('');
+  const [topicIds, setTopicIds] = useState<string[]>([]);
   const [topicQuery, setTopicQuery] = useState('');
   const [researchDate, setResearchDate] = useState(jakartaDate);
   const [angle, setAngle] = useState('');
@@ -116,7 +117,7 @@ export default function ArticleMarketNewsGenerator() {
     // Prefill only. Do not call generateArticle.
     // eslint-disable-next-line react-hooks/set-state-in-effect -- read a same-tab handoff once on mount
     setKeyword(handoff.keyword);
-    setTopicId(topicForKeyword(handoff.keyword)?.id || '');
+    setTopicIds(topicsInKeyword(handoff.keyword).map(topic => topic.id).slice(0, 4));
     setAngle(handoff.angle);
     setResearchHandoff(true);
   }, []);
@@ -125,7 +126,7 @@ export default function ArticleMarketNewsGenerator() {
     try {
       const restored = restoreArticleMarketNews(task);
       setKeyword(restored.keyword);
-      setTopicId(topicForKeyword(restored.keyword)?.id || '');
+      setTopicIds(topicsInKeyword(restored.keyword).map(topic => topic.id).slice(0, 4));
       setResearchDate(restored.researchDate);
       setAngle(restored.angle);
       setCompetitorHeadings(restored.competitorHeadings);
@@ -180,7 +181,7 @@ export default function ArticleMarketNewsGenerator() {
 
   const fillExample = () => {
     setKeyword(ARTICLE_MARKET_NEWS_EXAMPLE_KEYWORD);
-    setTopicId(topicForKeyword(ARTICLE_MARKET_NEWS_EXAMPLE_KEYWORD)?.id || 'gold');
+    setTopicIds(topicsInKeyword(ARTICLE_MARKET_NEWS_EXAMPLE_KEYWORD).map(topic => topic.id).slice(0, 4));
     setAngle(ARTICLE_MARKET_NEWS_EXAMPLE_ANGLE);
     setCompetitorHeadings(exampleCompetitorHeadings);
     setPaaText(examplePaaText);
@@ -254,7 +255,9 @@ export default function ArticleMarketNewsGenerator() {
       }
       if (!completed) throw new Error('Generation ended without a completed article.');
     } catch (generationError) {
-      setError(generationError instanceof Error ? generationError.message : 'Article generation failed.');
+      const text = generationError instanceof Error ? generationError.message : 'Article generation failed.';
+      const dropped = /failed to fetch|network ?error|load failed|networkerror/i.test(text);
+      setError(dropped ? `${progress ? `${progress} ` : ''}The connection dropped before the article finished. Try again.` : text);
     } finally {
       setLoading(false);
     }
@@ -326,25 +329,27 @@ export default function ArticleMarketNewsGenerator() {
           <FormField label="Topic" hint="Search, then choose a market. The article uses that instrument name.">
             <TextInput aria-label="Search topics" value={topicQuery} onChange={event => setTopicQuery(event.target.value)} placeholder="Search gold, Tesla, USD/JPY…" />
             <select
-              aria-label="Market topic"
-              className="mt-2 h-9 w-full rounded-[var(--mos-radius-control)] border border-[var(--mos-border)] bg-[var(--mos-surface)] px-3 text-sm"
-              value={topicId}
+              aria-label="Market topics"
+              multiple
+              className="mt-2 h-36 w-full rounded-[var(--mos-radius-control)] border border-[var(--mos-border)] bg-[var(--mos-surface)] px-3 py-2 text-sm"
+              value={topicIds}
               onChange={event => {
-                const topic = filterMarketNewsTopics('').find(item => item.id === event.target.value);
-                setTopicId(event.target.value);
-                setKeyword(topic?.keyword || '');
+                const ids = Array.from(event.target.selectedOptions).map(option => option.value).filter(Boolean).slice(0, 4);
+                const topics = ids.map(id => filterMarketNewsTopics('').find(item => item.id === id)).filter((topic): topic is NonNullable<typeof topic> => !!topic);
+                setTopicIds(ids);
+                setKeyword(topics.map(topic => topic.keyword).join(' + '));
               }}
             >
-              <option value="">Choose a topic</option>
               {groupMarketNewsTopics(filterMarketNewsTopics(topicQuery)).map(group => (
                 <optgroup key={group.category} label={group.category}>
                   {group.topics.map(topic => <option key={topic.id} value={topic.id}>{topic.label}</option>)}
                 </optgroup>
               ))}
             </select>
-            {topicForKeyword(keyword) && (
+            <p className="mt-1 text-xs text-[var(--mos-text-faint)]">Select one or more topics, for example Silver and Apple. Hold Ctrl or Command to add another.</p>
+            {topicsInKeyword(keyword).length > 0 && (
               <p className="mt-1 text-xs text-[var(--mos-text-muted)]">
-                {topicForKeyword(keyword)?.instrumentName}. {marketNewsCoverage(topicForKeyword(keyword)!) === 'catalog' ? 'Matched in the market-news catalog.' : 'Not in the market-news catalog. The draft uses web and news research with the research-tier model.'}
+                {topicsInKeyword(keyword).map(topic => topic.instrumentName).join(' · ')}. {marketNewsCatalogNotice(keyword) || 'Matched in the market-news catalog.'}
               </p>
             )}
           </FormField>
@@ -401,6 +406,7 @@ export default function ArticleMarketNewsGenerator() {
         {progress && <p className="text-sm text-cyan-200">{progress}</p>}
       </div>
       {error && <div className="mt-4 rounded-lg border border-red-500/25 bg-red-500/10 px-4 py-3 text-sm text-red-300" role="alert">{error}</div>}
+      {result?.fallbackLabel && <p data-testid="article-market-news-fallback-label" className="mt-4 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">{result.fallbackLabel}</p>}
 
       {result && (
         <div className="mt-7 space-y-5 border-t border-[var(--mos-border)] pt-6">

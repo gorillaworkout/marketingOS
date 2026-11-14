@@ -11,14 +11,14 @@ CI on every pull request runs `npx tsx --test tests/*.test.ts` against Postgres 
 | Feature | What is tested | What is not tested here |
 | --- | --- | --- |
 | Auth and department access | Session gate, admin API prefixes, member block on each feature path, SEO and report prefixes | A full browser login |
-| Social Post v2 | Brief, hashtags, brand voice, campaigns, competitor reference, caption analyzer, prompt caps | A live Generate click |
+| Social Post v2 | Brief, hashtags, brand voice, campaigns, competitor reference, caption analyzer (hashtags inside the caption count), prompt caps, auth-expiry failover notice | A live Generate click |
 | Video Script v2 | Format prefill, storyboard PDF (`%PDF`) and zip | A live image render |
-| Event Plan v2 | Venue, speakers, quotation parsing and budget totals | A live quotation upload in the browser |
-| Market News topics | Symbol map and research fallback | A live article |
-| Content Studio v2 | Meta limits, headings, tables, HTML export used for ICA drafts | A live draft against the model |
-| SEO Website Audit | Crawl bounds, robots, score, PageSpeed parser, private-address and redirect checks | A live crawl of dupoin.co.id |
-| Keyword Gap beta | Buckets, GSC CSV, phrase extraction, provider parsers, stored-query source, Dupoin upload message when ICA is the only synced site | A live Semrush or DataForSEO call |
-| AI models | Dupoin failure falls over to OpenRouter; 429 moves to the next model; health probes | A live gateway |
+| Event Plan v2 | Venue, speakers, quotation parsing, budget totals, and confirmed totals replacing “No public price found” | A live quotation upload in the browser |
+| Market News topics | Symbol map, informational research-fallback notice, and the article stream keepalive | A live article |
+| Content Studio v2 | Meta limits, headings, tables, HTML export used for ICA drafts, Dupoin as the default site unless a saved site is chosen | A live draft against the model |
+| SEO Website Audit | Crawl bounds, robots, score, PageSpeed parser, 429 quota stop, private-address and redirect checks | A live crawl of dupoin.co.id |
+| Keyword Gap beta | Buckets, GSC CSV, phrase extraction, provider parsers, stored-query source, Dupoin upload message when ICA is the only synced site, past-run refresh when a job finishes | A live Semrush or DataForSEO call |
+| AI models | Dupoin failure falls over to OpenRouter; 401 and a 503 that wraps a 401 fail over immediately with an auth notice and a 15-minute cooldown; health probes show Auth expired | A live gateway |
 | AI Research | Chat parsing, memory, PDF/DOCX/HTML attachments, pin and watches, health route | A live chat |
 | Knowledge | Pin save, graph focus | A live graph layout |
 | Onboarding Reports | Metrics and docx export | A live upload of a production workbook |
