@@ -1,5 +1,6 @@
 import { queryOne } from '@/lib/database';
 import { DUPOIN_DEFAULT_BRAND_GUIDELINE } from '@/lib/dupoin-default-brand-guideline';
+import { guardGeneratedText } from '@/lib/brand-fact-guard';
 import { generateContent, getUserPreferredModel, type BrandGuidelines } from '@/lib/openai';
 import { buildDraftPrompt, buildRewritePrompt, parseDraftOutput, type DraftOutput, type DraftPromptInput, type RewritePromptInput } from './content-prompt';
 
@@ -69,7 +70,9 @@ async function run(userId: string, prompt: { system: string; user: string }, key
     maxTokens: 10_000,
     taskType: 'seo-content',
   });
-  return { ...parseDraftOutput(result.content, keyword), model: result.usage.model, fallbackLabel: result.fallbackLabel ?? null };
+  const draft = parseDraftOutput(result.content, keyword);
+  const guarded = guardGeneratedText(draft.bodyMarkdown, guideline.key_messages || '');
+  return { ...draft, bodyMarkdown: guarded.text, model: result.usage.model, fallbackLabel: [result.fallbackLabel, guarded.warnings[0]].filter(Boolean).join(' ') || null };
 }
 
 export function generateSeoDraft(userId: string, input: DraftPromptInput, guideline: BrandGuidelines): Promise<AiDraftResult> {

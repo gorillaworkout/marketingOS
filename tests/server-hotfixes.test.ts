@@ -6,7 +6,7 @@ import { explainImageFailure } from '../src/app/api/generate-image/route';
 
 test('image failures preserve actionable upstream causes', () => {
   const model = 'gpt-5.6-terra';
-  assert.match(explainImageFailure('Image API error 429: usage limit (reset after 8m 56s)', model), /8m 56s/);
+  assert.match(explainImageFailure('Image API error 429: usage limit (reset after 8m 56s)', model), /retry in 8m 56s/);
   assert.match(explainImageFailure('Image API error 401: token is expired', model), /token expired/);
   assert.match(explainImageFailure('Image API error 401: token is expired', model), /re-authenticate it in AI Models/);
   assert.match(explainImageFailure('Image API error 402: insufficient credit', model), /administrator/);
@@ -20,18 +20,17 @@ test('gateway-wrapped Antigravity capacity 502s are quota messages, not outages'
   const antigravity = 'ag/nano-banana-pro';
   const wrapped = 'Image API error 502: {"error":{"message":"You have exhausted your capacity on this mode"}}';
   const explained = explainImageFailure(wrapped, antigravity);
-  assert.match(explained, /quota\/rate limit is full/);
-  // No working fallback image model exists, so do not suggest the broken cx/gpt-5.5-image.
-  assert.match(explained, /No other image model is available/);
+  assert.match(explained, /Image quota reached/);
+  assert.match(explained, /no other image model enabled/);
   assert.doesNotMatch(explained, /cx\/gpt-5\.5-image/);
   assert.doesNotMatch(explained, /temporarily down/);
 
   const quotaWrapped = explainImageFailure('Image API error 502: rate limit / quota exceeded', antigravity);
-  assert.match(quotaWrapped, /quota\/rate limit is full/);
+  assert.match(quotaWrapped, /Image quota reached/);
   assert.doesNotMatch(quotaWrapped, /temporarily down/);
 
   const real429 = explainImageFailure('Image API error 429: You have exhausted your capacity on this mode', antigravity);
-  assert.match(real429, /quota\/rate limit is full/);
+  assert.match(real429, /Image quota reached/);
   assert.doesNotMatch(real429, /cx\/gpt-5\.5-image/);
 });
 

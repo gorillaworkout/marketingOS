@@ -10,10 +10,12 @@ import { compositeDupoinInstagramChrome } from '@/lib/dupoin-ig-chrome';
 import { compositeDupoinLogo } from '@/lib/dupoin-logo-composite';
 import {
   generateWithAntigravityCapacityFallback,
+  imageQuotaNotice,
   isCapacityOrRateLimitFailure,
+  nextImageFallback,
   parseImageApiErrorStatus,
 } from '@/lib/image-generation-fallback';
-import { DEFAULT_IMAGE_MODEL, imageModelLabel, resolveImageModel } from '@/lib/image-models';
+import { AVAILABLE_IMAGE_MODELS, DEFAULT_IMAGE_MODEL, imageModelLabel, resolveAssignedImageModels, resolveImageModel } from '@/lib/image-models';
 import { postImage } from '@/lib/llm-provider';
 import { logTokenUsage } from '@/lib/token-log';
 import { parseImageGenerationUsage } from '@/lib/token-usage';
@@ -89,12 +91,30 @@ export async function GET(request: NextRequest) {
   });
 }
 
+async function enabledImageIds(): Promise<string[]> {
+  const catalog = AVAILABLE_IMAGE_MODELS.map(item => item.id);
+  try {
+    const assignment = await queryOne<{ allowed_models: string; default_model: string }>(
+      'SELECT allowed_models, default_model FROM image_model_assignments WHERE id = ?',
+      ['default'],
+    );
+    if (!assignment) return catalog;
+    const allowed = JSON.parse(assignment.allowed_models) as string[];
+    const resolved = resolveAssignedImageModels(allowed, assignment.default_model).models.map(item => item.id);
+    return [...new Set([...allowed, ...resolved, ...catalog])];
+  } catch {
+    return catalog;
+  }
+}
+
 async function runImageJob(job: ImageJob, prompt: string, brief: string, type: string, model: string, taskId: string | null, aspectRatio: ImageAspectRatio, includeSwipeLeft: boolean, dupoinAcademy: boolean) {
   const cwd = process.cwd() || '/Users/bayudarmawan/marketingos';
   const sopName = generateSOPFileName(brief || prompt, type);
   // Retired ids (e.g. cx/gpt-5.5-image) map to their replacement and unknown ids
   // fall back to the default image model, before anything is shown or sent.
   const safeModel = resolveImageModel(model);
+  const enabled = await enabledImageIds();
+  const fallback = nextImageFallback(safeModel, enabled);
 
   try {
     imageJobs.update(job.id, job.ownerId, {
@@ -110,6 +130,7 @@ async function runImageJob(job: ImageJob, prompt: string, brief: string, type: s
       safeModel,
       (attemptModel) => requestGatewayImage(attemptModel, gatewayPrompt, generationSpec, aspectRatio),
       {
+        ...(fallback ? { fallbackModel: fallback } : {}),
         onRetry: (fallbackModel, fromModel) => {
           console.warn(`[generate-image] ${fromModel} capacity/quota exhausted; retrying once with ${fallbackModel}`);
           imageJobs.update(job.id, job.ownerId, {
@@ -243,10 +264,8 @@ export function explainImageFailure(reason: string, model: string): string {
   if (capacityLimited) {
     // Wrapped 502s and Antigravity models get the explicit quota message so users
     // do not think the whole image service is down.
-    if (model.startsWith('ag/') || status >= 500) {
-      // No other verified image model exists right now (ANTIGRAVITY_IMAGE_FALLBACK_MODEL
-      // is null), so do not suggest switching to one.
-      return `Antigravity image quota/rate limit is full for ${imageModelLabel(model)}.${waitHint} No other image model is available as a fallback right now.`;
+    if (model.startsWith('ag/') || status >= 500 || status === 429) {
+      return imageQuotaNotice(imageModelLabel(model), reset || null);
     }
     return `Usage limit reached for ${model}.${waitHint} You can also pick a different image model.`;
   }

@@ -2,6 +2,7 @@ import { NextRequest } from 'next/server';
 import { queryOne, queryAll, execute } from '@/lib/database';
 import { requireFeature } from '@/lib/auth';
 import { rateLimit } from '@/lib/rate-limit';
+import { guardGeneratedText } from '@/lib/brand-fact-guard';
 import { generateContent, getSmartSystemPrompt, fetchContextMemory, fetchStyleContext, fetchKnowledgeContext, getUserPreferredModel, type BrandGuidelines } from '@/lib/openai';
 import { persistKnowledgeQuietly, summarizeVideoScriptKnowledge } from '@/lib/knowledge-persist';
 import { runVideoScriptQc } from '@/lib/video-script-qc';
@@ -198,17 +199,19 @@ Output JSON format with: { "hook": "the opening hook that stops the scroll", "ho
             message: 'All 3 previews generated.',
           });
 
+          const brandFacts = brandGuidelines?.key_messages || '';
+          const keep = (value: string) => guardGeneratedText(value, brandFacts).text;
           const options = optionResults.map(({ variant, result }) => {
             const scriptData = parseModelJson(result);
             return {
               style: variant.style,
               styleLabel: variant.styleLabel,
-              hook: asString(scriptData.hook),
-              hookOptions: asStringList(scriptData.hookOptions),
-              context: asString(scriptData.context),
-              highlight: asString(scriptData.highlight),
-              brandTieIn: asString(scriptData.brandTieIn),
-              cta: asString(scriptData.cta),
+              hook: keep(asString(scriptData.hook)),
+              hookOptions: asStringList(scriptData.hookOptions).map(keep),
+              context: keep(asString(scriptData.context)),
+              highlight: keep(asString(scriptData.highlight)),
+              brandTieIn: keep(asString(scriptData.brandTieIn)),
+              cta: keep(asString(scriptData.cta)),
               citations: resolveVideoScriptCitations(scriptData, webResearch.sources),
             };
           });
@@ -419,16 +422,18 @@ The fullScript must be the complete, detailed script with scene descriptions, di
 
           const scriptData = parseModelJson(result.content);
           const citations = resolveVideoScriptCitations(scriptData, webResearch.sources);
+          const brandFacts = brandGuidelines?.key_messages || '';
+          const keep = (value: string) => guardGeneratedText(value, brandFacts).text;
           const finalOption = {
             style: style,
             styleLabel: variant.styleLabel,
-            hook: asString(scriptData.hook, selectedOption.hook || ''),
-            hookOptions: asStringList(scriptData.hookOptions),
-            context: asString(scriptData.context, selectedOption.context || ''),
-            highlight: asString(scriptData.highlight, selectedOption.highlight || ''),
-            brandTieIn: asString(scriptData.brandTieIn, selectedOption.brandTieIn || ''),
-            cta: asString(scriptData.cta, selectedOption.cta || ''),
-            fullScript: asString(scriptData.fullScript, result.content),
+            hook: keep(asString(scriptData.hook, selectedOption.hook || '')),
+            hookOptions: asStringList(scriptData.hookOptions).map(keep),
+            context: keep(asString(scriptData.context, selectedOption.context || '')),
+            highlight: keep(asString(scriptData.highlight, selectedOption.highlight || '')),
+            brandTieIn: keep(asString(scriptData.brandTieIn, selectedOption.brandTieIn || '')),
+            cta: keep(asString(scriptData.cta, selectedOption.cta || '')),
+            fullScript: keep(asString(scriptData.fullScript, result.content)),
             citations,
           };
 

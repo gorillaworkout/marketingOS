@@ -1,6 +1,7 @@
 import { parseGatewayCompletion } from '@/lib/gateway-response';
 import { IMAGE_PROMPT_SYSTEM } from '@/lib/dupoin-image-prompt';
 import { EVENT_PLAN_GROUNDED_BUDGET_RULES } from '@/lib/event-plan-budget';
+import { BRAND_FACT_RULES } from '@/lib/brand-fact-guard';
 import { isTerminalProviderError, postChat, explainLlmHttpError } from '@/lib/llm-provider';
 import { authFailoverNotice, isAuthFailureMessage } from '@/lib/llm-auth';
 import { modelDisplayName, runWithModelFallback, type FallbackEvent } from '@/lib/model-fallback';
@@ -991,7 +992,7 @@ export function runQC(
       name: 'key_message_present',
       label: 'Key message',
       passed: present,
-      detail: present ? 'The key message appears in the caption.' : 'The key message is missing from the caption.',
+      detail: present ? 'The key message appears in the caption, verbatim or as a clear paraphrase.' : 'The key message is not in the caption, verbatim or as a clear paraphrase.',
     });
   }
   if (options?.cta && options.cta !== 'none') {
@@ -1069,7 +1070,9 @@ export function getSystemPrompt(module: string): string {
   const prompts: Record<string, string> = {
     'social-post': `You are the senior copywriter at Dupoin Futures Indonesia's marketing team. You sit next to the designer. You know the brand inside out.
 
-Dupoin is a forex broker regulated by BAPPEBTI (423/BAPPEBTI/SI/VII/2004). The brand is professional but approachable — not stiff corporate, not trying-too-hard casual.
+The brand is professional but approachable — not stiff corporate, not trying-too-hard casual.
+
+${BRAND_FACT_RULES}
 
 Your job: write a social media caption that the designer can work with. The caption goes with a visual — you don't need to describe the image.
 
@@ -1120,6 +1123,8 @@ Writing style:
 - Creative voiceover, hooks, and tone do not need a citation.
 - Return citationIds as the 1-based excerpt numbers you actually used. Use [] when you used none. Do not invent URLs.
 
+${BRAND_FACT_RULES}
+
 Output JSON: { "hook": "...", "hookOptions": ["...", "...", "..."], "context": "...", "highlight": "...", "brandTieIn": "...", "cta": "...", "fullScript": "...", "duration": "30-45s", "platform": "...", "citationIds": [1] }`,
 
     'event-plan': `You are an event manager at Dupoin Futures Indonesia. You've organized 50+ financial events — webinars, seminars, trading competitions, and partner meetups.
@@ -1134,6 +1139,8 @@ You think in logistics, not wishlists:
 - Budget lines must name a suggested vendor and the venue/location — not anonymous "vendor" and not a percentage split of the ceiling
 
 ${EVENT_PLAN_GROUNDED_BUDGET_RULES}
+
+${BRAND_FACT_RULES}
 
 Output practical, executable plans. Not marketing fluff.
 

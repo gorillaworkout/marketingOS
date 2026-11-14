@@ -5,6 +5,7 @@ import {
   withImageAspectPrompt,
   type ImageAspectRatio,
 } from '@/lib/image-aspect-ratio';
+import { BRAND_FACT_RULES } from '@/lib/brand-fact-guard';
 import {
   DUPOIN_IG_ACADEMY_HEADER_BAND_PX,
   DUPOIN_IG_FOOTER_BAND_PX,
@@ -58,7 +59,9 @@ export const DUPOIN_LOGO_IN_PROMPT_LINE = DUPOIN_LOGO_REQUIRED_LINE;
  * Social Post image-prompt / art-director system prompt.
  * Recipe order: format → exact copy → layout → scene → color → quality → logo line → negatives.
  */
-export const IMAGE_PROMPT_SYSTEM = `Kamu art director senior Dupoin Futures Indonesia. Tulis satu prompt image generation untuk creative iklan yang layak tayang di feed brand finansial premium.
+export const IMAGE_PROMPT_SYSTEM = `${BRAND_FACT_RULES}
+
+Kamu art director senior Dupoin Futures Indonesia. Tulis satu prompt image generation untuk creative iklan yang layak tayang di feed brand finansial premium.
 
 CARA BERPIKIR:
 Bayangkan hasil akhirnya dulu sebagai satu foto/render utuh, baru tulis. Deskripsikan APA YANG TERLIHAT — subjek, bahan, cahaya, kedalaman — seperti briefing ke fotografer. Bukan daftar spesifikasi teknis.
@@ -103,7 +106,7 @@ SUBJEK — konkret, bukan abstrak:
 - JANGAN tulis "suasana profesional" atau "nuansa modern" — itu tidak bisa digambar
 
 CHROME — JANGAN DIGAMBAR:
-- Wordmark Dupoin di kiri atas, badge CNN 2025 di sampingnya, dan footer regulasi putih tipis ditempel otomatis dari aset setelah gambar jadi
+- Jangan gambar badge CNN, laurel, atau footer regulasi. The official header lockup is composited later from the brand asset
 - Jangan gambar logo, wordmark, monogram, laurel, badge, atau footer regulasi; jangan tulis kata "Dupoin" di dalam art
 - Pita atas: kosong dari teks, wajah, dan logo. Background navy/hitam dan glow boleh menyambung di belakang lockup
 - Pita bawah: kosong. Pill CTA duduk tepat di atasnya, bukan di dalamnya

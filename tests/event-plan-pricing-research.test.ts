@@ -45,10 +45,11 @@ test('narrative text keeps a sourced price and redacts an invented one', () => {
 
 test('pricing queries follow the submitted venue and ask for speaker fee ranges', () => {
   const ancol = buildEventPricingQueries({ location: 'Ancol Beach City', eventName: 'Seminar Keuangan', theme: 'Financial seminar' });
-  assert.ok(ancol.some((query) => query === 'Ancol Beach City sewa venue'));
-  assert.ok(ancol.some((query) => /speaker fee financial seminar/i.test(query)));
+  assert.ok(ancol.some((query) => /sewa venue seminar keuangan korporat Ancol Beach City/i.test(query)));
+  assert.ok(ancol.some((query) => /speaker fee financial education seminar/i.test(query)));
   const jakarta = buildEventPricingQueries({ location: 'Jakarta', eventName: 'Market Outlook', theme: 'seminar' });
-  assert.ok(jakarta.some((query) => /ballroom rental Jakarta|sewa ballroom Jakarta/i.test(query)));
+  assert.ok(jakarta.some((query) => /seminar keuangan korporat Jakarta/i.test(query)));
+  assert.ok(jakarta.every((query) => !/wedding ballroom|pernikahan ballroom/i.test(query)));
 });
 
 test('grounded budget omits invented Rupiah when research hits have no numbers', () => {
@@ -223,7 +224,7 @@ test('researchEventPricing cites a page price and a Jina fallback without callin
   });
   assert.ok(calls.some((url) => url.startsWith('https://r.jina.ai/https://ancol.example/sewa')));
   assert.equal(calls.some((url) => url.includes('127.0.0.1')), false);
-  assert.equal(calls.filter((url) => url.includes('google.serper.dev/search')).length, 4);
+  assert.equal(calls.filter((url) => url.includes('google.serper.dev/search')).length, 3);
   const venueHit = research.hits.find((hit) => hit.url === 'https://ancol.example/sewa' && hit.amounts.includes(40_000_000));
   assert.ok(venueHit);
   assert.equal(venueHit?.category, 'venue');

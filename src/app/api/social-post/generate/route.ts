@@ -2,6 +2,7 @@ import { NextRequest } from 'next/server';
 import { queryOne, queryAll, execute } from '@/lib/database';
 import { requireFeature } from '@/lib/auth';
 import { rateLimit } from '@/lib/rate-limit';
+import { guardGeneratedText } from '@/lib/brand-fact-guard';
 import { generateContent, getSmartSystemPrompt, fetchContextMemory, fetchStyleContext, fetchKnowledgeContext, getUserPreferredModel, runQC, generateDupoinFileName, type BrandGuidelines, type QCResult } from '@/lib/openai';
 import { buildBriefPromptBlock, outputShape, parseSocialPostBrief, type SocialPostBriefInput } from '@/lib/social-post-brief';
 import { getEmbedding } from '@/lib/embeddings';
@@ -405,7 +406,17 @@ Follow the SOP strictly. Return citationIds for every WEB_RESEARCH excerpt you u
             message: '🔍 Running quality checks...',
           })));
 
-          const qcResults: QCResult[] = options.map(opt => applyGroundedFactsCheck(
+          const brandFacts = brandGuidelines?.key_messages || '';
+          const claimWarnings = options.map(opt => {
+            const hook = guardGeneratedText(opt.hook, brandFacts);
+            const caption = guardGeneratedText(opt.caption, brandFacts);
+            opt.hook = hook.text;
+            opt.caption = caption.text;
+            return [...hook.warnings, ...caption.warnings];
+          });
+
+          const qcResults: QCResult[] = options.map((opt, index) => {
+            const qc = applyGroundedFactsCheck(
             runQC(`${opt.hook}\n${opt.caption}`, opt.hashtags, platform, {
               style: opt.style,
               keyMessage: generationBrief.keyMessage,
@@ -418,7 +429,13 @@ Follow the SOP strictly. Return citationIds for every WEB_RESEARCH excerpt you u
             }),
             opt.caption,
             opt.citations,
-          ));
+            );
+            const warnings = claimWarnings[index] || [];
+            if (!warnings.length) return qc;
+            const checks = [...qc.checks, { name: 'verified_claims', label: 'Verified claims', passed: false, detail: warnings[0] }];
+            const passedCount = checks.filter(check => check.passed).length;
+            return { checks, allPassed: passedCount === checks.length, score: Math.round((passedCount / checks.length) * 100) };
+          });
 
           controller.enqueue(encoder.encode(sseEvent({
             step: 'qc',
@@ -455,7 +472,7 @@ Follow the SOP strictly. Return citationIds for every WEB_RESEARCH excerpt you u
             { brandGuidelines, model: preferredModel, taskType: 'social-post' }
           )));
 
-          if (!isVideo) options.forEach((option, index) => { option.imagePrompt = imagePrompts[index].content; });
+          if (!isVideo) options.forEach((option, index) => { option.imagePrompt = guardGeneratedText(imagePrompts[index].content, brandFacts).text; });
 
           // Aggregate usage
           const totalUsage = {

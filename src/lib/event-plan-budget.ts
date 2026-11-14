@@ -17,7 +17,8 @@ export const EVENT_PLAN_GROUNDED_BUDGET_RULES = `Budget grounding (required):
 - estimatedCost is an integer Rupiah amount only when that exact number appears in the research excerpts. Cite the source URL in notes.
 - When the excerpts do not contain a price for the line, set estimatedCost to null and include exactly: "${NO_PUBLIC_PRICE_NOTE}".
 - Name how to request a quotation (official website or venue rental form). Do not invent phone numbers, emails, percentage splits, or quotation amounts.
-- A phone or email may be repeated only when it appears in an excerpt, together with that excerpt URL.`;
+- A phone or email may be repeated only when it appears in an excerpt, together with that excerpt URL.
+- Do not invent attendance, ROI, or other KPIs as facts. Label a public figure as an estimate.`;
 
 export type EventPlanBudgetItem = {
   category: string;
@@ -195,7 +196,7 @@ function lineNotes(input: {
   const contacts = contactSuffix(input.hits);
   if (input.amount !== null && input.sourceUrl) {
     const excerpt = input.snippet ? ` Excerpt: ${input.snippet.slice(0, 240)}.` : '';
-    return `Public price stated in the source (not a verified quotation): ${formatRupiah(input.amount)}. Source: ${input.sourceUrl}.${excerpt} ${place} ${quote}${contacts}`;
+    return `Estimate: Public price stated in the source (not a verified quotation): ${formatRupiah(input.amount)}. Source: ${input.sourceUrl}.${excerpt} ${place} ${quote}${contacts}`;
   }
   if (input.citedAmounts.length > 1 && input.sourceUrl) {
     const listed = input.citedAmounts.map((amount) => formatRupiah(amount)).join(', ');

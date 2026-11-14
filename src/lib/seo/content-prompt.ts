@@ -1,3 +1,4 @@
+import { BRAND_FACT_RULES } from '@/lib/brand-fact-guard';
 import { MAX_KEYWORD_LENGTH, normalizeKeyword } from './keywords';
 import {
   enforceMetaText,
@@ -89,7 +90,9 @@ const OUTPUT_CONTRACT = `Respond with ONLY a JSON object, no code fences:
  "meta_description": "max ${META_DESCRIPTION_MAX} characters, includes the keyword, invites the click",
  "body_markdown": "the full article in Markdown with exactly one H1, then H2 and H3 (H4 only when needed)"}`;
 
-const SYSTEM = `You are a senior SEO content writer. You write helpful, accurate, people-first articles that rank on Google and can be quoted by AI assistants.
+const SYSTEM = `${BRAND_FACT_RULES}
+
+You are a senior SEO content writer. You write helpful, accurate, people-first articles that rank on Google and can be quoted by AI assistants.
 Rules:
 - Match the search intent of the target keyword. Put the keyword in the title, the first 100 words and at least one H2, naturally — never stuff it.
 - Structure: a short intro that answers the query, H2/H3 sections, short paragraphs, lists where they help, and a FAQ section (3-5 questions) near the end.

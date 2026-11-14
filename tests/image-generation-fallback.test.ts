@@ -36,7 +36,7 @@ test('capacity detection matches explainImageFailure, including wrapped 502s', (
   assert.equal(isCapacityOrRateLimitFailure('timeout after 240s'), false);
   assert.equal(isCapacityOrRateLimitFailure('Image API error 404: model not found'), false);
 
-  assert.match(explainImageFailure(CAPACITY_502, 'ag/nano-banana-pro'), /quota\/rate limit is full/);
+  assert.match(explainImageFailure(CAPACITY_502, 'ag/nano-banana-pro'), /Image quota reached/);
   assert.doesNotMatch(explainImageFailure(PLAIN_502, 'ag/nano-banana-pro'), /quota\/rate limit is full/);
 });
 
@@ -65,9 +65,9 @@ test('capacity on the default ag/ model fails once with the clear quota error (n
   assert.deepEqual(attempted, [DEFAULT_IMAGE_MODEL]);
 
   const explained = explainImageFailure(CAPACITY_502, DEFAULT_IMAGE_MODEL);
-  assert.match(explained, /quota\/rate limit is full/);
+  assert.match(explained, /Image quota reached/);
   assert.match(explained, /Gemini 3\.1 Flash Image/);
-  assert.match(explained, /No other image model is available/);
+  assert.match(explained, /no other image model enabled/);
   assert.doesNotMatch(explained, /gpt-5\.5|GPT-5\.5/);
 });
 
