@@ -6,7 +6,8 @@ import {
   type ProbeTarget,
 } from '@/lib/llm-provider';
 import type { LlmKind } from '@/lib/llm-provider-defaults';
-import { getLlmSettings, saveModelHealth } from '@/lib/llm-provider-store';
+import { clearProviderLastError, getLlmSettings, saveModelHealth } from '@/lib/llm-provider-store';
+import { providerErrorClearedBy } from '@/lib/llm-auth';
 import { modelsInUse, TIER_PRIMARY } from '@/lib/model-tiers';
 
 export const dynamic = 'force-dynamic';
@@ -54,7 +55,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Choose Test all or one model row.' }, { status: 400 });
   }
 
-  const results = await probeModelsInOrder(targets);
+  const results = (await probeModelsInOrder(targets)).map(result => ({ ...result, testedAt: new Date().toISOString() }));
   for (const result of results) {
     try {
       await saveModelHealth({
@@ -65,11 +66,25 @@ export async function POST(request: NextRequest) {
         httpStatus: result.httpStatus,
         latencyMs: result.latencyMs,
         message: result.message,
-        testedAt: new Date().toISOString(),
+        testedAt: result.testedAt,
       });
     } catch (error) {
       console.error('[llm-provider] could not store health:', error instanceof Error ? error.message : error);
     }
   }
-  return NextResponse.json({ results });
+  // A passing Dupoin chat test supersedes a stale stored failover error for that model (e.g. an old OAuth expiry).
+  let clearedProviderError = false;
+  const passed = results.filter(result => result.provider === 'dupoin' && result.kind === 'chat' && result.status === 'active');
+  if (passed.length) {
+    try {
+      const { status } = await getLlmSettings();
+      if (passed.some(result => providerErrorClearedBy(status.lastError, result.model))) {
+        await clearProviderLastError();
+        clearedProviderError = true;
+      }
+    } catch (error) {
+      console.error('[llm-provider] could not clear the stored error:', error instanceof Error ? error.message : error);
+    }
+  }
+  return NextResponse.json({ results, clearedProviderError });
 }

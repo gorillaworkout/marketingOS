@@ -335,6 +335,15 @@ export async function markProviderRecovered(activeProvider: 'dupoin' | 'openrout
   invalidateLlmSettingsCache();
 }
 
+/** Clears the stored failover error after a model test proves it stale. Keeps last_failover_at as history. */
+export async function clearProviderLastError(): Promise<void> {
+  await execute(
+    `UPDATE llm_provider_status SET last_error = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = 'default' AND last_error IS NOT NULL`,
+    [],
+  );
+  invalidateLlmSettingsCache();
+}
+
 export async function recordProviderFailover(input: {
   reason: string;
   upstreamModel: string;

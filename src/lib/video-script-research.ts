@@ -9,7 +9,7 @@ import {
   resolveSearchApiKeys,
   searchSerper,
 } from './ai-research-grounding';
-import { resolveSocialPostCitations, type SocialPostCitation, type SocialPostWebSource } from './social-post-research';
+import { isScrapedMetadata, resolveSocialPostCitations, type SocialPostCitation, type SocialPostWebSource } from './social-post-research';
 
 const MAX_QUERIES = 3;
 const MAX_SOURCES = 6;
@@ -244,7 +244,7 @@ export async function researchVideoScriptWeb(input: {
       continue;
     }
     const snippet = candidate.snippet.replace(/\s+/g, ' ').trim();
-    if (snippet.length < MIN_SNIPPET) continue;
+    if (snippet.length < MIN_SNIPPET || isScrapedMetadata(snippet)) continue;
     pushSource({
       url: candidate.url,
       title: (candidate.title || candidate.url).slice(0, 180),
@@ -341,8 +341,10 @@ function normalizeUrl(url: string): string {
 }
 
 function chooseSnippet(extracted: string, fallback: string): string {
-  const pageText = extracted.replace(/\s+/g, ' ').trim();
-  const searchText = fallback.replace(/\s+/g, ' ').trim();
+  const page = extracted.replace(/\s+/g, ' ').trim();
+  const search = fallback.replace(/\s+/g, ' ').trim();
+  const pageText = isScrapedMetadata(page) ? '' : page;
+  const searchText = isScrapedMetadata(search) ? '' : search;
   if (pageText.length >= MIN_SNIPPET) return pageText.slice(0, 700);
   if (searchText.length > pageText.length) return searchText.slice(0, 700);
   return (pageText || searchText).slice(0, 700);

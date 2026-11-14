@@ -1,5 +1,6 @@
 import { BRAND_FACT_RULES, mergeBrandFacts } from '@/lib/brand-fact-guard';
 import { MAX_KEYWORD_LENGTH, normalizeKeyword } from './keywords';
+import { repairMarkdownLayout } from './markdown';
 import {
   enforceMetaText,
   intentGuidance,
@@ -230,6 +231,6 @@ export function parseDraftOutput(content: string, keyword: string): DraftOutput 
     title,
     slug: slugify(slug || title) || slugify(keyword),
     metaDescription: enforceMetaText(meta, META_DESCRIPTION_MAX),
-    bodyMarkdown: body.slice(0, MAX_BODY_LENGTH),
+    bodyMarkdown: repairMarkdownLayout(body).slice(0, MAX_BODY_LENGTH),
   };
 }

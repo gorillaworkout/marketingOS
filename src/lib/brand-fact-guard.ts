@@ -119,9 +119,17 @@ export function unverifiedClaims(text: string, brandFacts: string): string[] {
 export function guardGeneratedText(text: string, brandFacts = ''): { text: string; warnings: string[] } {
   const claims = unverifiedClaims(text, brandFacts);
   if (!claims.length) return { text, warnings: [] };
-  const sentences = text.split(/(?<=[.!?])\s+/);
-  const kept = sentences.filter(sentence => unverifiedClaims(sentence, brandFacts).length === 0);
-  const next = kept.join(' ').replace(/\s+/g, ' ').trim();
+  // Work line by line so Markdown structure (headings, lists, tables) survives.
+  const kept: string[] = [];
+  for (const line of text.split('\n')) {
+    if (!line.trim() || unverifiedClaims(line, brandFacts).length === 0) { kept.push(line); continue; }
+    if (line.trim().startsWith('|')) continue;
+    const marker = line.match(/^\s*(?:#{1,6}\s+|[-*+]\s+|\d+[.)]\s+|>\s*)?/)?.[0] ?? '';
+    const sentences = line.slice(marker.length).split(/(?<=[.!?])\s+/);
+    const rest = sentences.filter(sentence => unverifiedClaims(sentence, brandFacts).length === 0).join(' ').replace(/[ \t]+/g, ' ').trim();
+    if (rest) kept.push(`${marker}${rest}`);
+  }
+  const next = kept.join('\n').replace(/\n{3,}/g, '\n\n').trim();
   return {
     text: next,
     warnings: claims.slice(0, 3).map(claim => `Removed an unverified claim: "${claim}".`),

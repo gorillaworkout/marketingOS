@@ -94,9 +94,9 @@ function mapRow(row: Record<string, unknown>, full: boolean): GapRow {
 
 export async function expireStaleGaps(): Promise<void> {
   await execute(
-    `UPDATE seo_keyword_gaps SET status = 'failed', error = 'The keyword gap stopped before it finished.', progress = 100,
+    `UPDATE seo_keyword_gaps SET status = 'failed', error = 'The keyword gap timed out: no progress for 10 minutes (the server may have restarted). Start it again.', progress = 100,
        finished_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
-     WHERE status IN ('queued', 'running') AND updated_at < CURRENT_TIMESTAMP - INTERVAL '20 minutes'`,
+     WHERE status IN ('queued', 'running') AND updated_at < CURRENT_TIMESTAMP - INTERVAL '10 minutes'`,
   );
 }
 

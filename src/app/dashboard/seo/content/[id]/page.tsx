@@ -10,7 +10,7 @@ import { fetchJson } from '@/components/seo/useSeoSites';
 import { ContentStatusBadge } from '@/components/seo/ContentStatusBadge';
 import { ACTION_LABELS, type ContentAction, type ContentStatus } from '@/lib/seo/content-status';
 import { diffStats, lineDiff } from '@/lib/seo/diff';
-import { markdownToHtml } from '@/lib/seo/markdown';
+import { markdownToHtml, repairMarkdownLayout } from '@/lib/seo/markdown';
 import { headingWarnings, META_DESCRIPTION_MAX, META_TITLE_MAX, parseSubkeywords, subkeywordCoverage } from '@/lib/seo/content-studio';
 
 type Draft = {
@@ -72,7 +72,7 @@ export default function ContentEditorPage() {
   const detail = state?.detail ?? null;
   const draft = detail?.draft ?? null;
   const dirty = !!(draft && form) && (form.title !== draft.title || form.slug !== draft.slug || form.metaDescription !== draft.meta_description || form.bodyMarkdown !== draft.body_markdown);
-  const previewHtml = useMemo(() => (preview && form ? markdownToHtml(form.bodyMarkdown) : ''), [preview, form]);
+  const previewHtml = useMemo(() => (preview && form ? markdownToHtml(repairMarkdownLayout(form.bodyMarkdown)) : ''), [preview, form]);
   const shownCompare = compare && compare.key === compareKey ? compare : null;
   const diff = useMemo(() => (shownCompare?.version && draft ? lineDiff(asText(shownCompare.version), asText(draft)) : null), [shownCompare, draft]);
   const words = form?.bodyMarkdown.trim() ? form.bodyMarkdown.trim().split(/\s+/).length : 0;

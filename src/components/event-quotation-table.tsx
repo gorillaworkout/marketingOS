@@ -51,7 +51,9 @@ export function EventQuotationTable({
           </thead>
           <tbody>
             {lines.map((line, index) => (
-              <tr key={`${line.item}-${index}`} className="border-t border-[var(--mos-border)]">
+              // Key by position only: a key built from line.item changes on every keystroke,
+              // remounts the row, and drops focus after the first character.
+              <tr key={index} className="border-t border-[var(--mos-border)]">
                 <td className="p-2"><TextInput value={line.vendor} onChange={event => update(index, { vendor: event.target.value })} /></td>
                 <td className="p-2"><TextInput value={line.item} onChange={event => update(index, { item: event.target.value })} /></td>
                 <td className="p-2">
