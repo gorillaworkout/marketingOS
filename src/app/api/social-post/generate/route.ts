@@ -3,6 +3,7 @@ import { queryOne, queryAll, execute } from '@/lib/database';
 import { requireFeature } from '@/lib/auth';
 import { rateLimit } from '@/lib/rate-limit';
 import { generateContent, getSmartSystemPrompt, fetchContextMemory, fetchStyleContext, fetchKnowledgeContext, getUserPreferredModel, runQC, generateDupoinFileName, type BrandGuidelines, type QCResult } from '@/lib/openai';
+import { buildBriefPromptBlock, outputShape, parseSocialPostBrief, type SocialPostBriefInput } from '@/lib/social-post-brief';
 import { buildSocialPostImagePromptUserMessage } from '@/lib/dupoin-image-prompt';
 import { DEFAULT_IMAGE_ASPECT_RATIO } from '@/lib/image-aspect-ratio';
 import {
@@ -28,7 +29,7 @@ const STYLE_VARIANTS = [
     styleLabel: '🔥 Bold & Catchy',
     instruction: `STYLE: BOLD & CATCHY
 - Strong, attention-grabbing hook with power words
-- Use emojis generously throughout
+- Use emojis generously, except LinkedIn which stays at 1-2
 - Punchy, short sentences
 - Create urgency and FOMO
 - Bold claims use excitement, not invented statistics
@@ -75,7 +76,17 @@ export async function POST(request: NextRequest) {
     });
   }
   const userId = auth.id;
-  const { brief, platform, targetAudience, goal, brandGuidelineId } = await request.json();
+  const payload = await request.json();
+  const { brief, platform, targetAudience, goal, brandGuidelineId } = payload as {
+    brief?: string; platform?: string; targetAudience?: string; goal?: string; brandGuidelineId?: string;
+  };
+  const parsedBrief = parseSocialPostBrief(payload);
+  if (!parsedBrief.ok) {
+    return new Response(sseEvent({ step: 'error', message: parsedBrief.error }), {
+      headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' },
+    });
+  }
+  const generationBrief: SocialPostBriefInput = parsedBrief.brief;
   if (!brief) {
     return new Response(sseEvent({ step: 'error', message: 'Brief is required' }), {
       headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' },
@@ -247,10 +258,11 @@ export async function POST(request: NextRequest) {
 
           const optionPromises = STYLE_VARIANTS.map(async (variant, index) => {
             const stylePrompt = `Create a social media post with these details:
-Brief: ${brief}
+Brief: ${String(brief).slice(0, 2_000)}
 Platform: ${platform || 'Instagram'}
 Target Audience: ${targetAudience || 'General'}
 Goal: ${goal || 'Awareness'}
+${buildBriefPromptBlock(generationBrief)}
 
 ${variant.instruction}
 ${bestExamples}
@@ -259,7 +271,7 @@ ${knowledgeContext}
 
 ${evidence}
 
-Follow the SOP strictly. Output JSON format with: { "hook": "...", "caption": "...", "hashtags": ["..."], "citationIds": [1] }`;
+Follow the SOP strictly. Return citationIds for every WEB_RESEARCH excerpt you used. Output JSON format with: ${outputShape(generationBrief.contentType)}`;
 
             const progressBase = 20 + index * 16;
 
@@ -298,7 +310,10 @@ Follow the SOP strictly. Output JSON format with: { "hook": "...", "caption": ".
               caption: captionData.caption || result,
               hashtags: Array.isArray(captionData.hashtags) ? captionData.hashtags : [],
               citations: resolveSocialPostCitations(captionData, webResearch.sources),
-              imagePrompt: '', // Will be filled below
+              videoHook: typeof captionData.videoHook === 'string' ? captionData.videoHook : '',
+              shotList: Array.isArray(captionData.shotList) ? captionData.shotList.filter((line: unknown) => typeof line === 'string') : [],
+              slides: Array.isArray(captionData.slides) ? captionData.slides : [],
+              imagePrompt: '',
             };
           });
 
@@ -310,7 +325,12 @@ Follow the SOP strictly. Output JSON format with: { "hook": "...", "caption": ".
           })));
 
           const qcResults: QCResult[] = options.map(opt => applyGroundedFactsCheck(
-            runQC(opt.caption, opt.hashtags, platform),
+            runQC(`${opt.hook}\n${opt.caption}`, opt.hashtags, platform, {
+              style: opt.style,
+              keyMessage: generationBrief.keyMessage,
+              cta: generationBrief.cta,
+              ctaUrl: generationBrief.ctaUrl,
+            }),
             opt.caption,
             opt.citations,
           ));
@@ -325,15 +345,17 @@ Follow the SOP strictly. Output JSON format with: { "hook": "...", "caption": ".
           // Generate DUPOIN naming convention
           const dupoinFileName = generateDupoinFileName(brief, platform);
 
-          // Generate one advertising creative prompt per caption option.
+          // Generate one advertising creative prompt per caption option. Video skips images.
+          const isVideo = generationBrief.contentType === 'video';
           controller.enqueue(encoder.encode(sseEvent({
             step: 'image-prompt',
             progress: 80,
-            message: '🎨 Building advertising creative directions...',
+            message: isVideo
+              ? 'Video post: caption, 3-second hook, and shot list only. Image generation skipped.'
+              : '🎨 Building advertising creative directions...',
           })));
-
           const smartImageSystem = getSmartSystemPrompt('image-prompt', platform, brandGuidelines, undefined, styleContext);
-          const imagePrompts = await Promise.all(options.map(async selectedCaption => generateContent(
+          const imagePrompts = isVideo ? [] : await Promise.all(options.map(async selectedCaption => generateContent(
             smartImageSystem,
             `${buildSocialPostImagePromptUserMessage({
               brief,
@@ -342,13 +364,13 @@ Follow the SOP strictly. Output JSON format with: { "hook": "...", "caption": ".
               hook: selectedCaption.hook,
               caption: selectedCaption.caption,
               aspectRatio: DEFAULT_IMAGE_ASPECT_RATIO,
-            })}${knowledgeContext}`,
+            })}\nContent type: ${generationBrief.contentType}\nKey message: ${generationBrief.keyMessage}\nCTA: ${generationBrief.cta}${knowledgeContext}`,
             userId,
             taskId,
             { brandGuidelines, model: preferredModel, taskType: 'social-post' }
           )));
 
-          options.forEach((option, index) => { option.imagePrompt = imagePrompts[index].content; });
+          if (!isVideo) options.forEach((option, index) => { option.imagePrompt = imagePrompts[index].content; });
 
           // Aggregate usage
           const totalUsage = {
@@ -366,10 +388,22 @@ Follow the SOP strictly. Output JSON format with: { "hook": "...", "caption": ".
             },
           };
 
-          // Save output data
           const outputData = {
+            input: {
+              contentType: generationBrief.contentType,
+              tone: generationBrief.tone,
+              toneCustom: generationBrief.toneCustom,
+              cta: generationBrief.cta,
+              ctaUrl: generationBrief.ctaUrl,
+              keyMessage: generationBrief.keyMessage,
+              reference: generationBrief.reference,
+              brandGuidelineId: brandGuidelineId || null,
+              platform: platform || 'Instagram',
+              targetAudience: targetAudience || '',
+              goal: goal || '',
+            },
             options,
-            imagePrompt: imagePrompts[0].content,
+            imagePrompt: imagePrompts[0]?.content || '',
             webResearch,
           };
 
@@ -391,7 +425,8 @@ Follow the SOP strictly. Output JSON format with: { "hook": "...", "caption": ".
               success: true,
               taskId,
               options,
-              imagePrompt: imagePrompts[0].content,
+              imagePrompt: imagePrompts[0]?.content || '',
+              contentType: generationBrief.contentType,
               outputFile: `/outputs/social-posts/${fileName}`,
               usage: totalUsage,
               fallbackLabel: optionResults.find(r => r.fallbackLabel)?.fallbackLabel || null,

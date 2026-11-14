@@ -1,5 +1,6 @@
 'use client';
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { useRouter } from 'next/navigation';
 import {
   Button,
   EmptyState,
@@ -18,6 +19,7 @@ import { DEFAULT_IMAGE_ASPECT_RATIO, IMAGE_ASPECT_RATIOS, type ImageAspectRatio 
 import { applyDupoinImagePromptLocks } from '@/lib/dupoin-image-prompt';
 import { AVAILABLE_IMAGE_MODELS, DEFAULT_IMAGE_MODEL, imageModelLabel, selectableImageModel } from '@/lib/image-models';
 import { AI_RESEARCH_HANDOFF_QUERY, AI_RESEARCH_HANDOFF_VALUE, readAiResearchHandoff } from '@/lib/ai-research-handoff';
+import { readStoredSocialPostInput, VIDEO_HANDOFF_STORAGE_KEY, videoScriptHref, type SocialContentType, type SocialCta, type SocialReference, type SocialTone } from '@/lib/social-post-brief';
 import {
   mergeConfirmedSocialPostStatus,
   socialPostStatusFromResponse,
@@ -127,6 +129,9 @@ interface PostOption {
   hashtags: string[];
   imagePrompt: string;
   citations?: SocialPostCitation[];
+  videoHook?: string;
+  shotList?: string[];
+  slides?: Array<{ title?: string; text?: string }>;
 }
 
 const STEP_LABELS: Record<string, string> = {
@@ -280,7 +285,22 @@ export function SocialPostWebSources({ research }: { research: SocialPostWebRese
 }
 
 export default function SocialPostPage() {
+  const router = useRouter();
   const [brief, setBrief] = useState('');
+  const [contentType, setContentType] = useState<SocialContentType>('photo');
+  const [tone, setTone] = useState<SocialTone>('brand-default');
+  const [toneCustom, setToneCustom] = useState('');
+  const [cta, setCta] = useState<SocialCta>('none');
+  const [ctaUrl, setCtaUrl] = useState('');
+  const [keyMessage, setKeyMessage] = useState('');
+  const [referenceKind, setReferenceKind] = useState<'text' | 'url' | 'image'>('text');
+  const [referenceText, setReferenceText] = useState('');
+  const [referenceUrl, setReferenceUrl] = useState('');
+  const [reference, setReference] = useState<SocialReference | null>(null);
+  const [referenceNote, setReferenceNote] = useState('');
+  const [hashtagTopic, setHashtagTopic] = useState('');
+  const [hashtagResult, setHashtagResult] = useState<{ recommended: string[]; notes?: string; groups?: { brand: string[]; campaign: string[]; niche: string[]; broad: string[] } } | null>(null);
+  const [hashtagBusy, setHashtagBusy] = useState(false);
   const [researchHandoff, setResearchHandoff] = useState(false);
   const [platform, setPlatform] = useState('Instagram');
   const [targetAudience, setTargetAudience] = useState('');
@@ -451,6 +471,66 @@ export default function SocialPostPage() {
     return () => window.removeEventListener('keydown', onKey);
   }, [previewImage]);
 
+  const attachUrl = async () => {
+    setReferenceNote('Reading the page…');
+    const response = await fetch('/api/social-post/reference', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ kind: 'url', url: referenceUrl }),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) { setReference(null); setReferenceNote(data.error || 'That page could not be read. Paste the text instead.'); return; }
+    setReference({ kind: 'url', url: data.url, text: data.text });
+    setReferenceNote('Page text saved as the content reference.');
+  };
+
+  const attachImage = async (file?: File) => {
+    if (!file) return;
+    setReferenceNote('Describing the screenshot…');
+    const form = new FormData();
+    form.set('file', file);
+    const response = await fetch('/api/social-post/reference', { method: 'POST', body: form });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) { setReference(null); setReferenceNote(data.error || 'The image could not be described. Paste the text instead.'); return; }
+    setReference({ kind: 'image', text: data.text, imageKey: data.imageKey });
+    setReferenceNote(data.text);
+  };
+
+  const suggestHashtags = async (caption?: string, style?: string) => {
+    setHashtagBusy(true);
+    setError('');
+    const response = await fetch('/api/social-post/hashtags', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        topic: caption || hashtagTopic || brief || keyMessage,
+        caption,
+        platform,
+        contentType,
+        style,
+        keyMessage,
+        cta,
+        ctaUrl,
+      }),
+    });
+    const data = await response.json().catch(() => ({}));
+    setHashtagBusy(false);
+    if (!response.ok) { setError(data.error || 'Could not generate hashtags.'); return null; }
+    setHashtagResult({ recommended: data.recommended || [], notes: data.notes, groups: data.groups });
+    return data as { recommended: string[]; qc?: { checks: unknown[]; score: number; allPassed: boolean } };
+  };
+
+  const openVideoScript = (option: PostOption) => {
+    sessionStorage.setItem(VIDEO_HANDOFF_STORAGE_KEY, JSON.stringify({
+      brief,
+      hook: option.videoHook || option.hook,
+      shots: option.shotList || [],
+      platform,
+      audience: targetAudience,
+    }));
+    router.push(videoScriptHref());
+  };
+
   const handleGenerate = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
@@ -494,6 +574,13 @@ export default function SocialPostPage() {
           targetAudience,
           goal,
           brandGuidelineId,
+          contentType,
+          tone,
+          toneCustom,
+          cta,
+          ctaUrl,
+          keyMessage,
+          reference,
         })),
         signal: controller.signal,
       });
@@ -835,6 +922,27 @@ export default function SocialPostPage() {
       if (data.dupoinFileName) setDupoinFileName(data.dupoinFileName);
       if (data.researchPosts) setResearchPosts(data.researchPosts);
       setWebResearch(readWebResearch(data.webResearch));
+      const stored = readStoredSocialPostInput(data.input);
+      if (stored) {
+        setContentType(stored.contentType);
+        setTone(stored.tone);
+        setToneCustom(stored.toneCustom);
+        setCta(stored.cta);
+        setCtaUrl(stored.ctaUrl);
+        setKeyMessage(stored.keyMessage);
+        setReference(stored.reference);
+        setReferenceKind(stored.reference?.kind || 'text');
+        setReferenceText(stored.reference?.kind === 'text' ? stored.reference.text : '');
+        setReferenceUrl(stored.reference?.url || '');
+        setReferenceNote(stored.reference?.text ? 'Saved content reference restored.' : '');
+        if (stored.platform) setPlatform(stored.platform);
+        if (stored.targetAudience) setTargetAudience(stored.targetAudience);
+        if (stored.goal) setGoal(stored.goal);
+        if (stored.brandGuidelineId) {
+          brandGuidelineTouched.current = true;
+          setBrandGuidelineId(stored.brandGuidelineId);
+        }
+      }
       // Replay previously generated images for this post
       setImageHistory(history);
       const restoredUrl = latest?.imageUrl || data.imageUrl || null;
@@ -959,6 +1067,13 @@ export default function SocialPostPage() {
                   <option>Instagram</option><option>TikTok</option><option>LinkedIn</option><option>Twitter/X</option><option>Facebook</option>
                 </Select>
               </FormField>
+              <FormField label="Content type">
+                <Select value={contentType} onChange={e => setContentType(e.target.value as SocialContentType)}>
+                  <option value="photo">Photo</option>
+                  <option value="carousel">Carousel</option>
+                  <option value="video">Video</option>
+                </Select>
+              </FormField>
               <FormField label="Target audience">
                 <Select value={targetAudience} onChange={e => setTargetAudience(e.target.value)}>
                   <option value="">Choose an audience...</option>
@@ -978,6 +1093,28 @@ export default function SocialPostPage() {
                   <option>Awareness</option><option>Engagement</option><option>Lead Generation</option><option>Education</option><option>Event Promotion</option>
                 </Select>
               </FormField>
+              <FormField label="Tone of voice">
+                <Select value={tone} onChange={e => setTone(e.target.value as SocialTone)}>
+                  <option value="brand-default">Brand default</option>
+                  <option value="professional">Professional</option>
+                  <option value="friendly">Friendly</option>
+                  <option value="educational">Educational</option>
+                  <option value="bold">Bold</option>
+                  <option value="inspirational">Inspirational</option>
+                  <option value="humorous">Humorous</option>
+                  <option value="custom">Custom…</option>
+                </Select>
+              </FormField>
+              <FormField label="CTA">
+                <Select value={cta} onChange={e => setCta(e.target.value as SocialCta)}>
+                  <option value="none">None</option>
+                  <option value="follow">Follow</option>
+                  <option value="learn-more">Learn More</option>
+                  <option value="register">Register</option>
+                  <option value="comment">Comment</option>
+                  <option value="visit-link">Visit Link</option>
+                </Select>
+              </FormField>
               <FormField label="Brand guideline">
                 <Select
                   data-testid="social-post-brand-guideline"
@@ -994,9 +1131,45 @@ export default function SocialPostPage() {
                 </Select>
               </FormField>
             </div>
+            {tone === 'custom' && (
+              <FormField label="Custom tone" hint="80 characters or fewer">
+                <input value={toneCustom} maxLength={80} onChange={e => setToneCustom(e.target.value)} className="h-9 w-full rounded-[var(--mos-radius-control)] border border-[var(--mos-border)] bg-[var(--mos-surface)] px-3 text-sm" />
+              </FormField>
+            )}
+            {(cta === 'register' || cta === 'visit-link') && (
+              <FormField label="CTA URL" hint="Optional. http or https. The model must not invent a different link.">
+                <input value={ctaUrl} onChange={e => setCtaUrl(e.target.value)} placeholder="https://" className="h-9 w-full rounded-[var(--mos-radius-control)] border border-[var(--mos-border)] bg-[var(--mos-surface)] px-3 text-sm" />
+              </FormField>
+            )}
+            <FormField label="Key message" hint="Must appear in the caption. 200 characters or fewer.">
+              <input value={keyMessage} maxLength={200} onChange={e => setKeyMessage(e.target.value)} className="h-9 w-full rounded-[var(--mos-radius-control)] border border-[var(--mos-border)] bg-[var(--mos-surface)] px-3 text-sm" />
+            </FormField>
             <FormField label="Brief" required>
               <TextArea value={brief} onChange={e => setBrief(e.target.value)} rows={3}
                 placeholder="Describe what you want to post about..." required />
+            </FormField>
+            <FormField label="Content reference" hint="Paste text (2,000 characters), a public article URL, or one image up to 5 MB. Social network URLs are not fetched.">
+              <div className="mb-2 flex gap-2">
+                {(['text', 'url', 'image'] as const).map(kind => (
+                  <button key={kind} type="button" onClick={() => {
+                    setReferenceKind(kind);
+                    setReferenceNote('');
+                    if (kind === 'text') setReference(referenceText.trim() ? { kind: 'text', text: referenceText.slice(0, 2000) } : null);
+                    else setReference(null);
+                  }} className={`rounded-full border px-3 py-1 text-xs ${referenceKind === kind ? 'border-[var(--mos-accent)] text-[var(--mos-text)]' : 'border-[var(--mos-border)] text-[var(--mos-text-muted)]'}`}>
+                    {kind === 'text' ? 'Paste text' : kind === 'url' ? 'URL' : 'Screenshot'}
+                  </button>
+                ))}
+              </div>
+              {referenceKind === 'text' && <TextArea value={referenceText} maxLength={2000} rows={3} onChange={e => { setReferenceText(e.target.value); setReference(e.target.value.trim() ? { kind: 'text', text: e.target.value.slice(0, 2000) } : null); }} placeholder="Paste a caption, article, or notes" />}
+              {referenceKind === 'url' && (
+                <div className="flex gap-2">
+                  <input value={referenceUrl} onChange={e => setReferenceUrl(e.target.value)} placeholder="https://" className="h-9 min-w-0 flex-1 rounded-[var(--mos-radius-control)] border border-[var(--mos-border)] bg-[var(--mos-surface)] px-3 text-sm" />
+                  <Button type="button" onClick={() => void attachUrl()}>Read URL</Button>
+                </div>
+              )}
+              {referenceKind === 'image' && <input aria-label="Reference screenshot" type="file" accept="image/png,image/jpeg,image/webp" onChange={e => void attachImage(e.target.files?.[0])} />}
+              {referenceNote && <p className="mt-2 text-xs text-[var(--mos-text-muted)]">{referenceNote}</p>}
             </FormField>
             <div className="flex items-center gap-3">
               <Button type="submit" variant="primary" disabled={loading || !brief}>
@@ -1207,6 +1380,15 @@ export default function SocialPostPage() {
                               {opt.hashtags && opt.hashtags.length > 0 && (
                                 <p className="text-blue-600 text-sm mt-3">{opt.hashtags.join(' ')}</p>
                               )}
+                              {contentType === 'carousel' && opt.slides && opt.slides.length > 0 && (
+                                <ol className="mt-3 list-decimal space-y-1 pl-4 text-sm text-gray-700">
+                                  {opt.slides.map((slide, slideIndex) => <li key={`${slide.title || 'slide'}-${slideIndex}`}><span className="font-medium">{slide.title}</span>{slide.text ? ` — ${slide.text}` : ''}</li>)}
+                                </ol>
+                              )}
+                              {contentType === 'video' && opt.videoHook && <p className="mt-3 text-sm font-medium text-gray-900">3-second hook: {opt.videoHook}</p>}
+                              {contentType === 'video' && opt.shotList && opt.shotList.length > 0 && (
+                                <ol className="mt-2 list-decimal pl-4 text-sm text-gray-700">{opt.shotList.map(shot => <li key={shot}>{shot}</li>)}</ol>
+                              )}
                             </div>
 
                             {/* Copy button */}
@@ -1215,6 +1397,20 @@ export default function SocialPostPage() {
                                 className="text-xs px-3 py-1.5 bg-[var(--mos-raised)] hover:bg-[var(--mos-raised)] text-[var(--mos-text-secondary)] rounded-lg">
                                 Copy Caption
                               </button>
+                              <button type="button" onClick={() => void suggestHashtags(opt.caption, opt.style).then(data => {
+                                if (!data?.recommended) return;
+                                setOptions(current => current?.map((item, itemIndex) => itemIndex === index ? { ...item, hashtags: data.recommended } : item) || null);
+                                if (data.qc) setQcResults(current => current.map((item, itemIndex) => itemIndex === index ? data.qc as typeof item : item));
+                              })}
+                                className="text-xs px-3 py-1.5 bg-[var(--mos-raised)] hover:bg-[var(--mos-raised)] text-[var(--mos-text-secondary)] rounded-lg">
+                                {hashtagBusy ? 'Hashtags…' : 'Hashtags'}
+                              </button>
+                              {contentType === 'video' && (
+                                <button type="button" onClick={() => openVideoScript(opt)}
+                                  className="text-xs px-3 py-1.5 bg-[var(--mos-raised)] hover:bg-[var(--mos-raised)] text-[var(--mos-text-secondary)] rounded-lg">
+                                  Open in Video Script
+                                </button>
+                              )}
                               <button onClick={() => copyToClipboard(opt.hook + '\n\n' + opt.caption + '\n\n' + opt.hashtags.join(' '))}
                                 className="text-xs px-3 py-1.5 bg-[var(--mos-raised)] hover:bg-[var(--mos-raised)] text-[var(--mos-text-secondary)] rounded-lg">
                                 Copy All
@@ -1281,7 +1477,7 @@ export default function SocialPostPage() {
           )}
 
           {/* Image Prompt + Generate (shown when options exist or result exists) */}
-          {(options || result || promptEditorOpen) && (
+          {(options || result || promptEditorOpen) && contentType !== 'video' && (
             <Panel padding="none" id="image-prompt-editor">
               {/* Header */}
               <div className="flex items-center justify-between border-b border-[var(--mos-border-subtle)] px-5 py-4">
@@ -1604,7 +1800,34 @@ export default function SocialPostPage() {
         </div>
 
         {/* Right: Recent Posts */}
-        <div className="lg:col-span-1">
+        <div className="lg:col-span-1 space-y-4">
+          <Panel>
+            <SectionHeader title="Advanced" description="Brand voice, campaigns, and competitor references arrive in the next releases." />
+            <div className="mt-3 space-y-2 text-xs text-[var(--mos-text-muted)]">
+              <p className="rounded-[var(--mos-radius-control)] border border-[var(--mos-border)] px-3 py-2">Brand voice — coming soon</p>
+              <p className="rounded-[var(--mos-radius-control)] border border-[var(--mos-border)] px-3 py-2">Campaign — coming soon</p>
+              <p className="rounded-[var(--mos-radius-control)] border border-[var(--mos-border)] px-3 py-2">Competitor — coming soon</p>
+            </div>
+            <form className="mt-4 space-y-3" onSubmit={event => { event.preventDefault(); void suggestHashtags(); }}>
+              <SectionHeader title="Hashtag generator" description="Grouped brand, campaign, niche, and broad tags for this platform." />
+              <TextArea value={hashtagTopic} onChange={e => setHashtagTopic(e.target.value)} rows={3} placeholder="Topic or paste a caption" />
+              <Button type="submit" disabled={hashtagBusy}>{hashtagBusy ? 'Generating…' : 'Generate hashtags'}</Button>
+              {hashtagResult?.groups && (
+                <div className="space-y-2 text-xs">
+                  {(['brand', 'campaign', 'niche', 'broad'] as const).map(name => hashtagResult.groups?.[name]?.length ? (
+                    <p key={name}>
+                      <span className="mr-2 uppercase tracking-wide text-[var(--mos-text-faint)]">{name}</span>
+                      <span className="text-blue-300">{hashtagResult.groups[name].join(' ')}</span>
+                    </p>
+                  ) : null)}
+                </div>
+              )}
+              {hashtagResult && !hashtagResult.groups && (
+                <p className="text-sm text-blue-300">{hashtagResult.recommended.join(' ')}</p>
+              )}
+              {hashtagResult?.notes && <p className="text-xs text-[var(--mos-text-muted)]">{hashtagResult.notes}</p>}
+            </form>
+          </Panel>
           <Panel padding="none" className="sticky top-8">
             <div className="p-4 border-b border-[var(--mos-border)]">
               <h3 className="text-sm font-semibold text-white">Recent posts</h3>

@@ -2,6 +2,7 @@ import { parseGatewayCompletion } from '@/lib/gateway-response';
 import { IMAGE_PROMPT_SYSTEM } from '@/lib/dupoin-image-prompt';
 import { EVENT_PLAN_GROUNDED_BUDGET_RULES } from '@/lib/event-plan-budget';
 import { isTerminalProviderError, postChat, explainLlmHttpError } from '@/lib/llm-provider';
+import { captionUrls, ctaPresent, emojiLimit, hashtagRange, keyMessagePresent, platformKey, platformOptimization, urlsMatch } from '@/lib/social-post-brief';
 import { parseStoredSourceUrls } from '@/lib/knowledge-pin';
 import { logTokenUsage } from '@/lib/token-log';
 import { runWithModelFallback, type FallbackEvent } from '@/lib/model-fallback';
@@ -820,48 +821,7 @@ function buildBrandGuidelinesPrompt(bg: BrandGuidelines): string {
  * Platform-specific prompt optimizations.
  */
 function getPlatformOptimization(platform?: string): string {
-  if (!platform) return '';
-
-  const lower = platform.toLowerCase();
-  const optimizations: Record<string, string> = {
-    'instagram': `Platform: Instagram
-- Use visually descriptive language
-- Include 15-20 relevant hashtags
-- Keep caption scannable with line breaks and emojis
-- Hook must grab attention in first line (before "more" cutoff)
-- Optimal length: 138-150 characters for the hook`,
-    'linkedin': `Platform: LinkedIn
-- Professional, thought-leadership tone
-- No excessive emojis (1-2 max)
-- Include industry insights or data points
-- Use line breaks for readability
-- Hashtags: 3-5 professional hashtags max
-- Hook should provoke professional curiosity`,
-    'tiktok': `Platform: TikTok
-- Trendy, casual, authentic voice
-- Reference current trends/sounds if relevant
-- Short punchy sentences
-- Gen-Z friendly language
-- Hook must work in first 1-2 seconds
-- Include trending hashtag suggestions`,
-    'twitter': `Platform: X/Twitter
-- Concise, punchy, under 280 characters
-- Strong opinion or insight in the hook
-- 1-3 hashtags max
-- Thread-worthy content if longer`,
-    'facebook': `Platform: Facebook
-- Conversational, community-oriented
-- Storytelling works well
-- Moderate emoji use
-- Engagement-focused (questions, polls)`,
-    'youtube': `Platform: YouTube
-- SEO-optimized title and description
-- Hook in first 5 seconds
-- Clear chapter/section structure
-- CTA for subscribe and engagement`,
-  };
-
-  return optimizations[lower] || `Platform: ${platform}\nOptimize content format and style for ${platform}.`;
+  return platformOptimization(platform);
 }
 
 /**
@@ -921,7 +881,12 @@ export interface QCResult {
  * Run automated QC checks on a social post option.
  * Checks: caption length, hashtag count, banned words, emoji count.
  */
-export function runQC(caption: string, hashtags: string[], platform?: string): QCResult {
+export function runQC(
+  caption: string,
+  hashtags: string[],
+  platform?: string,
+  options?: { style?: string; keyMessage?: string; cta?: string; ctaUrl?: string },
+): QCResult {
   const checks: QCCheck[] = [];
 
   // 1. Caption length check (platform-specific)
@@ -932,7 +897,14 @@ export function runQC(caption: string, hashtags: string[], platform?: string): Q
     'Twitter/X': { min: 20, max: 280, label: 'X/Twitter' },
     'Facebook': { min: 50, max: 63206, label: 'Facebook' },
   };
-  const limits = platformLimits[platform || ''] || { min: 50, max: 2200, label: 'General' };
+  const limits = platformLimits[platform || ''] || platformLimits[
+    platformKey(platform) === 'twitter' ? 'Twitter/X'
+      : platformKey(platform) === 'instagram' ? 'Instagram'
+        : platformKey(platform) === 'linkedin' ? 'LinkedIn'
+          : platformKey(platform) === 'tiktok' ? 'TikTok'
+            : platformKey(platform) === 'facebook' ? 'Facebook'
+              : ''
+  ] || { min: 50, max: 2200, label: 'General' };
   const captionLen = caption.length;
   const captionOk = captionLen >= limits.min && captionLen <= limits.max;
   checks.push({
@@ -946,18 +918,19 @@ export function runQC(caption: string, hashtags: string[], platform?: string): Q
         : `Too long: ${captionLen} chars (max ${limits.max} for ${limits.label})`,
   });
 
-  // 2. Hashtag count check (8-12 ideal)
+  // 2. Hashtag count follows the same range as the platform prompt.
   const tagCount = hashtags.length;
-  const tagOk = tagCount >= 5 && tagCount <= 15;
+  const range = hashtagRange(platform);
+  const tagOk = tagCount >= range.min && tagCount <= range.max;
   checks.push({
     name: 'hashtag_count',
     label: 'Hashtag Count',
     passed: tagOk,
     detail: tagOk
-      ? `${tagCount} hashtags (ideal: 8-12)`
-      : tagCount < 5
-        ? `Only ${tagCount} hashtags (add more, ideal: 8-12)`
-        : `${tagCount} hashtags (too many, ideal: 8-12)`,
+      ? `${tagCount} hashtags (ideal: ${range.min}-${range.max})`
+      : tagCount < range.min
+        ? `Only ${tagCount} hashtags (add more, ideal: ${range.min}-${range.max})`
+        : `${tagCount} hashtags (too many, ideal: ${range.min}-${range.max})`,
   });
 
   // 3. Banned words check
@@ -976,15 +949,46 @@ export function runQC(caption: string, hashtags: string[], platform?: string): Q
   // 4. Emoji count check (max 3)
   const emojiRegex = /[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1F1E0}-\u{1F1FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{FE00}-\u{FE0F}\u{1F900}-\u{1F9FF}\u{1FA00}-\u{1FA6F}\u{1FA70}-\u{1FAFF}\u{200D}\u{20E3}\u{E0020}-\u{E007F}]/gu;
   const emojis = caption.match(emojiRegex) || [];
-  const emojiOk = emojis.length <= 3;
+  const maxEmojis = emojiLimit(platform, options?.style);
+  const emojiOk = emojis.length <= maxEmojis;
   checks.push({
     name: 'emoji_count',
     label: 'Emoji Count',
     passed: emojiOk,
     detail: emojiOk
-      ? `${emojis.length} emojis (max 3)`
-      : `${emojis.length} emojis — too many (max 3 recommended)`,
+      ? `${emojis.length} emojis (max ${maxEmojis})`
+      : `${emojis.length} emojis — too many (max ${maxEmojis})`,
   });
+
+  if (options?.keyMessage?.trim()) {
+    const present = keyMessagePresent(`${caption}`, options.keyMessage);
+    checks.push({
+      name: 'key_message_present',
+      label: 'Key message',
+      passed: present,
+      detail: present ? 'The key message appears in the caption.' : 'The key message is missing from the caption.',
+    });
+  }
+  if (options?.cta && options.cta !== 'none') {
+    const present = ctaPresent(caption, options.cta, options.ctaUrl);
+    checks.push({
+      name: 'cta_present',
+      label: 'Call to action',
+      passed: present,
+      detail: present ? 'The caption includes the requested call to action.' : 'The requested call to action is missing.',
+    });
+    const urls = captionUrls(caption);
+    const allowed = options.ctaUrl?.trim();
+    const invented = allowed
+      ? urls.filter(url => !urlsMatch(url, allowed))
+      : urls;
+    checks.push({
+      name: 'no_invented_url',
+      label: 'Links',
+      passed: invented.length === 0,
+      detail: invented.length === 0 ? 'No invented URL.' : `Unexpected URL: ${invented[0]}`,
+    });
+  }
 
   const passedCount = checks.filter(c => c.passed).length;
   return {
@@ -1030,8 +1034,8 @@ How you write:
 - Hook: langsung ke poin. Kalau promo, sebut benefit-nya. Kalau edukasi, kasih insight yang bikin orang berhenti scroll
 - Body: 2-3 kalimat. Jangan bertele-tele. Setiap kalimat harus punya alasan untuk ada
 - CTA: natural. "Cek di bio" atau "DM kita" — bukan "SEGERA HUBUNGI KAMI SEKARANG JUGA"
-- Emojis: 1-3, yang relevan. Bukan hiasan
-- Hashtags: 8-12 yang beneran dipakai orang, bukan hashtag random
+- Emojis: follow the platform limit. Bold style may use more, except LinkedIn which stays at 1-2
+- Hashtags: follow the platform count in the platform rules. Do not invent a different range
 - Jangan pernah pakai kalimat klise: "Di era digital...", "Jangan lewatkan...", "Kesempatan emas..."
 
 Tone: seperti teman yang ngerti trading lagi ngasih tau info penting, bukan sales yang ngejar target.
