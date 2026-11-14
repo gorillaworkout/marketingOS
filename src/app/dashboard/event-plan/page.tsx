@@ -13,8 +13,10 @@ import type { EventPlanResearch } from '@/lib/event-plan-research';
 import { Button, DataTableFrame, FormField, Panel, PageHeader, PageStack, SectionHeader, StatusBadge, TextArea, TextInput, Toolbar } from '@/components/ui/dashboard';
 import InlineModelSelector from '@/components/InlineModelSelector';
 import { TASK_EDITOR_QUERY, fetchOwnHistoryTask } from '@/lib/history-editor';
+import { EventQuotationTable } from '@/components/event-quotation-table';
+import { parseQuotationLines, type QuotationLine } from '@/lib/event-plan-quotation';
 
-type BudgetItem = { category: string; estimatedCost: number | null; notes: string; suggestedVendor?: string; venue?: string; sourceUrl?: string | null };
+type BudgetItem = { category: string; estimatedCost: number | null; notes: string; suggestedVendor?: string; venue?: string; sourceUrl?: string | null; source?: string };
 type Budget = { currency: 'IDR'; total?: number | null; items: BudgetItem[]; contingency?: number | null; preliminary?: boolean; publicPricesFound?: boolean; ceilingNote?: string };
 type EventPlanOption = {
   style: string;
@@ -88,6 +90,7 @@ function normalizeBudget(value: unknown): Budget | null {
       suggestedVendor: typeof entry.suggestedVendor === 'string' ? entry.suggestedVendor : undefined,
       venue: typeof entry.venue === 'string' ? entry.venue : undefined,
       sourceUrl: typeof entry.sourceUrl === 'string' ? entry.sourceUrl : null,
+      source: entry.source === 'quotation' ? 'quotation' : 'estimate',
     }];
   }) : [];
   return {
@@ -108,6 +111,13 @@ export default function EventPlanPage() {
   const [budget, setBudget] = useState('');
   const [targetDate, setTargetDate] = useState('');
   const [researchLinks, setResearchLinks] = useState('');
+  const [venueName, setVenueName] = useState('');
+  const [participants, setParticipants] = useState('');
+  const [speakerDraft, setSpeakerDraft] = useState('');
+  const [speakers, setSpeakers] = useState<string[]>([]);
+  const [quotations, setQuotations] = useState<QuotationLine[]>([]);
+  const [contingencyPercent, setContingencyPercent] = useState(10);
+  const [uploadingQuote, setUploadingQuote] = useState(false);
   const [loading, setLoading] = useState(false);
   const [options, setOptions] = useState<EventPlanOption[]>([]);
   const [selectedOption, setSelectedOption] = useState(0);
@@ -152,6 +162,11 @@ export default function EventPlanPage() {
       setBudget(restored.budget);
       setTargetDate(restored.targetDate);
       setResearchLinks(restored.researchLinks);
+      setVenueName(restored.venueName);
+      setParticipants(restored.participants ? String(restored.participants) : '');
+      setSpeakers(restored.speakers);
+      setQuotations(restored.quotations);
+      setContingencyPercent(restored.contingencyPercent);
       setOptions(restored.options as EventPlanOption[]);
       setSelectedOption(0);
       setTokenUsage(restored.model ? { model: restored.model } : null);
@@ -186,7 +201,19 @@ export default function EventPlanPage() {
     try {
       const res = await fetch('/api/event-plan/generate', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ eventName, theme, location, budget: budget ? Number(budget) : undefined, targetDate, researchUrls: researchLinks.split(/\r?\n/).map((url) => url.trim()).filter(Boolean) }),
+        body: JSON.stringify({
+          eventName,
+          theme,
+          location,
+          venueName,
+          participants: participants ? Number(participants) : undefined,
+          speakers,
+          quotations,
+          contingencyPercent,
+          budget: budget ? Number(budget) : undefined,
+          targetDate,
+          researchUrls: researchLinks.split(/\r?\n/).map((url) => url.trim()).filter(Boolean),
+        }),
       });
       if (!res.ok) throw new Error(`Generation failed (${res.status})`);
       if (!res.body) throw new Error('The generation stream was unavailable');
@@ -243,7 +270,7 @@ export default function EventPlanPage() {
 
   const result = options[selectedOption];
   const displayBudget = normalizeBudget(result?.budget);
-  const speakers = Array.isArray(result?.speakers) ? result.speakers.filter((speaker): speaker is string => typeof speaker === 'string') : [];
+  const plannedSpeakers = Array.isArray(result?.speakers) ? result.speakers.filter((speaker): speaker is string => typeof speaker === 'string') : [];
   const research = result?.research || { status: 'unverified' as const, sources: [], contacts: [] };
   const handleDownload = (format: 'doc' | 'json') => {
     if (!result) return;
@@ -270,9 +297,41 @@ export default function EventPlanPage() {
           <FormField label="Event name" required><TextInput value={eventName} onChange={e => setEventName(e.target.value)} placeholder="e.g., Bloomberg Awarding Night" required /></FormField>
           <FormField label="Location"><TextInput value={location} onChange={e => setLocation(e.target.value)} placeholder="Jakarta" /></FormField>
           <FormField label="Theme"><TextInput value={theme} onChange={e => setTheme(e.target.value)} placeholder="e.g., Financial Awards" /></FormField>
+          <FormField label="Venue name" hint="Specific hall or hotel. The city stays in Location."><TextInput value={venueName} onChange={e => setVenueName(e.target.value)} placeholder="Hotel Indonesia Kempinski, Grand Ballroom" /></FormField>
+          <FormField label="Target participants"><TextInput inputMode="numeric" value={participants} onChange={e => setParticipants(e.target.value.replace(/\D/g, ''))} placeholder="120" /></FormField>
           <FormField label="Budget ceiling" hint="IDR"><TextInput inputMode="numeric" value={budget ? formatIDR(budget) : ''} onChange={e => setBudget(e.target.value.replace(/\D/g, ''))} placeholder="Rp 50.000.000" /></FormField>
           <FormField label="Event target date"><TextInput type="date" value={targetDate} onChange={e => setTargetDate(e.target.value)} /></FormField>
         </div>
+        <FormField label="Speakers">
+          <div className="flex gap-2">
+            <TextInput value={speakerDraft} onChange={e => setSpeakerDraft(e.target.value)} placeholder="Speaker name" />
+            <Button type="button" onClick={() => { const name = speakerDraft.trim(); if (!name) return; setSpeakers(current => current.includes(name) ? current : [...current, name]); setSpeakerDraft(''); }}>Add</Button>
+          </div>
+          {speakers.length > 0 && <ul className="mt-2 space-y-1 text-sm text-[var(--mos-text-secondary)]">{speakers.map(name => <li key={name} className="flex justify-between gap-2"><span>{name}</span><button type="button" onClick={() => setSpeakers(current => current.filter(item => item !== name))}>Remove</button></li>)}</ul>}
+        </FormField>
+        <EventQuotationTable
+          lines={quotations}
+          contingencyPercent={contingencyPercent}
+          uploading={uploadingQuote}
+          onChange={setQuotations}
+          onContingency={setContingencyPercent}
+          onUpload={files => {
+            if (!files.length) return;
+            setUploadingQuote(true);
+            setError('');
+            const form = new FormData();
+            files.forEach(file => form.append('files', file));
+            void fetch('/api/event-plan/quotations', { method: 'POST', body: form })
+              .then(async response => {
+                const data = await response.json().catch(() => ({}));
+                if (!response.ok) throw new Error(data.error || 'Could not read the quotation.');
+                const next = parseQuotationLines((data.files || []).flatMap((file: { lines?: unknown }) => file.lines || []));
+                setQuotations(current => [...current, ...next]);
+              })
+              .catch(cause => setError(cause instanceof Error ? cause.message : 'Could not read the quotation.'))
+              .finally(() => setUploadingQuote(false));
+          }}
+        />
         <FormField label="Research / quotation links" hint="Optional · maximum 5"><TextArea value={researchLinks} onChange={e => setResearchLinks(e.target.value)} rows={4} placeholder={'https://official-vendor.example/proposal\nhttps://hotel.example/price-list'} /><span className="mt-1.5 block text-xs leading-5 text-[var(--mos-text-faint)]">One public URL per line. The server reads that page and looks for venue rental prices and speaker fees. The result is not a verified quotation.</span></FormField>
         <Button type="submit" variant="primary" disabled={loading || !eventName}>{loading ? 'Generating…' : 'Generate plan'}</Button>
       </form>
@@ -291,7 +350,7 @@ export default function EventPlanPage() {
             {result.theme && <Detail label="Theme" value={result.theme} />}
             <Detail label="Venue / location" value={result.venue?.trim() || location || 'Jakarta'} />
             {targetDate && <Detail label="Event target date" value={formatTargetDate(targetDate)} />}
-            {speakers.length > 0 && <div className="mb-4"><label className="text-xs text-[var(--mos-text-faint)] uppercase tracking-wide">Speakers</label><ul className="mt-2 divide-y divide-[var(--mos-border-subtle)] rounded-[var(--mos-radius-control)] border border-[var(--mos-border)]">{speakers.map((speaker, index) => <li key={index} className="px-3 py-2 text-[var(--mos-text-secondary)]">{speaker}</li>)}</ul></div>}
+            {plannedSpeakers.length > 0 && <div className="mb-4"><label className="text-xs text-[var(--mos-text-faint)] uppercase tracking-wide">Speakers</label><ul className="mt-2 divide-y divide-[var(--mos-border-subtle)] rounded-[var(--mos-radius-control)] border border-[var(--mos-border)]">{plannedSpeakers.map(speaker => <li key={speaker} className="px-3 py-2 text-[var(--mos-text-secondary)]">{speaker}</li>)}</ul></div>}
             <BudgetBreakdown budget={displayBudget} />
             {result.timeline && <Detail label="Timeline" value={result.timeline} preserveWhitespace />}
             <ResearchPanel research={research} />
@@ -321,7 +380,7 @@ function BudgetBreakdown({ budget }: { budget: Budget | null }) {
   return (
     <div className="mb-4">
       <label className="text-xs text-[var(--mos-text-faint)] uppercase tracking-wide">Budget breakdown</label>
-      <p className="mt-1 text-xs text-[var(--mos-text-faint)]">{NO_PUBLIC_PRICE_NOTE}. Figures in the table appear only when they are in a public source. This is not a verified quotation.</p>
+      <p className="mt-1 text-xs text-[var(--mos-text-faint)]">Confirmed quotation rows are separate from AI estimates. An estimate is not a quotation, and it has a price only when a public source states one.</p>
       {budget.ceilingNote && <p className="mt-1 text-xs text-amber-300">{budget.ceilingNote}</p>}
       <DataTableFrame className="mt-2">
         <table className="w-full text-sm text-left">
@@ -336,7 +395,7 @@ function BudgetBreakdown({ budget }: { budget: Budget | null }) {
           <tbody>
             {budget.items.length ? budget.items.map((item, index) => (
               <tr key={index} className="border-t border-[var(--mos-border)] align-top text-[var(--mos-text-secondary)]">
-                <td className="p-3 whitespace-nowrap">{item.category}</td>
+                <td className="p-3 whitespace-nowrap">{item.category}<p className="mt-1 text-[10px] uppercase tracking-wide text-[var(--mos-text-faint)]">{item.source === 'quotation' ? 'Quotation' : 'AI estimate'}</p></td>
                 <td className="p-3 min-w-[12rem]">
                   <p>{item.suggestedVendor || '—'}</p>
                   {item.venue && <p className="mt-1 text-xs text-[var(--mos-text-faint)]">{item.venue}</p>}
