@@ -57,6 +57,7 @@ export default function SeoSettingsPage() {
 
     {settings && <>
       <PagespeedKeyForm />
+      <KeywordGapKeysForm />
 
       <Panel>
         <div className="flex flex-wrap items-center justify-between gap-3">
@@ -152,6 +153,63 @@ function PagespeedKeyForm() {
       <Button disabled={saving || source !== 'settings'} onClick={() => save(true)}>Clear saved key</Button>
     </div>
     {message && <p className="mt-2 text-xs text-emerald-300">{message}</p>}
+  </Panel>;
+}
+
+function KeywordGapKeysForm() {
+  const [status, setStatus] = useState<{ semrush: { configured: boolean; hint: string | null; source: string }; dataforseo: { configured: boolean; hint: string | null; source: string } } | null>(null);
+  const [semrushKey, setSemrushKey] = useState('');
+  const [login, setLogin] = useState('');
+  const [password, setPassword] = useState('');
+  const [message, setMessage] = useState('');
+  const [error, setError] = useState('');
+
+  const load = useCallback(async () => {
+    const response = await fetch('/api/seo/settings/keyword-gap', { cache: 'no-store' });
+    const data = await response.json().catch(() => null);
+    if (response.ok && data) setStatus(data);
+  }, []);
+  useEffect(() => {
+    const timer = window.setTimeout(() => { void load(); }, 0);
+    return () => window.clearTimeout(timer);
+  }, [load]);
+
+  const save = async (body: Record<string, unknown>) => {
+    setMessage(''); setError('');
+    const response = await fetch('/api/seo/settings/keyword-gap', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) { setError(data.error || 'Could not save.'); return; }
+    setStatus(data);
+    setSemrushKey(''); setLogin(''); setPassword('');
+    setMessage('Saved.');
+  };
+
+  return <Panel>
+    <h2 className="text-sm font-medium text-[var(--mos-text)]">Keyword Gap provider keys</h2>
+    <p className="mt-1 text-xs text-[var(--mos-text-muted)]">Optional. Semrush and DataForSEO stay Not configured until a key is saved. Keys are encrypted and never shown again.</p>
+    <div className="mt-4 grid gap-3 md:grid-cols-2">
+      <div>
+        <StatusBadge tone={status?.semrush.configured ? 'success' : 'warning'} dot>{status?.semrush.configured ? `Semrush ${status.semrush.hint || 'configured'}` : 'Semrush not configured'}</StatusBadge>
+        <div className="mt-2 flex gap-2">
+          <TextInput type="password" value={semrushKey} onChange={event => setSemrushKey(event.target.value)} placeholder="Semrush API key" autoComplete="off" />
+          <Button size="sm" disabled={!semrushKey.trim()} onClick={() => save({ semrushKey })}>Save</Button>
+          <Button size="sm" disabled={status?.semrush.source !== 'settings'} onClick={() => save({ clearSemrush: true })}>Clear</Button>
+        </div>
+      </div>
+      <div>
+        <StatusBadge tone={status?.dataforseo.configured ? 'success' : 'warning'} dot>{status?.dataforseo.configured ? `DataForSEO ${status.dataforseo.hint || 'configured'}` : 'DataForSEO not configured'}</StatusBadge>
+        <div className="mt-2 grid gap-2">
+          <TextInput value={login} onChange={event => setLogin(event.target.value)} placeholder="DataForSEO login" autoComplete="off" />
+          <TextInput type="password" value={password} onChange={event => setPassword(event.target.value)} placeholder="DataForSEO password" autoComplete="off" />
+          <div className="flex gap-2">
+            <Button size="sm" disabled={!login.trim() || !password.trim()} onClick={() => save({ dataforseoLogin: login, dataforseoPassword: password })}>Save</Button>
+            <Button size="sm" disabled={status?.dataforseo.source !== 'settings'} onClick={() => save({ clearDataforseo: true })}>Clear</Button>
+          </div>
+        </div>
+      </div>
+    </div>
+    {message && <p className="mt-2 text-xs text-emerald-300">{message}</p>}
+    {error && <p className="mt-2 text-xs text-red-300">{error}</p>}
   </Panel>;
 }
 
