@@ -9,7 +9,7 @@ import {
   resolveSearchApiKeys,
   searchSerper,
 } from './ai-research-grounding';
-import { COMPETITOR_BROKERS, normalizeResearchUrl, type ArticleSourceInput } from './article-market-news';
+import { COMPETITOR_BROKERS, datedSourceCount, normalizeResearchUrl, type ArticleSourceInput } from './article-market-news';
 
 /**
  * Article Market News gather: same-day publisher RSS, plus open-web Serper
@@ -34,6 +34,8 @@ export interface ArticleResearchOptions {
   /** Publisher RSS only. Default is RSS plus open-web gather. */
   enableOpenWeb?: boolean;
   onProgress?: (message: string) => void;
+  /** Research-fallback topics keep searching until this many dated sources exist. */
+  minimumDatedSources?: number;
 }
 
 export const ARTICLE_RESEARCH_FEEDS: ResearchFeed[] = [
@@ -591,7 +593,23 @@ export async function researchArticleMarketNews(
     });
   }
 
-  const sources = mergeSources(rssSources, webSources);
+  let sources = mergeSources(rssSources, webSources);
+  const needed = options.minimumDatedSources ?? 0;
+  if (enableOpenWeb && needed > 0 && datedSourceCount(sources) < needed) {
+    options.onProgress?.('Searching for more dated sources...');
+    const extra = await gatherOpenWeb({
+      keyword: `${keyword} berita`,
+      researchDate,
+      angle: options.angle,
+      fetchImpl,
+      serperKey,
+      maxBytes,
+      timeoutMs: openWebTimeout,
+      enableJina,
+      onProgress: options.onProgress,
+    });
+    sources = mergeSources(sources, extra);
+  }
   if (sources.length === 0) {
     if (!enableOpenWeb) throw new Error(RSS_ONLY_EMPTY_MESSAGE);
     if (!serperKey) {

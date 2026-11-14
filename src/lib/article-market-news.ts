@@ -1,4 +1,5 @@
 import { BRAND_FACT_RULES } from '@/lib/brand-fact-guard';
+import { topicsInKeyword } from '@/lib/market-news-topics';
 
 /**
  * Models (especially Claude via the gateway) often wrap article JSON in markdown
@@ -310,6 +311,8 @@ export interface ArticleQualityCheck {
   noCompetitorBroker: boolean;
   allNumbersSourceBacked: boolean;
   allQuotesSourceBacked: boolean;
+  /** Named products removed because they were not in the research sources. Does not fail the gate. */
+  unsupportedProducts: string[];
   sourceCount: number;
   plagiarismStatus: 'manual-check-required';
   nonNumericFactReviewStatus: 'manual-check-required';
@@ -613,8 +616,10 @@ Write the article using only factual claims traceable to SOURCE EVIDENCE. Treat 
 function citationDateVariants(publishedAt: string): string[] {
   const [year, month, day] = publishedAt.slice(0, 10).split('-');
   const months = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
+  const shortMonths = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
   const monthName = months[Number(month) - 1];
-  return [publishedAt.slice(0, 10), `${Number(day)} ${monthName} ${year}`, `${day}/${month}/${year}`];
+  const shortMonth = shortMonths[Number(month) - 1];
+  return [publishedAt.slice(0, 10), `${Number(day)} ${monthName} ${year}`, `${Number(day)} ${shortMonth} ${year}`, `${day}/${month}/${year}`];
 }
 
 function containsSourceDate(text: string, publishedAt: string): boolean {
@@ -669,6 +674,121 @@ export function articleWordCountRepairGuidance(feedback: string): string {
   }
   return '';
 }
+
+export const ARTICLE_COMPLETION_MAX_TOKENS = 12_000;
+
+const ARTICLE_MODEL_STRENGTH = ['cc/claude-opus-5-5', 'cc/claude-sonnet-5-5', 'cx/gpt-5.6-sol', 'ag/gemini-3-flash'];
+
+/** Prefer the requested model, then the strongest Smart/Research model that is not in the auth cooldown. */
+export function strongestAvailableArticleModel(preferred: string | null | undefined, cooled: readonly string[] = []): string {
+  for (const id of [preferred, ...ARTICLE_MODEL_STRENGTH]) {
+    if (id && !cooled.includes(id)) return id;
+  }
+  return ARTICLE_MODEL_STRENGTH[ARTICLE_MODEL_STRENGTH.length - 1];
+}
+
+export function buildArticleExpandPrompt(input: {
+  keyword: string;
+  articleMarkdown: string;
+  wordCount: number;
+  sourceBlock: string;
+}): string {
+  const topics = topicsInKeyword(input.keyword);
+  const sections = topics.length > 1
+    ? `Add one H2 section per topic: ${topics.map(topic => topic.label).join(', ')}.`
+    : 'Add H2 sections for context, drivers, risk factors, what to watch, and the FAQ/PAA questions.';
+  return `EXPAND PASS. Keep every existing sentence. Do not regenerate the article from scratch.
+The draft is ${input.wordCount} words. Add grounded sections until the article is at least ${ARTICLE_WORD_MIN} words and about 920–980 words.
+${sections}
+Use only the source evidence below. Do not invent product names, figures, or quotes.
+Return the full article as the same JSON object.
+
+EXISTING DRAFT:
+${input.articleMarkdown}
+
+SOURCE EVIDENCE:
+${input.sourceBlock}`;
+}
+
+export function citationParenthetical(source: ArticleSourceInput): string {
+  const [year, month, day] = source.publishedAt.slice(0, 10).split('-');
+  const shortMonths = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  return `(${source.outlet}, ${Number(day)} ${shortMonths[Number(month) - 1]} ${year})`;
+}
+
+export function repairArticleCitations(markdown: string, sources: ArticleSourceInput[]): {
+  markdown: string;
+  sources: ArticleSourceInput[];
+  inserted: string[];
+  dropped: string[];
+} {
+  const heading = findSourcesHeading(markdown);
+  let prose = heading ? markdown.slice(0, heading.index).trimEnd() : markdown.trimEnd();
+  let tail = heading ? markdown.slice(heading.index) : '';
+  const kept: ArticleSourceInput[] = [];
+  const inserted: string[] = [];
+  const dropped: string[] = [];
+  for (const source of sources) {
+    if (prose.includes(source.outlet) && containsSourceDate(prose, source.publishedAt)) {
+      kept.push(source);
+      continue;
+    }
+    const note = citationParenthetical(source);
+    const words = source.verifiedFacts.toLowerCase().split(/[^a-z0-9]+/).filter(word => word.length > 5);
+    const sentences = prose.split(/(?<=[.!?])\s+/);
+    let placed = false;
+    for (let index = 0; index < sentences.length; index += 1) {
+      const lower = sentences[index].toLowerCase();
+      if (!words.some(word => lower.includes(word)) && !lower.includes(source.outlet.toLowerCase())) continue;
+      sentences[index] = /[.!?]$/.test(sentences[index].trim())
+        ? sentences[index].replace(/([.!?])(\s*)$/, ` ${note}$1`)
+        : `${sentences[index]} ${note}`;
+      placed = true;
+      break;
+    }
+    if (placed) {
+      prose = sentences.join(' ');
+      kept.push(source);
+      inserted.push(source.outlet);
+      continue;
+    }
+    dropped.push(source.outlet);
+    tail = tail.split('\n').filter(line => !line.includes(source.url)).join('\n');
+  }
+  const markdownOut = tail ? `${prose}\n\n${tail.trim()}` : prose;
+  return { markdown: markdownOut, sources: kept, inserted, dropped };
+}
+
+const PRODUCT_STOP = new Set([
+  'what to watch', 'risk factors', 'dupoin futures', 'bank indonesia', 'united states', 'federal reserve',
+]);
+
+export function unsupportedProductNames(text: string, corpus: string): string[] {
+  const haystack = corpus.toLowerCase();
+  const found = new Set<string>();
+  const pattern = /\b(?:iPhone|iPad|iMac|MacBook|Apple Watch)\s+[A-Z][A-Za-z0-9]+|\b[A-Z][a-z]+(?:\s+[A-Z][a-z0-9]+){1,2}\b/g;
+  for (const match of text.matchAll(pattern)) {
+    const name = match[0].replace(/\s+/g, ' ').trim();
+    if (name.length < 5 || PRODUCT_STOP.has(name.toLowerCase())) continue;
+    if (haystack.includes(name.toLowerCase())) continue;
+    found.add(name);
+  }
+  return [...found];
+}
+
+export function stripUnsupportedProductNames(markdown: string, corpus: string): { markdown: string; removed: string[] } {
+  const removed = unsupportedProductNames(markdown, corpus);
+  if (!removed.length) return { markdown, removed };
+  const sentences = markdown.split(/(?<=[.!?])\s+|\n+/);
+  const kept = sentences.filter(sentence => !removed.some(name => sentence.includes(name)));
+  return { markdown: kept.join(markdown.includes('\n') ? '\n' : ' ').replace(/\n{3,}/g, '\n\n').trim(), removed };
+}
+
+export function datedSourceCount(sources: Array<{ publishedAt?: string }>): number {
+  return sources.filter(source => /^\d{4}-\d{2}-\d{2}/.test(source.publishedAt || '')).length;
+}
+
+export const MIN_DATED_RESEARCH_SOURCES = 3;
 
 export function describeArticlePublicationGateFailure(detail: string): string {
   const count = articleWordCountFromFeedback(detail);
@@ -891,6 +1011,7 @@ export function validateGeneratedArticle(title: string, articleMarkdown: string,
     noCompetitorBroker: brokerMatches.length === 0,
     allNumbersSourceBacked: unsupportedNumbers.length === 0,
     allQuotesSourceBacked: unsupportedQuotes.length === 0,
+    unsupportedProducts: [],
     sourceCount: input.sources.length,
     plagiarismStatus: 'manual-check-required',
     nonNumericFactReviewStatus: 'manual-check-required',
