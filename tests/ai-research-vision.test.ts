@@ -96,7 +96,7 @@ test('AI Research UI adds a file picker, previews, and sends images with the pro
   assert.match(page, /accept=\{AI_RESEARCH_FILE_PICKER_ACCEPT\}/);
   assert.match(page, /multiple/);
   assert.match(page, /previewUrl/);
-  assert.match(page, /JSON\.stringify\(\{[\s\S]*messages: \[userMsg\][\s\S]*conversationId: activeConvoId[\s\S]*pinnedSourceUrls/);
+  assert.match(page, /JSON\.stringify\(\{[\s\S]*messages: \[userMsg\][\s\S]*conversationId: requestConversationId[\s\S]*pinnedSourceUrls/);
   assert.match(page, /fileToChatImage\(item\.file\)/);
   assert.match(page, /skipNextLoadRef/);
   assert.match(page, /d\.type === 'start'/);
@@ -110,9 +110,10 @@ test('AI Research UI adds a file picker, previews, and sends images with the pro
   assert.match(page, /onDrop=\{handleAttachmentDrop\}/);
   assert.match(page, /addAttachments\(files\)/);
   assert.match(page, /onPaste=\{handleComposerPaste\}/);
+  assert.match(page, /if \(!incoming\.length\) return;/);
   assert.match(page, /if \(!files\.length\) return;/);
   assert.match(page, /drag, paste, or click to attach/);
-  assert.match(page, /Drag, paste, or click the icon for images, Excel\/CSV, PDF, Word, and PowerPoint/);
+  assert.match(page, /Drag, paste, or click the icon for images, Excel\/CSV, PDF, Word, PowerPoint, and HTML/);
   assert.match(page, /onClick=\{\(\) => fileInputRef\.current\?\.click\(\)\}/);
   assert.match(page, /Unsupported attachment\. Use JPEG, PNG, WebP, GIF, XLSX, XLS, CSV, PDF, DOCX, PPTX, or HTML\./);
 });

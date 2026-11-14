@@ -226,7 +226,7 @@ test('AI Research health route is feature-gated, rate-limited, and scoped to all
   assert.match(page, /status === 'stale'/);
   assert.match(page, /result\.snippet/);
   assert.match(page, /type="file"/);
-  assert.match(page, /JSON\.stringify\(\{[\s\S]*messages: \[userMsg\][\s\S]*conversationId: activeConvoId[\s\S]*pinnedSourceUrls/);
+  assert.match(page, /JSON\.stringify\(\{[\s\S]*messages: \[userMsg\][\s\S]*conversationId: requestConversationId[\s\S]*pinnedSourceUrls/);
 
   const gateway = read('src/lib/gateway-config.ts');
   assert.match(gateway, /process\.env\.GORILLAWORKOUT_API_BASE/);

@@ -22,11 +22,18 @@ export async function GET(request: NextRequest) {
   const sites = await listSeoSites();
   const site = parsed && !('error' in parsed) ? sites.find(item => sameHost(item.site_url, parsed.url)) ?? null : null;
   const storedRows = site ? await countStoredGscRows(site.id) : 0;
+  const gscSites = await Promise.all(sites.map(async item => ({
+    name: item.name,
+    siteUrl: item.site_url,
+    gscProperty: item.gsc_property,
+    storedRows: await countStoredGscRows(item.id),
+  })));
   const gaps = await listGaps();
   const providers = await providerFlags();
   return NextResponse.json({
     gaps,
     providers,
+    gscSites,
     source: parsed && !('error' in parsed) ? {
       domain: parsed.url,
       siteId: site?.id ?? null,

@@ -12,7 +12,7 @@ const pages = [
   'src/app/dashboard/models/page.tsx',
   'src/app/dashboard/tokens/page.tsx',
   'src/app/dashboard/analytics/page.tsx',
-  'src/app/dashboard/accounts/page.tsx',
+  'src/app/dashboard/accounts/AccountsClient.tsx',
   'src/app/dashboard/knowledge-graph/page.tsx',
   'src/app/dashboard/brand-guidelines/page.tsx',
   'src/app/dashboard/images/page.tsx',
@@ -29,7 +29,7 @@ const pages = [
   'src/app/dashboard/seo/keyword-gap/page.tsx',
   'src/app/dashboard/monthly-report/page.tsx',
   'src/app/dashboard/monthly-report/uploads/page.tsx',
-  'src/app/dashboard/settlement-report/page.tsx',
+  'src/components/settlement/SettlementWorkspace.tsx',
 ];
 
 test('all dashboard product pages use the shared page composition', async () => {
@@ -39,6 +39,11 @@ test('all dashboard product pages use the shared page composition', async () => 
     assert.match(source, /PageHeader/, `${file} must use PageHeader`);
     assert.match(source, /PageStack/, `${file} must use PageStack`);
   }
+  const accountsPage = await readFile('src/app/dashboard/accounts/page.tsx', 'utf8');
+  assert.match(accountsPage, /export const dynamic = 'force-dynamic'/);
+  assert.match(accountsPage, /<AccountsClient \/>/);
+  const settlementPage = await readFile('src/app/dashboard/settlement-report/page.tsx', 'utf8');
+  assert.match(settlementPage, /<SettlementWorkspace \/>/);
 });
 
 test('dashboard UI module exposes the practical shared primitives', async () => {
