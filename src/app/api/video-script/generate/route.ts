@@ -5,6 +5,7 @@ import { rateLimit } from '@/lib/rate-limit';
 import { generateContent, getSmartSystemPrompt, fetchContextMemory, fetchStyleContext, fetchKnowledgeContext, getUserPreferredModel, type BrandGuidelines } from '@/lib/openai';
 import { persistKnowledgeQuietly, summarizeVideoScriptKnowledge } from '@/lib/knowledge-persist';
 import { runVideoScriptQc } from '@/lib/video-script-qc';
+import { parseVideoFormat, videoFormatInstruction } from '@/lib/video-script-format';
 import {
   VIDEO_SCRIPT_WEB_SKIPPED_MESSAGE,
   formatVideoScriptEvidence,
@@ -106,6 +107,13 @@ async function handlePreview(
   const { event, platform, duration, targetAudience, references, brandGuidelineId } = body as ScriptFields & {
     brandGuidelineId?: string;
   };
+  const videoFormat = parseVideoFormat(body.format);
+  if (!videoFormat) {
+    return new Response(sseEvent({ step: 'error', message: 'A video format is required.' }), {
+      headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' },
+    });
+  }
+  const formatBlock = videoFormatInstruction(videoFormat);
   if (!event) {
     return new Response(sseEvent({ step: 'error', message: 'Event description is required' }), {
       headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' },
@@ -149,6 +157,7 @@ Event/Topic: ${event}
 Platform: ${platform || 'Instagram Reels'}
 Duration: ${duration || '30-45 seconds'}
 Target Audience: ${targetAudience || 'General'}
+${formatBlock}
 ${referenceNote}
 
 ${variant.instruction}
@@ -289,6 +298,13 @@ async function handleFull(
     style: string;
   };
 
+  const videoFormat = parseVideoFormat(body.format);
+  if (!videoFormat) {
+    return new Response(sseEvent({ step: 'error', message: 'A video format is required.' }), {
+      headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' },
+    });
+  }
+  const formatBlock = videoFormatInstruction(videoFormat);
   if (!event || !selectedOption || !editedPrompt) {
     return new Response(sseEvent({ step: 'error', message: 'Event, selected option, and edited prompt are required' }), {
       headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' },
@@ -362,6 +378,8 @@ SELECTED STYLE PREVIEW:
 
 EDITED PROMPT / INSTRUCTIONS:
 ${editedPrompt}
+
+${formatBlock}
 
 ${variant.instruction}
 ${bestExamples}
@@ -458,6 +476,7 @@ The fullScript must be the complete, detailed script with scene descriptions, di
             duration,
             targetAudience,
             references: references || '',
+            format: videoFormat,
           };
 
           const dateStr = new Date().toISOString().split('T')[0];
