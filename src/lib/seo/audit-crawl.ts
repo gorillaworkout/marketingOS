@@ -87,6 +87,11 @@ export async function crawlSite(input: {
   timeoutMs?: number;
   concurrency?: number;
   onProgress?: (crawled: number, maxPages: number) => void;
+  /** Queue sitemap URLs before links discovered on the pages. Audit leaves this off. */
+  seedFromSitemap?: boolean;
+  /** Raw HTML for each fetched HTML page. Audit does not set this. */
+  onHtml?: (page: { url: string; html: string }) => void;
+  delayMs?: number;
 }): Promise<CrawlOutput> {
   const fetchPage = input.fetchPage ?? createAuditFetch();
   const timeoutMs = input.timeoutMs ?? AUDIT_TIMEOUT_MS;
@@ -136,6 +141,16 @@ export async function crawlSite(input: {
   const inbound = new Map<string, number>();
   const robotsBlocked: string[] = [];
   const queue: Array<{ url: string; depth: number }> = [{ url: normalizeAuditUrl(start.finalUrl), depth: 0 }];
+  if (input.seedFromSitemap) {
+    for (const loc of sitemapUrls) {
+      if (queue.length >= input.maxPages) break;
+      if (queue.some(item => item.url === loc)) continue;
+      let parsed: URL;
+      try { parsed = new URL(loc); } catch { continue; }
+      if (!pathAllowed(parsed.pathname, disallow) || ASSET.test(parsed.pathname)) continue;
+      queue.push({ url: loc, depth: 1 });
+    }
+  }
   const linked = new Set<string>();
 
   const rememberLinks = (facts: PageFacts, depth: number) => {
@@ -171,6 +186,7 @@ export async function crawlSite(input: {
     const page = blankPage(url, fetched.finalUrl, fetched.status, fetched.hops, depth, html);
     page.bytes = fetched.bytes;
     page.inSitemap = sitemapUrls.has(url) || sitemapUrls.has(fetched.finalUrl);
+    if (html && fetched.body) input.onHtml?.({ url: fetched.finalUrl, html: fetched.body });
     if (facts) {
       page.title = facts.title;
       page.metaDescription = facts.metaDescription;
@@ -201,7 +217,7 @@ export async function crawlSite(input: {
         seen.add(item.url);
         active += 1;
         void (async () => {
-          await new Promise(done => setTimeout(done, 200));
+          await new Promise(done => setTimeout(done, input.delayMs ?? 200));
           if (pages.length < input.maxPages) await take(item.url, item.depth);
         })().finally(() => {
           active -= 1;
