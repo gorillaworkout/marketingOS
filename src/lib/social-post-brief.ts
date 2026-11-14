@@ -56,6 +56,17 @@ export const HASHTAG_RANGES: Record<string, { min: number; max: number }> = {
   facebook: { min: 1, max: 3 },
 };
 
+/** Hashtags in a caption, including Unicode letters such as #dupoin. */
+export function extractHashtags(caption: string): string[] {
+  const found = caption.match(/#[\p{L}\p{N}_]+/gu) || [];
+  const tags: string[] = [];
+  for (const tag of found) {
+    const key = tag.toLowerCase();
+    if (!tags.some(existing => existing.toLowerCase() === key)) tags.push(tag);
+  }
+  return tags;
+}
+
 export function hashtagRange(platform?: string): { min: number; max: number } {
   return HASHTAG_RANGES[platformKey(platform)] || { min: 3, max: 8 };
 }

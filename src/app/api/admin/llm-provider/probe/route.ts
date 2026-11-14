@@ -61,7 +61,7 @@ export async function POST(request: NextRequest) {
         provider: result.provider,
         model: result.model,
         kind: result.kind,
-        status: result.status,
+        status: result.status === 'auth_expired' ? 'error' : result.status,
         httpStatus: result.httpStatus,
         latencyMs: result.latencyMs,
         message: result.message,

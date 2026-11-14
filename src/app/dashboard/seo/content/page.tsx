@@ -101,7 +101,7 @@ export default function ContentStudioPage() {
   const set = (key: 'keyword' | 'targetPageUrl' | 'caseStudy' | 'instructions' | 'brandGuidelineId' | 'queueItemId' | 'sopId' | 'subkeywordDraft' | 'intent' | 'language') => (event: { target: { value: string } }) => setForm(previous => ({ ...previous, [key]: event.target.value }));
 
   return <PageStack>
-    <PageHeader eyebrow="SEO OS / Content Studio" title="Content Studio" description="Turn a keyword and a case study into an on-brand article, review it, and track it until it is published." actions={headerActions} />
+    <PageHeader eyebrow="SEO OS / Content Studio" title="Content Studio" description={site ? `Site: ${site.name}. Turn a keyword and a case study into an on-brand article, review it, and track it until it is published.` : 'Turn a keyword and a case study into an on-brand article, review it, and track it until it is published.'} actions={headerActions} />
 
     {error && <Panel><p className="text-sm text-red-300">{error}</p></Panel>}
     {message && <Panel><p className="text-sm text-[var(--mos-text-secondary)]">{message}</p></Panel>}

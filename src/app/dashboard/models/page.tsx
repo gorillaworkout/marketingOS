@@ -43,14 +43,19 @@ function formatWhen(value: string | null | undefined): string {
   return Number.isNaN(date.getTime()) ? 'Never' : date.toLocaleString();
 }
 
-function badgeTone(status: string): 'success' | 'warning' | 'danger' | 'neutral' {
+function authExpiredRow(status: string, message?: string): boolean {
+  return status === 'auth_expired' || /^Auth expired\b/i.test(message || '');
+}
+
+function badgeTone(status: string, message?: string): 'success' | 'warning' | 'danger' | 'neutral' {
   if (status === 'active') return 'success';
   if (status === 'rate_limited' || status === 'credits') return 'warning';
-  if (status === 'blocked' || status === 'error') return 'danger';
+  if (status === 'blocked' || status === 'error' || authExpiredRow(status, message)) return 'danger';
   return 'neutral';
 }
 
-function badgeLabel(status: string): string {
+function badgeLabel(status: string, message?: string): string {
+  if (authExpiredRow(status, message)) return 'Auth expired';
   if (status === 'active') return 'Active';
   if (status === 'rate_limited') return 'Rate-limited';
   if (status === 'blocked') return 'Blocked/Unavailable';
@@ -300,9 +305,9 @@ export default function ModelsPage() {
               {health.length === 0 && <p className="text-sm text-[var(--mos-text-muted)]">No tests yet. Test all checks the models in use, without duplicate rows.</p>}
               {health.map(row => (
                 <div key={`${row.provider}:${row.kind}:${row.model}`} className="flex flex-wrap items-center gap-2 text-sm">
-                  <StatusBadge tone={badgeTone(row.status)}>{badgeLabel(row.status)}{row.status === 'active' && row.latencyMs ? ` ${row.latencyMs}ms` : ''}</StatusBadge>
+                  <StatusBadge tone={badgeTone(row.status, row.message)}>{badgeLabel(row.status, row.message)}{row.status === 'active' && row.latencyMs ? ` ${row.latencyMs}ms` : ''}</StatusBadge>
                   <span className="text-[var(--mos-text-secondary)]">{row.provider === 'dupoin' ? 'Dupoin' : 'OpenRouter'} · {row.model}</span>
-                  <span className="text-xs text-[var(--mos-text-faint)]">{formatWhen(row.testedAt)}{row.status === 'rate_limited' ? ' · try again later' : ''}</span>
+                  <span className="text-xs text-[var(--mos-text-faint)]">{formatWhen(row.testedAt)}{row.status === 'rate_limited' ? ' · try again later' : ''}{authExpiredRow(row.status, row.message) ? ` · Auth expired ${formatWhen(row.testedAt)}. Re-test or wait 15 minutes.` : ''}</span>
                 </div>
               ))}
             </div>
@@ -317,5 +322,5 @@ export default function ModelsPage() {
 
 function ModelBadge({ health, provider, model }: { health: Health[]; provider: 'dupoin' | 'openrouter'; model: string }) {
   const row = health.find(item => item.provider === provider && item.model === model);
-  return <StatusBadge tone={badgeTone(row?.status || '')}>{provider === 'dupoin' ? 'Dupoin' : 'OpenRouter'} {badgeLabel(row?.status || '')}</StatusBadge>;
+  return <StatusBadge tone={badgeTone(row?.status || '', row?.message)}>{provider === 'dupoin' ? 'Dupoin' : 'OpenRouter'} {badgeLabel(row?.status || '', row?.message)}</StatusBadge>;
 }

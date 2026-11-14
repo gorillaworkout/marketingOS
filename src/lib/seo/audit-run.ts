@@ -2,7 +2,7 @@ import { generateContent, getUserPreferredModel } from '@/lib/openai';
 import { aiProviderErrorBody } from '@/lib/ai-http-status';
 import { applyIssueCounts, buildAuditIssues, healthScore, indexingRows, notConnectedCards } from './audit-page';
 import { crawlSite } from './audit-crawl';
-import { parsePsiResponse, psiRequestUrl, PSI_TOP_PAGES, resolvePsiKey, scrubPsiKey, topPsiPages } from './audit-psi';
+import { parsePsiResponse, PSI_CALL_DELAY_MS, psiErrorMessage, PSI_QUOTA_MESSAGE, psiRequestUrl, PSI_TOP_PAGES, resolvePsiKey, scrubPsiKey, topPsiPages } from './audit-psi';
 import { failAudit, finishAudit, getAudit, readPagespeedKey, updateAuditProgress } from './audit-store';
 import type { AuditResult, PsiReading } from './audit-types';
 
@@ -12,13 +12,24 @@ Lead with the highest-severity fixes. Mention the affected URLs that were provid
 
 async function collectPsi(urls: string[], key: string | null): Promise<PsiReading[]> {
   const readings: PsiReading[] = [];
+  let quotaExceeded = false;
   for (const url of urls) {
     for (const strategy of ['mobile', 'desktop'] as const) {
+      if (quotaExceeded) {
+        readings.push({ url, strategy, performanceScore: null, lab: null, field: null, error: PSI_QUOTA_MESSAGE });
+        continue;
+      }
+      await new Promise(resolve => setTimeout(resolve, PSI_CALL_DELAY_MS));
       try {
         const response = await fetch(psiRequestUrl(url, strategy, key), { signal: AbortSignal.timeout(30_000) });
         const text = await response.text();
+        if (response.status === 429) {
+          quotaExceeded = true;
+          readings.push({ url, strategy, performanceScore: null, lab: null, field: null, error: PSI_QUOTA_MESSAGE });
+          continue;
+        }
         if (!response.ok) {
-          readings.push({ url, strategy, performanceScore: null, lab: null, field: null, error: scrubPsiKey(`PageSpeed returned ${response.status}`, key) });
+          readings.push({ url, strategy, performanceScore: null, lab: null, field: null, error: scrubPsiKey(psiErrorMessage(response.status), key) });
           continue;
         }
         readings.push(parsePsiResponse(JSON.parse(text) as unknown, url, strategy));

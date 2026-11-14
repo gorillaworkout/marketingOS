@@ -34,11 +34,17 @@ export function useSeoSites() {
       if (cancelled) return;
       if (!ok) { setError(body.error || 'Could not load SEO sites.'); return; }
       setData(body);
-      setSiteId(current => current || body.defaultSiteId || body.sites[0]?.id || '');
+      const stored = window.localStorage.getItem('mos.seo.site') || '';
+      const remembered = stored && body.sites.some(item => item.id === stored) ? stored : '';
+      setSiteId(current => current || remembered || body.defaultSiteId || body.sites[0]?.id || '');
     }).catch(() => { if (!cancelled) setError('Could not load SEO sites.'); });
     return () => { cancelled = true; };
   }, []);
 
   const site = data?.sites.find(item => item.id === siteId) ?? null;
-  return { data, site, siteId, setSiteId, error, loading: !data && !error };
+  const chooseSite = (next: string) => {
+    setSiteId(next);
+    if (next) window.localStorage.setItem('mos.seo.site', next);
+  };
+  return { data, site, siteId, setSiteId: chooseSite, error, loading: !data && !error };
 }

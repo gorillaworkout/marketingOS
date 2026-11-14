@@ -155,8 +155,12 @@ test('connection status and default site', () => {
   assert.equal(connectionStatus({ gsc_property: 'sc-domain:a.org', last_synced_at: null }, false), 'missing-key');
   assert.equal(connectionStatus({ gsc_property: 'sc-domain:a.org', last_synced_at: null }, true), 'never-synced');
   assert.equal(connectionStatus({ gsc_property: 'sc-domain:a.org', last_synced_at: '2026-10-28' }, true), 'connected');
-  assert.equal(defaultSiteId([{ id: 'ica', active: true }, { id: 'dupoin', active: false }]), 'ica');
-  assert.equal(defaultSiteId([{ id: 'dupoin', active: false }]), null);
+  assert.equal(defaultSiteId([
+    { id: 'ica', active: true, site_url: 'https://indonesiancheer.org/', name: 'ICA Cheerleading' },
+    { id: 'dupoin', active: false, site_url: 'https://dupoin.co.id/', name: 'Dupoin' },
+  ]), 'dupoin');
+  assert.equal(defaultSiteId([{ id: 'ica', active: true }]), 'ica');
+  assert.equal(defaultSiteId([{ id: 'dupoin', active: false }]), 'dupoin');
 });
 
 // ---------- GSC client ----------

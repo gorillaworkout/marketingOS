@@ -165,6 +165,7 @@ test('automatic mode failovers on 429, 5xx, and network errors, not on a bad pro
   const networked = await postChat({ model: 'ag/gemini-3-flash', body: {}, referer: 'https://marketingos.local', title: 'MarketingOS', timeoutMs: 1000 });
   assert.equal(networked.provider, 'openrouter');
   assert.equal(isProviderFailoverStatus(429), true);
+  assert.equal(isProviderFailoverStatus(401), true);
   assert.equal(isProviderFailoverStatus(400), false);
 });
 

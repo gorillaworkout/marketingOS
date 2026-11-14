@@ -187,7 +187,7 @@ Output JSON format with: { "hook": "the opening hook that stops the scroll", "ho
               taskType: 'video-script',
             });
 
-            return { variant, result: result.content, usage: result.usage };
+            return { variant, result: result.content, usage: result.usage, fallbackLabel: result.fallbackLabel || null };
           });
 
           const optionResults = await Promise.all(optionPromises);
@@ -257,6 +257,7 @@ Output JSON format with: { "hook": "the opening hook that stops the scroll", "ho
               usage: totalUsage,
               webResearch,
               qcResults,
+              fallbackLabel: optionResults.find(item => item.fallbackLabel)?.fallbackLabel || null,
             },
           });
         })();
@@ -514,6 +515,7 @@ The fullScript must be the complete, detailed script with scene descriptions, di
               usage: totalUsage,
               webResearch,
               qcResults,
+              fallbackLabel: result.fallbackLabel || null,
             },
           });
         })();

@@ -2,6 +2,12 @@ import type { PsiMetrics, PsiReading } from './audit-types';
 
 export const PSI_ENDPOINT = 'https://www.googleapis.com/pagespeedonline/v5/runPagespeed';
 export const PSI_TOP_PAGES = 5;
+export const PSI_QUOTA_MESSAGE = 'PageSpeed quota exceeded — add PAGESPEED_API_KEY or retry later';
+export const PSI_CALL_DELAY_MS = 750;
+
+export function psiErrorMessage(status: number): string {
+  return status === 429 ? PSI_QUOTA_MESSAGE : `PageSpeed returned ${status}`;
+}
 
 export function resolvePsiKey(envValue: string | undefined, stored: string | null): string | null {
   const envKey = envValue?.trim();

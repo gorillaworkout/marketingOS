@@ -77,6 +77,7 @@ test('non-streaming fallback retries transparently and logs each switch', async 
     fallbackModel: 'cc/claude-sonnet-5-5',
     error: 'API error 503: upstream 404',
     afterPartial: false,
+    authExpired: false,
     at: '2026-10-14T04:00:00.000Z',
   });
   assert.equal(outcome.label, 'Answered by GPT-5.6 Sol (Gemini 3.1 Pro Low and Claude Sonnet 5.5 unavailable)');

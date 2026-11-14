@@ -7,7 +7,7 @@ import { fetchKnowledgeContext, fetchStyleContext, generateContent, getUserPrefe
 import { persistKnowledgeQuietly, summarizeArticleKnowledge } from '@/lib/knowledge-persist';
 import { articleDraftProtectedPhrases, articleWordCountRepairGuidance, buildArticleMarketNewsPrompts, describeArticlePublicationGateFailure, ensureEndingDupoinAccountCta, fitArticleMarkdownWordCount, normalizeArticleMarketNewsInput, parseGeneratedArticle, validateGeneratedArticle } from '@/lib/article-market-news';
 import { researchArticleMarketNews } from '@/lib/article-market-news-research';
-import { marketNewsCoverage, topicForKeyword } from '@/lib/market-news-topics';
+import { marketNewsCatalogNotice, marketNewsCoverage, topicsInKeyword } from '@/lib/market-news-topics';
 
 export const maxDuration = 300;
 
@@ -61,8 +61,9 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: error instanceof Error ? error.message : 'Invalid article request.' }, { status: 400 });
   }
 
-  const topic = topicForKeyword(input.keyword);
-  const researchFallback = topic ? marketNewsCoverage(topic) === 'research-fallback' : false;
+  const topics = topicsInKeyword(input.keyword);
+  const researchFallback = topics.some(topic => marketNewsCoverage(topic) === 'research-fallback');
+  const catalogNotice = marketNewsCatalogNotice(input.keyword);
   const articleModel = await getUserPreferredModel(auth.id, 'article-market-news');
   const researchModel = researchFallback ? await getUserPreferredModel(auth.id, 'ai-research') : articleModel;
   const model = researchFallback ? researchModel : articleModel;
@@ -88,15 +89,19 @@ export async function POST(request: NextRequest) {
         const builtPrompts = buildArticleMarketNewsPrompts(effectiveInput);
         const systemPrompt = `${builtPrompts.systemPrompt}${knowledgeContext}${styleContext}\n\nStyle notes, if present, apply to voice only. Do not use them to add facts, numbers, or sources.`;
         const userPrompt = builtPrompts.userPrompt;
+        if (catalogNotice) {
+          controller.enqueue(encoder.encode(sseEvent({ step: 'notice', progress: 30, message: catalogNotice })));
+        }
         controller.enqueue(encoder.encode(sseEvent({
           step: 'draft',
           progress: 35,
-          message: researchFallback
-            ? 'This symbol is not in the market-data catalog. Writing from web and news research with the research-tier model…'
-            : 'Writing the SOP-compliant article draft…',
+          message: 'Writing the SOP-compliant article draft…',
         })));
 
         let generated: Awaited<ReturnType<typeof generateContent>> | undefined;
+        const keepalive = setInterval(() => {
+          try { controller.enqueue(encoder.encode(`: keepalive ${Date.now()}\n\n`)); } catch { /* stream closed */ }
+        }, 10_000);
         let article: Record<string, unknown> | undefined;
         let title = '';
         let metaDescription = '';
@@ -104,6 +109,7 @@ export async function POST(request: NextRequest) {
         let validation: ReturnType<typeof validateGeneratedArticle> | undefined;
         let attemptPrompt = userPrompt;
 
+        try {
         for (let attempt = 1; attempt <= 3; attempt += 1) {
           try {
             generated = await generateContent(systemPrompt, attemptPrompt, auth.id, undefined, {
@@ -148,6 +154,9 @@ export async function POST(request: NextRequest) {
             attemptPrompt = buildRepairPrompt(userPrompt, feedback, generated?.content);
           }
         }
+        } finally {
+          clearInterval(keepalive);
+        }
 
         if (!generated || !article || !validation || validation.violations.length > 0) {
           throw new Error('Article generation ended without a publication-ready draft.');
@@ -186,7 +195,7 @@ export async function POST(request: NextRequest) {
           step: 'done',
           progress: 100,
           message: 'Article draft complete. Run manual fact and originality checks before publishing.',
-          result: { ...article, title, articleMarkdown, wordCount: validation.wordCount, qc: validation.qc, usage: generated.usage, model, historyId, normalizedInput: effectiveInput },
+          result: { ...article, title, articleMarkdown, wordCount: validation.wordCount, qc: validation.qc, usage: generated.usage, model, historyId, normalizedInput: effectiveInput, fallbackLabel: generated.fallbackLabel || null },
         })));
       } catch (error) {
         controller.enqueue(encoder.encode(sseEvent({ step: 'error', progress: 100, message: error instanceof Error ? error.message : 'Article generation failed.' })));

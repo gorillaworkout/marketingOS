@@ -277,14 +277,33 @@ export function groupMarketNewsTopics(topics: readonly MarketNewsTopic[]): Array
   });
 }
 
+export function topicsInKeyword(keyword: string): MarketNewsTopic[] {
+  const parts = keyword.split(/\s+\+\s+/).map(part => part.trim()).filter(Boolean);
+  const topics = (parts.length > 1 ? parts : [keyword]).map(part => topicForKeyword(part)).filter((topic): topic is MarketNewsTopic => !!topic);
+  return topics.filter((topic, index) => topics.findIndex(item => item.id === topic.id) === index);
+}
+
+/** Informational only. A missing catalog symbol does not stop generation. */
+export function marketNewsCatalogNotice(keyword: string): string | null {
+  const missing = topicsInKeyword(keyword).filter(topic => marketNewsCoverage(topic) === 'research-fallback');
+  if (!missing.length) return null;
+  return `${missing.map(topic => topic.label).join(', ')} is not in the market-data catalog. Continuing with web and news research. This does not stop the draft.`;
+}
+
+export function combineMarketNewsTopics(topics: readonly MarketNewsTopic[]): string {
+  return topics.map(topic => topic.keyword).join(' + ');
+}
+
 export function marketNewsTopicContext(keyword: string): string {
-  const topic = topicForKeyword(keyword);
-  if (!topic) return '';
-  const coverage = marketNewsCoverage(topic);
-  const source = coverage === 'catalog'
-    ? `The existing market-news catalog can match ${topic.symbols.join(', ')}. Still use only numbers present in the supplied sources.`
-    : 'This symbol is not in the existing market-news catalog. Use only the web and news research already supplied. Do not invent a live quote.';
-  return `INSTRUMENT NAME (required): ${topic.instrumentName}\nTOPIC CONTEXT: ${topic.promptContext}\nDATA COVERAGE: ${source}`;
+  const topics = topicsInKeyword(keyword);
+  if (!topics.length) return '';
+  return topics.map(topic => {
+    const coverage = marketNewsCoverage(topic);
+    const source = coverage === 'catalog'
+      ? `The existing market-news catalog can match ${topic.symbols.join(', ')}. Still use only numbers present in the supplied sources.`
+      : 'This symbol is not in the existing market-news catalog. Use only the web and news research already supplied. Do not invent a live quote. This note is informational and does not stop the draft.';
+    return `INSTRUMENT NAME (required): ${topic.instrumentName}\nTOPIC CONTEXT: ${topic.promptContext}\nDATA COVERAGE: ${source}`;
+  }).join('\n\n');
 }
 
 export const ELIGIBLE_MARKET_NEWS_KEYWORDS = [...new Set(MARKET_NEWS_TOPICS.flatMap(topic => [topic.keyword, ...topic.aliases]))];

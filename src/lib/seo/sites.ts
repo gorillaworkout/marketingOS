@@ -25,8 +25,14 @@ export function connectionStatus(site: Pick<SeoSiteRow, 'gsc_property' | 'last_s
   return site.last_synced_at ? 'connected' : 'never-synced';
 }
 
-export function defaultSiteId(sites: Array<Pick<SeoSiteRow, 'id' | 'active'>>): string | null {
-  return sites.find(site => site.active)?.id ?? null;
+export function defaultSiteId(sites: Array<Pick<SeoSiteRow, 'id' | 'active'> & { site_url?: string; name?: string }>): string | null {
+  const dupoin = sites.find(site => {
+    const host = (site.site_url || '').toLowerCase();
+    const name = (site.name || '').toLowerCase();
+    return host.includes('dupoin.co.id') || name === 'dupoin';
+  });
+  if (dupoin) return dupoin.id;
+  return sites.find(site => site.active)?.id ?? sites[0]?.id ?? null;
 }
 
 export async function getSeoSite(siteId: string | null | undefined): Promise<SeoSiteRow | undefined> {

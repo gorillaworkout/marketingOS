@@ -19,6 +19,7 @@ interface MarketResearchResult {
   candidateCount: number;
   themeCandidateCount?: number;
   historyId: string | null;
+  fallbackLabel?: string | null;
 }
 
 interface ShortlistCandidate {
@@ -251,6 +252,7 @@ export default function MarketResearchPage() {
         <Button type="button" variant="primary" onClick={generate} disabled={loading || brief.trim().length < 20} className="mt-5">{loading ? 'Researching…' : shortlist ? 'Search again' : 'Generate market research'}</Button>
         {loading && <div className="mt-4"><div className="h-2 overflow-hidden rounded-full bg-[var(--mos-raised)]"><div className="h-full bg-cyan-500 transition-all" style={{ width: `${progress}%` }} /></div><p className="mt-2 text-sm text-[var(--mos-text-muted)]">{status}</p></div>}
         {error && <div className="mt-4 rounded-[var(--mos-radius-panel)] border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-200"><p>{error}</p>{errorSourceStatus.length > 0 && <div className="mt-3 space-y-1">{errorSourceStatus.map(source => <p key={source.outlet} className={source.status === 'ok' ? 'text-xs text-emerald-200' : 'text-xs text-red-300'}>{source.outlet}: {formatMarketResearchSourceStatus(source)}</p>)}</div>}</div>}
+        {result?.fallbackLabel && <p data-testid="market-research-fallback-label" className="mt-4 rounded-[var(--mos-radius-panel)] border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">{result.fallbackLabel}</p>}
       </Panel>
 
       {shortlist && <Panel>
