@@ -5,6 +5,7 @@ import { Button, FormField, LoadingState, PageHeader, PageStack, Panel, SectionH
 import type { LlmMode } from '@/lib/llm-provider-defaults';
 import { EMBEDDINGS_FAILOVER_NOTE } from '@/lib/llm-provider-defaults';
 import { groupModelsByProvider } from '@/lib/model-groups';
+import { storedAuthExpired } from '@/lib/llm-auth';
 import { FREE_TEXT_CHAIN, IMAGE_SHORTLIST, TEXT_SHORTLIST, TIER_FEATURES, TIER_PAID_TARGET, type ModelTier } from '@/lib/model-tiers';
 
 type TierRow = { tier: ModelTier; dupoinPrimary: string; paidTarget: string };
@@ -43,19 +44,19 @@ function formatWhen(value: string | null | undefined): string {
   return Number.isNaN(date.getTime()) ? 'Never' : date.toLocaleString();
 }
 
-function authExpiredRow(status: string, message?: string): boolean {
-  return status === 'auth_expired' || /^Auth expired\b/i.test(message || '');
+function authExpiredRow(status: string, message?: string, lastError?: string): boolean {
+  return storedAuthExpired({ status, message, lastError }) || status === 'auth_expired' || /^Auth expired\b/i.test(message || '');
 }
 
-function badgeTone(status: string, message?: string): 'success' | 'warning' | 'danger' | 'neutral' {
+function badgeTone(status: string, message?: string, lastError?: string): 'success' | 'warning' | 'danger' | 'neutral' {
   if (status === 'active') return 'success';
   if (status === 'rate_limited' || status === 'credits') return 'warning';
-  if (status === 'blocked' || status === 'error' || authExpiredRow(status, message)) return 'danger';
+  if (status === 'blocked' || status === 'error' || authExpiredRow(status, message, lastError)) return 'danger';
   return 'neutral';
 }
 
-function badgeLabel(status: string, message?: string): string {
-  if (authExpiredRow(status, message)) return 'Auth expired';
+function badgeLabel(status: string, message?: string, lastError?: string): string {
+  if (authExpiredRow(status, message, lastError)) return 'Auth expired';
   if (status === 'active') return 'Active';
   if (status === 'rate_limited') return 'Rate-limited';
   if (status === 'blocked') return 'Blocked/Unavailable';
@@ -257,7 +258,7 @@ export default function ModelsPage() {
                       </FormField>
                     </div>
                     <div className="mt-3 flex flex-wrap items-center gap-2">
-                      <ModelBadge health={health} provider="dupoin" model={tier.dupoinPrimary} />
+                      <ModelBadge health={health} provider="dupoin" model={tier.dupoinPrimary} lastError={provider?.status.lastError} detectedAt={provider?.status.lastFailoverAt} />
                       <ModelBadge health={health} provider="openrouter" model={usePaid ? tier.paidTarget : (tier.tier === 'image' ? tier.paidTarget : FREE_TEXT_CHAIN[0])} />
                       <Button size="sm" disabled={busy !== ''} onClick={() => void probe({
                         targets: [
@@ -305,9 +306,9 @@ export default function ModelsPage() {
               {health.length === 0 && <p className="text-sm text-[var(--mos-text-muted)]">No tests yet. Test all checks the models in use, without duplicate rows.</p>}
               {health.map(row => (
                 <div key={`${row.provider}:${row.kind}:${row.model}`} className="flex flex-wrap items-center gap-2 text-sm">
-                  <StatusBadge tone={badgeTone(row.status, row.message)}>{badgeLabel(row.status, row.message)}{row.status === 'active' && row.latencyMs ? ` ${row.latencyMs}ms` : ''}</StatusBadge>
+                  <StatusBadge tone={badgeTone(row.status, row.message, provider?.status.lastError || '')}>{badgeLabel(row.status, row.message, provider?.status.lastError || '')}{row.status === 'active' && row.latencyMs ? ` ${row.latencyMs}ms` : ''}</StatusBadge>
                   <span className="text-[var(--mos-text-secondary)]">{row.provider === 'dupoin' ? 'Dupoin' : 'OpenRouter'} · {row.model}</span>
-                  <span className="text-xs text-[var(--mos-text-faint)]">{formatWhen(row.testedAt)}{row.status === 'rate_limited' ? ' · try again later' : ''}{authExpiredRow(row.status, row.message) ? ` · Auth expired ${formatWhen(row.testedAt)}. Re-test or wait 15 minutes.` : ''}</span>
+                  <span className="text-xs text-[var(--mos-text-faint)]">{formatWhen(authExpiredRow(row.status, row.message, provider?.status.lastError || '') && provider?.status.lastFailoverAt && row.status !== 'auth_expired' && !/^Auth expired\b/i.test(row.message || '') ? provider.status.lastFailoverAt : row.testedAt)}{row.status === 'rate_limited' ? ' · try again later' : ''}{authExpiredRow(row.status, row.message, provider?.status.lastError || '') ? ` · Auth expired ${formatWhen(provider?.status.lastFailoverAt || row.testedAt)}. Re-test or wait 15 minutes.` : ''}</span>
                 </div>
               ))}
             </div>
@@ -320,7 +321,9 @@ export default function ModelsPage() {
   );
 }
 
-function ModelBadge({ health, provider, model }: { health: Health[]; provider: 'dupoin' | 'openrouter'; model: string }) {
+function ModelBadge({ health, provider, model, lastError, detectedAt }: { health: Health[]; provider: 'dupoin' | 'openrouter'; model: string; lastError?: string | null; detectedAt?: string | null }) {
   const row = health.find(item => item.provider === provider && item.model === model);
-  return <StatusBadge tone={badgeTone(row?.status || '', row?.message)}>{provider === 'dupoin' ? 'Dupoin' : 'OpenRouter'} {badgeLabel(row?.status || '', row?.message)}</StatusBadge>;
+  const expired = authExpiredRow(row?.status || '', row?.message, provider === 'dupoin' ? lastError || '' : '');
+  const when = expired ? formatWhen(detectedAt || row?.testedAt) : '';
+  return <StatusBadge tone={badgeTone(row?.status || '', row?.message, provider === 'dupoin' ? lastError || '' : '')}>{provider === 'dupoin' ? 'Dupoin' : 'OpenRouter'} {badgeLabel(row?.status || '', row?.message, provider === 'dupoin' ? lastError || '' : '')}{when ? ` · ${when}` : ''}</StatusBadge>;
 }

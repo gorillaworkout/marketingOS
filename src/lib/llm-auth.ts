@@ -35,6 +35,12 @@ export function authCooldownModels(now = Date.now()): string[] {
   return cooled;
 }
 
+export function storedAuthExpired(input: { status?: string; message?: string; lastError?: string }): boolean {
+  if (input.status === 'active') return false;
+  const blob = `${input.message || ''}\n${input.lastError || ''}`;
+  return isAuthFailureMessage(blob) || /authentication_error|oauth expired|oauth token/i.test(blob);
+}
+
 export function authFailoverNotice(failedName: string, nextName: string): string {
   return `Model ${failedName} token expired — switched to ${nextName}. Please re-authenticate ${failedName} in AI Models.`;
 }

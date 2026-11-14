@@ -312,6 +312,7 @@ export async function researchEventPricing(input: {
   eventName?: string;
   theme?: string;
   location?: string;
+  coveredCategories?: string[];
   researchUrls?: string[];
   fetchImpl?: FetchLike;
   serperApiKey?: string;
@@ -323,7 +324,7 @@ export async function researchEventPricing(input: {
   const timeoutMs = input.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const enableJina = input.enableJina !== false;
   const location = resolveEventLocation(input.location);
-  const queries = buildEventPricingQueries({ eventName: input.eventName, theme: input.theme, location });
+  const queries = buildEventPricingQueries({ eventName: input.eventName, theme: input.theme, location, coveredCategories: input.coveredCategories });
   const warnings: string[] = [];
   const serperKey = input.serperApiKey !== undefined ? input.serperApiKey.trim() : resolveSearchApiKeys().serper;
   const candidates: Candidate[] = [];
@@ -375,6 +376,7 @@ export async function researchEventPricing(input: {
       theme: input.theme,
       location,
       existingQueries: allQueries,
+      coveredCategories: input.coveredCategories,
     });
     if (followUps.length) {
       allQueries.push(...followUps);
@@ -382,7 +384,8 @@ export async function researchEventPricing(input: {
     }
   }
 
-  return { queries: allQueries, hits: capPricingHits(hits, rounds), warnings: [...new Set(warnings)], rounds };
+  const kept = capPricingHits(hits, rounds).filter(hit => !/\bpernikahan\b|\bbridal\b|\bresepsi\b|(?<!-)wedding\b/i.test(`${hit.title} ${hit.snippet}`));
+  return { queries: allQueries, hits: kept, warnings: [...new Set(warnings)], rounds };
 }
 
 export function toEventPlanResearch(research: EventPricingResearch, submittedUrls: string[] = []): EventPlanResearch {

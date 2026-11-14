@@ -203,7 +203,7 @@ export function buildBriefPromptBlock(brief: SocialPostBriefInput): string {
     `Tone of voice: ${toneLine(brief)} (use this for word choice; the style variant still sets structure and energy)`,
   ];
   if (brief.keyMessage) {
-    lines.push(`Key message: "${brief.keyMessage.slice(0, KEY_MESSAGE_MAX)}" — this idea must appear in the caption, in the hook or the first two lines. A close paraphrase is allowed.`);
+    lines.push(`Key message: "${brief.keyMessage.slice(0, KEY_MESSAGE_MAX)}" — every option must include this verbatim or as a clear paraphrase. It must appear in the caption, in the hook or the first two lines.`);
   }
   if (brief.cta !== 'none') {
     lines.push(`CTA: end with one clear "${CTA_LABELS[brief.cta]}" line.${brief.ctaUrl ? ` Use exactly this URL and no other URL: ${brief.ctaUrl}` : ' Do not invent a URL.'}`);
@@ -269,15 +269,17 @@ export function ctaPresent(text: string, cta: string, ctaUrl?: string): boolean 
   return (CTA_CUES[cta] || []).some(cue => haystack.includes(cue));
 }
 
+const KEY_MESSAGE_STOPWORDS = new Set(['dengan', 'untuk', 'yang', 'dari', 'pada', 'atau', 'dan', 'the', 'and', 'with', 'from', 'your', 'this', 'that', 'hari', 'ini', 'bisa']);
+
 export function keyMessagePresent(text: string, keyMessage: string): boolean {
   const message = keyMessage.trim().toLowerCase();
   if (!message) return true;
   const haystack = text.toLowerCase().replace(/\s+/g, ' ');
   if (haystack.includes(message.replace(/\s+/g, ' '))) return true;
-  const words = message.split(/[^a-z0-9]+/).filter(word => word.length > 3);
+  const words = message.split(/[^a-z0-9]+/).filter(word => word.length > 3 && !KEY_MESSAGE_STOPWORDS.has(word));
   if (words.length === 0) return haystack.includes(message);
   const hits = words.filter(word => haystack.includes(word)).length;
-  return hits / words.length >= 0.7;
+  return hits / words.length >= 0.5;
 }
 
 export function captionUrls(text: string): string[] {

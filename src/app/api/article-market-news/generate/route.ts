@@ -7,6 +7,7 @@ import { fetchKnowledgeContext, fetchStyleContext, generateContent, getUserPrefe
 import { persistKnowledgeQuietly, summarizeArticleKnowledge } from '@/lib/knowledge-persist';
 import { articleDraftProtectedPhrases, articleWordCountRepairGuidance, buildArticleMarketNewsPrompts, describeArticlePublicationGateFailure, ensureEndingDupoinAccountCta, fitArticleMarkdownWordCount, normalizeArticleMarketNewsInput, parseGeneratedArticle, validateGeneratedArticle } from '@/lib/article-market-news';
 import { researchArticleMarketNews } from '@/lib/article-market-news-research';
+import { guardGeneratedText, mergeBrandFacts } from '@/lib/brand-fact-guard';
 import { marketNewsCatalogNotice, marketNewsCoverage, topicsInKeyword } from '@/lib/market-news-topics';
 
 export const maxDuration = 300;
@@ -126,7 +127,7 @@ export async function POST(request: NextRequest) {
             article = parseGeneratedArticle(generated.content);
             title = typeof article.title === 'string' ? article.title.trim() : '';
             metaDescription = typeof article.metaDescription === 'string' ? article.metaDescription.trim() : '';
-            articleMarkdown = typeof article.articleMarkdown === 'string' ? article.articleMarkdown.trim() : '';
+            articleMarkdown = guardGeneratedText(typeof article.articleMarkdown === 'string' ? article.articleMarkdown.trim() : '', mergeBrandFacts('')).text;
             if (!title || !articleMarkdown) throw new Error('AI returned an incomplete article.');
             if (!metaDescription || metaDescription.length > 155) throw new Error(`Meta description must be 1–155 characters; received ${metaDescription.length}.`);
             articleMarkdown = ensureEndingDupoinAccountCta(articleMarkdown);

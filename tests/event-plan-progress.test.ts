@@ -85,7 +85,7 @@ test('a thin price pack gets two new venue and vendor queries and a priced venue
   });
   assert.equal(followUps.length, 2);
   assert.ok(followUps.every((query) => !existing.includes(query)));
-  assert.match(followUps[0] || '', /daftar harga sewa ballroom/);
+  assert.match(followUps[0] || '', /daftar harga venue seminar keuangan/);
   assert.match(followUps[1] || '', /vendor event organizer/);
 });
 
@@ -97,7 +97,7 @@ test('researchEventPricing searches again only when the first pack has no public
     if (url.includes('google.serper.dev/search')) {
       const query = String(init?.body || '');
       bodies.push(query);
-      if (/daftar harga sewa ballroom|vendor event organizer/i.test(query)) {
+      if (/daftar harga venue seminar keuangan|vendor event organizer/i.test(query)) {
         return response(JSON.stringify({
           organic: [{ title: 'Hotel Ballroom Price', link: 'https://hotel.example/price', snippet: 'Sewa ballroom Hotel Example Rp 30.000.000 per hari.' }],
         }), 200, 'application/json');
@@ -131,7 +131,7 @@ test('researchEventPricing searches again only when the first pack has no public
   assert.ok(progress.some((event) => event.round === 2 && event.phase === 'searching' && /Searching again/.test(event.message)));
   assert.ok(progress.some((event) => event.round === 2 && event.phase === 'reading' && /Reading additional public price pages/.test(event.message)));
   assert.ok(progress.every((event) => assertEnglishEventPlanProgress(event.message)));
-  assert.ok(bodies.some((body) => /daftar harga sewa ballroom/.test(body)));
+  assert.ok(bodies.some((body) => /daftar harga venue seminar keuangan/.test(body)));
 
   const pricedBodies: string[] = [];
   const pricedFetch: typeof fetch = async (input, init) => {

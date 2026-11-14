@@ -121,7 +121,9 @@ export function VideoStoryboard({
                 {scene.imageUrl && <img src={scene.imageUrl} alt={`Scene ${scene.number}`} className="mt-2 aspect-[9/16] w-full rounded object-cover" />}
                 {scene.imageError && <p className="mt-2 text-xs text-red-300">{scene.imageError}</p>}
                 {busy === scene.number && <p className="mt-2 text-xs text-[var(--mos-text-muted)]">Generating this frame…</p>}
-                <Button type="button" className="mt-2" disabled={busy !== null} onClick={() => void regenerate(scene.number)}>Regenerate</Button>
+                {scene.imageError
+                  ? <Button type="button" className="mt-2" disabled={busy !== null} onClick={() => void regenerate(scene.number)}>Retry</Button>
+                  : <Button type="button" className="mt-2" disabled={busy !== null} onClick={() => void regenerate(scene.number)}>Regenerate</Button>}
               </div>
             ))}
           </div>

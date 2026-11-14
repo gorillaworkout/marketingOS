@@ -27,9 +27,9 @@ const STRUCTURE: Record<VideoFormat, string> = {
   'talking-head': 'Structure: to-camera lines spoken by one presenter, with short cutaways marked [CUTAWAY]. Write the spoken line, then the cutaway visual. Do not write a host/guest interview.',
   'b-roll': 'Structure: a shot list. Each beat is [SHOT], then [VO] and a [MUSIC] cue. No to-camera presenter monologue and no interview questions.',
   interview: 'Structure: a host/guest Q&A. Label every line HOST: or GUEST:. Include the question and the guest answer. Do not write a street vox pop.',
-  'street-interview': 'Structure: vox-pop questions. For each beat write the question, the expected answer type (one-word, short opinion, or story), and the street visual. Label them QUESTION, EXPECTED ANSWER, and VISUAL.',
+  'street-interview': 'Structure: vox-pop questions. For each beat write the question, the expected answer type (one-word, short opinion, or story), and the street visual. Label them QUESTION, EXPECTED ANSWER, and VISUAL. If the brief is a plan, a test, or hypothetical, write the questions as a simulation or a plan. Do not present the answers as a real interview that already happened.',
   'motion-graphic': 'Structure: scene-by-scene. Each scene has ON-SCREEN TEXT and VO. The on-screen text is what the graphic shows. Do not rely on a talking-head presenter.',
-  'event-recap': 'Structure: a timeline of moments. Each beat has a time, the moment, and a shot list line. Label them TIME, MOMENT, and SHOT.',
+  'event-recap': 'Structure: a timeline of moments. Each beat has a time, the moment, and a shot list line. Label them TIME, MOMENT, and SHOT. If the brief is a plan, a test, or hypothetical, write a production plan or a simulation. Do not present it as documentation of a real event.',
 };
 
 export function parseVideoFormat(value: unknown): VideoFormat | null {
@@ -110,7 +110,7 @@ export function buildStoryboardImagePrompt(scene: StoryboardScene, format: Video
     `Storyboard frame ${scene.number} for a Dupoin Futures ${VIDEO_FORMAT_LABELS[format]} video.`,
     `Shot: ${scene.shot}`,
     onScreen,
-    'Photoreal production still. No competitor logos, no invented prices, no guaranteed-profit claims.',
+    'Photoreal production still. No competitor logos, no invented prices, no guaranteed-profit claims. Do not draw a license number, an award badge, a ranking, or a most-trusted mark.',
   ].join('\n');
 }
 

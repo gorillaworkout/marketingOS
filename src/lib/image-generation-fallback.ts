@@ -15,6 +15,24 @@ import { imageModelLabel, isAllowedImageModel } from './image-models';
  */
 export const ANTIGRAVITY_IMAGE_FALLBACK_MODEL: string | null = null;
 
+const PAID_IMAGE_PREFIXES = ['google/', 'openai/', 'anthropic/'];
+
+/** The next enabled image model that is not the one that failed and is not a paid id. */
+export function nextImageFallback(current: string, enabled: readonly string[]): string | null {
+  for (const candidate of enabled) {
+    const model = candidate.trim();
+    if (!model || model === current) continue;
+    if (PAID_IMAGE_PREFIXES.some(prefix => model.startsWith(prefix))) continue;
+    return model;
+  }
+  return null;
+}
+
+export function imageQuotaNotice(modelName: string, retryIn?: string | null): string {
+  const wait = retryIn?.trim() ? `retry in ${retryIn.trim()}` : 'retry later';
+  return `Image quota reached for ${modelName}, ${wait}; no other image model enabled — enable one in AI Models`;
+}
+
 /** The configured fallback, only when it is a different catalogued model. */
 export function antigravityImageFallbackFor(model: string): string | null {
   const fallback = ANTIGRAVITY_IMAGE_FALLBACK_MODEL;

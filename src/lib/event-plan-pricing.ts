@@ -96,25 +96,19 @@ export function isBareCityLocation(location: string): boolean {
   return BARE_CITIES.has(location.toLowerCase().replace(/\s+/g, ' ').trim());
 }
 
-export function buildEventPricingQueries(input: { eventName?: string; theme?: string; location: string }): string[] {
+export function buildEventPricingQueries(input: { eventName?: string; theme?: string; location: string; coveredCategories?: string[] }): string[] {
   const location = input.location.replace(/\s+/g, ' ').trim() || 'Jakarta';
+  const covered = new Set((input.coveredCategories || []).map(category => category.toLowerCase()));
+  const exclude = '-pernikahan -wedding';
   const queries: string[] = [];
-  if (isBareCityLocation(location)) {
-    queries.push(`sewa ballroom ${location} harga`);
-    queries.push(`ballroom rental ${location}`);
-  } else {
-    queries.push(`${location} sewa venue`);
-    queries.push(`${location} harga sewa ballroom`);
+  if (!covered.has('venue')) {
+    queries.push(`sewa venue seminar keuangan korporat ${location} ${exclude}`);
   }
-  const topic = `${input.eventName || ''} ${input.theme || ''}`.toLowerCase();
-  if (/seminar|webinar|edukasi|trading|finans|finance|outlook|workshop|award/.test(topic) || !topic.trim()) {
-    queries.push('biaya narasumber seminar keuangan Indonesia');
-    queries.push('speaker fee financial seminar Indonesia');
-  } else {
-    queries.push(`biaya narasumber ${input.theme || input.eventName} Indonesia`);
-    queries.push('speaker fee financial seminar Indonesia');
+  if (!covered.has('speakers') && !covered.has('speaker')) {
+    queries.push(`biaya narasumber seminar edukasi keuangan ${location} ${exclude}`);
+    queries.push(`speaker fee financial education seminar ${location} ${exclude}`);
   }
-  return [...new Set(queries.map((query) => query.replace(/\s+/g, ' ').trim()))].slice(0, 4);
+  return [...new Set(queries.map((query) => query.replace(/\s+/g, ' ').trim()))].filter(query => !/\bwedding ballroom\b/i.test(query)).slice(0, 4);
 }
 
 /** A pack is thin until a public venue price is cited. Speaker-only or empty packs get one follow-up search. */
@@ -127,13 +121,15 @@ export function buildEventPricingFollowUpQueries(input: {
   theme?: string;
   location: string;
   existingQueries: string[];
+  coveredCategories?: string[];
 }): string[] {
   const location = input.location.replace(/\s+/g, ' ').trim() || 'Jakarta';
-  const topic = (input.theme || input.eventName || 'event').replace(/\s+/g, ' ').trim();
+  const covered = new Set((input.coveredCategories || []).map(category => category.toLowerCase()));
+  const exclude = '-pernikahan -wedding';
   const candidates = [
-    `${location} daftar harga sewa ballroom`,
-    `${location} vendor event organizer paket harga`,
-    `speaker fee ${topic} Indonesia`,
+    ...(covered.has('venue') ? [] : [`daftar harga venue seminar keuangan ${location} ${exclude}`]),
+    `vendor event organizer seminar keuangan ${location} ${exclude}`,
+    `speaker fee financial education seminar ${location} ${exclude}`,
   ];
   const seen = new Set(input.existingQueries.map((query) => query.toLowerCase()));
   const unique: string[] = [];

@@ -65,7 +65,7 @@ export async function POST(request: NextRequest) {
   let scenes: StoryboardScene[] = [];
   try {
     const result = await generateContent(
-      'You split a Dupoin video script into storyboard scenes. Return JSON only. Do not invent prices or competitor names.',
+      'You split a Dupoin video script into storyboard scenes. Return JSON only. Do not invent prices, competitor names, license numbers, awards, or rankings. If the script is a plan or a test, the scenes are a simulation, not footage of a real event.',
       `${videoFormatInstruction(format)}\nScript:\n${fullScript}\nReturn 4 to 8 scenes. JSON: { "scenes": [{ "shot": "", "onScreenText": "", "vo": "", "duration": "5s" }] }`,
       auth.id,
       taskId || undefined,

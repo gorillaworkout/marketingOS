@@ -130,6 +130,30 @@ export function eventPlanInputBlock(input: {
   return lines.join('\n');
 }
 
+export const NOT_IN_QUOTATION_NOTE = 'Not in quotation — to confirm with vendor';
+
+/** Drop estimate rows a quotation already covers, and stop saying "no public price" for the rest. */
+export function alignBudgetWithQuotation(budget: Record<string, unknown> | null | undefined, lines: QuotationLine[]): Record<string, unknown> {
+  const source = budget || {};
+  const items = Array.isArray(source.items) ? source.items : [];
+  if (!lines.length) return { ...source, items };
+  const covered = new Set(lines.map(line => line.category.toLowerCase()));
+  const next = items.flatMap(item => {
+    if (!item || typeof item !== 'object') return [];
+    const row = item as Record<string, unknown>;
+    const category = typeof row.category === 'string' ? row.category.toLowerCase() : '';
+    if (covered.has(category) && row.source !== 'quotation') return [];
+    if (row.source === 'quotation') return [row];
+    const notes = typeof row.notes === 'string' ? row.notes : '';
+    const replaced = notes.replace(/No public price found[^.]*/gi, NOT_IN_QUOTATION_NOTE);
+    return [{
+      ...row,
+      notes: replaced.includes(NOT_IN_QUOTATION_NOTE) ? replaced : `${replaced} ${NOT_IN_QUOTATION_NOTE}`.trim(),
+    }];
+  });
+  return { ...source, items: next };
+}
+
 /** Replace the "no public price" line when a confirmed quotation total exists. */
 export function applyConfirmedQuotationNarrative(text: string, lines: QuotationLine[], contingencyPercent: number): string {
   if (!lines.length) return text;
@@ -149,7 +173,8 @@ export function mergeQuotedBudget(aiBudget: Record<string, unknown> | null | und
     source: 'quotation' as const,
     notes: `Confirmed quotation. ${line.item}. Qty ${line.qty} × ${line.currency} ${line.unitPrice} = ${line.currency} ${line.total}.${line.notes ? ` ${line.notes}` : ''}`,
   }));
-  const estimates: Array<Record<string, unknown> & { source: 'estimate'; estimatedCost?: unknown }> = (Array.isArray(aiBudget?.items) ? aiBudget.items : []).map(item => {
+  const aligned = lines.length ? alignBudgetWithQuotation(aiBudget, lines) : (aiBudget || {});
+  const estimates: Array<Record<string, unknown> & { source: 'estimate'; estimatedCost?: unknown }> = (Array.isArray(aligned.items) ? aligned.items : []).map(item => {
     const row = item && typeof item === 'object' ? item as Record<string, unknown> : {};
     return { ...row, source: 'estimate' as const };
   });

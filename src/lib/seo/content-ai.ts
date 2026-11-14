@@ -1,5 +1,6 @@
 import { queryOne } from '@/lib/database';
 import { DUPOIN_DEFAULT_BRAND_GUIDELINE } from '@/lib/dupoin-default-brand-guideline';
+import { guardGeneratedText, mergeBrandFacts } from '@/lib/brand-fact-guard';
 import { generateContent, getUserPreferredModel, type BrandGuidelines } from '@/lib/openai';
 import { buildDraftPrompt, buildRewritePrompt, parseDraftOutput, type DraftOutput, type DraftPromptInput, type RewritePromptInput } from './content-prompt';
 
@@ -59,7 +60,7 @@ export async function resolveBrandGuideline(userId: string | null, id: string | 
 
 export interface AiDraftResult extends DraftOutput { model: string; fallbackLabel: string | null }
 
-async function run(userId: string, prompt: { system: string; user: string }, keyword: string, guideline: BrandGuidelines): Promise<AiDraftResult> {
+async function run(userId: string, prompt: { system: string; user: string }, keyword: string, guideline: BrandGuidelines, site?: { name?: string | null; siteUrl?: string | null }): Promise<AiDraftResult> {
   const model = await getUserPreferredModel(userId, 'seo-content');
   const result = await generateContent(prompt.system, prompt.user, userId, undefined, {
     brandGuidelines: guideline,
@@ -69,13 +70,15 @@ async function run(userId: string, prompt: { system: string; user: string }, key
     maxTokens: 10_000,
     taskType: 'seo-content',
   });
-  return { ...parseDraftOutput(result.content, keyword), model: result.usage.model, fallbackLabel: result.fallbackLabel ?? null };
+  const draft = parseDraftOutput(result.content, keyword);
+  const guarded = guardGeneratedText(draft.bodyMarkdown, mergeBrandFacts(guideline.key_messages, site));
+  return { ...draft, bodyMarkdown: guarded.text, model: result.usage.model, fallbackLabel: [result.fallbackLabel, guarded.warnings[0]].filter(Boolean).join(' ') || null };
 }
 
 export function generateSeoDraft(userId: string, input: DraftPromptInput, guideline: BrandGuidelines): Promise<AiDraftResult> {
-  return run(userId, buildDraftPrompt(input), input.keyword, guideline);
+  return run(userId, buildDraftPrompt(input), input.keyword, guideline, { name: input.siteName, siteUrl: input.siteUrl });
 }
 
 export function rewriteSeoDraft(userId: string, input: RewritePromptInput, guideline: BrandGuidelines): Promise<AiDraftResult> {
-  return run(userId, buildRewritePrompt(input), input.keyword, guideline);
+  return run(userId, buildRewritePrompt(input), input.keyword, guideline, { name: input.siteName, siteUrl: input.siteUrl });
 }
