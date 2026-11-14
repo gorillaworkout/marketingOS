@@ -461,9 +461,61 @@ export function normalizeArticleMarketNewsInput(value: unknown, expectedResearch
 }
 
 function extractNumbers(value: string): string[] {
-  return (value.normalize('NFKC').match(/[+-]?\d+(?:[.,]\d+)*(?:%)?/g) || [])
-    .map(token => token.replace(/[.,]+$/g, ''))
-    .filter(Boolean);
+  const text = value.normalize('NFKC');
+  const tokens: string[] = [];
+  for (const match of text.matchAll(/[+-]?\d+(?:[.,]\d+)*(?:%)?/g)) {
+    let token = match[0];
+    // A hyphen glued to a word or digit ("Q3-11", "a-35") is a separator, not a minus sign.
+    const before = text[(match.index ?? 0) - 1] || '';
+    if (/^[+-]/.test(token) && /[\p{L}\p{N}]/u.test(before)) token = token.slice(1);
+    token = token.replace(/[.,]+$/g, '');
+    if (token) tokens.push(token);
+  }
+  return tokens;
+}
+
+/**
+ * Numeric values a token can stand for, so Indonesian and English formats match:
+ * 157,72 ↔ 157.72, 1.234,5 ↔ 1,234.5. Ambiguous 1.234 counts as both 1234 and 1.234.
+ */
+function numberValueKeys(token: string): string[] {
+  const raw = token.replace(/^[+-]/, '').replace(/%$/, '');
+  const keys = new Set<string>();
+  const add = (value: string) => {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) keys.add(String(parsed));
+  };
+  const hasDot = raw.includes('.');
+  const hasComma = raw.includes(',');
+  if (!hasDot && !hasComma) add(raw);
+  else if (hasDot && hasComma) {
+    const decimal = raw.lastIndexOf('.') > raw.lastIndexOf(',') ? '.' : ',';
+    const thousands = decimal === '.' ? ',' : '.';
+    add(raw.split(thousands).join('').replace(decimal, '.'));
+  } else {
+    const separator = hasDot ? '.' : ',';
+    const groups = raw.split(separator);
+    if (groups.length > 1 && /^\d{1,3}$/.test(groups[0]) && groups.slice(1).every(group => /^\d{3}$/.test(group))) add(groups.join(''));
+    if (groups.length === 2) add(`${groups[0]}.${groups[1]}`);
+    if (groups.length > 2 && !keys.size) add(groups.join(''));
+  }
+  return [...keys];
+}
+
+const MONTH_NAMES = 'januari|februari|maret|april|mei|juni|juli|agustus|september|oktober|november|desember|january|february|march|may|june|july|august|october|december|jan|feb|mar|apr|jun|jul|agu|aug|sep|sept|okt|oct|nov|des|dec';
+
+/** Remove dates, times, URLs, and the Sources list: their digits are metadata, not numeric claims. */
+function stripNonClaimNumbers(value: string): string {
+  const sources = findSourcesHeading(value);
+  return (sources ? value.slice(0, sources.index) : value)
+    .replace(/\]\([^)\s]+\)/g, '] ')
+    .replace(/\bhttps?:\/\/[^\s)\]]+/gi, ' ')
+    .replace(/\b\d{4}-\d{2}-\d{2}(?:[T ]\d{1,2}[:.]\d{2}(?:[:.]\d{2})?(?:Z|[+-]\d{2}:?\d{2})?)?\b/g, ' ')
+    .replace(/\b\d{1,2}[/.-]\d{1,2}[/.-]\d{4}\b/g, ' ')
+    .replace(new RegExp(`\\b\\d{1,2}\\s+(?:${MONTH_NAMES})\\.?\\s+\\d{4}\\b`, 'gi'), ' ')
+    .replace(new RegExp(`\\b(?:${MONTH_NAMES})\\.?\\s+\\d{1,2},?\\s+\\d{4}\\b`, 'gi'), ' ')
+    .replace(/\b\d{1,2}[:.]\d{2}(?:[:.]\d{2})?\s*(?:WIB|WITA|WIT|UTC|GMT|ET|EST|EDT)\b/gi, ' ')
+    .replace(/\b\d{1,2}:\d{2}(?::\d{2})?\b/g, ' ');
 }
 
 function extractQuotes(value: string): string[] {
@@ -735,10 +787,14 @@ export function repairArticleCitations(markdown: string, sources: ArticleSourceI
     }
     const note = citationParenthetical(source);
     const words = source.verifiedFacts.toLowerCase().split(/[^a-z0-9]+/).filter(word => word.length > 5);
-    const sentences = prose.split(/(?<=[.!?])\s+/);
+    // Keep the original whitespace so headings and paragraphs survive the rewrite.
+    const sentences = prose.split(/(?<=[.!?])(\s+)/);
     let placed = false;
-    for (let index = 0; index < sentences.length; index += 1) {
-      const lower = sentences[index].toLowerCase();
+    for (let index = 0; index < sentences.length; index += 2) {
+      // The sentence end sits on the chunk's last line; never cite inside a heading.
+      const lastLine = sentences[index].split('\n').at(-1) || '';
+      if (/^\s*#/.test(lastLine)) continue;
+      const lower = lastLine.toLowerCase();
       if (!words.some(word => lower.includes(word)) && !lower.includes(source.outlet.toLowerCase())) continue;
       sentences[index] = /[.!?]$/.test(sentences[index].trim())
         ? sentences[index].replace(/([.!?])(\s*)$/, ` ${note}$1`)
@@ -747,7 +803,7 @@ export function repairArticleCitations(markdown: string, sources: ArticleSourceI
       break;
     }
     if (placed) {
-      prose = sentences.join(' ');
+      prose = sentences.join('');
       kept.push(source);
       inserted.push(source.outlet);
       continue;
@@ -976,12 +1032,225 @@ function articleLengthViolation(wordCount: number): string | null {
   return null;
 }
 
+const ESCAPE_REGEX = /[.*+?^${}()|[\]\\]/g;
+
+function headingWords(value: string): Set<string> {
+  return new Set(normalized(value).split(' ').filter(Boolean));
+}
+
+function similarity(a: string, b: string): number {
+  const left = headingWords(a);
+  const right = headingWords(b);
+  const shared = [...left].filter(word => right.has(word)).length;
+  return shared / Math.max(1, new Set([...left, ...right]).size);
+}
+
+/** Index of the line that starts the next heading at or above `level`, or the Sources heading. */
+function sectionEnd(lines: string[], from: number, level: number): number {
+  for (let index = from + 1; index < lines.length; index += 1) {
+    const heading = /^(#{1,6})\s+/.exec(lines[index]);
+    if (heading && heading[1].length <= level) return index;
+    if (/^#{1,3}\s+(?:sources|sumber)\s*$/i.test(lines[index])) return index;
+  }
+  return lines.length;
+}
+
+function collapseBlankLines(markdown: string): string {
+  return markdown.replace(/[ \t]+$/gm, '').replace(/\n{3,}/g, '\n\n').trim();
+}
+
+/** The most relevant existing body sentence for a question, or a safe fallback. */
+function faqAnswer(question: string, body: string, input: ArticleMarketNewsInput): string {
+  const questionWords = [...headingWords(question)].filter(word => word.length > 3);
+  const candidates = body
+    .split('\n')
+    .filter(line => line.trim() && !/^\s*(?:#|[-*>|])/.test(line))
+    .flatMap(line => line.split(/(?<=[.!?])\s+/))
+    .map(sentence => sentence.trim())
+    .filter(sentence => /[.!]$/.test(sentence) && sentence.split(/\s+/).length >= 6 && !isImperativeDupoinAccountCta(sentence) && extractQuotes(sentence).length === 0);
+  let best = '';
+  let bestScore = 0;
+  for (const sentence of candidates) {
+    const words = headingWords(sentence);
+    const score = questionWords.filter(word => words.has(word)).length;
+    if (score > bestScore) {
+      best = sentence;
+      bestScore = score;
+    }
+  }
+  if (best) return best;
+  return `Jawabannya bergantung pada perkembangan ${input.keyword} yang dibahas di atas dan pada sumber yang dicantumkan.`;
+}
+
+export interface ArticleStructureRepair {
+  markdown: string;
+  repairs: string[];
+}
+
+/**
+ * Deterministic fixes for the publication gate's structure rules, run as the last step
+ * before the gate: one H1 equal to the title, the five PAA questions once each as
+ * headings, the keyword in the first prose paragraph, and a Sources list rebuilt from
+ * the research list. A weak fallback model's structural slips no longer fail a draft.
+ */
+export function repairArticleStructure(title: string, articleMarkdown: string, input: ArticleMarketNewsInput): ArticleStructureRepair {
+  const repairs: string[] = [];
+  let markdown = articleMarkdown.replace(/\r\n?/g, '\n');
+
+  // 1. Exactly one H1, equal to the title, at the top.
+  {
+    const lines = markdown.split('\n');
+    let inFence = false;
+    let firstH1Seen = false;
+    let demoted = 0;
+    let replaced = false;
+    const kept: string[] = [];
+    for (const line of lines) {
+      if (/^\s*```/.test(line)) inFence = !inFence;
+      const h1 = inFence ? null : /^#\s+(.+?)\s*$/.exec(line);
+      if (!h1) {
+        kept.push(line);
+        continue;
+      }
+      const isTitle = normalized(h1[1]) === normalized(title);
+      if (isTitle || !firstH1Seen) {
+        if (!isTitle) replaced = true;
+        firstH1Seen = true;
+        continue;
+      }
+      kept.push(`## ${h1[1]}`);
+      demoted += 1;
+    }
+    const next = `# ${title}\n\n${kept.join('\n').trimStart()}`;
+    if (collapseBlankLines(next) !== collapseBlankLines(markdown)) {
+      if (replaced) repairs.push('Replaced a mismatched H1 with the title.');
+      if (demoted) repairs.push(`Demoted ${demoted} extra H1 heading(s) to H2.`);
+      if (!replaced && !demoted) repairs.push('Placed the title as the only H1.');
+    }
+    markdown = next;
+  }
+
+  // 2. The five PAA questions, once each and verbatim, as question headings.
+  {
+    let lines = markdown.split('\n');
+    const questions = input.paaQuestions;
+    const exactPresent = new Set(lines.map(line => /^#{2,3}\s+(.+?)\s*$/.exec(line)?.[1] || '').filter(text => questions.includes(text)));
+    const seen = new Set<string>();
+    const out: string[] = [];
+    let changed = false;
+    for (let index = 0; index < lines.length; index += 1) {
+      const heading = /^(#{2,3})\s+(.+?)\s*$/.exec(lines[index]);
+      if (!heading || !heading[2].endsWith('?')) {
+        out.push(lines[index]);
+        continue;
+      }
+      const [, hashes, text] = heading;
+      let target: string | null = questions.includes(text) ? text : null;
+      if (!target) {
+        const ranked = questions
+          .map(question => ({ question, score: similarity(question, text) }))
+          .sort((a, b) => b.score - a.score)[0];
+        if (ranked && ranked.score >= 0.7) target = ranked.question;
+      }
+      if (target && (seen.has(target) || (target !== text && exactPresent.has(target)))) {
+        // A duplicate or a paraphrase of a question that is already present: drop that section.
+        index = sectionEnd(lines, index, hashes.length) - 1;
+        changed = true;
+        continue;
+      }
+      if (target) {
+        seen.add(target);
+        if (target !== text) changed = true;
+        out.push(`${hashes} ${target}`);
+        continue;
+      }
+      // Any other question heading would break the exactly-five rule.
+      out.push(`${hashes} ${text.replace(/\?+$/, '').trim()}`);
+      changed = true;
+    }
+    lines = out;
+    const missing = questions.filter(question => !seen.has(question));
+    markdown = lines.join('\n');
+    if (missing.length) {
+      const sourcesHeading = findSourcesHeading(markdown);
+      const body = sourcesHeading ? markdown.slice(0, sourcesHeading.index) : markdown;
+      const tail = sourcesHeading ? markdown.slice(sourcesHeading.index) : '';
+      const cta = lastProseParagraph(body);
+      const ctaAt = isImperativeDupoinAccountCta(cta) ? body.lastIndexOf(cta) : -1;
+      const before = ctaAt >= 0 ? body.slice(0, ctaAt) : body;
+      const after = ctaAt >= 0 ? body.slice(ctaAt) : '';
+      const block = missing.map(question => `## ${question}\n${faqAnswer(question, before, input)}`).join('\n\n');
+      markdown = `${before.trimEnd()}\n\n${block}\n\n${after.trim()}${tail ? `\n\n${tail.trim()}` : ''}`;
+      changed = true;
+    }
+    if (changed) repairs.push(missing.length ? `Fixed the PAA headings and added ${missing.length} missing question(s).` : 'Fixed the PAA headings.');
+    markdown = collapseBlankLines(markdown);
+  }
+
+  // 3. Main keyword in the first prose paragraph.
+  {
+    const first = firstProseParagraph(markdown);
+    if (first && !normalized(first).includes(normalized(input.keyword))) {
+      const keyword = input.keyword.trim();
+      const lead = `${keyword.charAt(0).toUpperCase()}${keyword.slice(1)} menjadi fokus utama ulasan pasar ini.`;
+      const at = markdown.indexOf(first);
+      markdown = `${markdown.slice(0, at)}${lead} ${first}${markdown.slice(at + first.length)}`;
+      repairs.push('Added the main keyword to the first paragraph.');
+    }
+  }
+
+  // 4. Sources list rebuilt from the research list.
+  {
+    const sourcesHeading = findSourcesHeading(markdown);
+    const section = sourcesHeading ? markdown.slice(sourcesHeading.index) : '';
+    const complete = Boolean(sourcesHeading) && input.sources.every(source => section.includes(source.outlet) && section.includes(source.url) && containsSourceDate(section, source.publishedAt));
+    if (!complete) {
+      const body = sourcesHeading ? markdown.slice(0, sourcesHeading.index) : markdown;
+      const headingLine = sourcesHeading ? sourcesHeading[0].trim() : '## Sources';
+      const list = input.sources.map(source => `- ${source.outlet} — ${source.publishedAt.slice(0, 10)} — ${source.url}`).join('\n');
+      markdown = `${body.trimEnd()}\n\n${headingLine}${list ? `\n${list}` : ''}`;
+      markdown = ensureEndingDupoinAccountCta(markdown);
+      repairs.push('Rebuilt the Sources section from the research list.');
+    }
+  }
+
+  return { markdown: collapseBlankLines(markdown), repairs };
+}
+
+/** Drop prose sentences that carry a number no source supports, when the draft stays long enough. */
+export function removeUnsupportedNumberSentences(markdown: string, tokens: readonly string[]): { markdown: string; removed: number } {
+  if (!tokens.length) return { markdown, removed: 0 };
+  const sourcesHeading = findSourcesHeading(markdown);
+  const body = sourcesHeading ? markdown.slice(0, sourcesHeading.index) : markdown;
+  const tail = sourcesHeading ? markdown.slice(sourcesHeading.index) : '';
+  const patterns = tokens.map(token => new RegExp(`(?<![\\d.,])${token.replace(ESCAPE_REGEX, '\\$&')}(?![\\d])`));
+  let removed = 0;
+  const lines = body.split('\n').map(line => {
+    if (/^\s*#/.test(line)) return line;
+    const parts = line.split(/(?<=[.!?])\s+/);
+    const keep = parts.filter(part => {
+      const hit = patterns.some(pattern => pattern.test(stripNonClaimNumbers(part)));
+      if (hit) removed += 1;
+      return !hit;
+    });
+    return keep.join(' ');
+  });
+  return { markdown: collapseBlankLines(`${lines.join('\n')}\n\n${tail}`), removed };
+}
+
 export function validateGeneratedArticle(title: string, articleMarkdown: string, input: ArticleMarketNewsInput, metaDescription = ''): ArticleValidationResult {
   const wordCount = countArticleWords(articleMarkdown);
-  const allowedMaterial = input.sources.map(source => source.verifiedFacts).join('\n');
-  const allowedNumbers = new Set(extractNumbers(allowedMaterial));
-  const numericClaimMaterial = stripCitationMetadata(`${title}\n${metaDescription}\n${articleMarkdown}`, input);
-  const unsupportedNumbers = [...new Set(extractNumbers(numericClaimMaterial).filter(token => !allowedNumbers.has(token)))];
+  // Source facts plus operator-supplied text (keyword, PAA, source headlines) back a number.
+  const allowedMaterial = [
+    ...input.sources.flatMap(source => [source.verifiedFacts, source.title]),
+    input.keyword,
+    ...input.paaQuestions,
+  ].join('\n');
+  const allowedTokens = extractNumbers(allowedMaterial);
+  const allowedNumbers = new Set(allowedTokens);
+  const allowedValues = new Set(allowedTokens.flatMap(numberValueKeys));
+  const numericClaimMaterial = stripNonClaimNumbers(stripCitationMetadata(`${title}\n${metaDescription}\n${articleMarkdown}`, input));
+  const unsupportedNumbers = [...new Set(extractNumbers(numericClaimMaterial).filter(token => !allowedNumbers.has(token) && !numberValueKeys(token).some(key => allowedValues.has(key))))];
   const allowedQuoteMaterial = input.sources.map(source => source.verifiedFacts).join('\n');
   const unsupportedQuotes = [...new Set(extractQuotes(`${title}\n${metaDescription}\n${articleMarkdown}`).filter(quote => !allowedQuoteMaterial.includes(quote)))];
   const lowerOutput = normalized(`${title}\n${articleMarkdown}`);

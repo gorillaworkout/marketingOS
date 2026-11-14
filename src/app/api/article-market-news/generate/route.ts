@@ -5,7 +5,7 @@ import { execute } from '@/lib/database';
 import { rateLimit } from '@/lib/rate-limit';
 import { fetchKnowledgeContext, fetchStyleContext, generateContent, getUserPreferredModel } from '@/lib/openai';
 import { persistKnowledgeQuietly, summarizeArticleKnowledge } from '@/lib/knowledge-persist';
-import { ARTICLE_COMPLETION_MAX_TOKENS, MIN_DATED_RESEARCH_SOURCES, articleDraftProtectedPhrases, articleWordCountRepairGuidance, buildArticleExpandPrompt, buildArticleMarketNewsPrompts, countArticleWords, describeArticlePublicationGateFailure, ensureEndingDupoinAccountCta, fitArticleMarkdownWordCount, normalizeArticleMarketNewsInput, parseGeneratedArticle, repairArticleCitations, stripUnsupportedProductNames, strongestAvailableArticleModel, validateGeneratedArticle } from '@/lib/article-market-news';
+import { ARTICLE_COMPLETION_MAX_TOKENS, MIN_DATED_RESEARCH_SOURCES, articleDraftProtectedPhrases, articleWordCountRepairGuidance, buildArticleExpandPrompt, buildArticleMarketNewsPrompts, countArticleWords, describeArticlePublicationGateFailure, ensureEndingDupoinAccountCta, fitArticleMarkdownWordCount, normalizeArticleMarketNewsInput, parseGeneratedArticle, removeUnsupportedNumberSentences, repairArticleCitations, repairArticleStructure, stripUnsupportedProductNames, strongestAvailableArticleModel, validateGeneratedArticle } from '@/lib/article-market-news';
 import { createArticleJobStore, type ArticleJob } from '@/lib/article-market-news-job';
 import { researchArticleMarketNews } from '@/lib/article-market-news-research';
 import { guardGeneratedText, mergeBrandFacts } from '@/lib/brand-fact-guard';
@@ -197,7 +197,21 @@ async function runArticleJob(
             articleMarkdown = ensureEndingDupoinAccountCta(articleMarkdown);
             const fitted = fitArticleMarkdownWordCount(articleMarkdown, articleDraftProtectedPhrases(gateInput));
             if (fitted.trimmed) articleMarkdown = fitted.markdown;
+            // Last step before the gate: repair H1, PAA headings, keyword lead and Sources
+            // deterministically, so the gate only fails on problems that cannot be repaired.
+            const structure = repairArticleStructure(title, articleMarkdown, gateInput);
+            articleMarkdown = structure.markdown;
             validation = validateGeneratedArticle(title, articleMarkdown, gateInput, metaDescription);
+            if (validation.unsupportedNumbers.length) {
+              const pruned = removeUnsupportedNumberSentences(articleMarkdown, validation.unsupportedNumbers);
+              const prunedValidation = pruned.removed ? validateGeneratedArticle(title, pruned.markdown, gateInput, metaDescription) : null;
+              if (prunedValidation && prunedValidation.violations.length < validation.violations.length) {
+                articleMarkdown = pruned.markdown;
+                validation = prunedValidation;
+                send({ step: 'notice', progress: 88, message: `Removed ${pruned.removed} sentence(s) with numbers not found in the sources.` });
+              }
+            }
+            if (structure.repairs.length) send({ step: 'draft', progress: 35 + attempt * 15, message: `Repaired the draft structure: ${structure.repairs.join(' ')}` });
             validation.qc.unsupportedProducts = productWarnings;
             const tooShort = countArticleWords(articleMarkdown) < 800;
             if (validation.violations.length === 0) {
