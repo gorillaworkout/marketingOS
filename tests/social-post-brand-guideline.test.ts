@@ -75,12 +75,17 @@ test('generate body includes brandGuidelineId only when one is selected', () => 
   }
 });
 
-test('signed-in users may list their own guidelines; writes stay admin-only', () => {
+test('brand voice writes are checked in the route so members can keep a personal voice', () => {
+  const api = readFileSync(path.join(process.cwd(), 'src/app/api/brand-guidelines/route.ts'), 'utf8');
   assert.equal(requiresAdminApiAccess('/api/brand-guidelines', 'GET'), false);
   assert.equal(requiresAdminApiAccess('/api/brand-guidelines', 'get'), false);
-  assert.equal(requiresAdminApiAccess('/api/brand-guidelines', 'POST'), true);
-  assert.equal(requiresAdminApiAccess('/api/brand-guidelines', 'PUT'), true);
-  assert.equal(requiresAdminApiAccess('/api/brand-guidelines', 'DELETE'), true);
+  assert.equal(requiresAdminApiAccess('/api/brand-guidelines', 'POST'), false);
+  assert.equal(requiresAdminApiAccess('/api/brand-guidelines', 'PUT'), false);
+  assert.equal(requiresAdminApiAccess('/api/brand-guidelines', 'DELETE'), false);
+  assert.equal(requiresAdminApiAccess('/api/brand-guidelines/voice/samples', 'POST'), false);
+  assert.match(api, /Only an admin can share a brand voice/);
+  assert.match(api, /Only an admin can edit a shared brand voice/);
+  assert.match(api, /canWriteBrandVoice/);
   assert.equal(requiresAdminApiAccess('/api/knowledge/save', 'POST'), false);
   assert.equal(requiresAdminApiAccess('/api/knowledge', 'GET'), true);
   assert.equal(requiresAdminApiAccess('/api/admin/users', 'GET'), true);

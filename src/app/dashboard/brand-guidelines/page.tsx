@@ -11,6 +11,10 @@ interface BrandGuideline {
   do_list: string[];
   dont_list: string[];
   examples: string | null;
+  voice_character?: string | null;
+  banned_phrases?: string[];
+  is_shared?: boolean;
+  can_edit?: boolean;
   created_at: string;
 }
 
@@ -26,8 +30,12 @@ export default function BrandGuidelinesPage() {
     do_list: '',
     dont_list: '',
     examples: '',
+    voice_character: '',
+    banned_phrases: '',
+    is_shared: false,
   });
   const [saveMsg, setSaveMsg] = useState('');
+  const [tab, setTab] = useState<'voice' | 'campaigns'>('voice');
 
   const fetchGuidelines = async () => {
     const res = await fetch('/api/brand-guidelines');
@@ -38,7 +46,7 @@ export default function BrandGuidelinesPage() {
   useEffect(() => { fetchGuidelines(); }, []);
 
   const resetForm = () => {
-    setForm({ brand_name: '', tone_of_voice: '', target_market: '', key_messages: '', do_list: '', dont_list: '', examples: '' });
+    setForm({ brand_name: '', tone_of_voice: '', target_market: '', key_messages: '', do_list: '', dont_list: '', examples: '', voice_character: '', banned_phrases: '', is_shared: false });
     setEditing(null);
     setShowForm(false);
   };
@@ -52,6 +60,9 @@ export default function BrandGuidelinesPage() {
       do_list: (g.do_list || []).join('\n'),
       dont_list: (g.dont_list || []).join('\n'),
       examples: g.examples || '',
+      voice_character: g.voice_character || '',
+      banned_phrases: (g.banned_phrases || []).join('\n'),
+      is_shared: Boolean(g.is_shared),
     });
     setEditing(g);
     setShowForm(true);
@@ -68,6 +79,9 @@ export default function BrandGuidelinesPage() {
       do_list: form.do_list ? form.do_list.split('\n').filter(Boolean) : [],
       dont_list: form.dont_list ? form.dont_list.split('\n').filter(Boolean) : [],
       examples: form.examples || null,
+      voice_character: form.voice_character || null,
+      banned_phrases: form.banned_phrases ? form.banned_phrases.split('\n').filter(Boolean) : [],
+      is_shared: form.is_shared,
     };
 
     const method = editing ? 'PUT' : 'POST';
@@ -95,9 +109,14 @@ export default function BrandGuidelinesPage() {
 
   return (
     <PageStack className="max-w-5xl">
-      <PageHeader eyebrow="Library / Governance" title="Brand guidelines" description="Define brand voice, audience, key messages, and production rules for generated content." actions={
-        <Button variant="primary" onClick={() => { resetForm(); setShowForm(true); }}>New guideline</Button>
+      <PageHeader eyebrow="Library / Governance" title="Brand guidelines" description="Define brand voice, audience, key messages, and the campaigns Social Post may use." actions={
+        tab === 'voice' ? <Button variant="primary" onClick={() => { resetForm(); setShowForm(true); }}>New guideline</Button> : undefined
       } />
+      <div className="flex gap-2">
+        <Button type="button" variant={tab === 'voice' ? 'primary' : 'secondary'} onClick={() => setTab('voice')}>Brand voice</Button>
+        <Button type="button" variant={tab === 'campaigns' ? 'primary' : 'secondary'} onClick={() => setTab('campaigns')}>Campaigns</Button>
+      </div>
+      {tab === 'campaigns' && <CampaignLibrary />}
 
       {saveMsg && (
         <div className={`px-4 py-3 rounded-lg border ${saveMsg.startsWith('Failed') || saveMsg.includes('required') || saveMsg.includes('not found')
@@ -105,8 +124,7 @@ export default function BrandGuidelinesPage() {
           : 'bg-green-500/10 border-green-500/20 text-green-400'}`}>{saveMsg}</div>
       )}
 
-      {/* Form */}
-      {showForm && (
+      {tab === 'voice' && showForm && (
         <Panel className="space-y-4">
           <SectionHeader title={editing ? 'Edit guideline' : 'New brand guideline'} />
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -120,6 +138,12 @@ export default function BrandGuidelinesPage() {
             <FormField label="Don't" hint="One per line"><TextArea value={form.dont_list} onChange={e => setForm({ ...form, dont_list: e.target.value })} rows={4} placeholder={"Promise guaranteed profits\nUse overly aggressive language\nMention competitors by name"} /></FormField>
           </div>
           <FormField label="Example content" hint="Optional"><TextArea value={form.examples} onChange={e => setForm({ ...form, examples: e.target.value })} rows={3} placeholder="Paste a sample caption/post that represents the brand voice..." /></FormField>
+          <FormField label="Voice character" hint="1,500 characters. Used in the Social Post prompt."><TextArea value={form.voice_character} onChange={e => setForm({ ...form, voice_character: e.target.value })} rows={3} maxLength={1500} /></FormField>
+          <FormField label="Banned phrases" hint="One per line"><TextArea value={form.banned_phrases} onChange={e => setForm({ ...form, banned_phrases: e.target.value })} rows={3} /></FormField>
+          <label className="flex items-center gap-2 text-sm text-[var(--mos-text-secondary)]">
+            <input type="checkbox" checked={form.is_shared} onChange={e => setForm({ ...form, is_shared: e.target.checked })} />
+            Shared with the team. Only an admin can edit a shared voice.
+          </label>
           <div className="flex gap-2">
             <Button variant="primary" onClick={handleSave}>{editing ? 'Update' : 'Create'}</Button>
             <Button onClick={resetForm}>Cancel</Button>
@@ -127,8 +151,7 @@ export default function BrandGuidelinesPage() {
         </Panel>
       )}
 
-      {/* List */}
-      <div className="space-y-4">
+      {tab === 'voice' && <div className="space-y-4">
         {guidelines.length === 0 && !showForm && (
           <Panel padding="none"><EmptyState title="No brand guidelines yet" description="Create one to make AI-generated content match your brand voice." /></Panel>
         )}
@@ -136,13 +159,15 @@ export default function BrandGuidelinesPage() {
           <Panel key={g.id}>
             <div className="flex items-start justify-between mb-3">
               <div>
-                <h3 className="text-lg font-semibold text-white">{g.brand_name}</h3>
+                <h3 className="text-lg font-semibold text-white">{g.brand_name}{g.is_shared ? ' · Shared' : ''}</h3>
                 {g.tone_of_voice && <p className="text-sm text-blue-400">{g.tone_of_voice}</p>}
               </div>
-              <div className="flex gap-2">
-                <Button size="sm" onClick={() => startEdit(g)}>Edit</Button>
-                <Button size="sm" variant="danger" onClick={() => handleDelete(g.id)}>Delete</Button>
-              </div>
+              {g.can_edit !== false && (
+                <div className="flex gap-2">
+                  <Button size="sm" onClick={() => startEdit(g)}>Edit</Button>
+                  <Button size="sm" variant="danger" onClick={() => handleDelete(g.id)}>Delete</Button>
+                </div>
+              )}
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
               {g.target_market && <div><span className="text-[var(--mos-text-faint)]">Target:</span> <span className="text-[var(--mos-text-secondary)]">{g.target_market}</span></div>}
@@ -170,7 +195,49 @@ export default function BrandGuidelinesPage() {
             )}
           </Panel>
         ))}
-      </div>
+      </div>}
     </PageStack>
+  );
+}
+
+function CampaignLibrary() {
+  const [rows, setRows] = useState<Array<{ id: string; name: string; status: string; updatedByName?: string | null; updatedAt?: string | null; keyFacts?: string[] }>>([]);
+  const [name, setName] = useState('');
+  const [facts, setFacts] = useState('');
+  const [message, setMessage] = useState('');
+
+  const load = () => {
+    fetch('/api/campaigns').then(response => response.ok ? response.json() : { campaigns: [] }).then(data => setRows(data.campaigns || [])).catch(() => setRows([]));
+  };
+  useEffect(() => { load(); }, []);
+
+  const save = async () => {
+    const response = await fetch('/api/campaigns', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, status: 'active', keyFacts: facts.split('\n'), links: [] }),
+    });
+    const data = await response.json().catch(() => ({}));
+    setMessage(response.ok ? 'Campaign saved. Edits record who changed it and when.' : data.error || 'Could not save the campaign.');
+    if (response.ok) { setName(''); setFacts(''); load(); }
+  };
+
+  return (
+    <div className="space-y-4">
+      <Panel className="space-y-3">
+        <SectionHeader title="New campaign" description="Any Social Post user can edit a campaign. The model may only state the facts you enter here, and it must not invent a URL." />
+        <FormField label="Name"><TextInput value={name} onChange={event => setName(event.target.value)} placeholder="Gold Week" /></FormField>
+        <FormField label="Key facts" hint="One per line"><TextArea value={facts} onChange={event => setFacts(event.target.value)} rows={4} placeholder="Spread from 0.0 for gold this week" /></FormField>
+        <Button variant="primary" onClick={() => void save()}>Save campaign</Button>
+        {message && <p className="text-sm text-[var(--mos-text-secondary)]">{message}</p>}
+      </Panel>
+      {rows.map(row => (
+        <Panel key={row.id}>
+          <h3 className="font-semibold text-white">{row.name}</h3>
+          <p className="mt-1 text-xs text-[var(--mos-text-faint)]">{row.status}{row.updatedByName ? ` · Updated by ${row.updatedByName}` : ''}{row.updatedAt ? ` · ${new Date(row.updatedAt).toLocaleString()}` : ''}</p>
+          {(row.keyFacts || []).length > 0 && <p className="mt-2 text-sm text-[var(--mos-text-secondary)]">{row.keyFacts?.join(' · ')}</p>}
+        </Panel>
+      ))}
+    </div>
   );
 }

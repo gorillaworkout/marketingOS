@@ -15,11 +15,13 @@ const MEMBER_ALLOWED_EXACT = ['/api/knowledge/save'];
 
 /**
  * Whether `getSession` should reject non-admins for this API call.
- * Listing brand guidelines is allowed for any signed-in user so Social Post can
- * load that user's own rows. Creating, editing, and deleting them stays admin-only.
+ * Brand guidelines are not blanket admin-only: any signed-in user may list
+ * their own rows plus shared voices, and the route itself decides who may
+ * write a personal voice or a shared one.
  */
 export function requiresAdminApiAccess(pathname: string, method: string): boolean {
+  void method;
   if (MEMBER_ALLOWED_EXACT.includes(pathname)) return false;
-  if (pathname === '/api/brand-guidelines' && method.toUpperCase() === 'GET') return false;
+  if (pathname === '/api/brand-guidelines' || pathname.startsWith('/api/brand-guidelines/')) return false;
   return ADMIN_ONLY_API_PREFIXES.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
 }
