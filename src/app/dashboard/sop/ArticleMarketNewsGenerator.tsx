@@ -44,6 +44,25 @@ interface ArticleResult {
 
 const emptySource = (): SourceForm => ({ outlet: '', title: '', url: '', publishedAt: '', verifiedFacts: '' });
 
+async function pollArticleJob(
+  jobId: string,
+  apply: (result: ArticleResult) => void,
+  onProgress: (message: string) => void,
+): Promise<boolean> {
+  for (let attempt = 0; attempt < 80; attempt += 1) {
+    await new Promise(resolve => setTimeout(resolve, 1500));
+    const response = await fetch(`/api/article-market-news/generate?jobId=${encodeURIComponent(jobId)}`, { cache: 'no-store' });
+    const data = await response.json().catch(() => ({}));
+    if (typeof data.message === 'string' && data.message) onProgress(data.message);
+    if (data.status === 'done' && data.result) {
+      apply(data.result as ArticleResult);
+      return true;
+    }
+    if (data.status === 'error') throw new Error(data.error || data.message || 'Article generation failed.');
+  }
+  return false;
+}
+
 function ExampleSample({
   title,
   description,
@@ -219,6 +238,7 @@ export default function ArticleMarketNewsGenerator() {
     setGeneratedInput(null);
     setFactReviewConfirmed(false);
     setProgress('Validating research gate…');
+    let jobId = '';
     try {
       const response = await fetch('/api/article-market-news/generate', {
         method: 'POST',
@@ -234,6 +254,12 @@ export default function ArticleMarketNewsGenerator() {
       const decoder = new TextDecoder();
       let buffer = '';
       let completed = false;
+      const applyResult = (result: ArticleResult) => {
+        setResult(result);
+        setGeneratedInput(result.normalizedInput || requestInput);
+        void fetchRecent();
+        completed = true;
+      };
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
@@ -243,21 +269,32 @@ export default function ArticleMarketNewsGenerator() {
         for (const line of lines) {
           if (!line.startsWith('data: ')) continue;
           const event = JSON.parse(line.slice(6));
+          if (typeof event.jobId === 'string') jobId = event.jobId;
           if (event.message) setProgress(event.message);
           if (event.step === 'error') throw new Error(event.message || 'Article generation failed.');
-          if (event.step === 'done' && event.result) {
-            setResult(event.result as ArticleResult);
-            setGeneratedInput((event.result as ArticleResult).normalizedInput || requestInput);
-            void fetchRecent();
-            completed = true;
-          }
+          if (event.step === 'done' && event.result) applyResult(event.result as ArticleResult);
         }
       }
+      if (!completed && jobId) completed = await pollArticleJob(jobId, applyResult, setProgress);
       if (!completed) throw new Error('Generation ended without a completed article.');
     } catch (generationError) {
       const text = generationError instanceof Error ? generationError.message : 'Article generation failed.';
       const dropped = /failed to fetch|network ?error|load failed|networkerror/i.test(text);
-      setError(dropped ? `${progress ? `${progress} ` : ''}The connection dropped before the article finished. Try again.` : text);
+      if (dropped && jobId) {
+        setProgress('The connection dropped. Reattaching to the server job…');
+        try {
+          const recovered = await pollArticleJob(jobId, result => {
+            setResult(result);
+            setGeneratedInput(result.normalizedInput || requestInput);
+            void fetchRecent();
+          }, setProgress);
+          if (recovered) return;
+        } catch (pollError) {
+          setError(pollError instanceof Error ? pollError.message : 'Article generation failed.');
+          return;
+        }
+      }
+      setError(dropped ? `${progress ? `${progress} ` : ''}The connection dropped before the article finished. Reattaching to the server job…` : text);
     } finally {
       setLoading(false);
     }

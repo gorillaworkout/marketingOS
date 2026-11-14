@@ -171,7 +171,8 @@ test('route is feature-gated, gateway-routed, evidence-gated, and never fetches 
   assert.match(route, /requireFeature\(request, 'article-market-news'\)/);
   assert.match(route, /parseGeneratedArticle\(generated\.content\)/);
   assert.match(route, /buildRepairPrompt\(/);
-  assert.match(route, /getUserPreferredModel\(auth\.id, 'article-market-news'\)/);
+  assert.match(route, /getUserPreferredModel\(auth\.id,/);
+  assert.match(route, /strongestAvailableArticleModel/);
   assert.doesNotMatch(route, /getModelProvider|codexTextOnly|gpt-5\.6-sol/);
   assert.match(route, /temperature: 0\.3/);
   assert.match(route, /jsonRepairAttempts: 0/);
@@ -490,8 +491,8 @@ test('publication gate preserves numeric and Unicode semantics and requires verb
 });
 
 test('editable DOCX stays tied to immutable generation snapshot and manual fact review', async () => {
-  assert.match(generator, /setGeneratedInput\(\(event\.result as ArticleResult\)\.normalizedInput \|\| requestInput\)/);
-  assert.match(route, /normalizedInput: effectiveInput/);
+  assert.match(generator, /result\.normalizedInput \|\| requestInput/);
+  assert.match(route, /normalizedInput: gateInput/);
   assert.match(generator, /validateGeneratedArticle\(result\.title, result\.articleMarkdown, generatedInput, result\.metaDescription \|\| ''\)/);
   assert.match(generator, /setFactReviewConfirmed\(false\)/);
   assert.match(generator, /!factReviewConfirmed/);

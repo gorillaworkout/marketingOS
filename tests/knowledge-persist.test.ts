@@ -281,7 +281,7 @@ test('approve, research, and generator routes persist and read knowledge', () =>
   assert.match(market, /persistKnowledgeQuietly/);
   assert.match(market, /follow the candidate evidence contract/i);
   assert.match(article, /fetchKnowledgeContext\(/);
-  assert.match(article, /fetchStyleContext\(auth\.id, 'article-market-news'\)/);
+  assert.match(article, /fetchStyleContext\(userId, 'article-market-news'\)/);
   assert.match(article, /persistKnowledgeQuietly/);
   assert.match(save, /persistKnowledgeEntry/);
   assert.match(save, /updateStylePreferences: false/);

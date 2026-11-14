@@ -14,7 +14,7 @@ CI on every pull request runs `npx tsx --test tests/*.test.ts` against Postgres 
 | Social Post v2 | Brief, hashtags, brand voice, campaigns, competitor reference, caption analyzer (hashtags inside the caption count), key-message paraphrase, verified-claim guard, prompt caps, auth-expiry failover notice | A live Generate click |
 | Video Script v2 | Format prefill, storyboard PDF (`%PDF`) and zip | A live image render |
 | Event Plan v2 | Venue, speakers, quotation parsing, budget totals, and confirmed totals replacing “No public price found” | A live quotation upload in the browser |
-| Market News topics | Symbol map, informational research-fallback notice, and the article stream keepalive | A live article |
+| Market News topics | Symbol map, informational research-fallback notice, expand-in-place for short drafts, citation repair, unsupported product removal, and a pollable article job | A live article |
 | Content Studio v2 | Meta limits, headings, tables, HTML export used for ICA drafts, Dupoin as the default site unless a saved site is chosen | A live draft against the model |
 | SEO Website Audit | Crawl bounds, robots, score, PageSpeed parser, 429 quota stop, private-address and redirect checks | A live crawl of dupoin.co.id |
 | Keyword Gap beta | Buckets, GSC CSV, phrase extraction, provider parsers, stored-query source, Dupoin upload message when ICA is the only synced site, past-run refresh when a job finishes | A live Semrush or DataForSEO call |
