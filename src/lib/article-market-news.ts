@@ -463,13 +463,15 @@ export function normalizeArticleMarketNewsInput(value: unknown, expectedResearch
 function extractNumbers(value: string): string[] {
   const text = value.normalize('NFKC');
   const tokens: string[] = [];
-  for (const match of text.matchAll(/[+-]?\d+(?:[.,]\d+)*(?:%)?/g)) {
+  // "2,73 persen", "2.73 percent" and "2.73 %" are the same claim as "2.73%".
+  for (const match of text.matchAll(/[+-]?\d+(?:[.,]\d+)*(?:\s?%|\s+(?:persen|percent|per cent|pct)(?![\p{L}\p{N}]))?/giu)) {
     let token = match[0];
     // A hyphen glued to a word or digit ("Q3-11", "a-35") is a separator, not a minus sign.
     const before = text[(match.index ?? 0) - 1] || '';
     if (/^[+-]/.test(token) && /[\p{L}\p{N}]/u.test(before)) token = token.slice(1);
-    token = token.replace(/[.,]+$/g, '');
-    if (token) tokens.push(token);
+    const percent = /(?:%|persen|percent|per cent|pct)$/i.test(token);
+    token = token.replace(/\s?%$|\s+(?:persen|percent|per cent|pct)$/i, '').replace(/[.,]+$/g, '');
+    if (token) tokens.push(percent ? `${token}%` : token);
   }
   return tokens;
 }
@@ -479,11 +481,15 @@ function extractNumbers(value: string): string[] {
  * 157,72 ↔ 157.72, 1.234,5 ↔ 1,234.5. Ambiguous 1.234 counts as both 1234 and 1.234.
  */
 function numberValueKeys(token: string): string[] {
+  const percent = token.endsWith('%');
   const raw = token.replace(/^[+-]/, '').replace(/%$/, '');
   const keys = new Set<string>();
   const add = (value: string) => {
     const parsed = Number(value);
-    if (Number.isFinite(parsed)) keys.add(String(parsed));
+    if (!Number.isFinite(parsed)) return;
+    keys.add(String(Number(parsed.toPrecision(12))));
+    // 2.73% is also the fraction 0.0273.
+    if (percent) keys.add(String(Number((parsed / 100).toPrecision(12))));
   };
   const hasDot = raw.includes('.');
   const hasComma = raw.includes(',');
@@ -1217,25 +1223,361 @@ export function repairArticleStructure(title: string, articleMarkdown: string, i
   return { markdown: collapseBlankLines(markdown), repairs };
 }
 
-/** Drop prose sentences that carry a number no source supports, when the draft stays long enough. */
-export function removeUnsupportedNumberSentences(markdown: string, tokens: readonly string[]): { markdown: string; removed: number } {
-  if (!tokens.length) return { markdown, removed: 0 };
+type ProseSentence = { text: string; line: number };
+
+/**
+ * Remove prose sentences (never headings or the Sources list) that match `drop`.
+ * Table rows are removed whole. Returns how many sentences went.
+ */
+function dropProseSentences(markdown: string, drop: (sentence: string) => boolean): { markdown: string; removed: number } {
   const sourcesHeading = findSourcesHeading(markdown);
   const body = sourcesHeading ? markdown.slice(0, sourcesHeading.index) : markdown;
   const tail = sourcesHeading ? markdown.slice(sourcesHeading.index) : '';
-  const patterns = tokens.map(token => new RegExp(`(?<![\\d.,])${token.replace(ESCAPE_REGEX, '\\$&')}(?![\\d])`));
   let removed = 0;
   const lines = body.split('\n').map(line => {
-    if (/^\s*#/.test(line)) return line;
+    if (/^\s*#/.test(line) || !line.trim()) return line;
+    if (/^\s*\|/.test(line)) {
+      if (/^\s*\|[\s|:-]+\|?\s*$/.test(line) || !drop(line)) return line;
+      removed += 1;
+      return '';
+    }
     const parts = line.split(/(?<=[.!?])\s+/);
     const keep = parts.filter(part => {
-      const hit = patterns.some(pattern => pattern.test(stripNonClaimNumbers(part)));
+      const hit = drop(part);
       if (hit) removed += 1;
       return !hit;
     });
-    return keep.join(' ');
+    if (!removed || keep.length === parts.length) return line;
+    const joined = keep.join(' ');
+    // A list marker that lost its whole item leaves nothing behind.
+    return /^\s*(?:[-*+]|\d+[.)])\s*$/.test(joined) ? '' : joined;
   });
-  return { markdown: collapseBlankLines(`${lines.join('\n')}\n\n${tail}`), removed };
+  if (!removed) return { markdown, removed: 0 };
+  return { markdown: collapseBlankLines(tail ? `${lines.join('\n')}\n\n${tail}` : lines.join('\n')), removed };
+}
+
+function proseSentences(markdown: string): ProseSentence[] {
+  const sourcesHeading = findSourcesHeading(markdown);
+  const body = sourcesHeading ? markdown.slice(0, sourcesHeading.index) : markdown;
+  const out: ProseSentence[] = [];
+  body.split('\n').forEach((line, index) => {
+    if (/^\s*#/.test(line) || !line.trim()) return;
+    if (/^\s*\|/.test(line)) {
+      out.push({ text: line, line: index });
+      return;
+    }
+    for (const part of line.split(/(?<=[.!?])\s+/)) if (part.trim()) out.push({ text: part, line: index });
+  });
+  return out;
+}
+
+function claimTokens(sentence: string, input?: ArticleMarketNewsInput): string[] {
+  const text = input ? stripCitationMetadata(sentence, input) : sentence;
+  return extractNumbers(stripNonClaimNumbers(text));
+}
+
+/** Drop prose sentences that carry a number no source supports, when the draft stays long enough. */
+export function removeUnsupportedNumberSentences(markdown: string, tokens: readonly string[], input?: ArticleMarketNewsInput): { markdown: string; removed: number } {
+  if (!tokens.length) return { markdown, removed: 0 };
+  const flagged = new Set(tokens);
+  return dropProseSentences(markdown, sentence => claimTokens(sentence, input).some(token => flagged.has(token)));
+}
+
+/**
+ * Publishers and data providers a weak model likes to cite from memory. A reference to
+ * one that is not in the research list (and not in any source's own text) is unattributed.
+ */
+const REFERENCE_OUTLETS = [
+  'Federal Reserve Economic Data', 'FRED', 'Bloomberg', 'Reuters', 'CNBC Indonesia', 'CNBC', 'Kontan', 'Bisnis.com',
+  'Investing.com', 'MarketWatch', 'Wall Street Journal', 'WSJ', 'Financial Times', 'Yahoo Finance', 'Trading Economics',
+  'TradingEconomics', 'Kitco', 'CME FedWatch', 'Refinitiv', 'FactSet', 'LSEG', "Barron's", 'Forbes', 'Kompas',
+  'Katadata', 'CNN Indonesia', 'Investor Daily', 'Bareksa', 'IDX Channel', 'Bureau of Labor Statistics',
+  'World Gold Council', 'Silver Institute', 'Morningstar', 'Zacks', 'Seeking Alpha',
+];
+
+function compact(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+function sourceHost(url: string): string {
+  try {
+    return new URL(url).hostname.replace(/^www\./, '');
+  } catch {
+    return '';
+  }
+}
+
+function outletPattern(name: string): RegExp {
+  return new RegExp(`(?<![\\p{L}\\p{N}])${name.replace(ESCAPE_REGEX, '\\$&')}(?![\\p{L}\\p{N}])`, 'u');
+}
+
+type OutletResolution = { kind: 'listed' } | { kind: 'via'; source: ArticleSourceInput } | { kind: 'unlisted' };
+
+function resolveOutlet(name: string, input: ArticleMarketNewsInput): OutletResolution {
+  const key = compact(name);
+  for (const source of input.sources) {
+    const outlet = compact(source.outlet);
+    if (outlet && (outlet.includes(key) || key.includes(outlet) || compact(sourceHost(source.url)).includes(key))) return { kind: 'listed' };
+  }
+  const operatorText = [input.keyword, input.angle, ...input.paaQuestions].join('\n');
+  if (outletPattern(name).test(operatorText)) return { kind: 'listed' };
+  const via = input.sources.find(source => outletPattern(name).test(`${source.title}\n${source.verifiedFacts}`));
+  return via ? { kind: 'via', source: via } : { kind: 'unlisted' };
+}
+
+function outletsIn(sentence: string): string[] {
+  const found: string[] = [];
+  let rest = sentence;
+  for (const name of REFERENCE_OUTLETS) {
+    const pattern = outletPattern(name);
+    if (!pattern.test(rest)) continue;
+    found.push(name);
+    rest = rest.replace(new RegExp(pattern.source, 'gu'), ' ');
+  }
+  return found;
+}
+
+/** Outlets named in the prose that no listed source backs. */
+export function unattributedSourceReferences(markdown: string, input: ArticleMarketNewsInput): string[] {
+  const names = new Set<string>();
+  for (const { text } of proseSentences(markdown)) {
+    for (const name of outletsIn(text)) {
+      const resolution = resolveOutlet(name, input);
+      // Quoting an outlet that a listed source reports needs that source on the same sentence.
+      if (resolution.kind === 'unlisted' || (resolution.kind === 'via' && !text.includes(resolution.source.outlet))) names.add(name);
+    }
+  }
+  return [...names];
+}
+
+function sourcesSectionExtras(markdown: string, input: ArticleMarketNewsInput): string[] {
+  const heading = findSourcesHeading(markdown);
+  if (!heading) return [];
+  const urls = new Set(input.sources.map(source => source.url));
+  return markdown.slice(heading.index).split('\n').slice(1).filter(line => {
+    if (!line.trim()) return false;
+    const lineUrls = line.match(/https?:\/\/[^\s)\]]+/g) || [];
+    if (lineUrls.some(url => !urls.has(url.replace(/[.,;]+$/, '')))) return true;
+    return !lineUrls.length && outletsIn(line).some(name => resolveOutlet(name, input).kind === 'unlisted');
+  });
+}
+
+/** Attribute a named outlet inline to the listed source that reports it, or drop the reference. */
+export function repairSourceReferences(markdown: string, input: ArticleMarketNewsInput): { markdown: string; dropped: string[]; attributed: string[] } {
+  const dropped = new Set<string>();
+  const attributed = new Set<string>();
+  let out = dropProseSentences(markdown, sentence => {
+    const unlisted = outletsIn(sentence).filter(name => resolveOutlet(name, input).kind === 'unlisted');
+    unlisted.forEach(name => dropped.add(name));
+    return unlisted.length > 0;
+  }).markdown;
+  // "via": the outlet is quoted by a listed source; cite that source on the sentence.
+  const sourcesHeading = findSourcesHeading(out);
+  const body = sourcesHeading ? out.slice(0, sourcesHeading.index) : out;
+  const tail = sourcesHeading ? out.slice(sourcesHeading.index) : '';
+  const lines = body.split('\n').map(line => {
+    if (/^\s*[#|]/.test(line)) return line;
+    return line.split(/(?<=[.!?])(\s+)/).map(part => {
+      for (const name of outletsIn(part)) {
+        const resolution = resolveOutlet(name, input);
+        if (resolution.kind !== 'via' || part.includes(resolution.source.outlet)) continue;
+        attributed.add(name);
+        const note = citationParenthetical(resolution.source);
+        return /[.!?]$/.test(part.trim()) ? part.replace(/([.!?])(\s*)$/, ` ${note}$1$2`) : `${part} ${note}`;
+      }
+      return part;
+    }).join('');
+  });
+  out = `${lines.join('\n')}${tail}`;
+  // The Sources list only names the research list.
+  const extras = new Set(sourcesSectionExtras(out, input));
+  if (extras.size) {
+    const heading = findSourcesHeading(out)!;
+    const head = out.slice(0, heading.index);
+    const section = out.slice(heading.index).split('\n').filter(line => !extras.has(line));
+    extras.forEach(line => outletsIn(line).forEach(name => dropped.add(name)));
+    out = `${head}${section.join('\n')}`;
+    if (!dropped.size) dropped.add('unlisted Sources entry');
+  }
+  return { markdown: collapseBlankLines(out), dropped: [...dropped], attributed: [...attributed] };
+}
+
+/** Company metrics a draft must not state twice with different values. */
+const ARTICLE_METRICS: Array<{ name: string; pattern: RegExp }> = [
+  { name: 'EPS', pattern: /(?<![\p{L}])(?:EPS|laba per saham|earnings per share)(?![\p{L}])/iu },
+  { name: 'revenue', pattern: /(?<![\p{L}])(?:pendapatan|revenue|penjualan bersih)(?![\p{L}])/iu },
+  { name: 'net income', pattern: /(?<![\p{L}])(?:laba bersih|net income)(?![\p{L}])/iu },
+];
+const NON_ACTUAL_VALUE = /(?<![\p{L}])(?:estimasi|perkiraan|memperkirakan|diperkirakan|konsensus|ekspektasi|proyeksi|target|estimates?|estimated|forecasts?|expected|expects|consensus|projections?|tahun lalu|sebelumnya|kuartal lalu|year earlier|a year ago|previous|prior)(?![\p{L}])/iu;
+
+function metricValue(sentence: string, pattern: RegExp): { token: string; at: number } | null {
+  const match = pattern.exec(sentence);
+  if (!match) return null;
+  const after = sentence.slice(match.index + match[0].length, match.index + match[0].length + 60);
+  const token = extractNumbers(stripNonClaimNumbers(after)).find(value => !/^(?:19|20)\d{2}$/.test(value));
+  return token ? { token, at: match.index } : null;
+}
+
+function keywordEntities(keyword: string): string[] {
+  return [...new Set(keyword.split(/[\s,+&/]+|\b(?:dan|and|vs)\b/i).map(word => word.trim()).filter(word => word.length >= 3 && !/^\d+$/.test(word)))];
+}
+
+function nearestEntity(sentence: string, at: number, entities: readonly string[]): string {
+  let best = '';
+  let bestDistance = Infinity;
+  const lower = sentence.toLowerCase();
+  for (const entity of entities) {
+    let from = 0;
+    while (true) {
+      const index = lower.indexOf(entity.toLowerCase(), from);
+      if (index < 0) break;
+      const distance = Math.abs(index - at);
+      if (distance < bestDistance) {
+        best = entity;
+        bestDistance = distance;
+      }
+      from = index + 1;
+    }
+  }
+  return best;
+}
+
+export interface MetricConflict {
+  metric: string;
+  entity: string;
+  values: string[];
+  /** Values a source pairs with this metric. */
+  sourced: string[];
+}
+
+function sameValue(a: string, b: string): boolean {
+  const keys = new Set(numberValueKeys(a));
+  return a === b || numberValueKeys(b).some(key => keys.has(key));
+}
+
+function metricConflictEntries(markdown: string, input: ArticleMarketNewsInput) {
+  const entities = keywordEntities(input.keyword);
+  const groups = new Map<string, { metric: string; entity: string; entries: Array<{ sentence: string; token: string }> }>();
+  for (const { text } of proseSentences(markdown)) {
+    if (NON_ACTUAL_VALUE.test(text)) continue;
+    for (const metric of ARTICLE_METRICS) {
+      const value = metricValue(text, metric.pattern);
+      if (!value) continue;
+      const entity = nearestEntity(text, value.at, entities);
+      const key = `${metric.name}|${entity.toLowerCase()}`;
+      const group = groups.get(key) || { metric: metric.name, entity, entries: [] };
+      group.entries.push({ sentence: text, token: value.token });
+      groups.set(key, group);
+    }
+  }
+  const sourceSentences = input.sources.flatMap(source => source.verifiedFacts.split(/(?<=[.!?])\s+/));
+  const conflicts: Array<MetricConflict & { entries: Array<{ sentence: string; token: string }> }> = [];
+  for (const group of groups.values()) {
+    const values: string[] = [];
+    for (const entry of group.entries) if (!values.some(value => sameValue(value, entry.token))) values.push(entry.token);
+    if (values.length < 2) continue;
+    const pattern = ARTICLE_METRICS.find(metric => metric.name === group.metric)!.pattern;
+    const sourced = sourceSentences.map(sentence => metricValue(sentence, pattern)?.token).filter((token): token is string => Boolean(token));
+    if (values.every(value => sourced.some(token => sameValue(token, value)))) continue;
+    conflicts.push({ metric: group.metric, entity: group.entity, values, sourced, entries: group.entries });
+  }
+  return conflicts;
+}
+
+/** The same company metric stated with different values, where not every value is paired with that metric in a source. */
+export function detectConflictingMetricValues(markdown: string, input: ArticleMarketNewsInput): MetricConflict[] {
+  return metricConflictEntries(markdown, input).map(({ metric, entity, values, sourced }) => ({ metric, entity, values, sourced }));
+}
+
+/** Keep the value a source pairs with the metric; drop the other sentences, or all of them when none matches. */
+export function resolveConflictingMetricValues(markdown: string, input: ArticleMarketNewsInput): { markdown: string; removed: number } {
+  const drop = new Set<string>();
+  for (const conflict of metricConflictEntries(markdown, input)) {
+    for (const entry of conflict.entries) {
+      if (!conflict.sourced.some(token => sameValue(token, entry.token))) drop.add(entry.sentence);
+    }
+  }
+  if (!drop.size) return { markdown, removed: 0 };
+  return dropProseSentences(markdown, sentence => drop.has(sentence));
+}
+
+function pruneMetaDescription(meta: string, unsupported: readonly string[], input: ArticleMarketNewsInput): string {
+  if (!meta || !unsupported.length) return meta;
+  const flagged = new Set(unsupported);
+  const parts = meta.split(/(?<=[.!?])\s+/);
+  const kept = parts.filter(part => !claimTokens(part, input).some(token => flagged.has(token)));
+  return kept.length && kept.length < parts.length ? kept.join(' ').trim() : meta;
+}
+
+export interface ArticleFinalRepair {
+  markdown: string;
+  metaDescription: string;
+  input: ArticleMarketNewsInput;
+  repairs: string[];
+  validation: ArticleValidationResult;
+}
+
+/**
+ * One deterministic repair pass used everywhere the publication gate runs: before the
+ * route's gate, and before the DOCX download lock on a fresh, restored, or reopened draft.
+ * It drops sentences whose numbers no source supports, attributes or drops outlets that
+ * are not in the research list, resolves conflicting values for the same metric, then
+ * re-runs citation and structure repair. The validator itself stays strict: the repair is
+ * kept only when it leaves the draft with fewer violations (with `requireClean`, only
+ * when it clears the gate, so a reopened or edited draft is never half-rewritten).
+ */
+export function finalizeArticleForPublication(
+  title: string,
+  articleMarkdown: string,
+  input: ArticleMarketNewsInput,
+  metaDescription = '',
+  options: { requireClean?: boolean } = {},
+): ArticleFinalRepair {
+  const original = validateGeneratedArticle(title, articleMarkdown, input, metaDescription);
+  const unchanged: ArticleFinalRepair = { markdown: articleMarkdown, metaDescription, input, repairs: [], validation: original };
+  if (!original.violations.length) return unchanged;
+
+  let markdown = articleMarkdown;
+  let meta = metaDescription;
+  let current = input;
+  const repairs = new Set<string>();
+  for (let pass = 0; pass < 3; pass += 1) {
+    const before = `${markdown}\u0000${meta}\u0000${current.sources.length}`;
+
+    const references = repairSourceReferences(markdown, current);
+    markdown = references.markdown;
+    if (references.dropped.length) repairs.add(`Removed references outside the research list: ${references.dropped.join(', ')}.`);
+    if (references.attributed.length) repairs.add(`Attributed ${references.attributed.join(', ')} to the listed source that reports it.`);
+
+    const conflicts = resolveConflictingMetricValues(markdown, current);
+    markdown = conflicts.markdown;
+    if (conflicts.removed) repairs.add('Resolved conflicting values for the same metric, keeping the one that matches a source.');
+
+    const numbers = validateGeneratedArticle(title, markdown, current, meta);
+    if (numbers.unsupportedNumbers.length) {
+      const pruned = removeUnsupportedNumberSentences(markdown, numbers.unsupportedNumbers, current);
+      markdown = pruned.markdown;
+      const nextMeta = pruneMetaDescription(meta, numbers.unsupportedNumbers, current);
+      if (pruned.removed || nextMeta !== meta) repairs.add(`Removed sentence(s) with numbers not found in the sources: ${numbers.unsupportedNumbers.join(', ')}.`);
+      meta = nextMeta;
+    }
+
+    const citations = repairArticleCitations(markdown, current.sources);
+    markdown = citations.markdown;
+    current = { ...current, sources: citations.sources };
+    if (citations.inserted.length) repairs.add(`Added inline citations for ${citations.inserted.join(', ')}.`);
+    if (citations.dropped.length) repairs.add(`Dropped uncited sources: ${citations.dropped.join(', ')}.`);
+
+    markdown = ensureEndingDupoinAccountCta(markdown);
+    markdown = repairArticleStructure(title, markdown, current).markdown;
+
+    if (`${markdown}\u0000${meta}\u0000${current.sources.length}` === before) break;
+  }
+  const validation = validateGeneratedArticle(title, markdown, current, meta);
+  // A saved or edited draft is only rewritten when the repair fully clears the gate.
+  if (options.requireClean && validation.violations.length > 0) return unchanged;
+  if (validation.violations.length >= original.violations.length && validation.violations.length > 0) return unchanged;
+  return { markdown, metaDescription: meta, input: current, repairs: [...repairs], validation };
 }
 
 export function validateGeneratedArticle(title: string, articleMarkdown: string, input: ArticleMarketNewsInput, metaDescription = ''): ArticleValidationResult {
@@ -1251,6 +1593,9 @@ export function validateGeneratedArticle(title: string, articleMarkdown: string,
   const allowedValues = new Set(allowedTokens.flatMap(numberValueKeys));
   const numericClaimMaterial = stripNonClaimNumbers(stripCitationMetadata(`${title}\n${metaDescription}\n${articleMarkdown}`, input));
   const unsupportedNumbers = [...new Set(extractNumbers(numericClaimMaterial).filter(token => !allowedNumbers.has(token) && !numberValueKeys(token).some(key => allowedValues.has(key))))];
+  const unattributedOutlets = unattributedSourceReferences(articleMarkdown, input);
+  const sourcesExtras = sourcesSectionExtras(articleMarkdown, input);
+  const metricConflicts = detectConflictingMetricValues(articleMarkdown, input);
   const allowedQuoteMaterial = input.sources.map(source => source.verifiedFacts).join('\n');
   const unsupportedQuotes = [...new Set(extractQuotes(`${title}\n${metaDescription}\n${articleMarkdown}`).filter(quote => !allowedQuoteMaterial.includes(quote)))];
   const lowerOutput = normalized(`${title}\n${articleMarkdown}`);
@@ -1301,6 +1646,9 @@ export function validateGeneratedArticle(title: string, articleMarkdown: string,
   if (!qc.dupoinCtaIncluded) violations.push('Final paragraph before Sources must be an imperative Dupoin account-opening CTA.');
   if (!qc.noCompetitorBroker) violations.push(`Competitor broker mention detected: ${brokerMatches.join(', ')}.`);
   if (!qc.allNumbersSourceBacked) violations.push(`Unsupported numeric claims detected: ${unsupportedNumbers.join(', ')}.`);
+  if (unattributedOutlets.length) violations.push(`Sources referenced in the prose lack attribution to the research list: ${unattributedOutlets.join(', ')}. Attribute them to a listed source or remove them.`);
+  if (sourcesExtras.length) violations.push('The Sources section lists references outside the research list.');
+  for (const conflict of metricConflicts) violations.push(`Conflicting values for the same metric: ${[conflict.metric, conflict.entity].filter(Boolean).join(' ')} (${conflict.values.join(' / ')}). Keep only the value that matches a source.`);
   if (!qc.allQuotesSourceBacked) violations.push(`Quotes not found verbatim in verified facts: ${unsupportedQuotes.join(' | ')}.`);
   return { wordCount, qc, violations, unsupportedNumbers, unsupportedQuotes };
 }

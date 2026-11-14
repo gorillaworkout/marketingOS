@@ -1,5 +1,5 @@
 import {
-  validateGeneratedArticle,
+  finalizeArticleForPublication,
   type ArticleMarketNewsInput,
   type ArticleQualityCheck,
   type ArticleSourceInput,
@@ -81,19 +81,19 @@ export function restoreArticleMarketNews(task: ArticleMarketNewsHistoryTask): Re
   const article = asRecord(output.article) || output;
   const input = asRecord(output.input);
   const title = typeof article.title === 'string' ? article.title.trim() : '';
-  const articleMarkdown = typeof article.articleMarkdown === 'string' ? article.articleMarkdown : '';
+  const storedMarkdown = typeof article.articleMarkdown === 'string' ? article.articleMarkdown : '';
   const keyword = typeof input?.keyword === 'string' ? input.keyword : '';
   const researchDate = typeof input?.researchDate === 'string' ? input.researchDate : '';
   const angle = typeof input?.angle === 'string' ? input.angle : '';
 
-  if (!input || !title || !articleMarkdown || !keyword || !researchDate) {
+  if (!input || !title || !storedMarkdown || !keyword || !researchDate) {
     throw new Error('Saved article is incomplete.');
   }
 
   const paaQuestions = Array.isArray(input.paaQuestions)
     ? input.paaQuestions.filter((question): question is string => typeof question === 'string')
     : [];
-  const generatedInput: ArticleMarketNewsInput = {
+  const storedInput: ArticleMarketNewsInput = {
     keyword,
     researchDate,
     angle,
@@ -103,18 +103,29 @@ export function restoreArticleMarketNews(task: ArticleMarketNewsHistoryTask): Re
     noCompetitorBroker: input.noCompetitorBroker === true,
     factsVerified: input.factsVerified === true,
   };
-  const metaDescription = typeof article.metaDescription === 'string' ? article.metaDescription : '';
-  const validation = validateGeneratedArticle(title, articleMarkdown, generatedInput, metaDescription);
+  // Reopened drafts get the same deterministic repair the route runs before its gate,
+  // so a draft saved before a repair existed no longer stays locked for download.
+  const finalized = finalizeArticleForPublication(
+    title,
+    storedMarkdown,
+    storedInput,
+    typeof article.metaDescription === 'string' ? article.metaDescription : '',
+    { requireClean: true },
+  );
+  const articleMarkdown = finalized.markdown;
+  const metaDescription = finalized.metaDescription;
+  const generatedInput = finalized.input;
+  const validation = finalized.validation;
   const storedQc = asRecord(output.qc) as ArticleQualityCheck | null;
 
   return {
     keyword,
     researchDate,
     angle,
-    competitorHeadings: generatedInput.competitorHeadings,
+    competitorHeadings: storedInput.competitorHeadings,
     paaText: paaQuestions.join('\n'),
-    sources: generatedInput.sources,
-    noCompetitorBroker: generatedInput.noCompetitorBroker,
+    sources: storedInput.sources,
+    noCompetitorBroker: storedInput.noCompetitorBroker,
     generatedInput,
     factReviewConfirmed: false,
     result: {
@@ -125,9 +136,9 @@ export function restoreArticleMarketNews(task: ArticleMarketNewsHistoryTask): Re
       sourcesCited: Array.isArray(article.sourcesCited)
         ? article.sourcesCited.filter((item): item is string => typeof item === 'string')
         : undefined,
-      wordCount: Number(article.wordCount) || validation.wordCount,
+      wordCount: finalized.repairs.length ? validation.wordCount : Number(article.wordCount) || validation.wordCount,
       model: typeof output.model === 'string' && output.model ? output.model : 'Unknown',
-      qc: storedQc || validation.qc,
+      qc: finalized.repairs.length ? validation.qc : storedQc || validation.qc,
       historyId: task.id,
       normalizedInput: generatedInput,
     },
