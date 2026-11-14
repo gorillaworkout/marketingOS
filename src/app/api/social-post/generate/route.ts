@@ -2,7 +2,7 @@ import { NextRequest } from 'next/server';
 import { queryOne, queryAll, execute } from '@/lib/database';
 import { requireFeature } from '@/lib/auth';
 import { rateLimit } from '@/lib/rate-limit';
-import { guardGeneratedText } from '@/lib/brand-fact-guard';
+import { guardGeneratedText, mergeBrandFacts } from '@/lib/brand-fact-guard';
 import { generateContent, getSmartSystemPrompt, fetchContextMemory, fetchStyleContext, fetchKnowledgeContext, getUserPreferredModel, runQC, generateDupoinFileName, type BrandGuidelines, type QCResult } from '@/lib/openai';
 import { buildBriefPromptBlock, outputShape, parseSocialPostBrief, type SocialPostBriefInput } from '@/lib/social-post-brief';
 import { getEmbedding } from '@/lib/embeddings';
@@ -406,7 +406,7 @@ Follow the SOP strictly. Return citationIds for every WEB_RESEARCH excerpt you u
             message: '🔍 Running quality checks...',
           })));
 
-          const brandFacts = brandGuidelines?.key_messages || '';
+          const brandFacts = mergeBrandFacts(brandGuidelines?.key_messages);
           const claimWarnings = options.map(opt => {
             const hook = guardGeneratedText(opt.hook, brandFacts);
             const caption = guardGeneratedText(opt.caption, brandFacts);

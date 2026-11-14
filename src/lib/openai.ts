@@ -1,7 +1,7 @@
 import { parseGatewayCompletion } from '@/lib/gateway-response';
 import { IMAGE_PROMPT_SYSTEM } from '@/lib/dupoin-image-prompt';
 import { EVENT_PLAN_GROUNDED_BUDGET_RULES } from '@/lib/event-plan-budget';
-import { BRAND_FACT_RULES } from '@/lib/brand-fact-guard';
+import { BRAND_FACT_RULES, DUPOIN_VERIFIED_FACTS } from '@/lib/brand-fact-guard';
 import { isTerminalProviderError, postChat, explainLlmHttpError } from '@/lib/llm-provider';
 import { authFailoverNotice, isAuthFailureMessage } from '@/lib/llm-auth';
 import { modelDisplayName, runWithModelFallback, type FallbackEvent } from '@/lib/model-fallback';
@@ -1071,6 +1071,9 @@ export function getSystemPrompt(module: string): string {
     'social-post': `You are the senior copywriter at Dupoin Futures Indonesia's marketing team. You sit next to the designer. You know the brand inside out.
 
 The brand is professional but approachable — not stiff corporate, not trying-too-hard casual.
+
+Verified Dupoin facts, use only these exact values: ${DUPOIN_VERIFIED_FACTS}
+Use the BAPPEBTI license only as a compliance footer when a footer is appropriate, never as a slogan or a headline.
 
 ${BRAND_FACT_RULES}
 

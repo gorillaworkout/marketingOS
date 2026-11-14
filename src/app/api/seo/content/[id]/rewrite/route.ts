@@ -37,6 +37,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
   try {
     result = await rewriteSeoDraft(auth.id, {
       keyword: draft.keyword, title: draft.title, metaDescription: draft.meta_description, bodyMarkdown: draft.body_markdown, instruction,
+      siteName: draft.site_name, siteUrl: draft.site_url,
       sop: sop ? sopInstructions(sop) : null,
       subkeywords: parseSubkeywords(draft.subkeywords),
       intent: parseSearchIntent(draft.search_intent),

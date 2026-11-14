@@ -1,4 +1,4 @@
-import { BRAND_FACT_RULES } from '@/lib/brand-fact-guard';
+import { BRAND_FACT_RULES, mergeBrandFacts } from '@/lib/brand-fact-guard';
 import { MAX_KEYWORD_LENGTH, normalizeKeyword } from './keywords';
 import {
   enforceMetaText,
@@ -148,6 +148,8 @@ export function buildDraftPrompt(input: DraftPromptInput): { system: string; use
   lines.push(intentGuidance(input.intent ?? 'informational'));
   if (input.subkeywords?.length) lines.push(`Subkeywords to use naturally in a heading or the body: ${input.subkeywords.join(', ')}.`);
   if (input.includeTable) lines.push('Include at least one Markdown table where a comparison or a set of steps is clearer as a table.');
+  const verified = mergeBrandFacts('', { name: input.siteName, siteUrl: input.siteUrl });
+  if (verified) lines.push('', 'VERIFIED_BRAND_FACTS (use only these exact regulatory values, and only as a compliance footer when a footer is appropriate):', verified);
   lines.push('', 'Write the article now.');
   return { system: SYSTEM, user: lines.join('\n') };
 }
@@ -164,6 +166,8 @@ export interface RewritePromptInput {
   intent?: SearchIntent;
   language?: AudienceLanguage;
   includeTable?: boolean;
+  siteName?: string | null;
+  siteUrl?: string | null;
 }
 
 export function buildRewritePrompt(input: RewritePromptInput): { system: string; user: string } {
@@ -178,6 +182,10 @@ export function buildRewritePrompt(input: RewritePromptInput): { system: string;
     input.bodyMarkdown,
     '',
     'Apply the instruction and return the complete updated article (not only the changed part). Keep facts that are already in the article; do not invent new ones.',
+    ...(() => {
+      const verified = mergeBrandFacts('', { name: input.siteName, siteUrl: input.siteUrl });
+      return verified ? ['', 'VERIFIED_BRAND_FACTS (use only these exact regulatory values):', verified] : [];
+    })(),
     '',
     languageGuidance(input.language ?? 'id'),
     intentGuidance(input.intent ?? 'informational'),

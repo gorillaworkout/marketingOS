@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
-import { guardGeneratedText, BRAND_FACT_RULES } from '../src/lib/brand-fact-guard.ts';
+import { guardGeneratedText, BRAND_FACT_RULES, DUPOIN_VERIFIED_FACTS, mergeBrandFacts } from '../src/lib/brand-fact-guard.ts';
 import { getSmartSystemPrompt, getSystemPrompt, runQC } from '../src/lib/openai.ts';
 import { buildBriefPromptBlock, keyMessagePresent, type SocialPostBriefInput } from '../src/lib/social-post-brief.ts';
 import { buildEventPricingQueries, buildEventPricingFollowUpQueries } from '../src/lib/event-plan-pricing.ts';
@@ -22,21 +22,36 @@ const brief = (keyMessage: string): SocialPostBriefInput => ({
   keyMessage,
 });
 
-test('unverified licenses and awards are stripped unless they are verbatim brand facts', () => {
-  const invented = 'Dupoin is licensed 423/BAPPEBTI/SI/VII/2004. MOST TRUSTED BROKER CNN 2025. Trade with a plan.';
-  const stripped = guardGeneratedText(invented, '');
-  assert.doesNotMatch(stripped.text, /423\/BAPPEBTI/);
-  assert.doesNotMatch(stripped.text, /MOST TRUSTED|CNN 2025/i);
-  assert.match(stripped.text, /Trade with a plan/);
-  assert.ok(stripped.warnings.length > 0);
+test('the real Dupoin license is kept and a wrong number or award is stripped', () => {
+  const facts = mergeBrandFacts('fast execution');
+  assert.match(facts, /423\/BAPPEBTI\/SI\/VII\/2004/);
+  assert.match(facts, /SPAB-064\/BBJ\/04\/04/);
+  assert.match(facts, /05\/AK-KBI\/PN\/V\/2024/);
+  assert.match(facts, /0013\/ASPEBTINDO\/ANG-B\/05\/2024/);
+  assert.match(facts, /824 153 24006/);
+  assert.match(facts, /fast execution/);
+  assert.doesNotMatch(DUPOIN_VERIFIED_FACTS, /\bOJK\b/);
+  assert.doesNotMatch(DUPOIN_VERIFIED_FACTS, /\bBI\b/);
 
-  const allowed = guardGeneratedText('Our registration is 423/BAPPEBTI/SI/VII/2004. MOST TRUSTED BROKER CNN 2025.', '423/BAPPEBTI/SI/VII/2004');
-  assert.match(allowed.text, /423\/BAPPEBTI\/SI\/VII\/2004/);
-  assert.doesNotMatch(allowed.text, /MOST TRUSTED/i);
+  const kept = guardGeneratedText('PT Dupoin Futures Indonesia is regulated by BAPPEBTI, license 423/BAPPEBTI/SI/VII/2004. MOST TRUSTED BROKER CNN 2025. Trade with a plan.', facts);
+  assert.match(kept.text, /423\/BAPPEBTI\/SI\/VII\/2004/);
+  assert.doesNotMatch(kept.text, /MOST TRUSTED|CNN 2025/i);
+  assert.match(kept.text, /Trade with a plan/);
+  assert.ok(kept.warnings.length > 0);
+
+  const wrong = guardGeneratedText('Licensed 999/BAPPEBTI/SI/VII/2004. Trade with a plan.', facts);
+  assert.doesNotMatch(wrong.text, /999\/BAPPEBTI/);
+  assert.match(wrong.text, /Trade with a plan/);
+
+  const ica = mergeBrandFacts('cheer facts', { name: 'ICA Cheerleading', siteUrl: 'https://indonesiancheer.org/' });
+  assert.equal(ica, 'cheer facts');
+  assert.doesNotMatch(guardGeneratedText('License 423/BAPPEBTI/SI/VII/2004.', ica).text, /423\/BAPPEBTI/);
 
   assert.match(BRAND_FACT_RULES, /VERIFIED_BRAND_FACTS/);
   assert.match(BRAND_FACT_RULES, /demo account|risk-management|webinar/i);
-  assert.doesNotMatch(getSystemPrompt('social-post'), /423\/BAPPEBTI/);
+  assert.match(getSystemPrompt('social-post'), /423\/BAPPEBTI\/SI\/VII\/2004/);
+  assert.match(getSystemPrompt('social-post'), /compliance footer/i);
+  assert.match(getSystemPrompt('social-post'), /never as a slogan/i);
   assert.match(getSmartSystemPrompt('social-post'), /VERIFIED_BRAND_FACTS/);
   assert.match(getSystemPrompt('video-script'), /VERIFIED_BRAND_FACTS/);
   assert.match(getSystemPrompt('event-plan'), /VERIFIED_BRAND_FACTS/);

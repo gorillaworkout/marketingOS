@@ -3,6 +3,34 @@
  * Safe to import from the browser. No database and no network.
  */
 
+/** Confirmed on the BAPPEBTI register and dupoin.co.id/about-us/licenses. No OJK or BI number: those public sources disagree. */
+export const DUPOIN_VERIFIED_FACTS = [
+  'PT Dupoin Futures Indonesia is regulated by BAPPEBTI, license 423/BAPPEBTI/SI/VII/2004.',
+  'JFX membership SPAB-064/BBJ/04/04.',
+  'KBI membership 05/AK-KBI/PN/V/2024.',
+  'ASPEBTINDO 0013/ASPEBTINDO/ANG-B/05/2024.',
+  'ISO/IEC 27001:2022 certificate 824 153 24006.',
+].join(' ');
+
+export function usesDupoinFacts(site?: { name?: string | null; siteUrl?: string | null; site_url?: string | null } | null): boolean {
+  if (!site) return true;
+  const name = (site.name || '').trim().toLowerCase();
+  const url = `${site.siteUrl || ''} ${site.site_url || ''}`.toLowerCase();
+  if (url.includes('indonesiancheer')) return false;
+  if (name === 'ica' || name.startsWith('ica ') || name.includes('ica cheer')) return false;
+  return true;
+}
+
+/** Brand-guideline key messages plus the built-in Dupoin register, except on the ICA site. */
+export function mergeBrandFacts(
+  keyMessages?: string | null,
+  site?: { name?: string | null; siteUrl?: string | null; site_url?: string | null } | null,
+): string {
+  const extra = (keyMessages || '').trim();
+  if (!usesDupoinFacts(site)) return extra;
+  return [DUPOIN_VERIFIED_FACTS, extra].filter(Boolean).join('\n');
+}
+
 export const BRAND_FACT_RULES = `VERIFIED_BRAND_FACTS
 Never state a license number, regulator registration, award, ranking, statistic, or product feature unless that exact text appears in VERIFIED_BRAND_FACTS.
 If VERIFIED_BRAND_FACTS is empty, omit them. Do not invent BAPPEBTI, OJK, or CoFTRA numbers, a "most trusted" or "terbaik" award, risk-management tools, a demo account, mentors, live sessions, "terbukti efektif", a personal anecdote, or a webinar or event the brief did not name.

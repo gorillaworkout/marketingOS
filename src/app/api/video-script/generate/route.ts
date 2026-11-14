@@ -2,7 +2,7 @@ import { NextRequest } from 'next/server';
 import { queryOne, queryAll, execute } from '@/lib/database';
 import { requireFeature } from '@/lib/auth';
 import { rateLimit } from '@/lib/rate-limit';
-import { guardGeneratedText } from '@/lib/brand-fact-guard';
+import { guardGeneratedText, mergeBrandFacts } from '@/lib/brand-fact-guard';
 import { generateContent, getSmartSystemPrompt, fetchContextMemory, fetchStyleContext, fetchKnowledgeContext, getUserPreferredModel, type BrandGuidelines } from '@/lib/openai';
 import { persistKnowledgeQuietly, summarizeVideoScriptKnowledge } from '@/lib/knowledge-persist';
 import { runVideoScriptQc } from '@/lib/video-script-qc';
@@ -199,7 +199,7 @@ Output JSON format with: { "hook": "the opening hook that stops the scroll", "ho
             message: 'All 3 previews generated.',
           });
 
-          const brandFacts = brandGuidelines?.key_messages || '';
+          const brandFacts = mergeBrandFacts(brandGuidelines?.key_messages);
           const keep = (value: string) => guardGeneratedText(value, brandFacts).text;
           const options = optionResults.map(({ variant, result }) => {
             const scriptData = parseModelJson(result);
@@ -422,7 +422,7 @@ The fullScript must be the complete, detailed script with scene descriptions, di
 
           const scriptData = parseModelJson(result.content);
           const citations = resolveVideoScriptCitations(scriptData, webResearch.sources);
-          const brandFacts = brandGuidelines?.key_messages || '';
+          const brandFacts = mergeBrandFacts(brandGuidelines?.key_messages);
           const keep = (value: string) => guardGeneratedText(value, brandFacts).text;
           const finalOption = {
             style: style,
