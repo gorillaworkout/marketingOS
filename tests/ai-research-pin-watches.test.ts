@@ -205,6 +205,7 @@ test('pin and watch wiring reuses knowledge writes and documents the daily check
   const save = read('src/app/api/knowledge/save/route.ts');
   const pinSave = read('src/lib/knowledge-pin-save.ts');
   const auth = read('src/lib/auth.ts');
+  const adminAccess = read('src/lib/admin-api-access.ts');
   const watches = read('src/app/api/ai-research/watches/route.ts');
   const run = read('src/app/api/ai-research/watches/run/route.ts');
   const migration = read('db/migrations/017_ai_research_knowledge_watches.sql');
@@ -216,7 +217,8 @@ test('pin and watch wiring reuses knowledge writes and documents the daily check
   const script = read('scripts/run-ai-research-watches.ts');
   const pkg = read('package.json');
 
-  assert.match(auth, /\/api\/knowledge\/save/);
+  assert.match(auth, /requiresAdminApiAccess/);
+  assert.match(adminAccess, /\/api\/knowledge\/save/);
   assert.match(save, /getSession\(request\)/);
   assert.match(save, /savePinnedResearchFact/);
   assert.match(save, /generateContent/);
