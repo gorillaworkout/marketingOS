@@ -539,6 +539,7 @@ export default function SocialPostPage() {
       shots: option.shotList || [],
       platform,
       audience: targetAudience,
+      contentType,
     }));
     router.push(videoScriptHref());
   };

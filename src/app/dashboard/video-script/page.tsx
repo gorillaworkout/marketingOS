@@ -16,6 +16,8 @@ import {
 import InlineModelSelector from '@/components/InlineModelSelector';
 import { AI_RESEARCH_HANDOFF_QUERY, AI_RESEARCH_HANDOFF_VALUE, readAiResearchHandoff } from '@/lib/ai-research-handoff';
 import { VIDEO_HANDOFF_QUERY, VIDEO_HANDOFF_STORAGE_KEY, VIDEO_HANDOFF_VALUE } from '@/lib/social-post-brief';
+import { parseVideoFormat, readStoredStoryboard, suggestVideoFormat, VIDEO_FORMAT_LABELS, VIDEO_FORMATS, type StoryboardScene, type VideoFormat } from '@/lib/video-script-format';
+import { VideoStoryboard } from '@/components/video-storyboard';
 import { TASK_EDITOR_QUERY, fetchOwnHistoryTask } from '@/lib/history-editor';
 import type { QCResult } from '@/lib/openai';
 import { readStoredVideoScriptQc } from '@/lib/video-script-qc';
@@ -203,6 +205,8 @@ export function VideoScriptQcPanel({ result }: { result?: QCResult | null }) {
 
 export default function VideoScriptPage() {
   const [event, setEvent] = useState('');
+  const [videoFormat, setVideoFormat] = useState<VideoFormat>('talking-head');
+  const [storyboardScenes, setStoryboardScenes] = useState<StoryboardScene[]>([]);
   const [platform, setPlatform] = useState('Instagram Reels');
   const [duration, setDuration] = useState('30-45 seconds');
   const [targetAudience, setTargetAudience] = useState('');
@@ -240,12 +244,13 @@ export default function VideoScriptPage() {
     if (template) setEvent(template);
     if (params.get(VIDEO_HANDOFF_QUERY) === VIDEO_HANDOFF_VALUE) {
       try {
-        const saved = JSON.parse(sessionStorage.getItem(VIDEO_HANDOFF_STORAGE_KEY) || 'null') as { brief?: string; hook?: string; shots?: string[]; platform?: string; audience?: string } | null;
+        const saved = JSON.parse(sessionStorage.getItem(VIDEO_HANDOFF_STORAGE_KEY) || 'null') as { brief?: string; hook?: string; shots?: string[]; platform?: string; audience?: string; contentType?: string } | null;
         if (saved?.brief) setEvent(saved.brief);
         const shotText = [saved?.hook, ...(saved?.shots || [])].filter(Boolean).join('\n');
         if (shotText) setReferences(shotText);
         if (saved?.audience) setTargetAudience(saved.audience);
         if (saved?.platform) setPlatform(saved.platform);
+        setVideoFormat(suggestVideoFormat({ brief: saved?.brief, shots: saved?.shots, contentType: saved?.contentType }));
       } catch { /* ignore a bad handoff */ }
       return;
     }
@@ -331,7 +336,7 @@ export default function VideoScriptPage() {
       const res = await fetch('/api/video-script/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mode: 'preview', event, platform, duration, targetAudience, references }),
+        body: JSON.stringify({ mode: 'preview', event, platform, duration, targetAudience, references, format: videoFormat }),
         signal: controller.signal,
       });
 
@@ -459,6 +464,7 @@ export default function VideoScriptPage() {
           duration,
           targetAudience,
           references,
+          format: videoFormat,
           selectedOption: selected,
           editedPrompt,
           style: selected.style,
@@ -631,6 +637,9 @@ export default function VideoScriptPage() {
       if (typeof raw.duration === 'string' && raw.duration) setDuration(raw.duration);
       if (typeof raw.targetAudience === 'string' && raw.targetAudience) setTargetAudience(raw.targetAudience);
       if (typeof raw.references === 'string') setReferences(raw.references);
+      const storedFormat = parseVideoFormat(raw.format);
+      setVideoFormat(storedFormat || suggestVideoFormat({ brief: typeof raw.event === 'string' ? raw.event : script.brief }));
+      setStoryboardScenes(readStoredStoryboard(raw.storyboard)?.scenes || []);
       setWebResearch(readStoredVideoScriptResearch(raw.webResearch));
       setQcResults(readStoredVideoScriptQc(raw.qcResults));
     } catch {
@@ -702,6 +711,8 @@ export default function VideoScriptPage() {
     setWebResearch(null);
     setQcResults([]);
     setResearchHandoff(false);
+    setStoryboardScenes([]);
+    setVideoFormat('talking-head');
   };
 
   return (
@@ -748,6 +759,11 @@ export default function VideoScriptPage() {
                 </p>
               )}
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <FormField label="Video format" required>
+                  <Select data-testid="video-script-format" value={videoFormat} onChange={event => setVideoFormat(event.target.value as VideoFormat)} required>
+                    {VIDEO_FORMATS.map(format => <option key={format} value={format}>{VIDEO_FORMAT_LABELS[format]}</option>)}
+                  </Select>
+                </FormField>
                 <FormField label="Platform">
                   <Select value={platform} onChange={e => setPlatform(e.target.value)}>
                     <option>Instagram Reels</option><option>TikTok</option><option>YouTube Shorts</option><option>YouTube</option>
@@ -1102,6 +1118,17 @@ export default function VideoScriptPage() {
                   {savingKnowledge ? 'Saving…' : knowledgeSaved ? 'Saved to Knowledge' : 'Save to Knowledge'}
                 </Button>
               </div>
+              {fullScriptOption.fullScript && (
+                <VideoStoryboard
+                  key={taskId || 'draft'}
+                  taskId={taskId}
+                  fullScript={fullScriptOption.fullScript}
+                  format={videoFormat}
+                  platform={platform}
+                  brief={event}
+                  initialScenes={storyboardScenes}
+                />
+              )}
             </div>
           )}
 
