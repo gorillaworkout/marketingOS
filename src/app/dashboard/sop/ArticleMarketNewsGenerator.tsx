@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { jakartaDate, validateGeneratedArticle, type ArticleMarketNewsInput, type ArticleQualityCheck } from '@/lib/article-market-news';
+import { finalizeArticleForPublication, jakartaDate, validateGeneratedArticle, type ArticleMarketNewsInput, type ArticleQualityCheck } from '@/lib/article-market-news';
 import { filterMarketNewsTopics, groupMarketNewsTopics, marketNewsCatalogNotice, topicsInKeyword } from '@/lib/market-news-topics';
 import { articleDocxFilename, buildArticleDocxBlob } from '@/lib/article-market-news-docx';
 import {
@@ -40,6 +40,20 @@ interface ArticleResult {
   historyId?: string;
   normalizedInput?: ArticleMarketNewsInput;
   fallbackLabel?: string | null;
+}
+
+/**
+ * The DOCX download lock runs the same deterministic repair as the route's publication
+ * gate, so a draft is never locked for something the gate would have repaired.
+ */
+function finalizeArticleResult(result: ArticleResult, input: ArticleMarketNewsInput): { result: ArticleResult; input: ArticleMarketNewsInput; repairs: string[] } {
+  const finalized = finalizeArticleForPublication(result.title, result.articleMarkdown, input, result.metaDescription || '', { requireClean: true });
+  if (!finalized.repairs.length) return { result, input, repairs: [] };
+  return {
+    result: { ...result, articleMarkdown: finalized.markdown, metaDescription: finalized.metaDescription, wordCount: finalized.validation.wordCount, qc: finalized.validation.qc, normalizedInput: finalized.input },
+    input: finalized.input,
+    repairs: finalized.repairs,
+  };
 }
 
 const emptySource = (): SourceForm => ({ outlet: '', title: '', url: '', publishedAt: '', verifiedFacts: '' });
@@ -255,8 +269,9 @@ export default function ArticleMarketNewsGenerator() {
       let buffer = '';
       let completed = false;
       const applyResult = (result: ArticleResult) => {
-        setResult(result);
-        setGeneratedInput(result.normalizedInput || requestInput);
+        const finalized = finalizeArticleResult(result, result.normalizedInput || requestInput);
+        setResult(finalized.result);
+        setGeneratedInput(finalized.input);
         void fetchRecent();
         completed = true;
       };
@@ -284,8 +299,9 @@ export default function ArticleMarketNewsGenerator() {
         setProgress('The connection dropped. Reattaching to the server job…');
         try {
           const recovered = await pollArticleJob(jobId, result => {
-            setResult(result);
-            setGeneratedInput(result.normalizedInput || requestInput);
+            const finalized = finalizeArticleResult(result, result.normalizedInput || requestInput);
+            setResult(finalized.result);
+            setGeneratedInput(finalized.input);
             void fetchRecent();
           }, setProgress);
           if (recovered) return;
@@ -298,6 +314,20 @@ export default function ArticleMarketNewsGenerator() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const repairDraft = () => {
+    if (!result || !generatedInput) return;
+    const finalized = finalizeArticleResult(result, generatedInput);
+    if (!finalized.repairs.length) {
+      setError('Automatic repair could not clear the publication gate. Revise the flagged sentences manually.');
+      return;
+    }
+    setResult(finalized.result);
+    setGeneratedInput(finalized.input);
+    setFactReviewConfirmed(false);
+    setError('');
+    setProgress(`Draft repaired: ${finalized.repairs.join(' ')}`);
   };
 
   const downloadDocx = async () => {
@@ -447,7 +477,7 @@ export default function ArticleMarketNewsGenerator() {
 
       {result && (
         <div className="mt-7 space-y-5 border-t border-[var(--mos-border)] pt-6">
-          <Toolbar><div><StatusBadge tone="success" dot>Draft generated</StatusBadge><h3 className="mt-2 text-base font-semibold text-white">{result.title}</h3><p className="mt-1 text-xs text-[var(--mos-text-muted)]">Model: {result.model} · {currentWordCount} words</p></div><Button variant="primary" onClick={downloadDocx} disabled={!currentValidation || currentValidation.violations.length > 0 || !factReviewConfirmed}>Download DOCX</Button></Toolbar>
+          <Toolbar><div><StatusBadge tone="success" dot>Draft generated</StatusBadge><h3 className="mt-2 text-base font-semibold text-white">{result.title}</h3><p className="mt-1 text-xs text-[var(--mos-text-muted)]">Model: {result.model} · {currentWordCount} words</p></div><div className="flex gap-2">{currentValidation && currentValidation.violations.length > 0 ? <Button variant="secondary" onClick={repairDraft}>Repair draft</Button> : null}<Button variant="primary" onClick={downloadDocx} disabled={!currentValidation || currentValidation.violations.length > 0 || !factReviewConfirmed}>Download DOCX</Button></div></Toolbar>
           {generatedInput && generatedInput.sources.length > 0 && (
             <div data-testid="article-research-sources" className="rounded-[var(--mos-radius-panel)] border border-[var(--mos-border)] bg-[var(--mos-raised)] p-4">
               <h4 className="text-sm font-semibold text-white">Research sources</h4>

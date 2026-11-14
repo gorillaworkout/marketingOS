@@ -4,7 +4,7 @@ import { requireFeature } from '@/lib/auth';
 import { rateLimit } from '@/lib/rate-limit';
 import { guardGeneratedText, mergeBrandFacts } from '@/lib/brand-fact-guard';
 import { generateContent, getSmartSystemPrompt, fetchContextMemory, fetchStyleContext, fetchKnowledgeContext, getUserPreferredModel, runQC, generateDupoinFileName, type BrandGuidelines, type QCResult } from '@/lib/openai';
-import { SOCIAL_POST_STORY_RULE, buildBriefPromptBlock, outputShape, parseSocialPostBrief, type SocialPostBriefInput } from '@/lib/social-post-brief';
+import { SOCIAL_POST_STORY_RULE, buildBriefPromptBlock, capSocialPostEmojis, emojiLimit, emojiPromptRule, outputShape, parseSocialPostBrief, type SocialPostBriefInput } from '@/lib/social-post-brief';
 import { getEmbedding } from '@/lib/embeddings';
 import {
   buildBrandVoiceBlock,
@@ -41,7 +41,7 @@ const STYLE_VARIANTS = [
     styleLabel: '🔥 Bold & Catchy',
     instruction: `STYLE: BOLD & CATCHY
 - Strong, attention-grabbing hook with power words
-- Use emojis generously, except LinkedIn which stays at 1-2
+- Use expressive emojis, but never more than the EMOJI LIMIT below (LinkedIn stays at 1-2)
 - Punchy, short sentences
 - Create urgency and FOMO
 - Bold claims use excitement, not invented statistics
@@ -348,6 +348,7 @@ ${campaignBlock}
 ${competitorBlock}
 
 ${variant.instruction}
+- ${emojiPromptRule(platform, variant.style)}
 ${bestExamples}
 ${contextMemory}
 ${knowledgeContext}
@@ -414,6 +415,13 @@ Follow the SOP strictly. Return citationIds for every WEB_RESEARCH excerpt you u
             opt.hook = hook.text;
             opt.caption = caption.text;
             return [...hook.warnings, ...caption.warnings];
+          });
+
+          // Deterministic emoji cap, so QC's per-platform limit holds even when the model overshoots.
+          options.forEach(opt => {
+            const capped = capSocialPostEmojis({ hook: opt.hook, caption: opt.caption }, emojiLimit(platform, opt.style));
+            opt.hook = capped.hook;
+            opt.caption = capped.caption;
           });
 
           const qcResults: QCResult[] = options.map((opt, index) => {

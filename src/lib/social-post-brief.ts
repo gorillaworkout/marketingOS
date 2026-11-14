@@ -80,6 +80,57 @@ export function emojiLimit(platform?: string, style?: string): number {
   return 3;
 }
 
+/**
+ * One user-perceived emoji: a flag pair, a keycap, a tag-sequence flag, or a pictograph
+ * with its variation selector, skin tone, and ZWJ-joined parts. Plain ©, ® and ™ only
+ * count when they carry the emoji variation selector.
+ */
+const EMOJI_PART = String.raw`(?:[\u00A9\u00AE\u2122]\uFE0F|(?![\u00A9\u00AE\u2122])\p{Extended_Pictographic}[\uFE0E\uFE0F]?\p{Emoji_Modifier}?|\p{Emoji_Modifier})`;
+const EMOJI_SEQUENCE_SOURCE = String.raw`\p{Regional_Indicator}{2}|[#*0-9]\uFE0F?\u20E3|${EMOJI_PART}(?:\u200D${EMOJI_PART})*[\u{E0020}-\u{E007F}]*`;
+
+function emojiRegex(): RegExp {
+  return new RegExp(EMOJI_SEQUENCE_SOURCE, 'gu');
+}
+
+export function countEmojis(text: string): number {
+  return (text.match(emojiRegex()) || []).length;
+}
+
+function tidyAfterEmojiRemoval(text: string): string {
+  return text
+    .replace(/[ \t]{2,}/g, ' ')
+    .replace(/[ \t]+([.,!?;:])/g, '$1')
+    .replace(/[ \t]+$/gm, '')
+    .replace(/^[ \t]+/gm, '');
+}
+
+/** Keep the first `max` emojis and remove the rest, so QC's emoji cap holds. */
+export function trimEmojis(text: string, max: number, alreadyKept = 0): { text: string; removed: number } {
+  let seen = alreadyKept;
+  let removed = 0;
+  const out = text.replace(emojiRegex(), match => {
+    seen += 1;
+    if (seen <= max) return match;
+    removed += 1;
+    return '';
+  });
+  return { text: removed ? tidyAfterEmojiRemoval(out) : text, removed };
+}
+
+/** Cap emojis across hook then caption: QC counts both together. */
+export function capSocialPostEmojis(option: { hook: string; caption: string }, max: number): { hook: string; caption: string; removed: number } {
+  const hook = trimEmojis(option.hook, max);
+  const kept = Math.min(countEmojis(option.hook), max);
+  const caption = trimEmojis(option.caption, max, kept);
+  return { hook: hook.text, caption: caption.text, removed: hook.removed + caption.removed };
+}
+
+/** Prompt line that states the same cap QC enforces. */
+export function emojiPromptRule(platform?: string, style?: string): string {
+  const max = emojiLimit(platform, style);
+  return `EMOJI LIMIT: use at most ${max} emojis in total across the hook and caption (a flag, skin-tone, or joined emoji counts as one). Extra emojis are removed automatically.`;
+}
+
 export function platformOptimization(platform?: string): string {
   const key = platformKey(platform);
   const range = hashtagRange(platform);

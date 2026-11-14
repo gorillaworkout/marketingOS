@@ -5,7 +5,7 @@ import { BRAND_FACT_RULES, DUPOIN_VERIFIED_FACTS } from '@/lib/brand-fact-guard'
 import { isTerminalProviderError, postChat, explainLlmHttpError } from '@/lib/llm-provider';
 import { authFailoverNotice, isAuthFailureMessage } from '@/lib/llm-auth';
 import { modelDisplayName, runWithModelFallback, type FallbackEvent } from '@/lib/model-fallback';
-import { SOCIAL_POST_STORY_RULE, captionUrls, ctaPresent, emojiLimit, extractHashtags, hashtagRange, keyMessagePresent, platformKey, platformOptimization, urlsMatch } from '@/lib/social-post-brief';
+import { SOCIAL_POST_STORY_RULE, captionUrls, countEmojis, ctaPresent, emojiLimit, extractHashtags, hashtagRange, keyMessagePresent, platformKey, platformOptimization, urlsMatch } from '@/lib/social-post-brief';
 import { inventedPromoTokens } from '@/lib/social-post-library';
 import { parseStoredSourceUrls } from '@/lib/knowledge-pin';
 import { logTokenUsage } from '@/lib/token-log';
@@ -972,18 +972,17 @@ export function runQC(
       : `Found: "${foundBanned.join('", "')}” — these violate BAPPEBTI compliance`,
   });
 
-  // 4. Emoji count check (max 3)
-  const emojiRegex = /[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1F1E0}-\u{1F1FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{FE00}-\u{FE0F}\u{1F900}-\u{1F9FF}\u{1FA00}-\u{1FA6F}\u{1FA70}-\u{1FAFF}\u{200D}\u{20E3}\u{E0020}-\u{E007F}]/gu;
-  const emojis = caption.match(emojiRegex) || [];
+  // 4. Emoji count: whole sequences (ZWJ, skin tone, flags count once), capped per platform and style.
+  const emojiCount = countEmojis(caption);
   const maxEmojis = emojiLimit(platform, options?.style);
-  const emojiOk = emojis.length <= maxEmojis;
+  const emojiOk = emojiCount <= maxEmojis;
   checks.push({
     name: 'emoji_count',
     label: 'Emoji Count',
     passed: emojiOk,
     detail: emojiOk
-      ? `${emojis.length} emojis (max ${maxEmojis})`
-      : `${emojis.length} emojis — too many (max ${maxEmojis})`,
+      ? `${emojiCount} emojis (max ${maxEmojis})`
+      : `${emojiCount} emojis — too many (max ${maxEmojis})`,
   });
 
   if (options?.keyMessage?.trim()) {

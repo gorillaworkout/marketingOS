@@ -5,7 +5,7 @@ import { execute } from '@/lib/database';
 import { rateLimit } from '@/lib/rate-limit';
 import { fetchKnowledgeContext, fetchStyleContext, generateContent, getUserPreferredModel } from '@/lib/openai';
 import { persistKnowledgeQuietly, summarizeArticleKnowledge } from '@/lib/knowledge-persist';
-import { ARTICLE_COMPLETION_MAX_TOKENS, MIN_DATED_RESEARCH_SOURCES, articleDraftProtectedPhrases, articleWordCountRepairGuidance, buildArticleExpandPrompt, buildArticleMarketNewsPrompts, countArticleWords, describeArticlePublicationGateFailure, ensureEndingDupoinAccountCta, fitArticleMarkdownWordCount, normalizeArticleMarketNewsInput, parseGeneratedArticle, removeUnsupportedNumberSentences, repairArticleCitations, repairArticleStructure, stripUnsupportedProductNames, strongestAvailableArticleModel, validateGeneratedArticle } from '@/lib/article-market-news';
+import { ARTICLE_COMPLETION_MAX_TOKENS, MIN_DATED_RESEARCH_SOURCES, articleDraftProtectedPhrases, articleWordCountRepairGuidance, buildArticleExpandPrompt, buildArticleMarketNewsPrompts, countArticleWords, describeArticlePublicationGateFailure, ensureEndingDupoinAccountCta, fitArticleMarkdownWordCount, normalizeArticleMarketNewsInput, parseGeneratedArticle, finalizeArticleForPublication, repairArticleCitations, repairArticleStructure, stripUnsupportedProductNames, strongestAvailableArticleModel, validateGeneratedArticle } from '@/lib/article-market-news';
 import { createArticleJobStore, type ArticleJob } from '@/lib/article-market-news-job';
 import { researchArticleMarketNews } from '@/lib/article-market-news-research';
 import { guardGeneratedText, mergeBrandFacts } from '@/lib/brand-fact-guard';
@@ -202,13 +202,16 @@ async function runArticleJob(
             const structure = repairArticleStructure(title, articleMarkdown, gateInput);
             articleMarkdown = structure.markdown;
             validation = validateGeneratedArticle(title, articleMarkdown, gateInput, metaDescription);
-            if (validation.unsupportedNumbers.length) {
-              const pruned = removeUnsupportedNumberSentences(articleMarkdown, validation.unsupportedNumbers);
-              const prunedValidation = pruned.removed ? validateGeneratedArticle(title, pruned.markdown, gateInput, metaDescription) : null;
-              if (prunedValidation && prunedValidation.violations.length < validation.violations.length) {
-                articleMarkdown = pruned.markdown;
-                validation = prunedValidation;
-                send({ step: 'notice', progress: 88, message: `Removed ${pruned.removed} sentence(s) with numbers not found in the sources.` });
+            if (validation.violations.length) {
+              // Same deterministic repair the DOCX download lock runs: drop unsupported-number
+              // sentences, attribute or drop unlisted outlets, resolve conflicting metric values.
+              const finalized = finalizeArticleForPublication(title, articleMarkdown, gateInput, metaDescription);
+              if (finalized.markdown !== articleMarkdown || finalized.metaDescription !== metaDescription) {
+                articleMarkdown = finalized.markdown;
+                metaDescription = finalized.metaDescription;
+                gateInput = finalized.input;
+                validation = finalized.validation;
+                send({ step: 'notice', progress: 88, message: `Final repair: ${finalized.repairs.join(' ')}` });
               }
             }
             if (structure.repairs.length) send({ step: 'draft', progress: 35 + attempt * 15, message: `Repaired the draft structure: ${structure.repairs.join(' ')}` });
@@ -251,7 +254,7 @@ async function runArticleJob(
         }
 
         const historyId = randomUUID();
-        const result = { ...article, title, articleMarkdown, wordCount: validation.wordCount, qc: validation.qc, usage: generated.usage, model, historyId, normalizedInput: gateInput, fallbackLabel: generated.fallbackLabel || null, productWarnings };
+        const result = { ...article, title, metaDescription, articleMarkdown, wordCount: validation.wordCount, qc: validation.qc, usage: generated.usage, model, historyId, normalizedInput: gateInput, fallbackLabel: generated.fallbackLabel || null, productWarnings };
         await execute(
           'INSERT INTO tasks (id, user_id, type, title, brief, status, output_data) VALUES (?, ?, ?, ?, ?, ?, ?)',
           [historyId, userId, 'article-market-news', `Article Market News: ${title}`, gateInput.angle, 'completed', JSON.stringify({
