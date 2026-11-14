@@ -52,6 +52,7 @@ export type SocialPostGenerateFields = {
   keyMessage?: string;
   reference?: { kind: string; text?: string; url?: string; imageKey?: string } | null;
   campaignId?: string | null;
+  competitorRefIds?: string[];
 };
 
 /** Caption-generation body. Omits `brandGuidelineId` when the picker is None. */
@@ -69,6 +70,7 @@ export function socialPostGenerateRequestBody(fields: SocialPostGenerateFields):
   keyMessage?: string;
   reference?: SocialPostGenerateFields['reference'];
   campaignId?: string;
+  competitorRefIds?: string[];
 } {
   const body: {
     brief: string;
@@ -84,6 +86,7 @@ export function socialPostGenerateRequestBody(fields: SocialPostGenerateFields):
     keyMessage?: string;
     reference?: SocialPostGenerateFields['reference'];
     campaignId?: string;
+    competitorRefIds?: string[];
   } = {
     brief: fields.brief,
     platform: fields.platform,
@@ -101,5 +104,6 @@ export function socialPostGenerateRequestBody(fields: SocialPostGenerateFields):
   if (fields.reference) body.reference = fields.reference;
   const campaignId = fields.campaignId?.trim();
   if (campaignId) body.campaignId = campaignId;
+  if (fields.competitorRefIds && fields.competitorRefIds.length > 0) body.competitorRefIds = fields.competitorRefIds.slice(0, 3);
   return body;
 }

@@ -14,6 +14,7 @@ import {
   type VoiceSample,
 } from '@/lib/social-post-library';
 import { rankCampaignSuggestion } from '@/lib/social-post-campaign-match';
+import { approachInsight, buildCompetitorInsightsBlock, competitorIdsFromBody, parseCompetitorAnalysis } from '@/lib/social-post-competitor';
 import { buildSocialPostImagePromptUserMessage } from '@/lib/dupoin-image-prompt';
 import { DEFAULT_IMAGE_ASPECT_RATIO } from '@/lib/image-aspect-ratio';
 import {
@@ -174,6 +175,25 @@ export async function POST(request: NextRequest) {
     samples: pickVoiceSamples(voiceSamples, platform, generationBrief.contentType),
   });
   const campaignBlock = campaign ? buildCampaignBlock(campaign) : '';
+  const competitorIds = competitorIdsFromBody((payload as { competitorRefIds?: unknown }).competitorRefIds);
+  let competitorBlock = '';
+  try {
+    if (competitorIds.length) {
+      const rows = await queryAll<{ id: string; pasted_text: string | null; analysis: unknown }>(
+        `SELECT id, pasted_text, analysis FROM competitor_references WHERE id IN (${competitorIds.map(() => '?').join(', ')})`,
+        competitorIds,
+      );
+      const byId = new Map(rows.map(row => [row.id, row]));
+      const insights = competitorIds.flatMap(id => {
+        const row = byId.get(id);
+        if (!row?.analysis) return [];
+        return [approachInsight(parseCompetitorAnalysis(row.analysis), row.pasted_text || '')];
+      });
+      competitorBlock = buildCompetitorInsightsBlock(insights);
+    }
+  } catch (error) {
+    console.warn('Competitor insights unavailable:', error);
+  }
 
   // Fetch context memory
   const contextMemory = await fetchContextMemory(userId, 'social-post', 5);
@@ -323,6 +343,7 @@ Goal: ${goal || 'Awareness'}
 ${buildBriefPromptBlock(generationBrief)}
 ${voiceBlock}
 ${campaignBlock}
+${competitorBlock}
 
 ${variant.instruction}
 ${bestExamples}
@@ -463,6 +484,7 @@ Follow the SOP strictly. Return citationIds for every WEB_RESEARCH excerpt you u
               reference: generationBrief.reference,
               brandGuidelineId: brandGuidelineId || null,
               campaignId: selectedCampaignId || null,
+              competitorRefIds: competitorIds,
               platform: platform || 'Instagram',
               targetAudience: targetAudience || '',
               goal: goal || '',
