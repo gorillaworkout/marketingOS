@@ -1,4 +1,5 @@
 import { DEFAULT_EVENT_LOCATION } from './event-plan-budget';
+import { parseContingencyPercent, parseParticipantCount, parseQuotationLines, parseSpeakerNames, type QuotationLine } from './event-plan-quotation';
 
 export const EVENT_PLAN_HISTORY_TYPE = 'event-plan' as const;
 
@@ -18,6 +19,11 @@ export interface RestoredEventPlan {
   budget: string;
   targetDate: string;
   researchLinks: string;
+  venueName: string;
+  participants: number | null;
+  speakers: string[];
+  quotations: QuotationLine[];
+  contingencyPercent: number;
   options: Array<Record<string, unknown>>;
   model?: string;
   historyId: string;
@@ -126,6 +132,11 @@ export function restoreEventPlan(task: EventPlanHistoryTask): RestoredEventPlan 
     budget: restoreBudget(input?.budget),
     targetDate: restoreDate(input?.targetDate),
     researchLinks: restoreLinks(input?.researchUrls),
+    venueName: typeof input?.venueName === 'string' ? input.venueName : '',
+    participants: parseParticipantCount(input?.participants),
+    speakers: parseSpeakerNames(input?.speakers),
+    quotations: parseQuotationLines(input?.quotations),
+    contingencyPercent: parseContingencyPercent(input?.contingencyPercent),
     options,
     ...(model ? { model } : {}),
     historyId: task.id,

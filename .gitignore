@@ -11,6 +11,7 @@ out/
 data/internal-docs/
 data/social-post-references/
 data/competitor-references/
+data/event-plan-quotations/
 data/*.db
 data/*.db-journal
 data/*.db-wal
