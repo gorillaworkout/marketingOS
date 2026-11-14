@@ -11,11 +11,13 @@ import { ContentStatusBadge } from '@/components/seo/ContentStatusBadge';
 import { ACTION_LABELS, type ContentAction, type ContentStatus } from '@/lib/seo/content-status';
 import { diffStats, lineDiff } from '@/lib/seo/diff';
 import { markdownToHtml } from '@/lib/seo/markdown';
+import { headingWarnings, META_DESCRIPTION_MAX, META_TITLE_MAX, parseSubkeywords, subkeywordCoverage } from '@/lib/seo/content-studio';
 
 type Draft = {
   id: string; site_id: string; site_name: string; site_url: string; queue_item_id: string | null; keyword: string; case_study: string | null;
   instructions: string | null; target_page_url: string | null; brand_guideline_name: string | null; sop_id?: string | null; sop_title?: string | null; title: string; slug: string;
   meta_description: string; body_markdown: string; status: ContentStatus; current_version: number; model: string | null;
+  subkeywords?: string | null; search_intent?: string | null; audience_language?: string | null; include_table?: boolean | null;
   fallback_label: string | null; published_url: string | null; published_at: string | null; approved_by_name: string | null;
   approved_at: string | null; created_by_name: string | null; updated_by_name: string | null; created_at: string; updated_at: string;
 };
@@ -74,6 +76,8 @@ export default function ContentEditorPage() {
   const shownCompare = compare && compare.key === compareKey ? compare : null;
   const diff = useMemo(() => (shownCompare?.version && draft ? lineDiff(asText(shownCompare.version), asText(draft)) : null), [shownCompare, draft]);
   const words = form?.bodyMarkdown.trim() ? form.bodyMarkdown.trim().split(/\s+/).length : 0;
+  const headingNotes = form ? headingWarnings(form.bodyMarkdown) : [];
+  const coverage = form && draft ? subkeywordCoverage(form.bodyMarkdown, parseSubkeywords(draft.subkeywords)) : [];
 
   const run = async (label: string, request: () => Promise<{ ok: boolean; status: number; data: Record<string, unknown> & { error?: string } }>, success: string) => {
     setBusy(label); setMessage(null);
@@ -140,6 +144,7 @@ export default function ContentEditorPage() {
             {draft.fallback_label && <StatusBadge tone="warning">{draft.fallback_label}</StatusBadge>}
             · Brand: {draft.brand_guideline_name ?? 'Dupoin Futures (default)'}
             {draft.sop_title && <>· Follows SOP: <Link href="/dashboard/seo/sops" className="text-[var(--mos-accent-soft)] hover:underline">{draft.sop_title}</Link></>}
+            · Intent: {draft.search_intent ?? 'informational'} · Language: {draft.audience_language === 'en' ? 'English' : 'Bahasa Indonesia'}{draft.include_table ? ' · Table requested' : ''}
           </span>
           {draft.approved_by_name && <span>Approved by {draft.approved_by_name} · {formatTime(draft.approved_at)}</span>}
           {draft.published_url && <span>Live at <a href={draft.published_url} target="_blank" rel="noreferrer" className="text-[var(--mos-accent-soft)] hover:underline">{draft.published_url}</a> · {formatTime(draft.published_at)}</span>}
@@ -161,15 +166,15 @@ export default function ContentEditorPage() {
 
     <Panel>
       <div className="grid gap-3">
-        <label className="grid gap-1 text-xs text-[var(--mos-text-muted)]">Title <span className="text-[var(--mos-text-faint)]">{form.title.length}/60 recommended</span>
-          <TextInput value={form.title} onChange={set('title')} maxLength={300} />
+        <label className="grid gap-1 text-xs text-[var(--mos-text-muted)]">Meta title <span className={form.title.length > META_TITLE_MAX ? 'text-red-300' : 'text-[var(--mos-text-faint)]'}>{form.title.length}/{META_TITLE_MAX}</span>
+          <TextInput value={form.title} onChange={set('title')} maxLength={META_TITLE_MAX} />
         </label>
         <div className="grid gap-3 md:grid-cols-2">
           <label className="grid gap-1 text-xs text-[var(--mos-text-muted)]">Slug
             <TextInput value={form.slug} onChange={set('slug')} maxLength={200} />
           </label>
-          <label className="grid gap-1 text-xs text-[var(--mos-text-muted)]">Meta description <span className="text-[var(--mos-text-faint)]">{form.metaDescription.length}/155 recommended</span>
-            <TextInput value={form.metaDescription} onChange={set('metaDescription')} maxLength={500} />
+          <label className="grid gap-1 text-xs text-[var(--mos-text-muted)]">Meta description <span className={form.metaDescription.length > META_DESCRIPTION_MAX ? 'text-red-300' : 'text-[var(--mos-text-faint)]'}>{form.metaDescription.length}/{META_DESCRIPTION_MAX}</span>
+            <TextInput value={form.metaDescription} onChange={set('metaDescription')} maxLength={META_DESCRIPTION_MAX} />
           </label>
         </div>
         <div className="flex items-center justify-between">
@@ -179,9 +184,11 @@ export default function ContentEditorPage() {
             <Button size="sm" variant={preview ? 'primary' : 'secondary'} onClick={() => setPreview(true)}>Preview</Button>
           </div>
         </div>
+        {headingNotes.length > 0 && <ul className="text-xs text-amber-200">{headingNotes.map(note => <li key={note}>{note}</li>)}</ul>}
+        {coverage.length > 0 && <ul className="text-xs text-[var(--mos-text-muted)]">{coverage.map(item => <li key={item.keyword}>{item.keyword}: {item.covered ? (item.inHeading ? 'used in a heading' : 'used in the article') : 'missing'}</li>)}</ul>}
         {preview
           // markdownToHtml escapes all raw HTML and only emits safe tags/links, so this is not an XSS sink.
-          ? <article className="seo-preview max-h-[70vh] overflow-auto rounded-lg border border-[var(--mos-border)] p-5 text-sm leading-6 text-[var(--mos-text-secondary)] [&_a]:text-[var(--mos-accent-soft)] [&_a]:underline [&_h1]:mb-3 [&_h1]:text-2xl [&_h1]:font-semibold [&_h1]:text-white [&_h2]:mb-2 [&_h2]:mt-5 [&_h2]:text-lg [&_h2]:font-semibold [&_h2]:text-white [&_h3]:mb-2 [&_h3]:mt-4 [&_h3]:font-semibold [&_h3]:text-white [&_li]:ml-5 [&_ol]:list-decimal [&_p]:mb-3 [&_ul]:list-disc [&_blockquote]:border-l-2 [&_blockquote]:pl-3" dangerouslySetInnerHTML={{ __html: previewHtml }} />
+          ? <article className="seo-preview max-h-[70vh] overflow-auto rounded-lg border border-[var(--mos-border)] p-5 text-sm leading-6 text-[var(--mos-text-secondary)] [&_a]:text-[var(--mos-accent-soft)] [&_a]:underline [&_h1]:mb-3 [&_h1]:text-2xl [&_h1]:font-semibold [&_h1]:text-white [&_h2]:mb-2 [&_h2]:mt-5 [&_h2]:text-lg [&_h2]:font-semibold [&_h2]:text-white [&_h3]:mb-2 [&_h3]:mt-4 [&_h3]:font-semibold [&_h3]:text-white [&_li]:ml-5 [&_ol]:list-decimal [&_p]:mb-3 [&_ul]:list-disc [&_blockquote]:border-l-2 [&_blockquote]:pl-3 [&_table]:my-3 [&_table]:w-full [&_table]:border-collapse [&_th]:border [&_th]:border-[var(--mos-border)] [&_th]:p-2 [&_td]:border [&_td]:border-[var(--mos-border)] [&_td]:p-2" dangerouslySetInnerHTML={{ __html: previewHtml }} />
           : <TextArea rows={24} value={form.bodyMarkdown} onChange={set('bodyMarkdown')} className="font-mono text-xs leading-5" />}
         <div className="flex flex-wrap items-center gap-2">
           <TextInput value={note} onChange={event => setNote(event.target.value)} placeholder="What changed? (optional, shown in history)" maxLength={500} className="min-w-[240px] flex-1" />

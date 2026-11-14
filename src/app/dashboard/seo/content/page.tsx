@@ -19,7 +19,10 @@ type Guideline = { id: string; brand_name: string };
 type Sop = { id: string; title: string; category: string };
 type Filter = ContentStatus | 'all';
 
-const EMPTY_FORM = { keyword: '', targetPageUrl: '', caseStudy: '', instructions: '', brandGuidelineId: 'default', queueItemId: '', sopId: '' };
+const EMPTY_FORM = {
+  keyword: '', targetPageUrl: '', caseStudy: '', instructions: '', brandGuidelineId: 'default', queueItemId: '', sopId: '',
+  subkeywordDraft: '', subkeywords: [] as string[], intent: 'informational', language: 'id', includeTable: false,
+};
 
 export default function ContentStudioPage() {
   const router = useRouter();
@@ -95,7 +98,7 @@ export default function ContentStudioPage() {
   </Select>;
   const total = Object.values(current?.counts ?? {}).reduce((sum, value) => sum + value, 0);
   const error = sitesError || current?.error || '';
-  const set = (key: keyof typeof EMPTY_FORM) => (event: { target: { value: string } }) => setForm(previous => ({ ...previous, [key]: event.target.value }));
+  const set = (key: 'keyword' | 'targetPageUrl' | 'caseStudy' | 'instructions' | 'brandGuidelineId' | 'queueItemId' | 'sopId' | 'subkeywordDraft' | 'intent' | 'language') => (event: { target: { value: string } }) => setForm(previous => ({ ...previous, [key]: event.target.value }));
 
   return <PageStack>
     <PageHeader eyebrow="SEO OS / Content Studio" title="Content Studio" description="Turn a keyword and a case study into an on-brand article, review it, and track it until it is published." actions={headerActions} />
@@ -120,6 +123,37 @@ export default function ContentStudioPage() {
         </label>
         <label className="grid gap-1 text-xs text-[var(--mos-text-muted)] md:col-span-2">Case study / first-hand material
           <TextArea rows={6} value={form.caseStudy} onChange={set('caseStudy')} placeholder="Real event details, results, numbers, quotes the article can use. The AI will not invent facts beyond this." />
+        </label>
+        <label className="grid gap-1 text-xs text-[var(--mos-text-muted)] md:col-span-2">Subkeywords
+          <div className="flex gap-2">
+            <TextInput value={form.subkeywordDraft} onChange={set('subkeywordDraft')} placeholder="Add a subkeyword" maxLength={40} />
+            <Button size="sm" type="button" onClick={() => {
+              const keyword = form.subkeywordDraft.trim();
+              if (!keyword || form.subkeywords.some(item => item.toLowerCase() === keyword.toLowerCase()) || form.subkeywords.length >= 8) return;
+              setForm(previous => ({ ...previous, subkeywords: [...previous.subkeywords, keyword], subkeywordDraft: '' }));
+            }}>Add</Button>
+          </div>
+          {form.subkeywords.length > 0 && <div className="mt-2 flex flex-wrap gap-2">{form.subkeywords.map(keyword => (
+            <button key={keyword} type="button" className="rounded-full border border-[var(--mos-border)] px-2 py-1" onClick={() => setForm(previous => ({ ...previous, subkeywords: previous.subkeywords.filter(item => item !== keyword) }))}>{keyword} ×</button>
+          ))}</div>}
+        </label>
+        <label className="grid gap-1 text-xs text-[var(--mos-text-muted)]">User intent
+          <Select value={form.intent} onChange={set('intent')}>
+            <option value="informational">Informational</option>
+            <option value="navigational">Navigational</option>
+            <option value="commercial">Commercial</option>
+            <option value="transactional">Transactional</option>
+          </Select>
+        </label>
+        <label className="grid gap-1 text-xs text-[var(--mos-text-muted)]">Audience language
+          <Select value={form.language} onChange={set('language')}>
+            <option value="id">Bahasa Indonesia</option>
+            <option value="en">English</option>
+          </Select>
+        </label>
+        <label className="flex items-center gap-2 text-xs text-[var(--mos-text-muted)]">
+          <input type="checkbox" checked={form.includeTable} onChange={event => setForm(previous => ({ ...previous, includeTable: event.target.checked }))} />
+          Include table
         </label>
         <label className="grid gap-1 text-xs text-[var(--mos-text-muted)]">Extra instructions (optional)
           <TextInput value={form.instructions} onChange={set('instructions')} placeholder="e.g. Bahasa Indonesia, 1200 words, mention registration deadline" />

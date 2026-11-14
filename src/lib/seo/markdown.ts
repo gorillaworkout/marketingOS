@@ -90,6 +90,31 @@ export function markdownToHtml(markdown: string): string {
 
     const bullet = /^[-*+]\s+/;
     const ordered = /^\d+[.)]\s+/;
+    if (trimmed.startsWith('|') && trimmed.endsWith('|')) {
+      flush();
+      const table: string[] = [];
+      while (index < lines.length && lines[index].trim().startsWith('|') && lines[index].trim().endsWith('|')) {
+        table.push(lines[index].trim());
+        index += 1;
+      }
+      index -= 1;
+      const rows = table
+        .filter(row => {
+          const cells = row.slice(1, -1).split('|').map(cell => cell.trim());
+          return !(cells.length && cells.every(cell => /^:?-{3,}:?$/.test(cell)));
+        })
+        .map(row => row.slice(1, -1).split('|').map(cell => cell.trim()));
+      if (rows.length) {
+        const [header, ...body] = rows;
+        const head = `<thead><tr>${header.map(cell => `<th>${inline(cell)}</th>`).join('')}</tr></thead>`;
+        const renderedBody = body.length
+          ? `<tbody>${body.map(row => `<tr>${row.map(cell => `<td>${inline(cell)}</td>`).join('')}</tr>`).join('')}</tbody>`
+          : '';
+        out.push(`<table>${head}${renderedBody}</table>`);
+      }
+      continue;
+    }
+
     if (bullet.test(trimmed) || ordered.test(trimmed)) {
       flush();
       const pattern = bullet.test(trimmed) ? bullet : ordered;
@@ -147,7 +172,7 @@ export function renderHtmlExport(draft: ExportableDraft): string {
     '</head>',
     '<body>',
     '<article>',
-    markdownToHtml(draft.body_markdown),
+    markdownToHtml(draft.body_markdown.match(/^#\s+/m) ? draft.body_markdown : `# ${draft.title}\n\n${draft.body_markdown}`),
     '</article>',
     '</body>',
     '</html>',

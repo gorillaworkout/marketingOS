@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireFeature } from '@/lib/auth';
 import { resolveBrandGuideline, rewriteSeoDraft } from '@/lib/seo/content-ai';
 import { MAX_INSTRUCTIONS_LENGTH } from '@/lib/seo/content-prompt';
+import { parseAudienceLanguage, parseSearchIntent, parseSubkeywords } from '@/lib/seo/content-studio';
 import { editResetsStatus } from '@/lib/seo/content-status';
 import { VersionConflictError, getDraft, saveVersion } from '@/lib/seo/content-store';
 import { getSop } from '@/lib/seo/sop-store';
@@ -37,6 +38,10 @@ export async function POST(request: NextRequest, context: RouteContext) {
     result = await rewriteSeoDraft(auth.id, {
       keyword: draft.keyword, title: draft.title, metaDescription: draft.meta_description, bodyMarkdown: draft.body_markdown, instruction,
       sop: sop ? sopInstructions(sop) : null,
+      subkeywords: parseSubkeywords(draft.subkeywords),
+      intent: parseSearchIntent(draft.search_intent),
+      language: parseAudienceLanguage(draft.audience_language),
+      includeTable: draft.include_table === true,
     }, guideline!);
   } catch (error) {
     console.error('SEO content rewrite failed:', error instanceof Error ? error.message : error);
