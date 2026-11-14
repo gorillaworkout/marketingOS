@@ -70,6 +70,10 @@ export async function POST(request: NextRequest) {
           queueItem?.note ? `Note from SEO OS: ${queueItem.note}` : null,
           sop ? sopInstructions(sop) : null,
         ].filter(Boolean).join('\n\n') || null,
+        subkeywords: parsed.subkeywords,
+        intent: parsed.intent,
+        language: parsed.language,
+        includeTable: parsed.includeTable,
       }, guideline);
       content = { title: draft.title, slug: draft.slug, metaDescription: draft.metaDescription, bodyMarkdown: draft.bodyMarkdown };
       model = draft.model;
@@ -97,6 +101,10 @@ export async function POST(request: NextRequest) {
       fallbackLabel,
       userId: auth.id,
       sopId: sop?.id ?? null,
+      subkeywords: parsed.subkeywords,
+      searchIntent: parsed.intent,
+      audienceLanguage: parsed.language,
+      includeTable: parsed.includeTable,
     });
     return NextResponse.json({ id, model, fallbackLabel }, { status: 201 });
   } catch (error) {

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireFeature } from '@/lib/auth';
-import { MAX_BODY_LENGTH, MAX_META_LENGTH, MAX_SLUG_LENGTH, MAX_TITLE_LENGTH, slugify } from '@/lib/seo/content-prompt';
+import { MAX_BODY_LENGTH, MAX_SLUG_LENGTH, slugify } from '@/lib/seo/content-prompt';
+import { enforceMetaText, META_DESCRIPTION_MAX, META_TITLE_MAX } from '@/lib/seo/content-studio';
 import { availableActions, canApprove, editResetsStatus, isContentAction, transitionStatus } from '@/lib/seo/content-status';
 import { VersionConflictError, changeStatus, getDraft, getVersion, listVersions, saveVersion, type DraftContent } from '@/lib/seo/content-store';
 import { siteRootHost, validateTargetUrl } from '@/lib/seo/keywords';
@@ -26,13 +27,11 @@ export async function GET(request: NextRequest, context: RouteContext) {
 
 function parseContent(body: Record<string, unknown>): DraftContent | { error: string } {
   const field = (key: string) => (typeof body[key] === 'string' ? body[key] as string : '');
-  const title = field('title').trim();
-  const metaDescription = field('metaDescription').trim();
+  const title = enforceMetaText(field('title'), META_TITLE_MAX);
+  const metaDescription = enforceMetaText(field('metaDescription'), META_DESCRIPTION_MAX);
   const bodyMarkdown = field('bodyMarkdown');
   const slug = slugify(field('slug') || title);
   if (!title) return { error: 'Title is required' };
-  if (title.length > MAX_TITLE_LENGTH) return { error: `Title is longer than ${MAX_TITLE_LENGTH} characters` };
-  if (metaDescription.length > MAX_META_LENGTH) return { error: `Meta description is longer than ${MAX_META_LENGTH} characters` };
   if (bodyMarkdown.length > MAX_BODY_LENGTH) return { error: `Article is longer than ${MAX_BODY_LENGTH} characters` };
   if (slug.length > MAX_SLUG_LENGTH) return { error: `Slug is longer than ${MAX_SLUG_LENGTH} characters` };
   return { title, slug, metaDescription, bodyMarkdown };

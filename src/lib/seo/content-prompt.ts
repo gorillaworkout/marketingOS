@@ -1,4 +1,16 @@
 import { MAX_KEYWORD_LENGTH, normalizeKeyword } from './keywords';
+import {
+  enforceMetaText,
+  intentGuidance,
+  languageGuidance,
+  META_DESCRIPTION_MAX,
+  META_TITLE_MAX,
+  parseAudienceLanguage,
+  parseSearchIntent,
+  parseSubkeywords,
+  type AudienceLanguage,
+  type SearchIntent,
+} from './content-studio';
 
 /** Pure request parsing, prompt building and AI-output parsing for Content Studio. */
 export const MAX_CASE_STUDY_LENGTH = 20_000;
@@ -20,6 +32,10 @@ export interface CreateRequest {
   mode: 'ai' | 'blank';
   /** Optional SEO OS SOP whose body is added to the AI instructions. */
   sopId: string | null;
+  subkeywords: string[];
+  intent: SearchIntent;
+  language: AudienceLanguage;
+  includeTable: boolean;
 }
 
 function text(value: unknown, max: number, label: string): string | null | { error: string } {
@@ -49,6 +65,10 @@ export function parseCreateRequest(body: unknown): CreateRequest | { error: stri
     targetPageUrl: typeof input.targetPageUrl === 'string' ? input.targetPageUrl.trim() : '',
     mode: input.mode === 'blank' ? 'blank' : 'ai',
     sopId: typeof input.sopId === 'string' && input.sopId.trim() ? input.sopId.trim() : null,
+    subkeywords: parseSubkeywords(input.subkeywords),
+    intent: parseSearchIntent(input.intent),
+    language: parseAudienceLanguage(input.language),
+    includeTable: input.includeTable === true,
   };
 }
 
@@ -64,18 +84,19 @@ export function slugify(value: string): string {
 }
 
 const OUTPUT_CONTRACT = `Respond with ONLY a JSON object, no code fences:
-{"title": "SEO title, max 60 characters, includes the keyword",
+{"title": "meta title, max ${META_TITLE_MAX} characters, includes the keyword",
  "slug": "url-slug-with-hyphens",
- "meta_description": "max 155 characters, includes the keyword, invites the click",
- "body_markdown": "the full article in Markdown"}`;
+ "meta_description": "max ${META_DESCRIPTION_MAX} characters, includes the keyword, invites the click",
+ "body_markdown": "the full article in Markdown with exactly one H1, then H2 and H3 (H4 only when needed)"}`;
 
 const SYSTEM = `You are a senior SEO content writer. You write helpful, accurate, people-first articles that rank on Google and can be quoted by AI assistants.
 Rules:
 - Match the search intent of the target keyword. Put the keyword in the title, the first 100 words and at least one H2, naturally — never stuff it.
 - Structure: a short intro that answers the query, H2/H3 sections, short paragraphs, lists where they help, and a FAQ section (3-5 questions) near the end.
 - Use the case study as first-hand evidence (experience, specifics, numbers). Never invent facts, statistics, quotes or results that are not in the brief or case study.
-- Do not add an H1 inside body_markdown; the title is the H1.
-- Write in the language the brief asks for; default to the language of the keyword.
+- body_markdown starts with exactly one H1, then H2 and H3. H4 is allowed. Do not skip a heading level and do not use H5 or H6.
+- The JSON title is the meta title and must be ${META_TITLE_MAX} characters or fewer. The meta description must be ${META_DESCRIPTION_MAX} characters or fewer.
+- Write in the language the brief asks for.
 - Body length: 900-1600 words unless the instructions say otherwise.
 ${OUTPUT_CONTRACT}`;
 
@@ -88,6 +109,10 @@ export interface DraftPromptInput {
   opportunityType?: string | null;
   metrics?: { clicks?: number; impressions?: number; position?: number; bestPage?: string } | null;
   instructions?: string | null;
+  subkeywords?: string[];
+  intent?: SearchIntent;
+  language?: AudienceLanguage;
+  includeTable?: boolean;
 }
 
 const OPPORTUNITY_HINTS: Record<string, string> = {
@@ -116,6 +141,10 @@ export function buildDraftPrompt(input: DraftPromptInput): { system: string; use
   if (facts.length) lines.push(`Google Search Console (recent): ${facts.join(', ')}`);
   lines.push('', 'Case study / first-hand material:', input.caseStudy || '(none provided — keep claims general and verifiable)');
   if (input.instructions) lines.push('', `Extra instructions: ${input.instructions}`);
+  lines.push('', languageGuidance(input.language ?? 'id'));
+  lines.push(intentGuidance(input.intent ?? 'informational'));
+  if (input.subkeywords?.length) lines.push(`Subkeywords to use naturally in a heading or the body: ${input.subkeywords.join(', ')}.`);
+  if (input.includeTable) lines.push('Include at least one Markdown table where a comparison or a set of steps is clearer as a table.');
   lines.push('', 'Write the article now.');
   return { system: SYSTEM, user: lines.join('\n') };
 }
@@ -128,6 +157,10 @@ export interface RewritePromptInput {
   instruction: string;
   /** SOP block (see sopInstructions) the article follows, if any. */
   sop?: string | null;
+  subkeywords?: string[];
+  intent?: SearchIntent;
+  language?: AudienceLanguage;
+  includeTable?: boolean;
 }
 
 export function buildRewritePrompt(input: RewritePromptInput): { system: string; user: string } {
@@ -142,6 +175,11 @@ export function buildRewritePrompt(input: RewritePromptInput): { system: string;
     input.bodyMarkdown,
     '',
     'Apply the instruction and return the complete updated article (not only the changed part). Keep facts that are already in the article; do not invent new ones.',
+    '',
+    languageGuidance(input.language ?? 'id'),
+    intentGuidance(input.intent ?? 'informational'),
+    ...(input.subkeywords?.length ? [`Subkeywords to use naturally in a heading or the body: ${input.subkeywords.join(', ')}.`] : []),
+    ...(input.includeTable ? ['Keep at least one Markdown table where a comparison or a set of steps is clearer as a table.'] : []),
   ].join('\n');
   return { system: SYSTEM, user };
 }
@@ -176,11 +214,11 @@ export function parseDraftOutput(content: string, keyword: string): DraftOutput 
     slug = '';
     meta = '';
   }
-  title = (title || keyword).slice(0, MAX_TITLE_LENGTH);
+  title = enforceMetaText(title || keyword, META_TITLE_MAX);
   return {
     title,
     slug: slugify(slug || title) || slugify(keyword),
-    metaDescription: meta.slice(0, MAX_META_LENGTH),
+    metaDescription: enforceMetaText(meta, META_DESCRIPTION_MAX),
     bodyMarkdown: body.slice(0, MAX_BODY_LENGTH),
   };
 }
