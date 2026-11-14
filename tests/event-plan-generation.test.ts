@@ -5,7 +5,7 @@ import { resolve } from 'node:path';
 import { getSmartSystemPrompt, getSystemPrompt } from '../src/lib/openai';
 import {
   EVENT_PLAN_GROUNDED_BUDGET_RULES,
-  NO_PUBLIC_PRICE_NOTE,
+  ESTIMATE_UNAVAILABLE_NOTE,
   buildPreliminaryBudget,
   formatVenueLine,
   normalizeGeneratedBudget,
@@ -21,7 +21,7 @@ function assertQuotePath(item: { notes?: unknown; suggestedVendor?: unknown; ven
   assert.equal(typeof item.suggestedVendor, 'string');
   assert.ok(String(item.suggestedVendor).length > 3, 'suggested vendor must be a concrete name, not blank');
   assert.doesNotMatch(String(item.suggestedVendor), /^vendor$/i);
-  assert.match(String(item.notes), new RegExp(NO_PUBLIC_PRICE_NOTE));
+  assert.match(String(item.notes), new RegExp(ESTIMATE_UNAVAILABLE_NOTE));
   assert.match(String(item.notes), /How to request a quotation/i);
   assert.match(String(item.notes), /Venue\/location/i);
   assert.match(String(item.venue), new RegExp(city, 'i'));
@@ -41,7 +41,7 @@ test('Event Plan client consumes its SSE generator and shows grounded budget sou
   assert.match(page, /Suggested vendor/);
   assert.match(page, /Venue \/ location/);
   assert.match(page, /item\.suggestedVendor/);
-  assert.match(page, /NO_PUBLIC_PRICE_NOTE/);
+  assert.match(page, /missingPriceNote/);
   assert.match(page, /Budget research sources/);
   assert.match(page, /source\.title/);
   assert.match(page, /source\.snippet/);
@@ -61,7 +61,7 @@ test('Event Plan generator researches public prices before writing the budget', 
   assert.match(route, /researchEventPricing/);
   assert.match(route, /formatEventPricingPrompt/);
   assert.match(route, /EVENT_PLAN_GROUNDED_BUDGET_RULES/);
-  assert.match(route, /NO_PUBLIC_PRICE_NOTE/);
+  assert.match(route, /missingPriceNote/);
   assert.doesNotMatch(route, /const budgetMatch =/);
   assert.doesNotMatch(route, /AI estimate — verify with vendor quotation/);
   assert.doesNotMatch(route, /available \* 0\./);
@@ -79,9 +79,9 @@ test('Event Plan prompts require cited public prices and omit invented Rupiah', 
     assert.match(source, /suggestedVendor/);
     assert.match(source, /venue\/location/i);
   }
-  assert.match(systemPrompt, new RegExp(NO_PUBLIC_PRICE_NOTE));
-  assert.match(smartPrompt, new RegExp(NO_PUBLIC_PRICE_NOTE));
-  assert.match(EVENT_PLAN_GROUNDED_BUDGET_RULES, new RegExp(NO_PUBLIC_PRICE_NOTE));
+  assert.match(systemPrompt, new RegExp(ESTIMATE_UNAVAILABLE_NOTE));
+  assert.match(smartPrompt, new RegExp(ESTIMATE_UNAVAILABLE_NOTE));
+  assert.match(EVENT_PLAN_GROUNDED_BUDGET_RULES, new RegExp(ESTIMATE_UNAVAILABLE_NOTE));
   assert.equal(systemPrompt.includes(EVENT_PLAN_GROUNDED_BUDGET_RULES), true);
   assert.match(route, /Never invent a vendor rate, phone number/i);
   assert.match(EVENT_PLAN_GROUNDED_BUDGET_RULES, /Do not invent phone numbers/i);
@@ -142,12 +142,12 @@ test('normalizeGeneratedBudget drops invented prices and keeps a sourced price w
   assert.equal(venue.sourceUrl, 'https://hilton.example/bandung');
   assert.match(String(venue.notes), /https:\/\/hilton\.example\/bandung/);
   assert.match(String(venue.notes), /not a verified quotation/);
-  assert.doesNotMatch(String(venue.notes), new RegExp(NO_PUBLIC_PRICE_NOTE));
+  assert.doesNotMatch(String(venue.notes), new RegExp(ESTIMATE_UNAVAILABLE_NOTE));
   assert.equal(sourced.total, 25_000_000);
   const speaker = (sourced.items as Array<Record<string, unknown>>).find((item) => String(item.category).includes('Speaker'));
   assert.ok(speaker);
   assert.equal(speaker.estimatedCost, null);
-  assert.match(String(speaker.notes), new RegExp(NO_PUBLIC_PRICE_NOTE));
+  assert.match(String(speaker.notes), new RegExp(ESTIMATE_UNAVAILABLE_NOTE));
 
   const empty = normalizeGeneratedBudget({}, undefined, 'Medan');
   assert.equal(empty.grounded, true);

@@ -1,11 +1,11 @@
 import { parseGatewayCompletion } from '@/lib/gateway-response';
 import { IMAGE_PROMPT_SYSTEM } from '@/lib/dupoin-image-prompt';
-import { EVENT_PLAN_GROUNDED_BUDGET_RULES } from '@/lib/event-plan-budget';
+import { EVENT_PLAN_GROUNDED_BUDGET_RULES, ESTIMATE_UNAVAILABLE_NOTE } from '@/lib/event-plan-budget';
 import { BRAND_FACT_RULES, DUPOIN_VERIFIED_FACTS } from '@/lib/brand-fact-guard';
 import { isTerminalProviderError, postChat, explainLlmHttpError } from '@/lib/llm-provider';
 import { authFailoverNotice, isAuthFailureMessage } from '@/lib/llm-auth';
 import { modelDisplayName, runWithModelFallback, type FallbackEvent } from '@/lib/model-fallback';
-import { captionUrls, ctaPresent, emojiLimit, extractHashtags, hashtagRange, keyMessagePresent, platformKey, platformOptimization, urlsMatch } from '@/lib/social-post-brief';
+import { SOCIAL_POST_STORY_RULE, captionUrls, ctaPresent, emojiLimit, extractHashtags, hashtagRange, keyMessagePresent, platformKey, platformOptimization, urlsMatch } from '@/lib/social-post-brief';
 import { inventedPromoTokens } from '@/lib/social-post-library';
 import { parseStoredSourceUrls } from '@/lib/knowledge-pin';
 import { logTokenUsage } from '@/lib/token-log';
@@ -1090,6 +1090,8 @@ How you write:
 
 Tone: seperti teman yang ngerti trading lagi ngasih tau info penting, bukan sales yang ngejar target.
 
+${SOCIAL_POST_STORY_RULE}
+
 Output JSON: { "hook": "...", "caption": "...", "hashtags": ["..."] }`,
 
     'video-script': `You are a senior video scriptwriter at Dupoin Futures Indonesia, specializing in Instagram Reels, TikTok, and YouTube Shorts. You follow the company's SOP strictly.
@@ -1147,7 +1149,7 @@ ${BRAND_FACT_RULES}
 
 Output practical, executable plans. Not marketing fluff.
 
-Output JSON: { "objective": "...", "concept": "...", "theme": "...", "venue": "...", "speakers": ["..."], "budget": { "currency": "IDR", "total": null, "items": [{ "category": "Venue", "estimatedCost": null, "suggestedVendor": "Hotel Indonesia Kempinski Jakarta", "venue": "Hotel Indonesia Kempinski Jakarta, Jakarta", "sourceUrl": null, "notes": "No public price found — request a quotation from the vendor. Venue/location: Hotel Indonesia Kempinski Jakarta, Jakarta. How to request a quotation: contact the sales or events team through the official site." }], "contingency": null }, "timeline": "..." }`,
+Output JSON: { "objective": "...", "concept": "...", "theme": "...", "venue": "...", "speakers": ["..."], "budget": { "currency": "IDR", "total": null, "items": [{ "category": "Venue", "estimatedCost": null, "suggestedVendor": "Hotel Indonesia Kempinski Jakarta", "venue": "Hotel Indonesia Kempinski Jakarta, Jakarta", "sourceUrl": null, "notes": "${ESTIMATE_UNAVAILABLE_NOTE}. Venue/location: Hotel Indonesia Kempinski Jakarta, Jakarta. How to request a quotation: contact the sales or events team through the official site." }], "contingency": null }, "timeline": "..." }`,
 
     'image-prompt': IMAGE_PROMPT_SYSTEM,
   };

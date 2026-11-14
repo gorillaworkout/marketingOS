@@ -1,12 +1,12 @@
 import {
   isBareCityLocation,
-  NO_PUBLIC_PRICE_NOTE,
+  ESTIMATE_UNAVAILABLE_NOTE,
   selectCitedAmount,
   type EventPricingHit,
   type PricingCategory,
 } from './event-plan-pricing';
 
-export { NO_PUBLIC_PRICE_NOTE };
+export { ESTIMATE_UNAVAILABLE_NOTE };
 
 export const DEFAULT_EVENT_LOCATION = 'Jakarta';
 
@@ -15,7 +15,7 @@ export const EVENT_PLAN_GROUNDED_BUDGET_RULES = `Budget grounding (required):
 - Always fill top-level "venue" with the submitted location plus a specific publicly known venue name or shortlist (default Jakarta if empty). Example: "Jakarta — Hotel Indonesia Kempinski Jakarta or Shangri-La Hotel Jakarta".
 - Every budget.items[] line must name suggestedVendor (a concrete public venue or vendor) and venue/location. Never write anonymous "vendor".
 - estimatedCost is an integer Rupiah amount only when that exact number appears in the research excerpts. Cite the source URL in notes.
-- When the excerpts do not contain a price for the line, set estimatedCost to null and include exactly: "${NO_PUBLIC_PRICE_NOTE}".
+- When the excerpts do not contain a price for the line, set estimatedCost to null and include exactly: "${ESTIMATE_UNAVAILABLE_NOTE}".
 - Name how to request a quotation (official website or venue rental form). Do not invent phone numbers, emails, percentage splits, or quotation amounts.
 - A phone or email may be repeated only when it appears in an excerpt, together with that excerpt URL.
 - Do not invent attendance, ROI, or other KPIs as facts. Label a public figure as an estimate.`;
@@ -202,7 +202,7 @@ function lineNotes(input: {
     const listed = input.citedAmounts.map((amount) => formatRupiah(amount)).join(', ');
     return `The source lists more than one figure (${listed}). Request a quotation from the vendor to lock one price. Source: ${input.sourceUrl}. ${place} ${quote}${contacts}`;
   }
-  return `${NO_PUBLIC_PRICE_NOTE}. ${place} ${quote}${contacts}`;
+  return `${ESTIMATE_UNAVAILABLE_NOTE}. ${place} ${quote}${contacts}`;
 }
 
 export function groundEventPlanBudget(input: {

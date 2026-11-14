@@ -4,7 +4,7 @@ import { requireFeature } from '@/lib/auth';
 import { rateLimit } from '@/lib/rate-limit';
 import { guardGeneratedText, mergeBrandFacts } from '@/lib/brand-fact-guard';
 import { generateContent, getSmartSystemPrompt, fetchContextMemory, fetchStyleContext, fetchKnowledgeContext, getUserPreferredModel, runQC, generateDupoinFileName, type BrandGuidelines, type QCResult } from '@/lib/openai';
-import { buildBriefPromptBlock, outputShape, parseSocialPostBrief, type SocialPostBriefInput } from '@/lib/social-post-brief';
+import { SOCIAL_POST_STORY_RULE, buildBriefPromptBlock, outputShape, parseSocialPostBrief, type SocialPostBriefInput } from '@/lib/social-post-brief';
 import { getEmbedding } from '@/lib/embeddings';
 import {
   buildBrandVoiceBlock,
@@ -72,7 +72,8 @@ const STYLE_VARIANTS = [
 - Trendy references and cultural context
 - Surprise twist or unexpected angle
 - Memorable and shareable
-- Do not invent numbers, prices, or competitor facts`,
+- Do not invent numbers, prices, or competitor facts
+- ${SOCIAL_POST_STORY_RULE}`,
     temperature: 0.95,
   },
 ];

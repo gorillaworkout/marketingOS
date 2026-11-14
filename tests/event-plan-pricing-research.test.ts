@@ -5,7 +5,7 @@ import {
   buildEventPricingQueries,
   extractPublicContacts,
   extractPublicRupiahAmounts,
-  NO_PUBLIC_PRICE_NOTE,
+  ESTIMATE_UNAVAILABLE_NOTE,
   redactUnsourcedPrices,
   type EventPricingHit,
 } from '../src/lib/event-plan-pricing';
@@ -39,7 +39,7 @@ test('narrative text keeps a sourced price and redacts an invented one', () => {
   assert.match(sourced, /Rp 40\.000\.000/);
   const invented = redactUnsourcedPrices('Asumsikan sewa Ancol 40 juta dan catering Rp 12.000.000.', [40_000_000]);
   assert.match(invented, /40 juta/);
-  assert.match(invented, new RegExp(NO_PUBLIC_PRICE_NOTE));
+  assert.match(invented, new RegExp(ESTIMATE_UNAVAILABLE_NOTE));
   assert.doesNotMatch(invented, /12\.000\.000/);
 });
 
@@ -78,7 +78,7 @@ test('grounded budget omits invented Rupiah when research hits have no numbers',
   assert.equal(budget.total, null);
   for (const item of budget.items as Array<Record<string, unknown>>) {
     assert.equal(item.estimatedCost, null);
-    assert.match(String(item.notes), new RegExp(NO_PUBLIC_PRICE_NOTE));
+    assert.match(String(item.notes), new RegExp(ESTIMATE_UNAVAILABLE_NOTE));
     assert.match(String(item.notes), /How to request a quotation/);
   }
   assert.match(String((budget.items as Array<Record<string, unknown>>)[0].venue), /Ancol Beach City/);
@@ -128,7 +128,7 @@ test('a single public price is copied onto the matching budget line with its cit
   assert.equal(speaker?.estimatedCost, 15_000_000);
   assert.equal(speaker?.sourceUrl, 'https://speakers.example/fee');
   assert.equal(catering?.estimatedCost, null);
-  assert.match(String(catering?.notes), new RegExp(NO_PUBLIC_PRICE_NOTE));
+  assert.match(String(catering?.notes), new RegExp(ESTIMATE_UNAVAILABLE_NOTE));
   assert.equal(budget.total, 55_000_000);
   assert.doesNotMatch(JSON.stringify(budget), /99000000|99\.000\.000/);
 });
@@ -178,7 +178,7 @@ test('researchEventPricing browses public pages and does not keep an invented pr
     modelBudget: { total: 40_000_000, items: [{ category: 'Venue', estimatedCost: 40_000_000 }] },
   });
   assert.equal((budget.items as Array<{ estimatedCost: unknown }>)[0].estimatedCost, null);
-  assert.match(JSON.stringify(budget), new RegExp(NO_PUBLIC_PRICE_NOTE));
+  assert.match(JSON.stringify(budget), new RegExp(ESTIMATE_UNAVAILABLE_NOTE));
   assert.doesNotMatch(JSON.stringify(budget), /40000000|40\.000\.000/);
   const report = toEventPlanResearch(research);
   assert.equal(report.status, 'researched');

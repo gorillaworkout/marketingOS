@@ -191,6 +191,9 @@ function parseReference(value: unknown): SocialReference | { error: string } | n
   return { kind, text, ...(url ? { url } : {}), ...(imageKey ? { imageKey } : {}) };
 }
 
+/** Creative and humorous copy may tell a story, but never as a real event about a named person. */
+export const SOCIAL_POST_STORY_RULE = 'Stories and jokes: never present an anecdote about a named or initialed person (for example "si A", "Budi", "temanku") as something that really happened. Use only clearly generic or hypothetical framing such as "misalnya…", "bayangin kalau…", or "banyak trader pemula…". No invented testimonials, quotes, or trading results.';
+
 export function toneLine(brief: SocialPostBriefInput): string {
   if (brief.tone === 'custom') return brief.toneCustom;
   if (brief.tone === 'brand-default') return 'Brand default (follow the brand guideline tone)';
@@ -201,6 +204,7 @@ export function buildBriefPromptBlock(brief: SocialPostBriefInput): string {
   const lines = [
     `Content type: ${brief.contentType}`,
     `Tone of voice: ${toneLine(brief)} (use this for word choice; the style variant still sets structure and energy)`,
+    SOCIAL_POST_STORY_RULE,
   ];
   if (brief.keyMessage) {
     lines.push(`Key message: "${brief.keyMessage.slice(0, KEY_MESSAGE_MAX)}" — every option must include this verbatim or as a clear paraphrase. It must appear in the caption, in the hook or the first two lines.`);

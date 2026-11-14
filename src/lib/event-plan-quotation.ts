@@ -3,6 +3,8 @@
  * Safe to import from the browser. No file parsing and no model calls.
  */
 
+import { MISSING_PRICE_SENTENCE, NOT_IN_QUOTATION_NOTE, scrubMissingPriceNotes } from './event-plan-pricing';
+
 export const QUOTATION_FILE_MAX_BYTES = 10 * 1024 * 1024;
 export const QUOTATION_FILE_MAX_COUNT = 5;
 export const QUOTATION_CATEGORIES = ['Venue', 'Speakers', 'Production', 'Catering', 'Promotion', 'Other'] as const;
@@ -130,9 +132,9 @@ export function eventPlanInputBlock(input: {
   return lines.join('\n');
 }
 
-export const NOT_IN_QUOTATION_NOTE = 'Not in quotation — to confirm with vendor';
+export { NOT_IN_QUOTATION_NOTE };
 
-/** Drop estimate rows a quotation already covers, and stop saying "no public price" for the rest. */
+/** Drop estimate rows a quotation already covers, and mark the rest as outside the quotation. */
 export function alignBudgetWithQuotation(budget: Record<string, unknown> | null | undefined, lines: QuotationLine[]): Record<string, unknown> {
   const source = budget || {};
   const items = Array.isArray(source.items) ? source.items : [];
@@ -145,7 +147,7 @@ export function alignBudgetWithQuotation(budget: Record<string, unknown> | null 
     if (covered.has(category) && row.source !== 'quotation') return [];
     if (row.source === 'quotation') return [row];
     const notes = typeof row.notes === 'string' ? row.notes : '';
-    const replaced = notes.replace(/No public price found[^.]*/gi, NOT_IN_QUOTATION_NOTE);
+    const replaced = scrubMissingPriceNotes(notes, true);
     return [{
       ...row,
       notes: replaced.includes(NOT_IN_QUOTATION_NOTE) ? replaced : `${replaced} ${NOT_IN_QUOTATION_NOTE}`.trim(),
@@ -154,12 +156,12 @@ export function alignBudgetWithQuotation(budget: Record<string, unknown> | null 
   return { ...source, items: next };
 }
 
-/** Replace the "no public price" line when a confirmed quotation total exists. */
+/** Replace a missing-price line with the confirmed totals when a quotation exists. */
 export function applyConfirmedQuotationNarrative(text: string, lines: QuotationLine[], contingencyPercent: number): string {
   if (!lines.length) return text;
   const totals = quotationGrandTotal(lines, contingencyPercent);
   const sentence = `Confirmed quotation subtotal IDR ${totals.subtotal.toLocaleString('en-US')}. Contingency ${parseContingencyPercent(contingencyPercent)}% is IDR ${totals.contingency.toLocaleString('en-US')}. Confirmed grand total IDR ${totals.total.toLocaleString('en-US')}.`;
-  const replaced = text.replace(/No public price found[^.]*\./gi, sentence);
+  const replaced = text.replace(MISSING_PRICE_SENTENCE, sentence);
   return /Confirmed quotation subtotal/i.test(replaced) ? replaced : `${replaced.trim()}\n\n${sentence}`.trim();
 }
 

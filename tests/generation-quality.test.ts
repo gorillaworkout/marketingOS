@@ -33,9 +33,11 @@ test('the real Dupoin license is kept and a wrong number or award is stripped', 
   assert.doesNotMatch(DUPOIN_VERIFIED_FACTS, /\bOJK\b/);
   assert.doesNotMatch(DUPOIN_VERIFIED_FACTS, /\bBI\b/);
 
-  const kept = guardGeneratedText('PT Dupoin Futures Indonesia is regulated by BAPPEBTI, license 423/BAPPEBTI/SI/VII/2004. MOST TRUSTED BROKER CNN 2025. Trade with a plan.', facts);
+  // The CNN Indonesia award is real (dupoin.co.id/en/about-us/our-awards); a made-up award is not.
+  const kept = guardGeneratedText('PT Dupoin Futures Indonesia is regulated by BAPPEBTI, license 423/BAPPEBTI/SI/VII/2004. MOST TRUSTED BROKER CNN 2025. Best Broker Forbes 2025. Trade with a plan.', facts);
   assert.match(kept.text, /423\/BAPPEBTI\/SI\/VII\/2004/);
-  assert.doesNotMatch(kept.text, /MOST TRUSTED|CNN 2025/i);
+  assert.match(kept.text, /MOST TRUSTED BROKER CNN 2025/);
+  assert.doesNotMatch(kept.text, /Forbes/);
   assert.match(kept.text, /Trade with a plan/);
   assert.ok(kept.warnings.length > 0);
 
