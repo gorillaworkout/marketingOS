@@ -44,6 +44,13 @@ export type SocialPostGenerateFields = {
   targetAudience: string;
   goal: string;
   brandGuidelineId?: string | null;
+  contentType?: string;
+  tone?: string;
+  toneCustom?: string;
+  cta?: string;
+  ctaUrl?: string;
+  keyMessage?: string;
+  reference?: { kind: string; text?: string; url?: string; imageKey?: string } | null;
 };
 
 /** Caption-generation body. Omits `brandGuidelineId` when the picker is None. */
@@ -53,6 +60,13 @@ export function socialPostGenerateRequestBody(fields: SocialPostGenerateFields):
   targetAudience: string;
   goal: string;
   brandGuidelineId?: string;
+  contentType?: string;
+  tone?: string;
+  toneCustom?: string;
+  cta?: string;
+  ctaUrl?: string;
+  keyMessage?: string;
+  reference?: SocialPostGenerateFields['reference'];
 } {
   const body: {
     brief: string;
@@ -60,6 +74,13 @@ export function socialPostGenerateRequestBody(fields: SocialPostGenerateFields):
     targetAudience: string;
     goal: string;
     brandGuidelineId?: string;
+    contentType?: string;
+    tone?: string;
+    toneCustom?: string;
+    cta?: string;
+    ctaUrl?: string;
+    keyMessage?: string;
+    reference?: SocialPostGenerateFields['reference'];
   } = {
     brief: fields.brief,
     platform: fields.platform,
@@ -68,5 +89,12 @@ export function socialPostGenerateRequestBody(fields: SocialPostGenerateFields):
   };
   const brandGuidelineId = fields.brandGuidelineId?.trim();
   if (brandGuidelineId) body.brandGuidelineId = brandGuidelineId;
+  if (fields.contentType) body.contentType = fields.contentType;
+  if (fields.tone) body.tone = fields.tone;
+  if (fields.toneCustom) body.toneCustom = fields.toneCustom;
+  if (fields.cta) body.cta = fields.cta;
+  if (fields.ctaUrl) body.ctaUrl = fields.ctaUrl;
+  if (fields.keyMessage) body.keyMessage = fields.keyMessage;
+  if (fields.reference) body.reference = fields.reference;
   return body;
 }

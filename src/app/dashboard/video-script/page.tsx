@@ -15,6 +15,7 @@ import {
 } from '@/components/ui/dashboard';
 import InlineModelSelector from '@/components/InlineModelSelector';
 import { AI_RESEARCH_HANDOFF_QUERY, AI_RESEARCH_HANDOFF_VALUE, readAiResearchHandoff } from '@/lib/ai-research-handoff';
+import { VIDEO_HANDOFF_QUERY, VIDEO_HANDOFF_STORAGE_KEY, VIDEO_HANDOFF_VALUE } from '@/lib/social-post-brief';
 import { TASK_EDITOR_QUERY, fetchOwnHistoryTask } from '@/lib/history-editor';
 import type { QCResult } from '@/lib/openai';
 import { readStoredVideoScriptQc } from '@/lib/video-script-qc';
@@ -237,6 +238,17 @@ export default function VideoScriptPage() {
     // URL and same-tab handoff are external inputs read once on mount. Prefill only. Do not call handleGeneratePreview.
     // eslint-disable-next-line react-hooks/set-state-in-effect -- URL is an external input read once on mount
     if (template) setEvent(template);
+    if (params.get(VIDEO_HANDOFF_QUERY) === VIDEO_HANDOFF_VALUE) {
+      try {
+        const saved = JSON.parse(sessionStorage.getItem(VIDEO_HANDOFF_STORAGE_KEY) || 'null') as { brief?: string; hook?: string; shots?: string[]; platform?: string; audience?: string } | null;
+        if (saved?.brief) setEvent(saved.brief);
+        const shotText = [saved?.hook, ...(saved?.shots || [])].filter(Boolean).join('\n');
+        if (shotText) setReferences(shotText);
+        if (saved?.audience) setTargetAudience(saved.audience);
+        if (saved?.platform) setPlatform(saved.platform);
+      } catch { /* ignore a bad handoff */ }
+      return;
+    }
     if (params.get(AI_RESEARCH_HANDOFF_QUERY) !== AI_RESEARCH_HANDOFF_VALUE) return;
     const handoff = readAiResearchHandoff('video-script');
     if (!handoff?.brief) return;
