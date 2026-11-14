@@ -264,10 +264,8 @@ function extractArticleFieldsLoosely(source: string): Record<string, unknown> | 
   return { title, metaDescription, articleMarkdown };
 }
 
-export const ELIGIBLE_KEYWORDS = [
-  'emas', 'harga emas', 'xauusd', 'xau/usd', 'rupiah', 'dollar', 'dolar',
-  'wall street', 'minyak', 'harga minyak',
-] as const;
+import { ELIGIBLE_MARKET_NEWS_KEYWORDS as ELIGIBLE_KEYWORDS, marketNewsTopicContext } from '@/lib/market-news-topics';
+export { ELIGIBLE_KEYWORDS };
 
 export const PRIMARY_SOURCE_GUIDANCE = 'Investing.com → Kontan → repeat after 10 minutes';
 
@@ -423,7 +421,7 @@ export function normalizeArticleMarketNewsInput(value: unknown, expectedResearch
   const input = value as Record<string, unknown>;
   const keyword = requiredText(input.keyword, 'Main keyword', MAX.keyword);
   if (!ELIGIBLE_KEYWORDS.some(item => normalized(keyword).includes(normalized(item)))) {
-    throw new Error(`Keyword must match the Article Market News SOP: ${ELIGIBLE_KEYWORDS.join(', ')}.`);
+    throw new Error(`Choose a market news topic. The keyword must match one of: ${ELIGIBLE_KEYWORDS.join(', ')}.`);
   }
   const researchDate = requiredText(input.researchDate, 'Research date', 10);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(researchDate) || researchDate !== expectedResearchDate) {
@@ -590,6 +588,7 @@ JSON encoding rules (required for gateway models such as Claude):
 
   const userPrompt = `<USER_DATA>
 MAIN KEYWORD: ${input.keyword}
+${marketNewsTopicContext(input.keyword)}
 RESEARCH DATE: ${input.researchDate}
 ARTICLE ANGLE: ${input.angle}
 
