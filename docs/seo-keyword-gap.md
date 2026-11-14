@@ -6,7 +6,7 @@ Keyword Gap is a beta page under SEO OS. The menu label is Keyword Gap (Beta). A
 
 The production cron is `npm run seo:sync` (`scripts/seo-sync.ts`). It writes Google Search Console Search Analytics into `seo_gsc_daily`: query, page, clicks, impressions, ctr, and position. Free mode uses those stored queries as the primary source, aggregated over the 16 months the sync keeps.
 
-The cron only syncs sites that are active and have a GSC property (`syncableSiteIds`). Migration 035 seeds Dupoin as `https://dupoin.co.id/` with `gsc_property` NULL and `active` FALSE, and it does not insert `seo_gsc_daily` rows. Per the schema, Dupoin has no stored query or position data until an admin sets a property and a sync runs. This repo cannot see the live production row count.
+The cron only syncs sites that are active and have a GSC property (`syncableSiteIds`). Migration 035 seeds Dupoin as `https://dupoin.co.id/` with `gsc_property` NULL and `active` FALSE, and it does not insert `seo_gsc_daily` rows. Production currently has synced queries only for ICA (`sc-domain:indonesiancheer.org`). Dupoin has no property and no synced rows, so Keyword Gap for dupoin.co.id uses the Queries CSV/XLSX upload until GSC is configured. The page states that in the Free mode panel.
 
 When the matched site has no stored rows, Free mode uses an uploaded Queries export (CSV or XLSX: query, clicks, impressions, CTR, position). A file is not used while stored rows exist.
 

@@ -17,7 +17,7 @@ CI on every pull request runs `npx tsx --test tests/*.test.ts` against Postgres 
 | Market News topics | Symbol map and research fallback | A live article |
 | Content Studio v2 | Meta limits, headings, tables, HTML export used for ICA drafts | A live draft against the model |
 | SEO Website Audit | Crawl bounds, robots, score, PageSpeed parser, private-address and redirect checks | A live crawl of dupoin.co.id |
-| Keyword Gap beta | Buckets, GSC CSV, phrase extraction, provider parsers, stored-query source | A live Semrush or DataForSEO call |
+| Keyword Gap beta | Buckets, GSC CSV, phrase extraction, provider parsers, stored-query source, Dupoin upload message when ICA is the only synced site | A live Semrush or DataForSEO call |
 | AI models | Dupoin failure falls over to OpenRouter; 429 moves to the next model; health probes | A live gateway |
 | AI Research | Chat parsing, memory, PDF/DOCX/HTML attachments, pin and watches, health route | A live chat |
 | Knowledge | Pin save, graph focus | A live graph layout |

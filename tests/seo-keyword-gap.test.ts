@@ -4,6 +4,7 @@ import test from 'node:test';
 import { assignBucket, buildGapKeywords, FREE_METHODOLOGY, phrasesMatch } from '../src/lib/seo/keyword-gap-bucket.ts';
 import { extractPageCandidates } from '../src/lib/seo/keyword-gap-extract.ts';
 import { gscKeywordSource, STORED_GSC_QUERIES_SQL } from '../src/lib/seo/keyword-gap-gsc.ts';
+import { gscSourceMessage } from '../src/lib/seo/keyword-gap-input.ts';
 import { parseGscQueryRows } from '../src/lib/seo/keyword-gap-parse.ts';
 import { parseDataForSeoRanked, parseSemrushOrganic, scrubProviderSecret, semrushOrganicUrl } from '../src/lib/seo/keyword-gap-providers.ts';
 
@@ -82,4 +83,24 @@ test('stored Search Console rows are the primary source and Dupoin is not seeded
   assert.match(service, /active = TRUE AND gsc_property IS NOT NULL/);
   const layout = readFileSync(new URL('../src/app/dashboard/layout.tsx', import.meta.url), 'utf8');
   assert.match(layout, /Keyword Gap \(Beta\)/);
+  const dupoin = gscSourceMessage({
+    domain: 'https://dupoin.co.id/',
+    gscProperty: null,
+    storedRows: 0,
+    connectedSites: [{ name: 'ICA Cheerleading', gscProperty: 'sc-domain:indonesiancheer.org', storedRows: 1200 }],
+  });
+  assert.match(dupoin, /dupoin\.co\.id has no Search Console property and no synced queries/);
+  assert.match(dupoin, /CSV or XLSX upload until GSC is configured/);
+  assert.match(dupoin, /sc-domain:indonesiancheer\.org/);
+  const ica = gscSourceMessage({
+    domain: 'https://indonesiancheer.org/',
+    gscProperty: 'sc-domain:indonesiancheer.org',
+    storedRows: 1200,
+    connectedSites: [],
+  });
+  assert.match(ica, /1,200 stored Search Console queries/);
+  assert.doesNotMatch(ica, /upload/i);
+  const page = readFileSync(new URL('../src/app/dashboard/seo/keyword-gap/page.tsx', import.meta.url), 'utf8');
+  assert.match(page, /data-testid="keyword-gap-gsc-source"/);
+  assert.match(page, /gscSourceMessage/);
 });

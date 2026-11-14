@@ -7,6 +7,7 @@ import {
 import { fetchJson, useSeoSites } from '@/components/seo/useSeoSites';
 import { defaultAuditUrl } from '@/lib/seo/audit-url';
 import { FREE_METHODOLOGY, GAP_BUCKETS, type GapBucket, type GapKeyword } from '@/lib/seo/keyword-gap-bucket';
+import { gscSourceMessage } from '@/lib/seo/keyword-gap-input';
 
 type GapSummary = {
   id: string; our_domain: string; status: 'queued' | 'running' | 'succeeded' | 'failed'; progress: number; message: string;
@@ -14,6 +15,7 @@ type GapSummary = {
   created_at: string; result: { keywords: GapKeyword[]; counts: Record<string, number>; methodology: string; source: string; storedQueries: number; ranked: boolean; notes: string[] } | null;
 };
 type Source = { domain: string; storedRows: number; using: 'stored' | 'upload'; gscProperty: string | null; active: boolean };
+type GscSite = { name: string; siteUrl: string; gscProperty: string | null; storedRows: number };
 type SortKey = 'keyword' | 'bucket' | 'ourPosition' | 'ourImpressions' | 'ourClicks';
 
 const LABELS: Record<GapBucket, string> = { missing: 'Missing', weak: 'Weak', almost: 'Almost', shared: 'Shared', strength: 'Strength' };
@@ -32,6 +34,7 @@ export default function KeywordGapPage() {
   const [file, setFile] = useState<File | null>(null);
   const [providers, setProviders] = useState({ semrush: false, dataforseo: false });
   const [source, setSource] = useState<Source | null>(null);
+  const [gscSites, setGscSites] = useState<GscSite[]>([]);
   const [gaps, setGaps] = useState<GapSummary[]>([]);
   const [selectedId, setSelectedId] = useState('');
   const [gap, setGap] = useState<GapSummary | null>(null);
@@ -43,11 +46,12 @@ export default function KeywordGapPage() {
   const shownDomain = domain ?? (data ? defaultAuditUrl(data.sites) : '');
 
   const loadList = async (nextDomain: string) => {
-    const { ok, data: body } = await fetchJson<{ gaps: GapSummary[]; providers: { semrush: boolean; dataforseo: boolean }; source: Source | null }>(`/api/seo/keyword-gap?domain=${encodeURIComponent(nextDomain)}`);
+    const { ok, data: body } = await fetchJson<{ gaps: GapSummary[]; providers: { semrush: boolean; dataforseo: boolean }; source: Source | null; gscSites?: GscSite[] }>(`/api/seo/keyword-gap?domain=${encodeURIComponent(nextDomain)}`);
     if (!ok) return;
     setGaps(body.gaps);
     setProviders(body.providers);
     setSource(body.source);
+    setGscSites(body.gscSites ?? []);
   };
 
   useEffect(() => {
@@ -104,6 +108,12 @@ export default function KeywordGapPage() {
   const counts = gap?.result?.counts ?? {};
   const running = gap?.status === 'queued' || gap?.status === 'running';
   const providerBlocked = (provider === 'semrush' && !providers.semrush) || (provider === 'dataforseo' && !providers.dataforseo);
+  const sourceMessage = gscSourceMessage({
+    domain: shownDomain || 'dupoin.co.id',
+    gscProperty: source?.gscProperty ?? null,
+    storedRows: source?.storedRows ?? 0,
+    connectedSites: gscSites,
+  });
 
   const sort = (key: SortKey) => {
     if (sortKey === key) setSortAsc(value => !value);
@@ -120,11 +130,7 @@ export default function KeywordGapPage() {
         <span title={FREE_METHODOLOGY} className="cursor-help text-xs text-[var(--mos-accent-soft)]">Methodology</span>
       </div>
       <p className="text-sm text-[var(--mos-text-secondary)]">{FREE_METHODOLOGY}</p>
-      <p className="mt-2 text-xs text-[var(--mos-text-muted)]">
-        {source && source.storedRows > 0
-          ? `Primary source: ${source.storedRows.toLocaleString('en-US')} stored Search Console rows from seo:sync.`
-          : 'No stored Search Console queries for this domain. Upload a Queries export. Dupoin is seeded without a GSC property, so the daily sync does not store its queries until a property is set and a sync runs.'}
-      </p>
+      <p className="mt-3 text-sm text-[var(--mos-text)]" data-testid="keyword-gap-gsc-source">{sourceMessage}</p>
     </Panel>
 
     <Panel>
