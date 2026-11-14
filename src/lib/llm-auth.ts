@@ -41,6 +41,27 @@ export function storedAuthExpired(input: { status?: string; message?: string; la
   return isAuthFailureMessage(blob) || /authentication_error|oauth expired|oauth token/i.test(blob);
 }
 
+/**
+ * True when a successful Dupoin test of `model` supersedes the stored provider
+ * error: the error names that model (e.g. "[claude/claude-sonnet-5-5]" for
+ * cc/claude-sonnet-5-5) or names no model at all.
+ */
+export function providerErrorClearedBy(lastError: string | null | undefined, model: string): boolean {
+  const error = (lastError || '').trim();
+  if (!error) return false;
+  const named = [...error.matchAll(/\[([A-Za-z0-9_.~-]+\/[A-Za-z0-9_.:~-]+)\]/g)].map(match => match[1].toLowerCase());
+  if (!named.length) return true;
+  const base = model.toLowerCase().split('/').pop() || '';
+  return named.some(name => name === model.toLowerCase() || name.split('/').pop() === base);
+}
+
+/** A stored provider error only marks a model when it is newer than that model's last test. */
+export function providerErrorAppliesTo(row: { provider: string; testedAt?: string | null }, lastFailoverAt?: string | null): boolean {
+  if (row.provider !== 'dupoin') return false;
+  if (!row.testedAt || !lastFailoverAt) return true;
+  return Date.parse(lastFailoverAt) > Date.parse(row.testedAt);
+}
+
 export function authFailoverNotice(failedName: string, nextName: string): string {
   return `Model ${failedName} token expired — switched to ${nextName}. Please re-authenticate ${failedName} in AI Models.`;
 }

@@ -67,9 +67,9 @@ function mapRow(row: Record<string, unknown>, withResult: boolean): AuditRow {
 
 export async function expireStaleAudits(): Promise<void> {
   await execute(
-    `UPDATE seo_audits SET status = 'failed', error = 'The audit stopped before it finished.', progress = 100,
+    `UPDATE seo_audits SET status = 'failed', error = 'The audit timed out: no progress for 10 minutes (the server may have restarted). Start it again.', progress = 100,
        finished_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
-     WHERE status IN ('queued', 'running') AND updated_at < CURRENT_TIMESTAMP - INTERVAL '20 minutes'`,
+     WHERE status IN ('queued', 'running') AND updated_at < CURRENT_TIMESTAMP - INTERVAL '10 minutes'`,
   );
 }
 

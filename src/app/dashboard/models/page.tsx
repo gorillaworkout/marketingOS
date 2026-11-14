@@ -5,7 +5,7 @@ import { Button, FormField, LoadingState, PageHeader, PageStack, Panel, SectionH
 import type { LlmMode } from '@/lib/llm-provider-defaults';
 import { EMBEDDINGS_FAILOVER_NOTE } from '@/lib/llm-provider-defaults';
 import { groupModelsByProvider } from '@/lib/model-groups';
-import { storedAuthExpired } from '@/lib/llm-auth';
+import { providerErrorAppliesTo, storedAuthExpired } from '@/lib/llm-auth';
 import { FREE_TEXT_CHAIN, IMAGE_SHORTLIST, TEXT_SHORTLIST, TIER_FEATURES, TIER_PAID_TARGET, type ModelTier } from '@/lib/model-tiers';
 
 type TierRow = { tier: ModelTier; dupoinPrimary: string; paidTarget: string };
@@ -169,6 +169,9 @@ export default function ModelsPage() {
       }
       return next;
     });
+    if (data.clearedProviderError === true) {
+      setProvider(current => current ? { ...current, status: { ...current.status, lastError: null } } : current);
+    }
     setNotice(`Tested ${results.length} model${results.length === 1 ? '' : 's'}.`);
   }
 
@@ -304,13 +307,16 @@ export default function ModelsPage() {
             />
             <div className="mt-4 flex flex-col gap-2">
               {health.length === 0 && <p className="text-sm text-[var(--mos-text-muted)]">No tests yet. Test all checks the models in use, without duplicate rows.</p>}
-              {health.map(row => (
+              {health.map(row => {
+                const rowError = providerErrorAppliesTo(row, provider?.status.lastFailoverAt) ? provider?.status.lastError || '' : '';
+                return (
                 <div key={`${row.provider}:${row.kind}:${row.model}`} className="flex flex-wrap items-center gap-2 text-sm">
-                  <StatusBadge tone={badgeTone(row.status, row.message, provider?.status.lastError || '')}>{badgeLabel(row.status, row.message, provider?.status.lastError || '')}{row.status === 'active' && row.latencyMs ? ` ${row.latencyMs}ms` : ''}</StatusBadge>
+                  <StatusBadge tone={badgeTone(row.status, row.message, rowError)}>{badgeLabel(row.status, row.message, rowError)}{row.status === 'active' && row.latencyMs ? ` ${row.latencyMs}ms` : ''}</StatusBadge>
                   <span className="text-[var(--mos-text-secondary)]">{row.provider === 'dupoin' ? 'Dupoin' : 'OpenRouter'} · {row.model}</span>
-                  <span className="text-xs text-[var(--mos-text-faint)]">{formatWhen(authExpiredRow(row.status, row.message, provider?.status.lastError || '') && provider?.status.lastFailoverAt && row.status !== 'auth_expired' && !/^Auth expired\b/i.test(row.message || '') ? provider.status.lastFailoverAt : row.testedAt)}{row.status === 'rate_limited' ? ' · try again later' : ''}{authExpiredRow(row.status, row.message, provider?.status.lastError || '') ? ` · Auth expired ${formatWhen(provider?.status.lastFailoverAt || row.testedAt)}. Re-test or wait 15 minutes.` : ''}</span>
+                  <span className="text-xs text-[var(--mos-text-faint)]">{formatWhen(authExpiredRow(row.status, row.message, rowError) && provider?.status.lastFailoverAt && row.status !== 'auth_expired' && !/^Auth expired\b/i.test(row.message || '') ? provider.status.lastFailoverAt : row.testedAt)}{row.status === 'rate_limited' ? ' · try again later' : ''}{authExpiredRow(row.status, row.message, rowError) ? ` · Auth expired ${formatWhen(provider?.status.lastFailoverAt || row.testedAt)}. Re-test or wait 15 minutes.` : ''}</span>
                 </div>
-              ))}
+                );
+              })}
             </div>
           </Panel>
 
@@ -323,7 +329,9 @@ export default function ModelsPage() {
 
 function ModelBadge({ health, provider, model, lastError, detectedAt }: { health: Health[]; provider: 'dupoin' | 'openrouter'; model: string; lastError?: string | null; detectedAt?: string | null }) {
   const row = health.find(item => item.provider === provider && item.model === model);
-  const expired = authExpiredRow(row?.status || '', row?.message, provider === 'dupoin' ? lastError || '' : '');
+  // A test newer than the stored failover error supersedes it.
+  const stored = providerErrorAppliesTo({ provider, testedAt: row?.testedAt }, detectedAt) ? lastError || '' : '';
+  const expired = authExpiredRow(row?.status || '', row?.message, stored);
   const when = expired ? formatWhen(detectedAt || row?.testedAt) : '';
-  return <StatusBadge tone={badgeTone(row?.status || '', row?.message, provider === 'dupoin' ? lastError || '' : '')}>{provider === 'dupoin' ? 'Dupoin' : 'OpenRouter'} {badgeLabel(row?.status || '', row?.message, provider === 'dupoin' ? lastError || '' : '')}{when ? ` · ${when}` : ''}</StatusBadge>;
+  return <StatusBadge tone={badgeTone(row?.status || '', row?.message, stored)}>{provider === 'dupoin' ? 'Dupoin' : 'OpenRouter'} {badgeLabel(row?.status || '', row?.message, stored)}{when ? ` · ${when}` : ''}</StatusBadge>;
 }

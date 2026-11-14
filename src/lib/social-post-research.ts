@@ -43,6 +43,34 @@ export type SocialPostWebResearch = {
 
 type FetchLike = typeof fetch;
 
+/**
+ * True for scraped page metadata rather than readable prose: JSON or config
+ * blobs (YouTube's `"att_web_record_metrics":true,...`), JSON-LD, or text that
+ * is mostly quotes, braces, and colons.
+ */
+export function isScrapedMetadata(text: string): boolean {
+  const sample = text.replace(/\s+/g, ' ').trim().slice(0, 600);
+  if (!sample) return false;
+  if (/^[[{]\s*"/.test(sample) || /"@(?:context|type)"\s*:/.test(sample)) return true;
+  const pairs = sample.match(/"[\w.$@-]+"\s*:/g)?.length ?? 0;
+  if (pairs >= 3) return true;
+  if ((sample.match(/\b(?:true|false|null)\s*,\s*"/g)?.length ?? 0) >= 2) return true;
+  const symbols = sample.match(/[{}"\\=<>|]/g)?.length ?? 0;
+  return sample.length >= 40 && symbols / sample.length > 0.08;
+}
+
+/** Video and social pages render their text with scripts, so a fetch returns player metadata. Use the search snippet instead. */
+function isVideoPage(url: string): boolean {
+  try {
+    const { hostname, pathname } = new URL(url);
+    const host = hostname.replace(/^(?:www|m)\./, '');
+    if (host === 'youtube.com' || host === 'youtu.be' || host === 'tiktok.com' || host === 'vimeo.com') return true;
+    return (host === 'facebook.com' || host === 'fb.watch') && /\/(?:videos|watch|reel)/.test(pathname);
+  } catch {
+    return false;
+  }
+}
+
 type Candidate = {
   url: string;
   title: string;
@@ -232,7 +260,7 @@ export async function researchSocialPostWeb(input: {
   }
 
   input.onProgress?.('Reading source pages...');
-  const toRead = candidates.slice(0, MAX_PAGE_FETCHES);
+  const toRead = candidates.filter((candidate) => !isVideoPage(candidate.url)).slice(0, MAX_PAGE_FETCHES);
   const documents = new Map<string, string>();
   await Promise.all(toRead.map(async (candidate) => {
     const text = await fetchPublicDocument(candidate.url, fetchImpl, timeoutMs, enableJina);
@@ -244,17 +272,20 @@ export async function researchSocialPostWeb(input: {
     const text = documents.get(normalizeUrl(candidate.url));
     if (text) {
       const extracted = extractFetchedContent(text, candidate.query);
+      const snippet = chooseSnippet(extracted.snippet, candidate.snippet);
+      if (snippet.length < MIN_SNIPPET || isScrapedMetadata(snippet)) continue;
+      const title = isScrapedMetadata(extracted.title || '') ? candidate.title : extracted.title || candidate.title;
       sources.push({
         url: candidate.url,
-        title: (extracted.title || candidate.title || candidate.url).slice(0, 180),
-        snippet: chooseSnippet(extracted.snippet, candidate.snippet),
+        title: (title || candidate.url).slice(0, 180),
+        snippet,
         query: candidate.query,
         read: true,
       });
       continue;
     }
     const snippet = candidate.snippet.replace(/\s+/g, ' ').trim();
-    if (snippet.length < MIN_SNIPPET) continue;
+    if (snippet.length < MIN_SNIPPET || isScrapedMetadata(snippet)) continue;
     sources.push({
       url: candidate.url,
       title: (candidate.title || candidate.url).slice(0, 180),
@@ -331,8 +362,10 @@ function factSupported(fact: string, haystack: string): boolean {
 }
 
 function chooseSnippet(extracted: string, fallback: string): string {
-  const pageText = extracted.replace(/\s+/g, ' ').trim();
-  const searchText = fallback.replace(/\s+/g, ' ').trim();
+  const page = extracted.replace(/\s+/g, ' ').trim();
+  const search = fallback.replace(/\s+/g, ' ').trim();
+  const pageText = isScrapedMetadata(page) ? '' : page;
+  const searchText = isScrapedMetadata(search) ? '' : search;
   if (pageText.length >= MIN_SNIPPET) return pageText.slice(0, 700);
   if (searchText.length > pageText.length) return searchText.slice(0, 700);
   return (pageText || searchText).slice(0, 700);

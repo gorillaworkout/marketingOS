@@ -101,6 +101,8 @@ export interface CrawlOutput {
   robotsBlocked: string[];
   pages: CrawledPage[];
   brokenLinks: string[];
+  /** True when the crawl stopped at `deadlineAt` before it ran out of pages. */
+  timedOut: boolean;
 }
 
 export async function crawlSite(input: {
@@ -117,7 +119,11 @@ export async function crawlSite(input: {
   delayMs?: number;
   /** Resolves a hostname to every address. Defaults to dns.lookup({ all: true }). */
   lookup?: HostLookup;
+  /** Epoch ms. No new page is started after this; the pages read so far are returned. */
+  deadlineAt?: number;
 }): Promise<CrawlOutput> {
+  const pastDeadline = () => input.deadlineAt !== undefined && Date.now() >= input.deadlineAt;
+  let timedOut = false;
   const fetchPage = input.fetchPage ?? createAuditFetch();
   const lookupHost = input.lookup ?? defaultHostLookup;
   const timeoutMs = input.timeoutMs ?? AUDIT_TIMEOUT_MS;
@@ -141,6 +147,7 @@ export async function crawlSite(input: {
   const sitemapTargets = [...new Set([`${origin}/sitemap.xml`, ...sitemapHints])].slice(0, 6);
   let sitemapPresent = false;
   for (const target of sitemapTargets) {
+    if (pastDeadline()) break;
     if (!sameHost(target, origin)) continue;
     const file = await follow(target, fetchPage, timeoutMs, lookupHost);
     if (file.status < 200 || file.status >= 300 || !file.body) continue;
@@ -151,6 +158,7 @@ export async function crawlSite(input: {
       try { if (sameHost(loc, origin)) sitemapUrls.add(normalizeAuditUrl(loc)); } catch { /* skip a bad sitemap URL */ }
     }
     for (const child of children) {
+      if (pastDeadline()) break;
       if (!sameHost(child, origin)) continue;
       const nested = await follow(child, fetchPage, timeoutMs, lookupHost);
       if (nested.status >= 200 && nested.status < 300) {
@@ -236,6 +244,10 @@ export async function crawlSite(input: {
   let active = 0;
   await new Promise<void>(resolve => {
     const pump = () => {
+      if (pastDeadline() && nextIndex < queue.length && pages.length < input.maxPages) {
+        timedOut = true;
+        nextIndex = queue.length;
+      }
       while (active < concurrency && nextIndex < queue.length && pages.length < input.maxPages) {
         const item = queue[nextIndex];
         nextIndex += 1;
@@ -244,13 +256,15 @@ export async function crawlSite(input: {
         active += 1;
         void (async () => {
           await new Promise(done => setTimeout(done, input.delayMs ?? 200));
-          if (pages.length < input.maxPages) await take(item.url, item.depth);
+          if (pages.length < input.maxPages && !pastDeadline()) await take(item.url, item.depth);
         })().finally(() => {
           active -= 1;
           pump();
         });
       }
-      if (active === 0 && nextIndex >= queue.length) resolve();
+      // Resolve once nothing is in flight and nothing more will start: the queue is empty, the page
+      // cap is reached (a big site keeps links queued), or the deadline passed.
+      if (active === 0 && (nextIndex >= queue.length || pages.length >= input.maxPages)) resolve();
     };
     pump();
   });
@@ -264,6 +278,7 @@ export async function crawlSite(input: {
     robotsBlocked: [...new Set(robotsBlocked)].slice(0, 50),
     pages,
     brokenLinks: pages.filter(page => page.status >= 400 && linked.has(page.url)).map(page => page.url).slice(0, 50),
+    timedOut,
   };
 }
 

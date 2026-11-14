@@ -64,5 +64,6 @@ export interface AuditResult {
   indexing: { rows: IndexingRow[]; gsc: NotConnectedCard; ga4: NotConnectedCard };
   psi: PsiReading[];
   psiKeyUsed: boolean;
-  limits: { maxPages: number; crawled: number };
+  /** timedOut: the crawl stopped at its time limit, so the result is partial. */
+  limits: { maxPages: number; crawled: number; timedOut?: boolean };
 }

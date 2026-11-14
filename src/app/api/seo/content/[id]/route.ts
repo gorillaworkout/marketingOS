@@ -6,6 +6,7 @@ import { availableActions, canApprove, editResetsStatus, isContentAction, transi
 import { VersionConflictError, changeStatus, getDraft, getVersion, listVersions, saveVersion, type DraftContent } from '@/lib/seo/content-store';
 import { siteRootHost, validateTargetUrl } from '@/lib/seo/keywords';
 import { getSeoSite } from '@/lib/seo/sites';
+import { repairMarkdownLayout } from '@/lib/seo/markdown';
 
 export const dynamic = 'force-dynamic';
 
@@ -18,7 +19,8 @@ export async function GET(request: NextRequest, context: RouteContext) {
   const draft = await getDraft(id);
   if (!draft) return NextResponse.json({ error: 'Article not found' }, { status: 404 });
   return NextResponse.json({
-    draft,
+    // Drafts saved before the layout fix may be flat; serve them repaired so Preview and a save fix them.
+    draft: { ...draft, body_markdown: repairMarkdownLayout(draft.body_markdown) },
     versions: await listVersions(id),
     actions: availableActions(draft.status),
     canApprove: canApprove(auth, draft.created_by),

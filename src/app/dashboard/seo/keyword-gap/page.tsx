@@ -181,6 +181,7 @@ export default function KeywordGapPage() {
     </Panel>}
 
     {gap?.summary && <Panel><h2 className="mb-2 text-sm font-medium text-[var(--mos-text)]">Top opportunities</h2><p className="whitespace-pre-wrap text-sm leading-6 text-[var(--mos-text-secondary)]">{gap.summary}</p></Panel>}
+    {gap?.result?.notes?.length ? <Panel><ul className="list-disc space-y-1 pl-5 text-sm text-amber-200">{gap.result.notes.map(note => <li key={note}>{note}</li>)}</ul></Panel> : null}
     {gap?.summary_error && <Panel><p className="text-sm text-amber-200">Summary unavailable: {gap.summary_error}</p></Panel>}
 
     {gap?.result && <>

@@ -112,7 +112,7 @@ export default function WebsiteAuditPage() {
     {result && <>
       <div className="grid gap-3 md:grid-cols-3">
         <MetricCard label="Site Health" value={result.healthScore} note="Notices do not change the score." />
-        <MetricCard label="Pages crawled" value={result.limits.crawled} note={`Limit ${result.limits.maxPages}`} />
+        <MetricCard label="Pages crawled" value={result.limits.crawled} note={result.limits.timedOut ? `Partial: stopped at the time limit (limit ${result.limits.maxPages} pages)` : `Limit ${result.limits.maxPages}`} />
         <MetricCard label="PageSpeed" value={result.psiKeyUsed ? 'Key configured' : 'Public quota'} note="Homepage plus the shallowest pages." />
       </div>
 

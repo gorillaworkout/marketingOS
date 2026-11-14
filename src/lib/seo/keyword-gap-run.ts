@@ -9,9 +9,9 @@ import {
   parseDataForSeoIntersection, parseDataForSeoRanked, parseSemrushIntersection, parseSemrushOrganic,
   scrubProviderSecret, semrushDatabase, semrushDomainVsDomainUrl, semrushOrganicUrl,
 } from './keyword-gap-providers';
+import { crawlTimeoutNote, GAP_COMPETITOR_CRAWL_MS, GAP_COMPETITOR_PAGE_CAP, SEO_LLM_TIMEOUT_MS, StepTimeoutError, withTimeout } from './time-budget';
 import { failGap, finishGap, getGap, readDataForSeo, readSemrushKey, updateGapProgress, type GapResult } from './keyword-gap-store';
 
-const PAGE_CAP = 100;
 const CLUSTER_SYSTEM = `You cluster competitor page phrases into search keywords. Reply with a JSON array only.
 Each item is {"keyword":"phrase from the list","intent":"informational|navigational|commercial|transactional"}.
 Use only phrases from the list. Do not invent keywords, search volume, or ranking positions. Return at most 150 items.`;
@@ -24,13 +24,14 @@ async function clusterPhrases(userId: string, phrases: string[]): Promise<{ keyw
   if (!allowed.length) return { keywords: [], model: null, error: null };
   try {
     const model = await getUserPreferredModel(userId, 'seo-content');
-    const generated = await generateContent(CLUSTER_SYSTEM, allowed.join('\n'), userId, undefined, {
+    const generated = await withTimeout(generateContent(CLUSTER_SYSTEM, allowed.join('\n'), userId, undefined, {
       model, temperature: 0.2, maxTokens: 4000, taskType: 'seo-keyword-gap',
-    });
+    }), SEO_LLM_TIMEOUT_MS, 'Clustering');
     const parsed = parseClusteredKeywords(generated.content, allowed);
     if (parsed.length) return { keywords: parsed, model: generated.usage.model, error: null };
   } catch (error) {
-    return { keywords: topCandidates([{ url: '', phrases: allowed }], 150).map(keyword => ({ keyword, intent: null })), model: null, error: aiProviderErrorBody(error).error };
+    const message = error instanceof StepTimeoutError ? `${error.message} Using the most frequent phrases instead.` : aiProviderErrorBody(error).error;
+    return { keywords: topCandidates([{ url: '', phrases: allowed }], 150).map(keyword => ({ keyword, intent: null })), model: null, error: message };
   }
   return { keywords: topCandidates([{ url: '', phrases: allowed }], 150).map(keyword => ({ keyword, intent: null })), model: null, error: null };
 }
@@ -39,12 +40,12 @@ async function summarize(userId: string, result: GapResult): Promise<{ summary: 
   const lines = result.keywords.slice(0, 40).map(keyword => `${keyword.bucket}: ${keyword.keyword} our=${keyword.ourPosition ?? '—'} competitor=${keyword.competitorPosition ?? '—'} volume=${keyword.volume ?? '—'}`);
   try {
     const model = await getUserPreferredModel(userId, 'seo-content');
-    const generated = await generateContent(SUMMARY_SYSTEM, [`Provider: ${result.provider}`, result.methodology, '', ...lines].join('\n'), userId, undefined, {
+    const generated = await withTimeout(generateContent(SUMMARY_SYSTEM, [`Provider: ${result.provider}`, result.methodology, '', ...lines].join('\n'), userId, undefined, {
       model, temperature: 0.2, maxTokens: 800, taskType: 'seo-keyword-gap',
-    });
+    }), SEO_LLM_TIMEOUT_MS, 'The summary');
     return { summary: generated.content.slice(0, 8000), error: null, model: generated.usage.model };
   } catch (error) {
-    return { summary: null, error: aiProviderErrorBody(error).error, model: null };
+    return { summary: null, error: error instanceof StepTimeoutError ? error.message : aiProviderErrorBody(error).error, model: null };
   }
 }
 
@@ -105,15 +106,23 @@ export async function runKeywordGap(id: string): Promise<void> {
       const domains = gap.input.competitors;
       for (let index = 0; index < domains.length; index += 1) {
         const domain = domains[index];
-        await updateGapProgress(id, 15 + Math.round((index / domains.length) * 50), `Crawling ${domain}.`);
+        const base = 15 + Math.round((index / domains.length) * 50);
+        const span = Math.round(50 / domains.length);
+        await updateGapProgress(id, base, `Crawling ${domain} (${index + 1} of ${domains.length}).`);
         const pages: Array<{ url: string; phrases: string[] }> = [];
-        await crawlSite({
+        const crawl = await crawlSite({
           startUrl: domain.startsWith('http') ? domain : `https://${domain}/`,
-          maxPages: PAGE_CAP,
+          maxPages: GAP_COMPETITOR_PAGE_CAP,
           seedFromSitemap: true,
           delayMs: 200,
+          deadlineAt: Date.now() + GAP_COMPETITOR_CRAWL_MS,
           onHtml: page => pages.push({ url: page.url, phrases: extractPageCandidates(page.url, page.html) }),
+          onProgress: (crawled, maxPages) => {
+            if (crawled % 5 !== 0) return;
+            void updateGapProgress(id, base + Math.round((crawled / Math.max(maxPages, 1)) * span), `Crawling ${domain}: ${crawled} of up to ${maxPages} pages.`);
+          },
         });
+        if (crawl.timedOut) notes.push(crawlTimeoutNote(domain, crawl.pages.length, GAP_COMPETITOR_CRAWL_MS));
         const phrases = topCandidates(pages, 80);
         for (const phrase of phrases) competitorKeywords.push({ keyword: phrase, domain, position: null, volume: null });
       }
