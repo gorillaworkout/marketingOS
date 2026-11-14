@@ -8,7 +8,7 @@ import {
   restoreEventPlan,
   type EventPlanHistoryTask,
 } from '@/lib/event-plan-history';
-import { NO_PUBLIC_PRICE_NOTE } from '@/lib/event-plan-pricing';
+import { missingPriceNote, scrubMissingPriceNotes } from '@/lib/event-plan-pricing';
 import type { EventPlanResearch } from '@/lib/event-plan-research';
 import { Button, DataTableFrame, FormField, Panel, PageHeader, PageStack, SectionHeader, StatusBadge, TextArea, TextInput, Toolbar } from '@/components/ui/dashboard';
 import InlineModelSelector from '@/components/InlineModelSelector';
@@ -32,6 +32,7 @@ type EventPlanOption = {
 };
 type GenerationEvent = {
   step?: string;
+  jobId?: string;
   progress?: number;
   message?: string;
   result?: { success?: boolean; options?: EventPlanOption[]; usage?: { plan?: unknown }; fallbackLabel?: string | null };
@@ -221,6 +222,17 @@ export default function EventPlanPage() {
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let buffer = '';
+      let jobId = '';
+      let finished = false;
+      const applyResult = (planResult: NonNullable<GenerationEvent['result']>) => {
+        const generatedOptions = Array.isArray(planResult.options) ? planResult.options : [];
+        setOptions(generatedOptions);
+        setSelectedOption(0);
+        const usage = planResult.usage?.plan;
+        setTokenUsage(usage && typeof usage === 'object' ? usage as TokenUsage : null);
+        setFallbackLabel(typeof planResult.fallbackLabel === 'string' ? planResult.fallbackLabel : '');
+        void fetchRecent();
+      };
       const consumeLines = (text: string) => {
         buffer += text;
         const lines = buffer.split(/\r?\n/);
@@ -236,30 +248,46 @@ export default function EventPlanPage() {
                 step: event.step || current?.step,
               }));
             }
-            if (event.step === 'error') setError(event.message || 'Generation failed');
+            if (typeof event.jobId === 'string') jobId = event.jobId;
+            if (event.step === 'error') { finished = true; setError(event.message || 'Generation failed'); }
             if (event.step === 'done') {
+              finished = true;
               if (!event.result?.success) setError(event.message || 'Generation failed');
-              else {
-                const generatedOptions = Array.isArray(event.result.options) ? event.result.options : [];
-                setOptions(generatedOptions);
-                setSelectedOption(0);
-                const usage = event.result.usage?.plan;
-                setTokenUsage(usage && typeof usage === 'object' ? usage as TokenUsage : null);
-                setFallbackLabel(typeof event.result.fallbackLabel === 'string' ? event.result.fallbackLabel : '');
-                void fetchRecent();
-              }
+              else applyResult(event.result);
             }
           } catch {
             // Wait for the next line if a proxy delivered an incomplete SSE message.
           }
         }
       };
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        consumeLines(decoder.decode(value, { stream: true }));
+      try {
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          consumeLines(decoder.decode(value, { stream: true }));
+        }
+        consumeLines(decoder.decode());
+      } catch (streamError) {
+        // A proxy or network drop ends the stream; the server job keeps running.
+        if (!jobId) throw streamError;
       }
-      consumeLines(decoder.decode());
+      if (!finished && jobId) {
+        // Reattach: poll the server job until it finishes.
+        for (let attempt = 0; attempt < 240 && !finished; attempt += 1) {
+          await new Promise(resolve => setTimeout(resolve, 1500));
+          const statusResponse = await fetch(`/api/event-plan/generate?jobId=${encodeURIComponent(jobId)}`, { cache: 'no-store' });
+          const status = await statusResponse.json().catch(() => ({})) as { status?: string; message?: string; progress?: number; result?: GenerationEvent['result']; error?: string };
+          if (typeof status.message === 'string' && status.message) {
+            setProgress((current) => ({ message: status.message || current?.message || '', progress: status.progress ?? current?.progress, step: current?.step }));
+          }
+          if (status.status === 'done' && status.result?.success) { finished = true; applyResult(status.result); }
+          else if (status.status === 'error' || statusResponse.status === 404) {
+            finished = true;
+            setError(status.error || status.message || 'Generation failed');
+          }
+        }
+        if (!finished) setError('The event plan is still generating. Check Recent Generated in a moment.');
+      }
     } catch (caught: unknown) {
       setError(caught instanceof Error ? caught.message : 'Network error');
     } finally {
@@ -268,7 +296,11 @@ export default function EventPlanPage() {
     }
   };
 
-  const result = options[selectedOption];
+  const rawResult = options[selectedOption];
+  const rawBudget = normalizeBudget(rawResult?.budget);
+  const hasQuotation = quotations.length > 0 || Boolean(rawBudget?.items.some((item) => item.source === 'quotation'));
+  // Older saved plans may carry retired missing-price wording; show the current note instead.
+  const result = rawResult ? scrubMissingPriceNotes(rawResult, hasQuotation) : rawResult;
   const displayBudget = normalizeBudget(result?.budget);
   const plannedSpeakers = Array.isArray(result?.speakers) ? result.speakers.filter((speaker): speaker is string => typeof speaker === 'string') : [];
   const research = result?.research || { status: 'unverified' as const, sources: [], contacts: [] };
@@ -353,7 +385,7 @@ export default function EventPlanPage() {
             {plannedSpeakers.length > 0 && <div className="mb-4"><label className="text-xs text-[var(--mos-text-faint)] uppercase tracking-wide">Speakers</label><ul className="mt-2 divide-y divide-[var(--mos-border-subtle)] rounded-[var(--mos-radius-control)] border border-[var(--mos-border)]">{plannedSpeakers.map(speaker => <li key={speaker} className="px-3 py-2 text-[var(--mos-text-secondary)]">{speaker}</li>)}</ul></div>}
             <BudgetBreakdown budget={displayBudget} />
             {result.timeline && <Detail label="Timeline" value={result.timeline} preserveWhitespace />}
-            <ResearchPanel research={research} />
+            <ResearchPanel research={research} missingPriceText={missingPriceNote(hasQuotation)} />
           </Panel>
           <Toolbar><div className="flex flex-wrap gap-2"><Button variant="primary" onClick={() => handleDownload('doc')}>Download event plan (.doc)</Button><Button onClick={() => handleDownload('json')}>Download JSON</Button></div>{tokenUsage && <div className="text-right"><p className="text-xs font-medium text-[var(--mos-text-secondary)]">{(tokenUsage.inputTokens || 0) + (tokenUsage.outputTokens || 0)} tokens</p>{tokenUsage.model && <p className="text-[11px] text-[var(--mos-text-faint)]">{tokenUsage.model}</p>}</div>}</Toolbar>
           {fallbackLabel && <p data-testid="event-plan-fallback-label" className="text-[11px] text-[var(--mos-text-faint)]">{fallbackLabel}</p>}
@@ -428,13 +460,13 @@ function BudgetBreakdown({ budget }: { budget: Budget | null }) {
   );
 }
 
-function ResearchPanel({ research }: { research: EventPlanResearch }) {
+function ResearchPanel({ research, missingPriceText }: { research: EventPlanResearch; missingPriceText: string }) {
   const contacts = research.contacts.filter((contact) => Boolean(contact.sourceUrl) && (contact.phone || contact.email));
   const hasSources = research.sources.length > 0;
   return (
     <section className={`mt-4 rounded-lg border p-4 ${hasSources ? 'border-blue-500/40 bg-blue-500/10 text-blue-100' : 'border-2 border-amber-400 bg-amber-500/15 text-amber-100'}`} role={hasSources ? undefined : 'alert'}>
       <h4 className="font-semibold">Budget research sources</h4>
-      <p className="mt-1 text-sm">{NO_PUBLIC_PRICE_NOTE}. The public pages below are not a verified quotation.</p>
+      <p className="mt-1 text-sm">{missingPriceText}. The public pages below are not a verified quotation.</p>
       {research.queries && research.queries.length > 0 && <p className="mt-2 text-xs">Searches: {research.queries.join(' · ')}</p>}
       {hasSources ? (
         <div className="mt-3">

@@ -14,6 +14,7 @@ import { EVENT_PLAN_PROGRESS } from './event-plan-progress';
 import type { EventPlanResearch } from './event-plan-research';
 import {
   buildEventPricingFollowUpQueries,
+  ESTIMATE_UNAVAILABLE_NOTE,
   buildEventPricingQueries,
   eventPricingPackIsThin,
   extractPublicContacts,
@@ -411,7 +412,7 @@ export function toEventPlanResearch(research: EventPricingResearch, submittedUrl
     query: hit.query,
     claim: hit.amounts.length
       ? 'Public price from this page (not a verified quotation)'
-      : 'No public price found on this page — request a quotation from the vendor',
+      : `${ESTIMATE_UNAVAILABLE_NOTE} (no price listed on this page)`,
   }));
   const listed = new Set(sources.map((source) => source.url));
   for (const url of submittedUrls) {
