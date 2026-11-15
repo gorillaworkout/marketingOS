@@ -166,6 +166,12 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       ],
     },
     {
+      label: 'Partnership',
+      items: [
+        { href: '/dashboard/partnership/competitor-intelligence', label: 'Competitor Intelligence', icon: 'target', feature: 'partnership' },
+      ],
+    },
+    {
       label: 'Library',
       items: resourceItems,
     },

@@ -12,6 +12,7 @@ data/internal-docs/
 data/social-post-references/
 data/competitor-references/
 data/event-plan-quotations/
+data/partnership-evidence/
 data/*.db
 data/*.db-journal
 data/*.db-wal

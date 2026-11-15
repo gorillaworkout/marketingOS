@@ -23,7 +23,7 @@ const PUBLIC_ROUTES = new Set([
   'src/app/api/ai-research/share/route.ts',
 ]);
 
-const GATE = /requireFeature\(|requireAdmin\(|getSession\(|getAuthorizedUser\(|watchCronAuthorization\(|requireInternalDocsUser\(|requireInternalDocsManager\(|requireMonthlyReport\(|requireSettlementReport\(|authenticateSync\(/;
+const GATE = /requireFeature\(|requireAdmin\(|getSession\(|getAuthorizedUser\(|watchCronAuthorization\(|partnershipCronAuthorization\(|requireInternalDocsUser\(|requireInternalDocsManager\(|requireMonthlyReport\(|requireSettlementReport\(|authenticateSync\(/;
 
 test('every API route is feature-gated, admin-gated, session-gated, or explicitly public', () => {
   const routes = walk(path.join(root, 'src/app/api'), 'route.ts');
@@ -54,6 +54,7 @@ test('a member without the department feature is blocked from that feature path'
     ['/dashboard/seo/content/draft-1', 'seo'],
     ['/dashboard/monthly-report/uploads', 'monthly-report'],
     ['/dashboard/settlement-report/data', 'settlement-report'],
+    ['/dashboard/partnership/competitor-intelligence', 'partnership'],
   ];
   for (const [pathname, feature] of cases) {
     assert.equal(accountFeatureFromPath(pathname), feature, pathname);

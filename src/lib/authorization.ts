@@ -30,11 +30,17 @@ export const MONTHLY_REPORT_FEATURE = 'monthly-report' as const;
 export const SETTLEMENT_REPORT_FEATURE = 'settlement-report' as const;
 
 /**
+ * Partnership division tools (Competitor Intelligence; later Proposal Builder and Global Trends).
+ * Assignable per department on Accounts. Migration 057 creates a Partnership department with it.
+ */
+export const PARTNERSHIP_FEATURE = 'partnership' as const;
+
+/**
  * Features an admin can assign per department on Accounts.
  * Generation workflows stay in GENERATION_FEATURES so model routing is unchanged.
  * FAQ & Guides (`internal-docs`) is first so it sits at the top of the Accounts list.
  */
-export const ACCOUNT_FEATURES = [INTERNAL_DOCS_FEATURE, ...GENERATION_FEATURES, SEO_FEATURE, MONTHLY_REPORT_FEATURE, SETTLEMENT_REPORT_FEATURE] as const;
+export const ACCOUNT_FEATURES = [INTERNAL_DOCS_FEATURE, ...GENERATION_FEATURES, SEO_FEATURE, MONTHLY_REPORT_FEATURE, SETTLEMENT_REPORT_FEATURE, PARTNERSHIP_FEATURE] as const;
 export type AccountFeature = typeof ACCOUNT_FEATURES[number];
 
 export const ACCOUNT_FEATURE_LABELS: Record<AccountFeature, string> = {
@@ -48,6 +54,7 @@ export const ACCOUNT_FEATURE_LABELS: Record<AccountFeature, string> = {
   seo: 'SEO OS',
   'monthly-report': 'Onboarding Reports',
   'settlement-report': 'Settlement Report',
+  partnership: 'Partnership',
 };
 
 /** Dashboard href for each account feature. Last path segment is not always the feature id. */
@@ -62,6 +69,7 @@ export const DASHBOARD_FEATURE_HREFS = {
   seo: '/dashboard/seo',
   'monthly-report': '/dashboard/monthly-report',
   'settlement-report': '/dashboard/settlement-report',
+  partnership: '/dashboard/partnership',
 } as const satisfies Record<AccountFeature, string>;
 
 export interface FeaturePrincipal {
@@ -107,9 +115,9 @@ export function generationFeatureFromPath(pathname: string): GenerationFeature |
 }
 
 /** Features whose whole route tree (href and every nested path) belongs to the feature. */
-const PREFIX_MATCHED_FEATURES = [INTERNAL_DOCS_FEATURE, SEO_FEATURE, MONTHLY_REPORT_FEATURE, SETTLEMENT_REPORT_FEATURE] as const;
+const PREFIX_MATCHED_FEATURES = [INTERNAL_DOCS_FEATURE, SEO_FEATURE, MONTHLY_REPORT_FEATURE, SETTLEMENT_REPORT_FEATURE, PARTNERSHIP_FEATURE] as const;
 
-/** Exact href match, plus nested routes for prefix-matched features (Internal Docs, SEO OS, Onboarding, Settlement). */
+/** Exact href match, plus nested routes for prefix-matched features (Internal Docs, SEO OS, Onboarding, Settlement, Partnership). */
 export function accountFeatureFromPath(pathname: string): AccountFeature | undefined {
   const normalized = normalizeDashboardPath(pathname);
   for (const feature of PREFIX_MATCHED_FEATURES) {
