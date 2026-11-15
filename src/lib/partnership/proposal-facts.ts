@@ -45,6 +45,8 @@ export const VERIFIED_AWARDS: readonly VerifiedAward[] = [
   { title: 'Highest Trading Volume Broker', year: '2025', by: 'CNBC' },
   { title: 'Top Futures Broker', year: '2026', by: 'Bloomberg Technoz' },
   { title: 'Best Growth Trading Platform', year: '2024', by: 'CNBC' },
+  { title: 'Biggest Bilateral Trading Volume', year: '2025', by: 'JFX' },
+  { title: 'Best Rated Broker', year: '2024', by: 'BAPPEBTI' },
 ];
 
 const EN: VerifiedFacts = {

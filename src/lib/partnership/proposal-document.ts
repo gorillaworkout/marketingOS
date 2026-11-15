@@ -243,7 +243,7 @@ export async function renderDocumentPdf(model: ProposalDocument): Promise<{ data
     };
     const top = y + 46;
     badges.slice(0, 4).forEach((badge, index) => drawBadge(MARGIN_X + CONTENT_W / 8 + index * (CONTENT_W / 4), top, badge));
-    badges.slice(4).forEach(badge => drawBadge(PAGE_W / 2, top + 116, badge));
+    badges.slice(4).forEach((badge, index, rest) => drawBadge(PAGE_W / 2 + (index - (rest.length - 1) / 2) * (CONTENT_W / 4), top + 116, badge));
     y = top + 178;
   }
 

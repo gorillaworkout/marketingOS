@@ -42,6 +42,8 @@ test('verified facts carry the license, regulators, memberships, and the confirm
     'Highest Trading Volume Broker 2025 (CNBC)',
     'Top Futures Broker 2026 (Bloomberg Technoz)',
     'Best Growth Trading Platform 2024 (CNBC)',
+    'Biggest Bilateral Trading Volume 2025 (JFX)',
+    'Best Rated Broker 2024 (BAPPEBTI)',
   ]);
 });
 
