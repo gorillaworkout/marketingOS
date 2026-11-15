@@ -80,7 +80,10 @@ async function follow(url: string, fetchPage: AuditFetch, timeoutMs: number, loo
     const bytes = Math.max(declared, Buffer.byteLength(response.body));
     if (response.status >= 300 && response.status < 400 && response.location && hops < MAX_REDIRECTS) {
       const next = new URL(response.location, current);
-      current = normalizeAuditUrl(next.toString());
+      const normalized = normalizeAuditUrl(next.toString());
+      // A server that adds a trailing slash would loop if we stripped it again; follow its exact target then.
+      next.hash = '';
+      current = normalized === current ? next.toString() : normalized;
       hops += 1;
       continue;
     }
