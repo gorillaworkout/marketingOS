@@ -6,7 +6,7 @@ const nextConfig: NextConfig = {
       { source: '/dashboard/monthly-report/settlement', destination: '/dashboard/settlement-report', permanent: false },
     ];
   },
-  serverExternalPackages: ['xlsx', 'exceljs', 'mammoth', 'unpdf', 'jszip', 'pdfkit'],
+  serverExternalPackages: ['xlsx', 'exceljs', 'mammoth', 'unpdf', 'jszip', 'pdfkit', 'pptxgenjs'],
   // FAQ & Guides rejects files over 100 MB in the upload route. This only
   // applies when a Next.js proxy buffers the body; the default is 10 MB and
   // would truncate a larger file before that check. 120 MB leaves room for

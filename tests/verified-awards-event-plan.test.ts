@@ -26,6 +26,8 @@ test('the verified facts list the real Dupoin awards and the Bappebti A+++ ratin
     'Highest Trading Volume Broker 2025 by CNBC Indonesia',
     'Top Futures Broker 2026 by Bloomberg Technoz',
     'Best Growth Trading Platform 2024 by CNBC Indonesia',
+    'Biggest Bilateral Trading Volume 2025 by JFX (Jakarta Futures Exchange)',
+    'Best Rated Broker 2024 by BAPPEBTI',
     'peringkat A+++ dari Bappebti 2023–2025',
   ]) {
     assert.ok(DUPOIN_VERIFIED_FACTS.includes(award), `missing ${award}`);
@@ -43,6 +45,10 @@ test('the guard keeps real award variants in any case or punctuation', () => {
     'TOP FUTURES BROKER 2026 — BLOOMBERG TECHNOZ.',
     'Best Growth Trading Platform 2024 by CNBC Indonesia.',
     'Dupoin meraih peringkat A+++ dari Bappebti 2023–2025.',
+    'Biggest Bilateral Trading Volume 2025 (JFX).',
+    'BIGGEST BILATERAL TRADING VOLUME 2025 — JAKARTA FUTURES EXCHANGE.',
+    'Best Rated Broker 2024 (BAPPEBTI).',
+    'Dupoin, best-rated broker 2024 by Bappebti.',
   ]) {
     assert.deepEqual(unverifiedClaims(text, facts), [], text);
     const guarded = guardGeneratedText(`${text} Trade with a plan.`, facts);
@@ -59,6 +65,11 @@ test('the guard strips fake or altered awards', () => {
     'Most Trusted Broker CNN 2019.',
     'Top Futures Broker 2026 by CNN Indonesia.',
     'Winner of the Global Finance award 2025 broker.',
+    'Biggest Bilateral Trading Volume 2024 by JFX.',
+    'Biggest Bilateral Trading Volume 2025 by CNBC.',
+    'Biggest Trading Volume 2025 by Forbes.',
+    'Best Rated Broker 2025 by BAPPEBTI.',
+    'Best Rated Broker 2024 by OJK.',
   ]) {
     const guarded = guardGeneratedText(`${fake} Trade with a plan.`, facts);
     assert.ok(guarded.warnings.length > 0, fake);

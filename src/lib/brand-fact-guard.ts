@@ -7,6 +7,7 @@
  * Real Dupoin awards and ratings.
  * Sources: dupoin.co.id/en/about-us/our-awards and CNN Indonesia
  * (cnnindonesia.com/ekonomi/20251030180700-83-1290255/pt-dupoin-futures-indonesia-sabet-most-trusted-broker).
+ * The JFX 2025 and BAPPEBTI 2024 awards were confirmed by the Dupoin team (Nov 2026).
  * `keys` are the phrases that identify the award, `issuers` must be named next to it,
  * and `years` are the only years a mention may carry.
  */
@@ -15,6 +16,8 @@ export const DUPOIN_VERIFIED_AWARDS = [
   { fact: 'Highest Trading Volume Broker 2025 by CNBC Indonesia', keys: ['highest trading volume'], issuers: ['cnbc'], years: ['2025'] },
   { fact: 'Top Futures Broker 2026 by Bloomberg Technoz', keys: ['top futures broker'], issuers: ['bloomberg'], years: ['2026'] },
   { fact: 'Best Growth Trading Platform 2024 by CNBC Indonesia', keys: ['best growth trading platform'], issuers: ['cnbc'], years: ['2024'] },
+  { fact: 'Biggest Bilateral Trading Volume 2025 by JFX (Jakarta Futures Exchange)', keys: ['biggest bilateral trading volume'], issuers: ['jfx', 'jakarta futures exchange'], years: ['2025'] },
+  { fact: 'Best Rated Broker 2024 by BAPPEBTI', keys: ['best rated broker'], issuers: ['bappebti'], years: ['2024'] },
   { fact: 'peringkat A+++ dari Bappebti 2023–2025', keys: ['a+++'], issuers: ['bappebti'], years: ['2023', '2024', '2025'] },
 ] as const;
 
@@ -61,6 +64,7 @@ const CLAIM_PATTERNS = [
   /\bmost[\s-]+trusted\b[^.\n]*/gi,
   /\bCNN\s*20\d{2}\b/gi,
   /\bterbaik\b/gi,
+  /\b(?:biggest|largest|highest|terbesar|tertinggi)\b[^.\n]{0,40}?\btrading volume\b[^.\n]*/gi,
   /\b(?:award|penghargaan)\b[^.\n]{0,40}\b(?:20\d{2}|winner|pemenang|broker)\b/gi,
   /\b(?:best|top|highest|leading|number one|#1)\b[^.\n]{0,40}?\b(?:broker|platform|pialang)\b(?=[^.\n]{0,60}?(?:\b20\d{2}\b|\b(?:by|versi|oleh|awards?)\b))[^.\n]*/gi,
   /\b(?:peringkat|rating|predikat|rated)\s+A\+*(?![\w+])[^.\n]*/gi,
@@ -83,7 +87,7 @@ function contextAround(text: string, start: number, end: number): string {
   return text.slice(from, stop >= 0 ? end + stop : text.length);
 }
 
-const ISSUER_OR_YEAR = /^ (?:(?:cnn|cnbc|bloomberg|technoz|bappebti|indonesia|awards?|20\d{2}|by|dari|oleh) )+$/;
+const ISSUER_OR_YEAR = /^ (?:(?:cnn|cnbc|bloomberg|technoz|bappebti|jfx|jakarta|futures|exchange|indonesia|awards?|20\d{2}|by|dari|oleh) )+$/;
 
 function isVerifiedAward(claim: string, context: string, looseFacts: string): boolean {
   const claimLoose = loose(claim);
