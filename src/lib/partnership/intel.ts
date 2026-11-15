@@ -330,7 +330,7 @@ export function buildIntelPrompt(competitor: { name: string; region: string }, s
   return { system, user };
 }
 
-function extractJson(raw: unknown): Record<string, unknown> | null {
+export function extractJson(raw: unknown): Record<string, unknown> | null {
   if (raw && typeof raw === 'object') return raw as Record<string, unknown>;
   if (typeof raw !== 'string') return null;
   const match = raw.match(/\{[\s\S]*\}/);
@@ -343,9 +343,10 @@ function extractJson(raw: unknown): Record<string, unknown> | null {
   }
 }
 
-function refsFor(value: unknown, byId: Map<string, IntelSource>): IntelSource[] {
+/** Citation enforcement shared by every Partnership report: only ids that exist in the catalog survive. */
+export function refsFor<T extends IntelSource>(value: unknown, byId: Map<string, T>): T[] {
   if (!Array.isArray(value)) return [];
-  const out: IntelSource[] = [];
+  const out: T[] = [];
   for (const id of value) {
     if (typeof id !== 'string') continue;
     const source = byId.get(id.trim().toUpperCase());
@@ -354,7 +355,7 @@ function refsFor(value: unknown, byId: Map<string, IntelSource>): IntelSource[] 
   return out;
 }
 
-const toRef = (source: IntelSource): SourceRef => ({ id: source.id, kind: source.kind, url: source.url, evidenceId: source.evidenceId, title: source.title });
+export const toRef = (source: IntelSource): SourceRef => ({ id: source.id, kind: source.kind, url: source.url, evidenceId: source.evidenceId, title: source.title });
 
 export function parseIntelResponse(raw: unknown, sources: IntelSource[], window: ActivityWindow): { overview: string; items: IntelItem[]; opportunities: IntelOpportunity[] } {
   const body = extractJson(raw);

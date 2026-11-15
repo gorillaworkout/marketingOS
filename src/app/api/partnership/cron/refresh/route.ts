@@ -1,12 +1,13 @@
 import { after, NextRequest, NextResponse } from 'next/server';
 import { partnershipCronAuthorization } from '@/lib/partnership/cron';
 import { runDueCompetitorRefreshes } from '@/lib/partnership/run';
+import { runDueTrendsDigest } from '@/lib/partnership/trends-run';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 300;
 
 /**
- * Weekly Competitor Intelligence refresh for an HTTP cron.
+ * Weekly Competitor Intelligence refresh plus the Global Industry Trends digest, for an HTTP cron.
  * Header: x-partnership-cron-secret: $PARTNERSHIP_CRON_SECRET. The work runs after the response.
  * The VPS can run `npm run partnership:refresh` instead.
  */
@@ -22,6 +23,12 @@ export async function POST(request: NextRequest) {
       console.log(`Partnership refresh: checked ${summary.checked}, refreshed ${summary.refreshed}, failed ${summary.failed}, skipped ${summary.skipped}.`);
     } catch (error) {
       console.error('Partnership refresh failed', error);
+    }
+    try {
+      const trends = await runDueTrendsDigest();
+      console.log(`Global Industry Trends: ${trends.status}${trends.reason ? ` (${trends.reason})` : ''}.`);
+    } catch (error) {
+      console.error('Global Industry Trends digest failed', error);
     }
   });
   return NextResponse.json({ accepted: true }, { status: 202 });

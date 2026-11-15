@@ -169,3 +169,18 @@ test('the audit page is in the SEO menu and does not embed a key', () => {
   assert.doesNotMatch(settings, /AIza[0-9A-Za-z_-]{20,}/);
   assert.doesNotMatch(route, /PAGESPEED_API_KEY\s*=\s*['\"][^'\"]+/);
 });
+
+test('a trailing-slash redirect does not loop: the crawler follows the exact target when normalizing would repeat the URL', async () => {
+  const fetched: string[] = [];
+  const fetchPage: AuditFetch = async url => {
+    fetched.push(url);
+    if (url === 'https://slash.test/news') return { ...response(301, '', 'text/html'), location: 'https://slash.test/news/' };
+    if (url === 'https://slash.test/news/') return response(200, '<html><head><title>News</title></head><body><h1>News</h1></body></html>', 'text/html');
+    return response(404, '', 'text/plain');
+  };
+  const html: string[] = [];
+  const crawl = await crawlSite({ startUrl: 'https://slash.test/news/', maxPages: 1, fetchPage, lookup: async () => ['93.184.216.34'], delayMs: 0, onHtml: page => { html.push(page.url); } });
+  assert.equal(crawl.pages[0]?.status, 200);
+  assert.equal(html.length, 1);
+  assert.ok(fetched.filter(url => url === 'https://slash.test/news').length <= 2);
+});

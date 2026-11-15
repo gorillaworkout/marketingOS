@@ -170,6 +170,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       items: [
         { href: '/dashboard/partnership/competitor-intelligence', label: 'Competitor Intelligence', icon: 'target', feature: 'partnership' },
         { href: '/dashboard/partnership/proposal-builder', label: 'Proposal Builder', icon: 'template', feature: 'partnership' },
+        { href: '/dashboard/partnership/global-trends', label: 'Global Industry Trends', icon: 'visibility', feature: 'partnership' },
       ],
     },
     {
