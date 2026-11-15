@@ -28,8 +28,9 @@ export function nextImageFallback(current: string, enabled: readonly string[]): 
   return null;
 }
 
-export function imageQuotaNotice(modelName: string, retryIn?: string | null): string {
+export function imageQuotaNotice(modelName: string, retryIn?: string | null, backupName?: string | null): string {
   const wait = retryIn?.trim() ? `retry in ${retryIn.trim()}` : 'retry later';
+  if (backupName?.trim()) return `Image quota reached for ${modelName}, ${wait}; backup image model ${backupName.trim()} was also unavailable`;
   return `Image quota reached for ${modelName}, ${wait}; no other image model enabled — enable one in AI Models`;
 }
 
@@ -109,6 +110,8 @@ export async function generateWithAntigravityCapacityFallback<T>(
   generate: (model: string) => Promise<T>,
   options?: {
     onRetry?: (fallbackModel: string, fromModel: string) => void | Promise<void>;
+    /** Called with the backup's own failure before the original error is rethrown. */
+    onFallbackError?: (fallbackModel: string, error: unknown) => void;
     /** Override the configured fallback (tests). `null` disables the retry. */
     fallbackModel?: string | null;
   },
@@ -141,7 +144,8 @@ export async function generateWithAntigravityCapacityFallback<T>(
         fallbackFrom: requestedModel,
         fallbackMessage: antigravityCapacityFallbackMessage(requestedModel, fallbackModel),
       };
-    } catch {
+    } catch (fallbackError) {
+      options?.onFallbackError?.(fallbackModel, fallbackError);
       throw error;
     }
   }

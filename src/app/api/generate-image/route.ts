@@ -17,6 +17,7 @@ import {
 } from '@/lib/image-generation-fallback';
 import { AVAILABLE_IMAGE_MODELS, DEFAULT_IMAGE_MODEL, imageModelLabel, resolveAssignedImageModels, resolveImageModel } from '@/lib/image-models';
 import { postImage } from '@/lib/llm-provider';
+import { freeImageBackupModel } from '@/lib/llm-provider-defaults';
 import { logTokenUsage } from '@/lib/token-log';
 import { parseImageGenerationUsage } from '@/lib/token-usage';
 import fs from 'fs';
@@ -114,7 +115,9 @@ async function runImageJob(job: ImageJob, prompt: string, brief: string, type: s
   // fall back to the default image model, before anything is shown or sent.
   const safeModel = resolveImageModel(model);
   const enabled = await enabledImageIds();
-  const fallback = nextImageFallback(safeModel, enabled);
+  // An enabled catalog model wins; otherwise the free OpenRouter backup covers
+  // an Antigravity quota hit while it is still offered.
+  const fallback = nextImageFallback(safeModel, enabled) ?? freeImageBackupModel();
 
   try {
     imageJobs.update(job.id, job.ownerId, {
@@ -138,6 +141,9 @@ async function runImageJob(job: ImageJob, prompt: string, brief: string, type: s
             progress: 55,
             message: `Antigravity quota full — retrying with ${imageModelLabel(fallbackModel)} instead of ${imageModelLabel(fromModel)}...`,
           });
+        },
+        onFallbackError: (fallbackModel, fallbackError) => {
+          console.warn(`[generate-image] backup ${fallbackModel} also failed:`, fallbackError instanceof Error ? fallbackError.message.slice(0, 300) : fallbackError);
         },
       },
     );
@@ -208,7 +214,7 @@ async function runImageJob(job: ImageJob, prompt: string, brief: string, type: s
     // Report WHY it failed. A blanket "please try again" sent users retrying a
     // quota or an expired upstream token forever, with the real cause only ever
     // visible in the server log.
-    const explained = explainImageFailure(reason, safeModel);
+    const explained = explainImageFailure(reason, safeModel, fallback && safeModel.startsWith('ag/') ? imageModelLabel(fallback) : null);
     imageJobs.update(job.id, job.ownerId, {
       status: 'error', progress: 0, message: `❌ ${explained}`, error: explained,
     });
@@ -249,7 +255,7 @@ async function requestGatewayImage(
  * over the generic 5xx outage copy. Capacity detection is shared with
  * `generateWithAntigravityCapacityFallback`.
  */
-export function explainImageFailure(reason: string, model: string): string {
+export function explainImageFailure(reason: string, model: string, backupName?: string | null): string {
   if (reason.includes('image generation needs OpenRouter credits')) return 'image generation needs OpenRouter credits. Add credits in OpenRouter, then try again.';
   if (reason.includes('OpenRouter free-model rate limit')) return reason;
   const status = parseImageApiErrorStatus(reason);
@@ -265,7 +271,7 @@ export function explainImageFailure(reason: string, model: string): string {
     // Wrapped 502s and Antigravity models get the explicit quota message so users
     // do not think the whole image service is down.
     if (model.startsWith('ag/') || status >= 500 || status === 429) {
-      return imageQuotaNotice(imageModelLabel(model), reset || null);
+      return imageQuotaNotice(imageModelLabel(model), reset || null, backupName);
     }
     return `Usage limit reached for ${model}.${waitHint} You can also pick a different image model.`;
   }

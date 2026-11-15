@@ -148,7 +148,7 @@ test('logging contract uses the actual model that produced the image', async () 
   assert.match(route, /logImageGenerationUsage\(job\.ownerId, taskId, usedModel, payload, payload\.provider\)/);
   assert.match(route, /taskType: 'image-gen'/);
   assert.doesNotMatch(route, /logImageGenerationUsage\(job\.ownerId, taskId, safeModel/);
-  assert.match(route, /explainImageFailure\(reason, safeModel\)/, 'errors name the model that was actually sent');
+  assert.match(route, /explainImageFailure\(reason, safeModel[,)]/, 'errors name the model that was actually sent');
 });
 
 test('Social Post surfaces usedModel and fallback toast copy', () => {

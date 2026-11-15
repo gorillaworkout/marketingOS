@@ -37,8 +37,31 @@ export const OPENROUTER_FREE_EMBEDDING_MODELS = [
   'nvidia/nemotron-3.5-embed-1b:free',
   'nvidia/nemotron-3.5-embed-8b:free',
 ] as const;
-/** No free image model is listed on https://openrouter.ai/api/v1/images/models. */
+/** Paid OpenRouter image target used by provider failover (needs credits). */
 export const DEFAULT_OPENROUTER_IMAGE_MODEL = 'google/gemini-3.1-flash-image';
+/**
+ * Free OpenRouter image model used as the backup when the Dupoin image model
+ * (`ag/gemini-3.1-flash-image`) hits its Antigravity quota. Listed with
+ * pricing 0 on https://openrouter.ai/api/v1/models?output_modalities=image on
+ * 2026-11-15, served on POST /api/v1/images. OpenRouter lists an
+ * expiration_date of 2026-11-28 for this free variant, so it switches itself
+ * off after that day instead of failing on every quota hit.
+ */
+export const OPENROUTER_FREE_IMAGE_BACKUP_MODEL = 'recraft/recraft-v4.1-flash-v2:free';
+export const OPENROUTER_FREE_IMAGE_BACKUP_LABEL = 'Recraft V4.1 Flash (OpenRouter free)';
+export const OPENROUTER_FREE_IMAGE_BACKUP_EXPIRES = '2026-11-29T00:00:00Z';
+export const OPENROUTER_FREE_IMAGE_MODELS = [OPENROUTER_FREE_IMAGE_BACKUP_MODEL] as const;
+
+/** True for a free OpenRouter image id that has not passed its listed expiry. */
+export function isOpenRouterFreeImageModel(model: string, now: number = Date.now()): boolean {
+  if (!(OPENROUTER_FREE_IMAGE_MODELS as readonly string[]).includes(model)) return false;
+  return now < Date.parse(OPENROUTER_FREE_IMAGE_BACKUP_EXPIRES);
+}
+
+/** The free backup image id while it is still offered, otherwise null. */
+export function freeImageBackupModel(now: number = Date.now()): string | null {
+  return isOpenRouterFreeImageModel(OPENROUTER_FREE_IMAGE_BACKUP_MODEL, now) ? OPENROUTER_FREE_IMAGE_BACKUP_MODEL : null;
+}
 /**
  * Verified on https://openrouter.ai/api/v1/embeddings/models.
  * The catalog description says this model produces 1,024-dimensional vectors,
@@ -55,7 +78,7 @@ export const EMBEDDINGS_FAILOVER_NOTE =
   'The stored knowledge vectors are a local 1024-number hash, saved as JSON text, not an external embedding. liquid/lfm-2.5-embedding-350m:free is the only free OpenRouter embedding model whose catalog text says it produces 1,024 dimensions. That width matches, but the vector space does not. Failover therefore does not write OpenRouter embeddings into the index. Retrieval stays on the local hash either way.';
 
 export const IMAGES_FAILOVER_NOTE =
-  'OpenRouter has no free image model. Image failover uses POST /api/v1/images with google/gemini-3.1-flash-image, which needs credits. A key without credits fails with “image generation needs OpenRouter credits” instead of an empty file.';
+  'When the Gemini image quota is full, the image is retried once on recraft/recraft-v4.1-flash-v2:free (free on OpenRouter until 28 Nov 2026, not used in Dupoin-only mode). Provider failover to google/gemini-3.1-flash-image still needs OpenRouter credits; a key without credits fails with “image generation needs OpenRouter credits” instead of an empty file.';
 
 export type LlmModelMapping = {
   dupoinModel: string;

@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { Button, FormField, LoadingState, PageHeader, PageStack, Panel, SectionHeader, Select, StatusBadge, TextInput } from '@/components/ui/dashboard';
 import type { LlmMode } from '@/lib/llm-provider-defaults';
-import { EMBEDDINGS_FAILOVER_NOTE } from '@/lib/llm-provider-defaults';
+import { EMBEDDINGS_FAILOVER_NOTE, OPENROUTER_FREE_IMAGE_BACKUP_LABEL, freeImageBackupModel } from '@/lib/llm-provider-defaults';
 import { groupModelsByProvider } from '@/lib/model-groups';
 import { providerErrorAppliesTo, storedAuthExpired } from '@/lib/llm-auth';
 import { FREE_TEXT_CHAIN, IMAGE_SHORTLIST, TEXT_SHORTLIST, TIER_FEATURES, TIER_PAID_TARGET, type ModelTier } from '@/lib/model-tiers';
@@ -77,6 +77,7 @@ export default function ModelsPage() {
   const [tiers, setTiers] = useState<TierRow[]>([]);
   const [health, setHealth] = useState<Health[]>([]);
   const [includeImages, setIncludeImages] = useState(false);
+  const freeImageBackup = freeImageBackupModel();
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState('');
@@ -244,7 +245,8 @@ export default function ModelsPage() {
                   <div key={tier.tier} className="rounded-[var(--mos-radius-control)] border border-[var(--mos-border)] p-3">
                     <div className="flex flex-wrap items-center gap-2">
                       <h3 className="text-sm font-medium text-[var(--mos-text)]">{TIER_COPY[tier.tier].title}</h3>
-                      {tier.tier === 'image' && <StatusBadge tone="warning">Needs credits on OpenRouter</StatusBadge>}
+                      {tier.tier === 'image' && freeImageBackup && <StatusBadge tone="success">Backup: {OPENROUTER_FREE_IMAGE_BACKUP_LABEL} (free until 28 Nov)</StatusBadge>}
+                      {tier.tier === 'image' && <StatusBadge tone="warning">Paid target needs OpenRouter credits</StatusBadge>}
                     </div>
                     <p className="mt-1 text-xs text-[var(--mos-text-muted)]">{TIER_COPY[tier.tier].detail} {features.join(', ')}</p>
                     <div className="mt-3 grid gap-3 md:grid-cols-2">
@@ -263,10 +265,12 @@ export default function ModelsPage() {
                     <div className="mt-3 flex flex-wrap items-center gap-2">
                       <ModelBadge health={health} provider="dupoin" model={tier.dupoinPrimary} lastError={provider?.status.lastError} detectedAt={provider?.status.lastFailoverAt} />
                       <ModelBadge health={health} provider="openrouter" model={usePaid ? tier.paidTarget : (tier.tier === 'image' ? tier.paidTarget : FREE_TEXT_CHAIN[0])} />
+                      {tier.tier === 'image' && freeImageBackup && <ModelBadge health={health} provider="openrouter" model={freeImageBackup} />}
                       <Button size="sm" disabled={busy !== ''} onClick={() => void probe({
                         targets: [
                           { provider: 'dupoin', model: tier.dupoinPrimary, kind: tier.tier === 'image' ? 'image' : 'chat' },
                           { provider: 'openrouter', model: tier.tier === 'image' ? tier.paidTarget : (usePaid ? tier.paidTarget : FREE_TEXT_CHAIN[0]), kind: tier.tier === 'image' ? 'image' : 'chat' },
+                          ...(tier.tier === 'image' && freeImageBackup ? [{ provider: 'openrouter', model: freeImageBackup, kind: 'image' }] : []),
                         ],
                       }, tier.tier)}>{busy === tier.tier ? 'Testing…' : 'Test'}</Button>
                     </div>

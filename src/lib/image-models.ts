@@ -56,8 +56,13 @@ export function resolveImageModel(id: string | undefined | null): string {
   return isAllowedImageModel(live) ? live : DEFAULT_IMAGE_MODEL;
 }
 
+/** Display names for backup image ids that are not in the picker catalog. */
+export const BACKUP_IMAGE_MODEL_LABELS: Readonly<Record<string, string>> = {
+  'recraft/recraft-v4.1-flash-v2:free': 'Recraft V4.1 Flash (OpenRouter free)',
+};
+
 export function imageModelLabel(id: string): string {
-  return AVAILABLE_IMAGE_MODELS.find(model => model.id === id)?.name ?? RETIRED_IMAGE_MODEL_LABELS[id] ?? id;
+  return AVAILABLE_IMAGE_MODELS.find(model => model.id === id)?.name ?? BACKUP_IMAGE_MODEL_LABELS[id] ?? RETIRED_IMAGE_MODEL_LABELS[id] ?? id;
 }
 
 /**
