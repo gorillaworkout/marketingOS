@@ -124,6 +124,8 @@ export function modelsInUse(input: {
   embeddingModel: string;
   imageModel: string;
   includeImages: boolean;
+  /** Free OpenRouter image backup (probed with images, never paid). */
+  freeImageBackup?: string | null;
 }): InUseModel[] {
   const rows: InUseModel[] = [];
   const seen = new Set<string>();
@@ -140,5 +142,6 @@ export function modelsInUse(input: {
   if (input.usePaid) for (const model of input.paidTargets) add('openrouter', model, model === TIER_PAID_TARGET.image ? 'image' : 'chat');
   add('openrouter', input.embeddingModel, 'embedding');
   if (input.includeImages) add('dupoin', input.imageModel, 'image');
+  if (input.includeImages && input.freeImageBackup) add('openrouter', input.freeImageBackup, 'image');
   return rows;
 }

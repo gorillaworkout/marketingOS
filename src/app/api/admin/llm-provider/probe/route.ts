@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { freeImageBackupModel } from '@/lib/llm-provider-defaults';
 import { requireAdmin } from '@/lib/auth';
 import {
   canManageLlmProvider,
@@ -43,6 +44,7 @@ export async function POST(request: NextRequest) {
       embeddingModel: settings.defaultEmbeddingModel,
       imageModel: TIER_PRIMARY.image,
       includeImages: body.includeImages === true,
+      freeImageBackup: freeImageBackupModel(),
     });
   } else if (Array.isArray(body.targets)) {
     if (body.targets.length > 8) return NextResponse.json({ error: 'Test at most 8 models at a time, or use Test all.' }, { status: 400 });

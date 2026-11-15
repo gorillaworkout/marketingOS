@@ -8,6 +8,7 @@ import {
   IMAGES_FAILOVER_NOTE,
   OPENROUTER_API_BASE,
   VERIFIED_OPENROUTER_IMAGE_MODELS,
+  isOpenRouterFreeImageModel,
   type LlmKind,
   type LlmMode,
   type LlmModelMapping,
@@ -225,7 +226,7 @@ export function imageRequestPath(provider: ProviderChoice): string {
 }
 
 export function openRouterImageSupported(model: string): boolean {
-  return (VERIFIED_OPENROUTER_IMAGE_MODELS as readonly string[]).includes(model);
+  return (VERIFIED_OPENROUTER_IMAGE_MODELS as readonly string[]).includes(model) || isOpenRouterFreeImageModel(model);
 }
 
 export function readCircuit(): CircuitState {
@@ -524,6 +525,42 @@ export type ImageExchange = {
   authNotice?: string | null;
 };
 
+/**
+ * A free OpenRouter image id goes straight to OpenRouter with its exact id: it
+ * has no Dupoin twin, is never mapped to a paid model, and never touches the
+ * Dupoin circuit. Dupoin-only mode keeps every request on Dupoin, so the free
+ * backup is refused there.
+ */
+async function postFreeOpenRouterImage(
+  settings: LlmSettings,
+  input: { model: string; prompt: string; aspectRatio?: string; timeoutMs: number },
+  referer: string,
+  title: string,
+): Promise<ImageExchange> {
+  if (settings.mode === 'dupoin') {
+    throw new Error(`OpenRouter image backup ${input.model} is off while AI Models provider mode is LLM Dupoin only.`);
+  }
+  const attempt = await attemptFetch({
+    url: `${OPENROUTER_API_BASE}${imageRequestPath('openrouter')}`,
+    apiKey: settings.openrouterKey,
+    missingKeyMessage: 'OpenRouter API key is not configured. Add it in LLM Provider settings.',
+    body: { model: input.model, prompt: input.prompt, n: 1, ...(input.aspectRatio ? { aspect_ratio: input.aspectRatio } : {}) },
+    referer,
+    title,
+    timeoutMs: input.timeoutMs,
+  });
+  if (attempt.kind !== 'http') throw attempt.error;
+  if (!attempt.response.ok) {
+    const errText = await attempt.response.text();
+    throw new Error(explainLlmHttpError('openrouter', attempt.response.status, errText, 'image'));
+  }
+  const payload = await attempt.response.json() as ImageExchange;
+  if (!payload?.data?.[0]?.b64_json && !payload?.data?.[0]?.url) {
+    throw new Error(`OpenRouter returned no image for ${input.model}. POST /api/v1/images did not include data[].b64_json or data[].url.`);
+  }
+  return { ...payload, provider: 'openrouter', upstreamModel: input.model };
+}
+
 export async function postImage(input: {
   model: string;
   prompt: string;
@@ -539,6 +576,9 @@ export async function postImage(input: {
   const before = readCircuit();
   const referer = input.referer || 'https://marketingos.local';
   const title = input.title || 'MarketingOS';
+  if (isOpenRouterFreeImageModel(input.model, now)) {
+    return postFreeOpenRouterImage(settings, input, referer, title);
+  }
   const cooled = authCooldownModels(now).includes(input.model);
   if (cooled && settings.mode !== 'auto' && settings.mode !== 'openrouter') {
     throw new Error(`Model ${imageModelLabel(input.model)} token expired. Please re-authenticate it in AI Models.`);
