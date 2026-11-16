@@ -8,11 +8,14 @@ import { parseGscQueryFile } from '@/lib/seo/keyword-gap-parse';
 import { GapInProgressError, createGap, listGaps, providerFlags, type GapInput, type GapProvider } from '@/lib/seo/keyword-gap-store';
 import { runKeywordGap } from '@/lib/seo/keyword-gap-run';
 import { listSeoSites } from '@/lib/seo/sites';
+import { tregConfig } from '@/lib/seo/treg-client';
+import { parseKeywordLimit, planTregRun } from '@/lib/seo/treg-plan';
+import { attachSpendRef, expireStaleReservations, settleTregSpend } from '@/lib/seo/treg-spend';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 300;
 
-const PROVIDERS = new Set(['free', 'semrush', 'dataforseo']);
+const PROVIDERS = new Set(['free', 'semrush', 'dataforseo', 'treg']);
 
 export async function GET(request: NextRequest) {
   const auth = await requireFeature(request, 'seo');
@@ -74,11 +77,34 @@ export async function POST(request: NextRequest) {
   const sites = await listSeoSites();
   const site = sites.find(item => sameHost(item.site_url, our.url)) ?? null;
   const payload: GapInput = { uploadedKeywords, competitors: competitors.domains.map(domain => domain.url), language, market };
+  let spendId: string | null = null;
+  if (provider === 'treg') {
+    await expireStaleReservations().catch(() => undefined);
+    const confirmed = Number(form.get('confirmEstimateMicro'));
+    const plan = await planTregRun({
+      config: tregConfig(),
+      role: auth.role,
+      userId: auth.id,
+      competitors: payload.competitors.length,
+      keywordLimit: parseKeywordLimit(form.get('keywordLimit')),
+      confirmedEstimateMicro: Number.isFinite(confirmed) && confirmed > 0 ? confirmed : null,
+    });
+    if (plan.kind === 'refuse') return NextResponse.json(plan.body, { status: plan.status });
+    if (plan.kind === 'paid') {
+      spendId = plan.spendId;
+      payload.treg = { spendId: plan.spendId, keywordLimit: plan.keywordLimit, estimateMicro: plan.estimateMicro, balanceBeforeMicro: plan.balanceBeforeMicro };
+    } else {
+      payload.tregSkipped = plan.reason;
+    }
+  }
   try {
     const id = await createGap({ siteId: site?.id ?? null, ourDomain: our.url, provider: provider as GapProvider, payload, userId: auth.id });
+    if (spendId) await attachSpendRef(spendId, id);
     after(() => runKeywordGap(id));
     return NextResponse.json({ id }, { status: 202 });
   } catch (error) {
+    // Nothing was called on treg: release the reservation.
+    if (spendId) await settleTregSpend(spendId, { status: 'failed', actualMicro: 0, costSource: 'reported', calls: 0, callIds: [], note: 'The run did not start.' }).catch(() => undefined);
     if (error instanceof GapInProgressError) return NextResponse.json({ error: error.message }, { status: 409 });
     throw error;
   }

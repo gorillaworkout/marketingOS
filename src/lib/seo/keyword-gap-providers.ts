@@ -145,6 +145,27 @@ function volumeOf(item: Record<string, unknown>): number | null {
   return typeof volume === 'number' ? volume : null;
 }
 
+function numberAt(record: Record<string, unknown> | null, key: string): number | null {
+  const value = record?.[key];
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+const INTENTS = new Set(['informational', 'navigational', 'commercial', 'transactional']);
+
+/** KD, CPC and main intent from a DataForSEO Labs item (also what treg relays). */
+export function keywordMetricsOf(item: Record<string, unknown>): { difficulty: number | null; cpc: number | null; intent: CompetitorKeyword['intent'] } {
+  const data = asRecord(item.keyword_data);
+  const info = asRecord(data?.keyword_info);
+  const properties = asRecord(data?.keyword_properties);
+  const intentInfo = asRecord(data?.search_intent_info);
+  const intent = typeof intentInfo?.main_intent === 'string' ? intentInfo.main_intent.toLowerCase() : '';
+  return {
+    difficulty: numberAt(properties, 'keyword_difficulty'),
+    cpc: numberAt(info, 'cpc'),
+    intent: INTENTS.has(intent) ? intent as CompetitorKeyword['intent'] : null,
+  };
+}
+
 function rankOf(value: unknown): number | null {
   const record = asRecord(value);
   const serp = asRecord(record?.serp_item) ?? record;
@@ -162,7 +183,7 @@ export function parseDataForSeoRanked(body: unknown, domain: string): { ours: Ou
     const position = rankOf(ranked);
     const volume = volumeOf(item);
     ours.push({ query: keyword, clicks: 0, impressions: volume ?? 0, ctr: null, position });
-    competitor.push({ keyword, domain, position, volume });
+    competitor.push({ keyword, domain, position, volume, ...keywordMetricsOf(item) });
   }
   return { ours, competitor };
 }

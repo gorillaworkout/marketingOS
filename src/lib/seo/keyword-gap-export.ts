@@ -1,7 +1,7 @@
 import * as XLSX from 'xlsx';
 import type { GapKeyword } from './keyword-gap-bucket';
 
-const HEADERS = ['Keyword', 'Bucket', 'Intent', 'Our position', 'Our clicks', 'Our impressions', 'Competitor position', 'Volume', 'Competitors'];
+const HEADERS = ['Keyword', 'Bucket', 'Intent', 'Our position', 'Our clicks', 'Our impressions', 'Competitor position', 'Volume', 'KD', 'CPC (USD)', 'Competitors'];
 
 function blank(value: number | null): number | string {
   return value === null ? '—' : value;
@@ -23,6 +23,8 @@ export function gapRows(keywords: GapKeyword[]): Array<Array<string | number>> {
       blank(keyword.ourImpressions),
       blank(keyword.competitorPosition),
       blank(keyword.volume),
+      blank(keyword.difficulty ?? null),
+      blank(keyword.cpc ?? null),
       cell(keyword.competitors.join(', ')),
     ]),
   ];

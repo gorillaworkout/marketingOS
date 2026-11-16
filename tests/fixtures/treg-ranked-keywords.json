@@ -1,0 +1,46 @@
+{
+  "version": "0.1.20251001",
+  "status_code": 20000,
+  "status_message": "Ok.",
+  "cost": 0.01224,
+  "tasks_count": 1,
+  "tasks_error": 0,
+  "tasks": [{
+    "id": "11161200-0000-0000-0000-000000000001",
+    "status_code": 20000,
+    "status_message": "Ok.",
+    "cost": 0.01224,
+    "result_count": 1,
+    "data": { "api": "dataforseo_labs", "function": "ranked_keywords", "target": "competitor.co.id", "location_code": 2360, "language_code": "id", "limit": 2 },
+    "result": [{
+      "se_type": "google",
+      "target": "competitor.co.id",
+      "location_code": 2360,
+      "language_code": "id",
+      "total_count": 2,
+      "items_count": 2,
+      "items": [
+        {
+          "se_type": "google",
+          "keyword_data": {
+            "keyword": "trading emas online",
+            "keyword_info": { "competition": 0.4, "cpc": 1.25, "search_volume": 9900 },
+            "keyword_properties": { "keyword_difficulty": 42 },
+            "search_intent_info": { "main_intent": "commercial" }
+          },
+          "ranked_serp_element": { "serp_item": { "type": "organic", "rank_group": 3, "rank_absolute": 4, "url": "https://competitor.co.id/emas" } }
+        },
+        {
+          "se_type": "google",
+          "keyword_data": {
+            "keyword": "cara trading forex",
+            "keyword_info": { "competition": 0.2, "cpc": null, "search_volume": 2400 },
+            "keyword_properties": { "keyword_difficulty": null },
+            "search_intent_info": { "main_intent": "informational" }
+          },
+          "ranked_serp_element": { "serp_item": { "type": "organic", "rank_group": 12, "rank_absolute": 14, "url": "https://competitor.co.id/forex" } }
+        }
+      ]
+    }]
+  }]
+}

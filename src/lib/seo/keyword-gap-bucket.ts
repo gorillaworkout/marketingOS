@@ -17,6 +17,10 @@ export interface CompetitorKeyword {
   /** Null in Free mode. A number only when a ranking provider returned it. */
   position: number | null;
   volume: number | null;
+  /** Ranking providers only (treg / DataForSEO Labs). */
+  difficulty?: number | null;
+  cpc?: number | null;
+  intent?: GapKeyword['intent'];
 }
 
 export interface GapKeyword {
@@ -28,6 +32,9 @@ export interface GapKeyword {
   ourImpressions: number | null;
   competitorPosition: number | null;
   volume: number | null;
+  /** Keyword difficulty 0-100 and CPC (USD) when a ranking provider returned them. Absent on older runs. */
+  difficulty?: number | null;
+  cpc?: number | null;
   competitors: string[];
 }
 
@@ -80,6 +87,8 @@ export function buildGapKeywords(input: {
       ourImpressions: null,
       competitorPosition: null,
       volume: null,
+      difficulty: null,
+      cpc: null,
       competitors: [],
     };
     if (our) {
@@ -93,6 +102,9 @@ export function buildGapKeywords(input: {
         current.competitorPosition = competitor.position;
       }
       if (input.ranked && competitor.volume && (current.volume === null || competitor.volume > current.volume)) current.volume = competitor.volume;
+      if (input.ranked && typeof competitor.difficulty === 'number' && current.difficulty === null) current.difficulty = competitor.difficulty;
+      if (input.ranked && typeof competitor.cpc === 'number' && current.cpc === null) current.cpc = competitor.cpc;
+      if (!current.intent && competitor.intent) current.intent = competitor.intent;
     }
     rows.set(key, current);
   };
@@ -110,6 +122,8 @@ export function buildGapKeywords(input: {
     if (!input.ranked) {
       row.competitorPosition = null;
       row.volume = null;
+      row.difficulty = null;
+      row.cpc = null;
     }
     gaps.push({ ...row, bucket });
   }

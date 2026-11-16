@@ -8,6 +8,7 @@ type Summary = { totalTokens: number; totalCost: number; activeUsers: number; av
 type UserUsage = { rank: number; userId: string; username: string; department: string; totalTokens: number; totalCost: number; taskCount: number; topModel: string | null; topProvider: string | null };
 type DepartmentUsage = { department: string; totalTokens: number; totalCost: number; userCount: number; taskCount: number; modelBreakdown: { model: string; tokens: number; cost: number }[] };
 type ProviderUsage = { provider: string; accountSource: string; totalTokens: number; totalCost: number; modelBreakdown: { model: string; tokens: number; cost: number }[] };
+type DataProviderSpend = { totalUsd: number; runs: number; rows: { id: string; createdAt: string; provider: string; feature: string; username: string; status: string; calls: number; estimatedUsd: number; actualUsd: number | null; costSource: 'reported' | 'estimate' | null; note: string | null }[] };
 type FeatureUsage = { taskType: string; label: string; totalTokens: number; totalCost: number; userCount: number; requestCount: number };
 
 const number = (value: number) => value.toLocaleString(undefined, { maximumFractionDigits: 0 });
@@ -20,6 +21,7 @@ export default function AnalyticsPage() {
   const [departments, setDepartments] = useState<DepartmentUsage[]>([]);
   const [providers, setProviders] = useState<ProviderUsage[]>([]);
   const [features, setFeatures] = useState<FeatureUsage[]>([]);
+  const [dataSpend, setDataSpend] = useState<DataProviderSpend | null>(null);
   const [loading, setLoading] = useState(true);
   const [sort, setSort] = useState<'cost' | 'tokens'>('cost');
 
@@ -38,6 +40,8 @@ export default function AnalyticsPage() {
       const [nextSummary, nextUsers, nextDepartments, nextProviders, nextFeatures] = await Promise.all([
         summaryResult.json(), usersResult.json(), departmentsResult.json(), providersResult.json(), featuresResult.json(),
       ]);
+      // Data-provider spend is optional: a failure here never hides the token tables.
+      void fetch(`/api/admin/usage/data-providers${suffix}`).then(result => result.ok ? result.json() : null).then(setDataSpend).catch(() => setDataSpend(null));
       setSummary(nextSummary); setUsers(nextUsers); setDepartments(nextDepartments); setProviders(nextProviders); setFeatures(nextFeatures);
     } finally {
       setLoading(false);
@@ -87,6 +91,12 @@ export default function AnalyticsPage() {
     <Section title="Provider Attribution"><table className="w-full min-w-[620px] text-sm"><thead className="border-b border-[var(--mos-border)] text-left text-xs uppercase tracking-wide text-[var(--mos-text-faint)]"><tr><th className="p-3">Provider</th><th className="p-3">Source</th><th className="p-3 text-right">Tokens</th><th className="p-3 text-right">Cost</th><th className="p-3">Models</th></tr></thead>
       <tbody>{providers.map(provider => <tr key={`${provider.provider}-${provider.accountSource}`} className="border-b border-[var(--mos-border)] text-[var(--mos-text-secondary)]"><td className="p-3 font-medium text-white">{provider.provider}</td><td className="p-3">{provider.accountSource === 'personal' ? '👤 Personal' : '🏢 Office'}</td><td className="p-3 text-right">{number(provider.totalTokens)}</td><td className="p-3 text-right text-green-400">{money(provider.totalCost)}</td><td className="p-3 text-xs">{provider.modelBreakdown.map(model => model.model).join(', ') || '—'}</td></tr>)}{!loading && !providers.length && <Empty colSpan={5} />}</tbody>
     </table></Section>
+
+    <Section title="Data provider spend (treg)" action={<span className="text-xs text-[var(--mos-text-muted)]">{dataSpend ? `${money(dataSpend.totalUsd)} across ${dataSpend.runs} run${dataSpend.runs === 1 ? '' : 's'} · not included in token cost` : 'Not included in token cost'}</span>}>
+      <table className="w-full min-w-[760px] text-sm"><thead className="border-b border-[var(--mos-border)] text-left text-xs uppercase tracking-wide text-[var(--mos-text-faint)]"><tr><th className="p-3">When</th><th className="p-3">User</th><th className="p-3">Feature</th><th className="p-3">Status</th><th className="p-3 text-right">Calls</th><th className="p-3 text-right">Estimate</th><th className="p-3 text-right">Cost</th></tr></thead>
+        <tbody>{(dataSpend?.rows ?? []).map(row => <tr key={row.id} className="border-b border-[var(--mos-border)] text-[var(--mos-text-secondary)]"><td className="p-3 text-xs">{new Date(row.createdAt).toLocaleString('en-GB')}</td><td className="p-3">{row.username}</td><td className="p-3">{row.feature}</td><td className="p-3 text-xs" title={row.note ?? undefined}>{row.status}</td><td className="p-3 text-right">{row.calls}</td><td className="p-3 text-right">{money(row.estimatedUsd)}</td><td className="p-3 text-right text-green-400">{row.actualUsd === null ? '—' : `${money(row.actualUsd)}${row.costSource === 'estimate' ? ' (estimate)' : ''}`}</td></tr>)}{!loading && !dataSpend?.rows.length && <Empty colSpan={7} />}</tbody>
+      </table>
+    </Section>
   </PageStack>;
 }
 
