@@ -1,4 +1,5 @@
 import { queryAll } from '@/lib/database';
+import { gscRowsSql } from './gsc-source';
 import type { DateRange } from './report';
 
 /**
@@ -55,15 +56,20 @@ type QueryRow = {
   best_page: string; tracked: boolean; target_page_url: string | null; queued: boolean;
 };
 
+/** Query+page rows for the window: daily rows plus prorated rolled-up months (see gsc-source.ts). */
+const QUERY_ROWS_SQL = gscRowsSql('query', '', { start: '', end: '' }).sql;
+
 /**
  * One row per query for the window: summed clicks and impressions, the
  * impression-weighted position, and the page that earned the most clicks
  * (then impressions). Only queries in a band, or whose best page is the
- * homepage, are returned.
+ * homepage, are returned. Old months come from seo_gsc_monthly.
  */
-export const QUERY_OPPORTUNITIES_SQL = `WITH per_page AS (
-  SELECT query, page, SUM(clicks) AS clicks, SUM(impressions) AS impressions, SUM(position * impressions) AS weighted
-  FROM seo_gsc_daily WHERE site_id = ? AND date BETWEEN ? AND ?
+export const QUERY_OPPORTUNITIES_SQL = `WITH gsc_rows AS (
+  ${QUERY_ROWS_SQL}
+), per_page AS (
+  SELECT query, page, SUM(clicks) AS clicks, SUM(impressions) AS impressions, SUM(weighted) AS weighted
+  FROM gsc_rows
   GROUP BY query, page
 ), per_query AS (
   SELECT query, SUM(clicks) AS clicks, SUM(impressions) AS impressions, SUM(weighted) / NULLIF(SUM(impressions), 0) AS position
@@ -71,7 +77,7 @@ export const QUERY_OPPORTUNITIES_SQL = `WITH per_page AS (
 ), best AS (
   SELECT DISTINCT ON (query) query, page FROM per_page ORDER BY query, clicks DESC, impressions DESC, page
 )
-SELECT q.query, q.clicks::BIGINT AS clicks, q.impressions::BIGINT AS impressions, q.position, b.page AS best_page,
+SELECT q.query, ROUND(q.clicks)::BIGINT AS clicks, ROUND(q.impressions)::BIGINT AS impressions, q.position, b.page AS best_page,
   (k.id IS NOT NULL) AS tracked, k.target_page_url,
   EXISTS (SELECT 1 FROM seo_content_queue c WHERE c.site_id = ? AND c.keyword_normalized = q.query AND c.status = 'pending') AS queued
 FROM per_query q
@@ -82,7 +88,7 @@ WHERE q.impressions >= ?
 ORDER BY q.impressions DESC, q.query
 LIMIT ?`;
 
-/** Tracked keywords with no target page and no Search Console row at all in the window. */
+/** Tracked keywords with no target page and no Search Console row at all in the window (daily or rolled-up month). */
 export const UNTARGETED_KEYWORDS_SQL = `SELECT k.id, k.keyword, k.intent,
   EXISTS (SELECT 1 FROM seo_content_queue c WHERE c.site_id = k.site_id AND c.keyword_normalized = k.keyword_normalized AND c.status = 'pending') AS queued
 FROM seo_keywords k
@@ -90,6 +96,11 @@ WHERE k.site_id = ? AND k.target_page_url IS NULL
   AND NOT EXISTS (
     SELECT 1 FROM seo_gsc_daily g
     WHERE g.site_id = k.site_id AND g.query = k.keyword_normalized AND g.date BETWEEN ? AND ?
+  )
+  AND NOT EXISTS (
+    SELECT 1 FROM seo_gsc_monthly m
+    JOIN seo_gsc_rollup_months r ON r.site_id = m.site_id AND r.month = m.month
+    WHERE m.site_id = k.site_id AND m.query = k.keyword_normalized AND r.first_date <= ? AND r.last_date >= ?
   )
 ORDER BY k.keyword_normalized
 LIMIT ?`;
@@ -119,10 +130,10 @@ export async function getOpportunities(siteId: string, range: DateRange, options
   const limit = Math.min(2000, Math.max(1, Math.floor(options.limit ?? 1000)));
   const [rows, keywords] = await Promise.all([
     queryAll<QueryRow>(QUERY_OPPORTUNITIES_SQL, [
-      siteId, range.start, range.end, siteId, siteId, minImpressions,
+      ...gscRowsSql('query', siteId, range).values, siteId, siteId, minImpressions,
       OPPORTUNITY_BANDS.push.min, OPPORTUNITY_BANDS['re-optimize'].max, HOMEPAGE_URL_PATTERN, limit,
     ]),
-    queryAll<KeywordWithoutPage & { queued: boolean }>(UNTARGETED_KEYWORDS_SQL, [siteId, range.start, range.end, limit]),
+    queryAll<KeywordWithoutPage & { queued: boolean }>(UNTARGETED_KEYWORDS_SQL, [siteId, range.start, range.end, range.end, range.start, limit]),
   ]);
   return groupOpportunities(rows.map(toOpportunity), keywords.map(row => ({ id: row.id, keyword: row.keyword, intent: row.intent, queued: Boolean(row.queued) })));
 }

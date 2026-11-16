@@ -6,7 +6,8 @@
  * upserted; rows for that day that Google no longer returns are removed.
  * Incremental runs re-pull the last 5 days because recent data is provisional
  * (dataState=all) and final data lags about 2-3 days. Backfill covers the 16
- * months Search Console keeps.
+ * months Search Console keeps, minus months already rolled up by the retention
+ * script (seo_gsc_rollup_months): those are skipped, never re-filled.
  */
 import { fetchAllRows, SeoConfigError, type GscClient, type SearchAnalyticsRow, type SleepFn } from './gsc-client';
 
@@ -46,6 +47,20 @@ export interface SeoSyncStore {
   replaceDay(siteId: string, date: string, snapshot: DaySnapshot, syncedAt: Date): Promise<number>;
   finishRun(runId: string, result: { status: 'succeeded' | 'failed'; daysSynced: number; rowsUpserted: number; error: string | null }): Promise<void>;
   markSiteSynced(siteId: string, at: Date): Promise<void>;
+  /**
+   * Months ('YYYY-MM-01') already rolled up into seo_gsc_monthly by the
+   * retention script. The sync never writes daily rows into them, so a
+   * backfill cannot refill deleted ranges or double count. Optional for stores
+   * that predate retention.
+   */
+  rolledUpMonths?(siteId: string): Promise<string[]>;
+}
+
+/** Drops dates whose month is already rolled up. */
+export function skipRolledUpDates(dates: string[], rolledUpMonths: Iterable<string>): string[] {
+  const months = new Set(rolledUpMonths);
+  if (!months.size) return dates;
+  return dates.filter(date => !months.has(`${date.slice(0, 7)}-01`));
 }
 
 /** Today's date in Search Console's reporting time zone (Pacific Time). */
@@ -59,7 +74,7 @@ export function addDays(isoDate: string, days: number): string {
   return date.toISOString().slice(0, 10);
 }
 
-function addMonths(isoDate: string, months: number): string {
+export function addMonths(isoDate: string, months: number): string {
   const date = new Date(`${isoDate}T00:00:00Z`);
   const day = date.getUTCDate();
   date.setUTCDate(1);
@@ -164,7 +179,7 @@ export interface RunSeoSyncDeps {
 }
 
 export type SeoSyncResult =
-  | { status: 'succeeded'; runId: string; daysSynced: number; rowsUpserted: number; rangeStart: string | null; rangeEnd: string | null }
+  | { status: 'succeeded'; runId: string; daysSynced: number; rowsUpserted: number; rangeStart: string | null; rangeEnd: string | null; skippedRolledUpDays: number }
   | { status: 'failed'; runId: string | null; daysSynced: number; rowsUpserted: number; error: string; configError: boolean }
   | { status: 'busy'; error: string };
 
@@ -175,7 +190,9 @@ export async function runSeoSync(options: RunSeoSyncOptions, deps: RunSeoSyncDep
   const site = await deps.store.getSite(options.siteId);
   if (!site) return { status: 'failed', runId: null, daysSynced: 0, rowsUpserted: 0, error: 'SEO site not found.', configError: true };
 
-  const dates = options.dates ?? datesForMode(options.mode, now());
+  const requested = options.dates ?? datesForMode(options.mode, now());
+  const dates = skipRolledUpDates(requested, deps.store.rolledUpMonths ? await deps.store.rolledUpMonths(site.id) : []);
+  const skippedRolledUpDays = requested.length - dates.length;
   const rangeStart = dates[0] ?? null;
   const rangeEnd = dates[dates.length - 1] ?? null;
 
@@ -201,7 +218,7 @@ export async function runSeoSync(options: RunSeoSyncOptions, deps: RunSeoSyncDep
     }
     await deps.store.finishRun(runId, { status: 'succeeded', daysSynced, rowsUpserted, error: null });
     await deps.store.markSiteSynced(site.id, now());
-    return { status: 'succeeded', runId, daysSynced, rowsUpserted, rangeStart, rangeEnd };
+    return { status: 'succeeded', runId, daysSynced, rowsUpserted, rangeStart, rangeEnd, skippedRolledUpDays };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     await deps.store.finishRun(runId, { status: 'failed', daysSynced, rowsUpserted, error: message.slice(0, 2000) });

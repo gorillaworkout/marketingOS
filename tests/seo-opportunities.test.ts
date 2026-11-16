@@ -171,10 +171,15 @@ test('opportunity rows are typed and grouped; homepage queries are also listed u
 });
 
 test('opportunity SQL weights position by impressions and takes regexes as parameters', () => {
-  assert.match(QUERY_OPPORTUNITIES_SQL, /SUM\(position \* impressions\)/);
+  // Daily rows carry position * impressions; rolled-up months (seo_gsc_monthly) carry the same weighted sum, prorated.
+  assert.match(QUERY_OPPORTUNITIES_SQL, /position \* impressions AS weighted/);
+  assert.match(QUERY_OPPORTUNITIES_SQL, /seo_gsc_monthly/);
+  assert.match(QUERY_OPPORTUNITIES_SQL, /SUM\(weighted\) \/ NULLIF\(SUM\(impressions\), 0\)/);
   assert.match(QUERY_OPPORTUNITIES_SQL, /DISTINCT ON \(query\)/);
   assert.match(QUERY_OPPORTUNITIES_SQL, /b\.page ~\* \?/);
-  assert.equal(QUERY_OPPORTUNITIES_SQL.match(/\?/g)?.length, 10);
+  assert.equal(QUERY_OPPORTUNITIES_SQL.match(/\?/g)?.length, 19); // 12 for the daily+monthly rows, 7 for filters
+  assert.equal(UNTARGETED_KEYWORDS_SQL.match(/\?/g)?.length, 6);
+  assert.match(UNTARGETED_KEYWORDS_SQL, /seo_gsc_monthly/);
   assert.doesNotMatch(QUERY_OPPORTUNITIES_SQL, /https/);
   assert.match(UNTARGETED_KEYWORDS_SQL, /target_page_url IS NULL/);
   assert.match(UNTARGETED_KEYWORDS_SQL, /NOT EXISTS/);

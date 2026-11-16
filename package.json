@@ -12,6 +12,7 @@
     "partnership:refresh": "tsx scripts/run-partnership-refresh.ts",
     "seo:sync": "tsx scripts/seo-sync.ts",
     "seo:visibility": "tsx scripts/seo-visibility.ts",
+    "seo:gsc-retention": "tsx scripts/seo-gsc-retention.ts",
     "db:import-sqlite": "tsx scripts/migrate-sqlite-to-postgres.ts"
   },
   "dependencies": {

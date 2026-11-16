@@ -98,6 +98,9 @@ site. The **Recent sync runs** table in SEO settings shows the result. Only one
 run per site can run at a time. A second one gets "already running", HTTP 409 in
 the UI.
 
+Months already rolled up by the retention script (see "Search Console data
+retention" below) are skipped: the backfill never writes daily rows into them.
+
 ## 8. Daily sync (cron, not installed automatically)
 
 Each incremental run re-pulls the last 5 days and upserts them, because GSC data
@@ -111,6 +114,132 @@ for the last 2–3 days is still provisional. Install the cron with `crontab -e`
 This runs at 01:30 UTC, which is 08:30 WIB. Create `/home/ubuntu/logs` first if it
 does not exist. Admins can also press **Sync now** on the SEO overview, which runs
 the same incremental pull for the selected site.
+
+## Search Console data retention (migration 060)
+
+Query+page rows (`seo_gsc_daily`) and page rows (`seo_gsc_page_daily`) grow by
+about 140 MB a month for Dupoin. `npm run seo:gsc-retention` keeps them daily only
+for recent months and folds older rows into one row per month:
+
+- `seo_gsc_monthly` (site, month, query, page) and `seo_gsc_page_monthly` (site,
+  month, page) hold summed clicks and impressions, CTR from the sums, the
+  impression-weighted position, and `days_present`.
+- `seo_gsc_rollup_months` records which months of a site are rolled up and which
+  dates they cover (`first_date`..`last_date`, `days`).
+- `seo_gsc_site_daily` (site totals) is never touched. Headline numbers, the
+  unfiltered trend, and the data range stay daily for the full 16 months.
+
+**Cutoff.** The cutoff is always the first day of a month, so a month is either
+fully daily or fully monthly, never both. `--months=6` (default) means the cutoff
+is the 1st of the month six months before the current month (Pacific date). Run
+on 2026-11-16, the cutoff is 2026-05-01: May to November stay daily, everything
+before May is rolled up. `--cutoff=YYYY-MM-01` sets it explicitly. The previous
+full month must stay daily, so a more recent cutoff is refused.
+
+**What the SEO pages show for old ranges.**
+
+- Totals, top queries and pages, Opportunities, and Keyword Gap combine daily rows
+  (from the cutoff on) with monthly rows (before it). CTR and position are
+  recomputed from the summed clicks, impressions, and `position * impressions`,
+  so for whole months the numbers are identical to the daily data.
+- A month that is only partly inside the range is prorated by its covered dates
+  (overlap days / covered days). Example: a range starting 16 April counts 15/30
+  of April. This is an estimate; exact daily numbers for that month are gone.
+- Trend with a query or page filter: each rolled-up month is one point at the
+  month's start, valued at the month's daily average, and marked with a dot. This
+  keeps the daily scale (no spike on the 1st). CTR and position points are the
+  month's values. The unfiltered trend uses site totals and stays daily.
+- Previous-period comparison works the same way on both sides of the cutoff.
+
+**Procedure (VPS, as `ubuntu`).** Each `--apply` needs Bayu's OK.
+
+1. Deploy this change. `scripts/deploy.sh` runs `npm run db:migrate`, which adds
+   the three tables (migration 060, additive, no data changes).
+2. Dry run. It only reads, and prints rows, clicks, and impressions per month and
+   site:
+
+   ```bash
+   cd /home/ubuntu/apps/marketingos
+   npm run seo:gsc-retention -- --cutoff=2026-05-01
+   ```
+
+3. Back up the slice that will be deleted (`date < cutoff`), compressed, mode 600.
+   Use the same `psql` access as for other backups and never print
+   `DATABASE_URL`:
+
+   ```bash
+   ts=$(date -u +%Y%m%dT%H%M%SZ); cutoff=2026-05-01
+   for t in seo_gsc_daily seo_gsc_page_daily; do
+     psql "$DATABASE_URL" -c "\copy (SELECT * FROM $t WHERE date < '$cutoff') TO STDOUT CSV HEADER" \
+       | gzip > /home/ubuntu/backups/gsc-pre-retention-$ts-$t.csv.gz
+     chmod 600 /home/ubuntu/backups/gsc-pre-retention-$ts-$t.csv.gz
+     gzip -t /home/ubuntu/backups/gsc-pre-retention-$ts-$t.csv.gz
+   done
+   ```
+
+   Check that the row counts (`gzip -dc FILE | tail -n +2 | wc -l`) are at least
+   the dry-run counts. The backup taken on 2026-11-16
+   (`gsc-pre-retention-20261116T061337Z-*`, `date < 2026-05-16`) covers a
+   2026-05-01 cutoff as well.
+4. Apply, outside the 08:30 WIB sync and with no backfill running (the script
+   refuses while a sync run is `running`):
+
+   ```bash
+   npm run seo:gsc-retention -- --cutoff=2026-05-01 --apply              # one transaction per site
+   npm run seo:gsc-retention -- --cutoff=2026-05-01 --apply --per-month  # or one transaction per site and month
+   ```
+
+   Each transaction inserts the monthly rows, checks that monthly clicks and
+   impressions grew by exactly the daily sums, then deletes the daily rows. Any
+   mismatch rolls the transaction back. Re-running is safe: with nothing older
+   than the cutoff, it changes nothing. `--per-month` keeps each transaction,
+   its locks, and its WAL small; a failure keeps the months already committed.
+5. Verify: the dry run now reports 0 rows. On the SEO overview, a 6- or 12-month
+   range with a query filter shows monthly dots before the cutoff.
+6. Repeat monthly with `--months=6 --apply` if you want a rolling window (cron
+   not installed automatically), for example `0 3 2 * *` (10:00 WIB on the 2nd).
+
+**Disk space: VACUUM FULL is separate, manual maintenance.** `DELETE` does not
+shrink the files. Autovacuum makes the space reusable for new rows, so the tables
+stop growing for a while, but `df` stays the same. The script never runs VACUUM.
+To return space to the OS, in a maintenance window, with the sync cron paused:
+
+```sql
+VACUUM (FULL, ANALYZE, VERBOSE) seo_gsc_daily;
+VACUUM (FULL, ANALYZE, VERBOSE) seo_gsc_page_daily;
+```
+
+`VACUUM FULL` takes an `ACCESS EXCLUSIVE` lock (SEO pages and the sync wait)
+and needs free disk about the size of the remaining table plus its indexes.
+Check `pg_total_relation_size` and `df` first.
+
+**Rollback.**
+
+- Before any `--apply`: revert the code; the empty tables can stay, or run
+  `db/rollbacks/060_seo_gsc_monthly_down.sql`.
+- After `--apply`: restore the daily rows from the csv.gz backup and remove the
+  monthly rows for the same months, in one transaction. This assumes the backup
+  was made with `SELECT *` as above. The `WHERE date < cutoff` filter and
+  `ON CONFLICT DO NOTHING` make a wider backup safe to use:
+
+  ```sql
+  -- psql "$DATABASE_URL", cutoff 2026-05-01
+  BEGIN;
+  CREATE TEMP TABLE restore_q (LIKE seo_gsc_daily INCLUDING DEFAULTS) ON COMMIT DROP;
+  CREATE TEMP TABLE restore_p (LIKE seo_gsc_page_daily INCLUDING DEFAULTS) ON COMMIT DROP;
+  \copy restore_q FROM PROGRAM 'gzip -dc /home/ubuntu/backups/gsc-pre-retention-<ts>-seo_gsc_daily.csv.gz' CSV HEADER
+  \copy restore_p FROM PROGRAM 'gzip -dc /home/ubuntu/backups/gsc-pre-retention-<ts>-seo_gsc_page_daily.csv.gz' CSV HEADER
+  INSERT INTO seo_gsc_daily SELECT * FROM restore_q WHERE date < '2026-05-01' ON CONFLICT DO NOTHING;
+  INSERT INTO seo_gsc_page_daily SELECT * FROM restore_p WHERE date < '2026-05-01' ON CONFLICT DO NOTHING;
+  DELETE FROM seo_gsc_monthly WHERE month < '2026-05-01';
+  DELETE FROM seo_gsc_page_monthly WHERE month < '2026-05-01';
+  DELETE FROM seo_gsc_rollup_months WHERE month < '2026-05-01';
+  COMMIT;
+  ```
+
+  Then the code can be reverted, and `db/rollbacks/060_seo_gsc_monthly_down.sql`
+  can drop the tables. Do not revert the code while rolled-up months exist: the
+  old code reads daily rows only and would show those months as empty.
 
 ## Troubleshooting (messages shown to admins)
 
@@ -133,6 +262,8 @@ the same incremental pull for the selected site.
   numbers when no query filter is set.
 - `seo_sync_runs`: run history. A partial unique index allows only one `running`
   row per site, and a run stuck for more than 3 hours is released automatically.
+
+- Migration 060 adds the monthly roll-up tables; see "Search Console data retention".
 
 Rollback: SEO OS only adds tables, a department, and a feature value. To hide it,
 untick SEO OS on departments. The tables can stay.

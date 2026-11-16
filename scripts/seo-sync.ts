@@ -5,7 +5,8 @@ import { runSeoSyncForSite, syncableSiteIds } from '../src/lib/seo/sync-service'
 // SEO OS: Search Console -> PostgreSQL sync.
 //
 //   npm run seo:sync                     re-pull the last 5 days for every active site with a GSC property
-//   npm run seo:sync -- --backfill       pull 16 months, day by day (first run; takes a while)
+//   npm run seo:sync -- --backfill       pull 16 months, day by day (first run; takes a while);
+//                                        months already rolled up by seo:gsc-retention are skipped
 //   npm run seo:sync -- --site=<site id> limit to one site (any site, active or not)
 //
 // Daily VPS cron, 08:30 WIB (01:30 UTC). Not installed automatically; see docs/seo-os/setup.md:
@@ -35,7 +36,8 @@ async function main(): Promise<number> {
       onDay: backfill ? (date, rows) => console.log(`  ${siteId} ${date}: ${rows} rows`) : undefined,
     });
     if (result.status === 'succeeded') {
-      console.log(`SEO sync ${siteId}: ${result.daysSynced} days (${result.rangeStart} to ${result.rangeEnd}), ${result.rowsUpserted} rows.`);
+      const skipped = result.skippedRolledUpDays ? ` Skipped ${result.skippedRolledUpDays} days in months already rolled up to monthly (seo:gsc-retention).` : '';
+      console.log(`SEO sync ${siteId}: ${result.daysSynced} days (${result.rangeStart} to ${result.rangeEnd}), ${result.rowsUpserted} rows.${skipped}`);
     } else {
       failed += 1;
       console.error(`SEO sync ${siteId} ${result.status}: ${result.error}`);

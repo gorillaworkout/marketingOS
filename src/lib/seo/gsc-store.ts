@@ -1,4 +1,4 @@
-import { execute, executeTransaction, queryOne, type DatabaseTransaction } from '@/lib/database';
+import { execute, executeTransaction, queryAll, queryOne, type DatabaseTransaction } from '@/lib/database';
 import type { DaySnapshot, SeoSiteRecord, SeoSyncStore } from './gsc-sync';
 
 /** Rows per INSERT; keeps every statement far below PostgreSQL's 65,535 parameter cap. */
@@ -46,6 +46,14 @@ async function upsertRows<T extends { clicks: number; impressions: number; ctr: 
  * not return (synced_at older than this run).
  */
 export async function replaceDayInTransaction(transaction: DatabaseTransaction, siteId: string, date: string, snapshot: DaySnapshot, syncedAt: Date): Promise<number> {
+  // A month rolled up by seo:gsc-retention keeps no daily query/page rows; writing
+  // some would double count it. runSeoSync already skips these dates; this
+  // guards a sync that started before the roll-up committed.
+  const rolledUp = await transaction.queryOne(
+    `SELECT 1 AS hit FROM seo_gsc_rollup_months WHERE site_id = ? AND month = date_trunc('month', ?::DATE)::DATE`,
+    [siteId, date],
+  );
+  if (rolledUp) return 0;
   let rows = 0;
   rows += await upsertRows(transaction, { table: 'seo_gsc_site_daily', keyColumns: ['site_id', 'date'] }, snapshot.site, () => [siteId, date], syncedAt);
   rows += await upsertRows(transaction, { table: 'seo_gsc_page_daily', keyColumns: ['site_id', 'date', 'page'] }, snapshot.pages, row => [siteId, date, row.page], syncedAt);
@@ -94,5 +102,9 @@ export const postgresSeoSyncStore: SeoSyncStore = {
   },
   async markSiteSynced(siteId, at) {
     await execute('UPDATE seo_sites SET last_synced_at = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [at, siteId]);
+  },
+  async rolledUpMonths(siteId) {
+    const rows = await queryAll<{ month: string }>(`SELECT to_char(month, 'YYYY-MM-DD') AS month FROM seo_gsc_rollup_months WHERE site_id = ? ORDER BY month`, [siteId]);
+    return rows.map(row => row.month);
   },
 };
