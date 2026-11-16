@@ -10,6 +10,9 @@ import {
   scrubProviderSecret, semrushDatabase, semrushDomainVsDomainUrl, semrushOrganicUrl,
 } from './keyword-gap-providers';
 import { crawlTimeoutNote, GAP_COMPETITOR_CRAWL_MS, GAP_COMPETITOR_PAGE_CAP, SEO_LLM_TIMEOUT_MS, StepTimeoutError, withTimeout } from './time-budget';
+import { collectTregKeywords } from './keyword-gap-treg';
+import { TregError, tregConfig, tregFallbackNotice } from './treg-client';
+import { settleTregRun } from './treg-cost-guard';
 import { failGap, finishGap, getGap, readDataForSeo, readSemrushKey, updateGapProgress, type GapResult } from './keyword-gap-store';
 
 const CLUSTER_SYSTEM = `You cluster competitor page phrases into search keywords. Reply with a JSON array only.
@@ -72,6 +75,72 @@ async function postJson(url: string, login: string, password: string, body: unkn
   return parsed;
 }
 
+type FreeCollection = {
+  ours: OurKeyword[];
+  competitorKeywords: CompetitorKeyword[];
+  source: GapResult['source'];
+  intents: Record<string, GapKeyword['intent']>;
+  clusterModel: string | null;
+};
+
+type LoadedGap = NonNullable<Awaited<ReturnType<typeof getGap>>>;
+
+/** Free mode: stored Search Console queries (or the upload) vs crawled competitor topics. Null when the gap was failed. */
+async function collectFree(id: string, gap: LoadedGap, userId: string, notes: string[], failPrefix = ''): Promise<FreeCollection | null> {
+  if (!gap.input) return null;
+  let ours: OurKeyword[] = [];
+  let competitorKeywords: CompetitorKeyword[] = [];
+  let source: GapResult['source'] = 'upload';
+  const intents: Record<string, GapKeyword['intent']> = {};
+  let clusterModel: string | null = null;
+  await updateGapProgress(id, 8, 'Reading stored Search Console queries.');
+  const storedCount = gap.site_id ? await countStoredGscRows(gap.site_id) : 0;
+  if (storedCount > 0 && gap.site_id) {
+    ours = await loadStoredGscQueries(gap.site_id);
+    source = 'gsc-stored';
+  } else if (gap.input.uploadedKeywords?.length) {
+    ours = gap.input.uploadedKeywords;
+    source = 'upload';
+    notes.push('No stored Search Console queries for this domain. The uploaded Queries export is the fallback.');
+  } else {
+    await failGap(id, `${failPrefix}No stored Search Console queries for this domain. Upload a Queries export (query, clicks, impressions, CTR, position).`);
+    return null;
+  }
+  const domains = gap.input.competitors;
+  for (let index = 0; index < domains.length; index += 1) {
+    const domain = domains[index];
+    const base = 15 + Math.round((index / domains.length) * 50);
+    const span = Math.round(50 / domains.length);
+    await updateGapProgress(id, base, `Crawling ${domain} (${index + 1} of ${domains.length}).`);
+    const pages: Array<{ url: string; phrases: string[] }> = [];
+    const crawl = await crawlSite({
+      startUrl: domain.startsWith('http') ? domain : `https://${domain}/`,
+      maxPages: GAP_COMPETITOR_PAGE_CAP,
+      seedFromSitemap: true,
+      delayMs: 200,
+      deadlineAt: Date.now() + GAP_COMPETITOR_CRAWL_MS,
+      onHtml: page => pages.push({ url: page.url, phrases: extractPageCandidates(page.url, page.html) }),
+      onProgress: (crawled, maxPages) => {
+        if (crawled % 5 !== 0) return;
+        void updateGapProgress(id, base + Math.round((crawled / Math.max(maxPages, 1)) * span), `Crawling ${domain}: ${crawled} of up to ${maxPages} pages.`);
+      },
+    });
+    if (crawl.timedOut) notes.push(crawlTimeoutNote(domain, crawl.pages.length, GAP_COMPETITOR_CRAWL_MS));
+    const phrases = topCandidates(pages, 80);
+    for (const phrase of phrases) competitorKeywords.push({ keyword: phrase, domain, position: null, volume: null });
+  }
+  await updateGapProgress(id, 72, 'Clustering competitor phrases.');
+  const clustered = await clusterPhrases(userId, [...new Set(competitorKeywords.map(keyword => normalizePhrase(keyword.keyword)))]);
+  clusterModel = clustered.model;
+  if (clustered.error) notes.push(clustered.error);
+  if (clustered.keywords.length) {
+    const kept = new Set(clustered.keywords.map(keyword => keyword.keyword));
+    for (const keyword of clustered.keywords) intents[keyword.keyword] = keyword.intent;
+    competitorKeywords = competitorKeywords.filter(keyword => kept.has(normalizePhrase(keyword.keyword)));
+  }
+  return { ours, competitorKeywords, source, intents, clusterModel };
+}
+
 export async function runKeywordGap(id: string): Promise<void> {
   const gap = await getGap(id);
   if (!gap || gap.status === 'succeeded' || gap.status === 'failed' || !gap.input) return;
@@ -88,52 +157,41 @@ export async function runKeywordGap(id: string): Promise<void> {
     let ranked = false;
     const intents: Record<string, GapKeyword['intent']> = {};
     let clusterModel: string | null = null;
+    let cost: GapResult['cost'] = null;
+    let fallback: string | null = null;
 
     if (gap.provider === 'free') {
-      await updateGapProgress(id, 8, 'Reading stored Search Console queries.');
-      const storedCount = gap.site_id ? await countStoredGscRows(gap.site_id) : 0;
-      if (storedCount > 0 && gap.site_id) {
-        ours = await loadStoredGscQueries(gap.site_id);
-        source = 'gsc-stored';
-      } else if (gap.input.uploadedKeywords?.length) {
-        ours = gap.input.uploadedKeywords;
-        source = 'upload';
-        notes.push('No stored Search Console queries for this domain. The uploaded Queries export is the fallback.');
+      const free = await collectFree(id, gap, userId, notes);
+      if (!free) return;
+      ({ ours, competitorKeywords, source, clusterModel } = free);
+      Object.assign(intents, free.intents);
+    } else if (gap.provider === 'treg') {
+      const config = tregConfig();
+      const plan = gap.input.treg;
+      const outcome = config.apiKey && plan
+        ? await collectTregKeywords({
+          gapId: id, userId, ourDomain: gap.our_domain, competitors: gap.input.competitors, market: gap.market,
+          language: gap.input.language, keywordLimit: plan.keywordLimit,
+          onProgress: (progress, text) => updateGapProgress(id, progress, text),
+        }, config)
+        : { ok: false as const, error: new TregError(config.apiKey ? gap.input.tregSkipped ?? 'not-configured' : 'not-configured'), actualMicro: 0, costSource: 'reported' as const, calls: 0, callIds: [] };
+      cost = await settleTregRun({
+        config, spendId: plan?.spendId ?? null, estimateMicro: plan?.estimateMicro ?? 0, balanceBeforeMicro: plan?.balanceBeforeMicro ?? null,
+        ok: outcome.ok, actualMicro: outcome.actualMicro, costSource: outcome.costSource, calls: outcome.calls, callIds: outcome.callIds,
+        note: outcome.ok ? null : tregFallbackNotice(outcome.error), refusalBalanceMicro: outcome.ok ? null : outcome.error.balanceMicro,
+      });
+      if (outcome.ok) {
+        ranked = true;
+        source = 'provider';
+        ours = outcome.ours;
+        competitorKeywords = outcome.competitorKeywords;
       } else {
-        await failGap(id, 'No stored Search Console queries for this domain. Upload a Queries export (query, clicks, impressions, CTR, position).');
-        return;
-      }
-      const domains = gap.input.competitors;
-      for (let index = 0; index < domains.length; index += 1) {
-        const domain = domains[index];
-        const base = 15 + Math.round((index / domains.length) * 50);
-        const span = Math.round(50 / domains.length);
-        await updateGapProgress(id, base, `Crawling ${domain} (${index + 1} of ${domains.length}).`);
-        const pages: Array<{ url: string; phrases: string[] }> = [];
-        const crawl = await crawlSite({
-          startUrl: domain.startsWith('http') ? domain : `https://${domain}/`,
-          maxPages: GAP_COMPETITOR_PAGE_CAP,
-          seedFromSitemap: true,
-          delayMs: 200,
-          deadlineAt: Date.now() + GAP_COMPETITOR_CRAWL_MS,
-          onHtml: page => pages.push({ url: page.url, phrases: extractPageCandidates(page.url, page.html) }),
-          onProgress: (crawled, maxPages) => {
-            if (crawled % 5 !== 0) return;
-            void updateGapProgress(id, base + Math.round((crawled / Math.max(maxPages, 1)) * span), `Crawling ${domain}: ${crawled} of up to ${maxPages} pages.`);
-          },
-        });
-        if (crawl.timedOut) notes.push(crawlTimeoutNote(domain, crawl.pages.length, GAP_COMPETITOR_CRAWL_MS));
-        const phrases = topCandidates(pages, 80);
-        for (const phrase of phrases) competitorKeywords.push({ keyword: phrase, domain, position: null, volume: null });
-      }
-      await updateGapProgress(id, 72, 'Clustering competitor phrases.');
-      const clustered = await clusterPhrases(userId, [...new Set(competitorKeywords.map(keyword => normalizePhrase(keyword.keyword)))]);
-      clusterModel = clustered.model;
-      if (clustered.error) notes.push(clustered.error);
-      if (clustered.keywords.length) {
-        const kept = new Set(clustered.keywords.map(keyword => keyword.keyword));
-        for (const keyword of clustered.keywords) intents[keyword.keyword] = keyword.intent;
-        competitorKeywords = competitorKeywords.filter(keyword => kept.has(normalizePhrase(keyword.keyword)));
+        fallback = tregFallbackNotice(outcome.error);
+        notes.push(fallback);
+        const free = await collectFree(id, gap, userId, notes, `${fallback}. `);
+        if (!free) return;
+        ({ ours, competitorKeywords, source, clusterModel } = free);
+        Object.assign(intents, free.intents);
       }
     } else if (gap.provider === 'semrush') {
       ranked = true;
@@ -184,12 +242,16 @@ export async function runKeywordGap(id: string): Promise<void> {
     const result: GapResult = {
       provider: gap.provider,
       source,
-      methodology: gap.provider === 'free' ? FREE_METHODOLOGY : 'Competitor positions and volume come from the selected ranking provider.',
+      methodology: !ranked ? FREE_METHODOLOGY : gap.provider === 'treg'
+        ? 'Competitor positions, volume, keyword difficulty, CPC and intent come from DataForSEO Labs ranked keywords via treg.'
+        : 'Competitor positions and volume come from the selected ranking provider.',
       ranked,
       keywords,
       counts: bucketCounts(keywords),
       storedQueries: source === 'gsc-stored' ? ours.length : 0,
       notes,
+      cost,
+      fallback,
     };
     await updateGapProgress(id, 94, 'Writing the summary.');
     const summary = await summarize(userId, result);

@@ -8,11 +8,14 @@ import { fetchJson, useSeoSites } from '@/components/seo/useSeoSites';
 import { defaultAuditUrl } from '@/lib/seo/audit-url';
 import { FREE_METHODOLOGY, GAP_BUCKETS, type GapBucket, type GapKeyword } from '@/lib/seo/keyword-gap-bucket';
 import { gscSourceMessage } from '@/lib/seo/keyword-gap-input';
+import { estimateKeywordGapMicro } from '@/lib/seo/treg-endpoints';
+import { TregBalancePanel, TregCostNotice, usd, useTregStatus } from '@/components/seo/TregCostNotice';
 
 type GapSummary = {
   id: string; our_domain: string; status: 'queued' | 'running' | 'succeeded' | 'failed'; progress: number; message: string;
   keyword_count: number | null; summary: string | null; summary_error: string | null; error: string | null; provider: string;
-  created_at: string; result: { keywords: GapKeyword[]; counts: Record<string, number>; methodology: string; source: string; storedQueries: number; ranked: boolean; notes: string[] } | null;
+  created_at: string; result: { keywords: GapKeyword[]; counts: Record<string, number>; methodology: string; source: string; storedQueries: number; ranked: boolean; notes: string[]; fallback?: string | null } | null;
+  cost?: { estimatedMicro: number; actualMicro: number | null; source: 'reported' | 'estimate' | null; status: string; balanceAfterMicro: number | null } | null;
 };
 type Source = { domain: string; storedRows: number; using: 'stored' | 'upload'; gscProperty: string | null; active: boolean };
 type GscSite = { name: string; siteUrl: string; gscProperty: string | null; storedRows: number };
@@ -20,8 +23,15 @@ type SortKey = 'keyword' | 'bucket' | 'ourPosition' | 'ourImpressions' | 'ourCli
 
 const LABELS: Record<GapBucket, string> = { missing: 'Missing', weak: 'Weak', almost: 'Almost', shared: 'Shared', strength: 'Strength' };
 
-function showNumber(value: number | null): string {
-  return value === null ? '—' : String(Math.round(value * 10) / 10);
+function showNumber(value: number | null | undefined): string {
+  return value === null || value === undefined ? '—' : String(Math.round(value * 10) / 10);
+}
+
+/** Run-history cost: the charge treg reported, or the estimate flagged as such. */
+function costLabel(cost: GapSummary['cost']): string {
+  if (!cost) return '—';
+  if (cost.actualMicro === null) return `~${usd(cost.estimatedMicro / 1_000_000)} (reserved)`;
+  return `${usd(cost.actualMicro / 1_000_000)}${cost.source === 'estimate' ? ' (estimate)' : ''}`;
 }
 
 export default function KeywordGapPage() {
@@ -30,9 +40,12 @@ export default function KeywordGapPage() {
   const [competitors, setCompetitors] = useState('');
   const [language, setLanguage] = useState('id');
   const [market, setMarket] = useState('Indonesia');
-  const [provider, setProvider] = useState('free');
+  const [providerChoice, setProvider] = useState<string | null>(null);
+  const { status: treg, reload: loadTreg } = useTregStatus();
+  const [keywordLimit, setKeywordLimit] = useState(200);
+  const [confirming, setConfirming] = useState(false);
   const [file, setFile] = useState<File | null>(null);
-  const [providers, setProviders] = useState({ semrush: false, dataforseo: false });
+  const [providers, setProviders] = useState({ semrush: false, dataforseo: false, treg: false });
   const [source, setSource] = useState<Source | null>(null);
   const [gscSites, setGscSites] = useState<GscSite[]>([]);
   const [gaps, setGaps] = useState<GapSummary[]>([]);
@@ -44,9 +57,14 @@ export default function KeywordGapPage() {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
   const shownDomain = domain ?? (data ? defaultAuditUrl(data.sites) : '');
+  // treg is the default when it is configured and this user may run it; otherwise Free, as before.
+  const provider = providerChoice ?? (treg?.canRun ? 'treg' : 'free');
+  const competitorCount = Math.min(5, competitors.split(/\r?\n/).map(line => line.trim()).filter(Boolean).length);
+  const estimate = estimateKeywordGapMicro(competitorCount, keywordLimit);
+
 
   const loadList = async (nextDomain: string) => {
-    const { ok, data: body } = await fetchJson<{ gaps: GapSummary[]; providers: { semrush: boolean; dataforseo: boolean }; source: Source | null; gscSites?: GscSite[] }>(`/api/seo/keyword-gap?domain=${encodeURIComponent(nextDomain)}`);
+    const { ok, data: body } = await fetchJson<{ gaps: GapSummary[]; providers: { semrush: boolean; dataforseo: boolean; treg: boolean }; source: Source | null; gscSites?: GscSite[] }>(`/api/seo/keyword-gap?domain=${encodeURIComponent(nextDomain)}`);
     if (!ok) return;
     setGaps(body.gaps);
     setProviders(body.providers);
@@ -69,12 +87,16 @@ export default function KeywordGapPage() {
       setGap(body.gap);
       if (body.gap.status === 'queued' || body.gap.status === 'running') timer = window.setTimeout(() => { void pull(); }, 2000);
       else void loadList(shownDomain);
+      // A finished paid run changed the balance and today's spend.
+      if (body.gap.provider === 'treg' && body.gap.status !== 'queued' && body.gap.status !== 'running') void loadTreg();
     };
     timer = window.setTimeout(() => { void pull(); }, 0);
     return () => { cancelled = true; window.clearTimeout(timer); };
-  }, [selectedId]);
+  }, [selectedId, loadTreg]);
 
   const start = async () => {
+    if (provider === 'treg' && !confirming) { setConfirming(true); return; }
+    setConfirming(false);
     setBusy(true); setMessage('');
     try {
       const form = new FormData();
@@ -83,12 +105,17 @@ export default function KeywordGapPage() {
       form.set('language', language);
       form.set('market', market);
       form.set('provider', provider);
+      if (provider === 'treg') {
+        form.set('keywordLimit', String(keywordLimit));
+        form.set('confirmEstimateMicro', String(estimate.totalMicro));
+      }
       if (file) form.set('queries', file);
       const { ok, data: body } = await fetchJson<{ id: string }>('/api/seo/keyword-gap', { method: 'POST', body: form });
       if (!ok) { setMessage(body.error || 'Could not start the keyword gap.'); return; }
       setSelectedId(body.id);
       setMessage('Keyword gap started.');
       await loadList(shownDomain);
+      if (provider === 'treg') void loadTreg();
     } finally {
       setBusy(false);
     }
@@ -108,7 +135,8 @@ export default function KeywordGapPage() {
   if (loading) return <LoadingState label="Loading Keyword Gap" />;
   const counts = gap?.result?.counts ?? {};
   const running = gap?.status === 'queued' || gap?.status === 'running';
-  const providerBlocked = (provider === 'semrush' && !providers.semrush) || (provider === 'dataforseo' && !providers.dataforseo);
+  const tregBlocked = provider === 'treg' && !!treg && treg.configured && !treg.canRun;
+  const providerBlocked = (provider === 'semrush' && !providers.semrush) || (provider === 'dataforseo' && !providers.dataforseo) || tregBlocked;
   const sourceMessage = gscSourceMessage({
     domain: shownDomain || 'dupoin.co.id',
     gscProperty: source?.gscProperty ?? null,
@@ -123,6 +151,7 @@ export default function KeywordGapPage() {
 
   return <PageStack>
     <PageHeader eyebrow="SEO OS / Keyword Gap" title="Keyword Gap" description="Beta. Compare our Search Console queries with competitor topics, or use a ranking provider when a key is saved." actions={<StatusBadge tone="warning">Beta</StatusBadge>} />
+    <TregBalancePanel status={treg} />
     {(sitesError || message) && <Panel><p className="text-sm text-[var(--mos-text-secondary)]">{sitesError || message}</p></Panel>}
 
     <Panel>
@@ -153,19 +182,36 @@ export default function KeywordGapPage() {
             </Select>
           </FormField>
           <FormField label="Provider">
-            <Select value={provider} onChange={event => setProvider(event.target.value)}>
+            <Select value={provider} onChange={event => { setProvider(event.target.value); setConfirming(false); }}>
               <option value="free">Free</option>
+              <option value="treg">treg (paid){!treg?.configured ? ' (Not configured)' : !treg.canRun ? ' (Admin only)' : ''}</option>
               <option value="semrush">Semrush{providers.semrush ? '' : ' (Not configured)'}</option>
               <option value="dataforseo">DataForSEO{providers.dataforseo ? '' : ' (Not configured)'}</option>
             </Select>
           </FormField>
+          {provider === 'treg' && <FormField label="Keywords per domain" hint="More keywords cost more per call.">
+            <Select value={String(keywordLimit)} onChange={event => { setKeywordLimit(Number(event.target.value)); setConfirming(false); }}>
+              {(treg?.keywordLimits ?? [100, 200, 500]).map(limit => <option key={limit} value={limit}>{limit}</option>)}
+            </Select>
+          </FormField>}
           <FormField label="Queries export" hint="Fallback when no stored Search Console rows exist. CSV or XLSX.">
             <input aria-label="Queries export" type="file" accept=".csv,.xlsx,text/csv" onChange={event => setFile(event.target.files?.[0] ?? null)} />
           </FormField>
         </div>
       </div>
-      {providerBlocked && <p className="mt-3 text-sm text-amber-200">Not configured. An admin can save this provider key in SEO settings. No ranking numbers are invented.</p>}
-      <div className="mt-4"><Button variant="primary" disabled={busy || providerBlocked || !shownDomain.trim() || !competitors.trim()} onClick={start}>{busy ? 'Starting…' : 'Run keyword gap'}</Button></div>
+      {providerBlocked && !tregBlocked && <p className="mt-3 text-sm text-amber-200">Not configured. An admin can save this provider key in SEO settings. No ranking numbers are invented.</p>}
+      {tregBlocked && <p className="mt-3 text-sm text-amber-200">Paid treg runs are admin-only. Choose Free, or ask an admin to run it.</p>}
+      {provider === 'treg' && treg && !treg.configured && <p className="mt-3 text-sm text-amber-200">treg is not configured, so this run uses Free mode.</p>}
+      {provider === 'treg' && <TregCostNotice
+        feature="Keyword Gap"
+        status={treg}
+        estimate={{ totalMicro: estimate.totalMicro, calls: estimate.calls, detail: `our domain + ${competitorCount} competitor${competitorCount === 1 ? '' : 's'}, ${usd(estimate.perCallMicro / 1_000_000)} each at ${keywordLimit} keywords` }}
+        confirming={confirming}
+        busy={busy}
+        onConfirm={start}
+        onCancel={() => setConfirming(false)}
+      />}
+      {!confirming && <div className="mt-4"><Button variant="primary" disabled={busy || providerBlocked || !shownDomain.trim() || !competitors.trim()} onClick={start}>{busy ? 'Starting…' : provider === 'treg' && treg?.configured ? `Run keyword gap (~${usd(estimate.totalMicro / 1_000_000)})` : 'Run keyword gap'}</Button></div>}
     </Panel>
 
     {gap && <Panel>
@@ -178,6 +224,8 @@ export default function KeywordGapPage() {
       </div>
       {running && <div className="mt-3 h-2 overflow-hidden rounded-full bg-white/10"><div className="h-full bg-[var(--mos-accent)]" style={{ width: `${gap.progress}%` }} /></div>}
       {gap.error && <p className="mt-3 text-sm text-red-300">{gap.error}</p>}
+      {gap.result?.fallback && <p className="mt-3 text-sm text-amber-200" data-testid="keyword-gap-fallback">{gap.result.fallback}</p>}
+      {gap.provider === 'treg' && gap.cost && <TregCostNotice feature="Keyword Gap" status={treg} estimate={{ totalMicro: gap.cost.estimatedMicro, calls: 0 }} result={gap.cost} />}
     </Panel>}
 
     {gap?.summary && <Panel><h2 className="mb-2 text-sm font-medium text-[var(--mos-text)]">Top opportunities</h2><p className="whitespace-pre-wrap text-sm leading-6 text-[var(--mos-text-secondary)]">{gap.summary}</p></Panel>}
@@ -193,13 +241,13 @@ export default function KeywordGapPage() {
         <a className="text-xs text-[var(--mos-accent-soft)] hover:underline" href={`/api/seo/keyword-gap/${gap.id}/export?format=csv`}>CSV</a>
         <a className="text-xs text-[var(--mos-accent-soft)] hover:underline" href={`/api/seo/keyword-gap/${gap.id}/export?format=xlsx`}>xlsx</a>
       </span>}>
-        <table className="w-full min-w-[860px] text-sm">
+        <table className="w-full min-w-[980px] text-sm">
           <thead className="border-b border-[var(--mos-border)] text-left text-xs uppercase tracking-wide text-[var(--mos-text-faint)]">
             <tr>
               {([['keyword', 'Keyword'], ['bucket', 'Bucket'], ['ourPosition', 'Our position'], ['ourClicks', 'Clicks'], ['ourImpressions', 'Impressions']] as Array<[SortKey, string]>).map(([key, label]) => (
                 <th key={key} className="p-3"><button type="button" className="hover:underline" onClick={() => sort(key)}>{label}</button></th>
               ))}
-              <th className="p-3">Competitor position</th><th className="p-3">Volume</th><th className="p-3">Intent</th>
+              <th className="p-3">Competitor position</th><th className="p-3">Volume</th><th className="p-3">KD</th><th className="p-3">CPC</th><th className="p-3">Intent</th>
             </tr>
           </thead>
           <tbody>
@@ -211,6 +259,8 @@ export default function KeywordGapPage() {
               <td className="p-3">{showNumber(keyword.ourImpressions)}</td>
               <td className="p-3">{showNumber(keyword.competitorPosition)}</td>
               <td className="p-3">{showNumber(keyword.volume)}</td>
+              <td className="p-3">{showNumber(keyword.difficulty)}</td>
+              <td className="p-3">{keyword.cpc === null || keyword.cpc === undefined ? '—' : usd(keyword.cpc, 2)}</td>
               <td className="p-3 text-xs">{keyword.intent ?? '—'}</td>
             </tr>)}
           </tbody>
@@ -221,7 +271,7 @@ export default function KeywordGapPage() {
     <DataTableFrame title="Past runs">
       {!gaps.length && <EmptyState title="No keyword gaps yet" description="Run a gap to store the first report." />}
       {gaps.length > 0 && <table className="w-full min-w-[680px] text-sm">
-        <thead className="border-b border-[var(--mos-border)] text-left text-xs uppercase tracking-wide text-[var(--mos-text-faint)]"><tr><th className="p-3">When</th><th className="p-3">Domain</th><th className="p-3">Provider</th><th className="p-3">Status</th><th className="p-3 text-right">Keywords</th><th className="p-3"></th></tr></thead>
+        <thead className="border-b border-[var(--mos-border)] text-left text-xs uppercase tracking-wide text-[var(--mos-text-faint)]"><tr><th className="p-3">When</th><th className="p-3">Domain</th><th className="p-3">Provider</th><th className="p-3">Status</th><th className="p-3 text-right">Keywords</th><th className="p-3 text-right">Cost</th><th className="p-3"></th></tr></thead>
         <tbody>
           {gaps.map(item => <tr key={item.id} className="border-b border-[var(--mos-border)]">
             <td className="p-3 text-xs">{new Date(item.created_at).toLocaleString('en-GB')}</td>
@@ -229,6 +279,7 @@ export default function KeywordGapPage() {
             <td className="p-3 text-xs">{item.provider}</td>
             <td className="p-3 text-xs">{item.status}</td>
             <td className="p-3 text-right">{item.keyword_count ?? '—'}</td>
+            <td className="p-3 text-right text-xs">{item.provider === 'treg' ? costLabel(item.cost) : '—'}</td>
             <td className="p-3 text-right"><Button size="sm" onClick={() => setSelectedId(item.id)}>Open</Button></td>
           </tr>)}
         </tbody>

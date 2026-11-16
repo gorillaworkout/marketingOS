@@ -241,6 +241,88 @@ Check `pg_total_relation_size` and `df` first.
   can drop the tables. Do not revert the code while rolled-up months exist: the
   old code reads daily rows only and would show those months as empty.
 
+## Keyword Gap on treg.to (migration 061)
+
+[treg.to](https://treg.to) is a pay-per-call gateway. Keyword Gap uses it for real
+competitor rankings: position, search volume, keyword difficulty (KD), CPC and
+search intent. Data comes from DataForSEO Labs "Ranked Keywords", which treg relays.
+Without treg, Keyword Gap works exactly as before (Free mode).
+
+### Server environment (`/home/ubuntu/apps/marketingos/.env.local`, never committed)
+
+| Variable | Required | Meaning |
+| --- | --- | --- |
+| `TREG_API_KEY` | yes, to enable treg | treg token. Use an **org-scoped agent token** (`treg org agent-new`, or the treg dashboard: Team → API keys). It is sent only as the `X-Treg-Token` header, and it is never stored in the DB, logged or shown in the UI. |
+| `TREG_DAILY_SPEND_LIMIT_USD` | no (default `5`) | Server-side cap on treg spend per Asia/Jakarta day. A run whose estimate would cross it is refused with a clear message. |
+| `TREG_LOW_BALANCE_USD` | no (default `2`) | Below this balance the Keyword Gap page shows a low-balance warning. |
+| `TREG_ADMIN_ONLY` | no (default `true`) | Paid runs are admin-only, like AI Visibility "Run now". Set `false` to let every SEO user run paid gaps. |
+| `TREG_BASE_URL` | no (default `https://treg.to`) | Only `https://` URLs are accepted. |
+| `TREG_ORG` | no | Sent as `X-Treg-Org`. Only needed for a personal (identity) token that belongs to more than one team. Org-scoped tokens do not need it. |
+
+After editing `.env.local`, restart with `pm2 restart marketingos --update-env`.
+
+### Endpoints used (all paths live in `src/lib/seo/treg-endpoints.ts`)
+
+- `POST /call/dataforseo.google.domain.ranked_keywords`: one call for our domain and one per competitor. The body is
+  `[{"target": "<domain>", "location_code": 2360, "language_code": "id", "limit": 100|200|500, "item_types": ["organic"], "order_by": ["keyword_data.keyword_info.search_volume,desc"]}]`.
+  Indonesia, the US, Singapore and Malaysia use `location_code`. Any other market is sent as `location_name`.
+- `GET /auth/me` gives `org_id`. `GET /orgs/{org_id}/balance` gives `balance_micro` (integer micro-USD).
+
+### Costs
+
+- **Estimate (before a run).** Catalog price: $0.012 per call plus $0.00012 per returned keyword.
+  - 200 keywords is $0.036 per domain.
+  - Our domain plus 3 competitors (4 calls) at 200 keywords is about $0.144.
+  - The page shows this as an estimate, and the run button asks for a confirm click first.
+- **Actual (after a run).** The `X-Treg-Cost-Micro` header on each call, summed, is recorded as `reported`.
+  - A call that timed out may still have been charged, so its estimate is added and the run is flagged `estimate`.
+  - Refused calls (402, 429, 5xx) are not charged by treg.
+- **Records.** Each paid run is written to `seo_data_provider_spend` with user, feature, estimate, actual, cost source, balance before and after, treg call ids and time. It shows in:
+  - Keyword Gap → Past runs → Cost
+  - The run's status panel
+  - Usage analytics (`/dashboard/analytics`) → "Data provider spend (treg)". This is kept separate from LLM token cost.
+- **Balance.** Shown at the top of Keyword Gap and cached for 5 minutes. A 402 refusal updates it from `balance_micro`.
+
+### Cost transparency for every treg feature (shared, required)
+
+Every feature that spends treg balance (Keyword Gap now, keyword enrichment or anything later) must show:
+- **before** a generate: the estimated cost of ONE generate and the remaining balance, with a confirm click;
+- **after** it: the actual cost and the new remaining balance.
+
+Use the shared pieces rather than building your own:
+
+| Piece | Where | What it does |
+| --- | --- | --- |
+| `<TregBalancePanel status />` | `src/components/seo/TregCostNotice.tsx` | Remaining balance (cached 5 min), spent today vs the daily limit, low-balance and admin-only notes. |
+| `<TregCostNotice feature estimate confirming onConfirm onCancel />` | same file | Before: "Estimated cost for one generate", the remaining balance, the balance after the run, and the confirm step. |
+| `<TregCostNotice … result={{ estimatedMicro, actualMicro, source, balanceAfterMicro }} />` | same file | After: the actual cost (reported by treg, or flagged as an estimate) and the remaining balance. |
+| `useTregStatus()` | same file | Reads `GET /api/seo/treg`, which is feature-agnostic and never returns the token. |
+| `guardTregSpend({ feature, estimate, confirmedEstimateMicro, … })` | `src/lib/seo/treg-cost-guard.ts` | Server side, before calling treg. Checks, in order: admin-only, the client confirmed at least the server's estimate (409 otherwise), balance (too low means Free mode), then the daily limit, reserving the estimate under an advisory lock. The balance before is recorded. |
+| `settleTregRun({ spendId, actualMicro, costSource, … })` | same file | After the run: records the actual cost, re-reads the balance (or takes `balance_micro` from a 402), and returns the cost object for the result. |
+
+A new feature computes its own one-generate estimate. Keyword Gap's is `estimateKeywordGapMicro` in `treg-endpoints.ts`. Put any new endpoint id and price in that same file.
+
+### Fallback (never blocks the page)
+
+| Situation | What happens |
+| --- | --- |
+| `TREG_API_KEY` missing | Free mode, with the notice "treg unavailable: not configured — showing Free mode". |
+| Balance below the estimate | Free mode before any paid call ("insufficient balance"). |
+| 401/403, 402 `insufficient_balance` / `route_max_cost`, 429 caps, 5xx, timeout, network | The run stops calling treg and finishes in Free mode, with the reason in English. Calls already made stay recorded. |
+| Daily limit reached | The paid run is refused with the amount used today. Free mode still works. |
+| Non-admin picks treg (admin-only on) | Refused, with a hint to use Free mode. |
+
+Free mode then needs stored Search Console rows or an uploaded Queries export, as before.
+
+### Rollback
+
+`db/rollbacks/061_seo_data_provider_spend_down.sql`:
+- drops the spend table (export it first if you need the history);
+- relabels treg gaps as `free`;
+- restores the 056 provider check.
+
+Revert the code first.
+
 ## Troubleshooting (messages shown to admins)
 
 | Message | Fix |

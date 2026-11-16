@@ -2,8 +2,11 @@ import { randomUUID } from 'node:crypto';
 import { execute, queryAll, queryOne } from '@/lib/database';
 import { decryptSecret, encryptSecret, maskSecret } from '@/lib/llm-crypto';
 import type { GapKeyword, OurKeyword } from './keyword-gap-bucket';
+import type { TregFailureKind } from './treg-client';
+import type { TregRunCost } from './treg-cost-guard';
+import { spendForRefs, type SpendRow } from './treg-spend';
 
-export type GapProvider = 'free' | 'semrush' | 'dataforseo';
+export type GapProvider = 'free' | 'semrush' | 'dataforseo' | 'treg';
 export type GapStatus = 'queued' | 'running' | 'succeeded' | 'failed';
 
 export interface GapInput {
@@ -11,7 +14,14 @@ export interface GapInput {
   competitors: string[];
   language: 'id' | 'en';
   market: string;
+  /** Paid treg run: the spend reservation and the confirmed estimate. */
+  treg?: { spendId: string; keywordLimit: number; estimateMicro: number; balanceBeforeMicro?: number | null } | null;
+  /** Set when the run was sent to Free mode before any treg call (e.g. the balance was too low). */
+  tregSkipped?: TregFailureKind | null;
 }
+
+/** What a treg run cost (shared shape from the treg cost guard). */
+export type GapCost = TregRunCost;
 
 export interface GapResult {
   provider: GapProvider;
@@ -22,6 +32,9 @@ export interface GapResult {
   counts: Record<string, number>;
   storedQueries: number;
   notes: string[];
+  cost?: GapCost | null;
+  /** Set when a paid provider failed and the run fell back to Free mode. */
+  fallback?: string | null;
 }
 
 export interface GapRow {
@@ -47,6 +60,8 @@ export interface GapRow {
   created_at: string;
   updated_at: string;
   finished_at: string | null;
+  /** treg spend for this run (migration 061), when it was a paid run. */
+  cost?: { estimatedMicro: number; actualMicro: number | null; source: 'reported' | 'estimate' | null; status: string; balanceAfterMicro: number | null } | null;
 }
 
 export class GapInProgressError extends Error {
@@ -149,7 +164,13 @@ export async function listGaps(limit = 20): Promise<GapRow[]> {
     `SELECT ${LIST} FROM seo_keyword_gaps g LEFT JOIN users u ON u.id = g.created_by ORDER BY g.created_at DESC LIMIT ?`,
     [limit],
   );
-  return rows.map(row => mapRow(row, false));
+  const gaps = rows.map(row => mapRow(row, false));
+  const spend = await spendForRefs(gaps.filter(gap => gap.provider === 'treg').map(gap => gap.id)).catch(() => new Map<string, SpendRow>());
+  for (const gap of gaps) {
+    const row = spend.get(gap.id);
+    gap.cost = row ? { estimatedMicro: row.estimated_micro, actualMicro: row.actual_micro, source: row.cost_source, status: row.status, balanceAfterMicro: row.balance_after_micro } : null;
+  }
+  return gaps;
 }
 
 export async function getGap(id: string): Promise<GapRow | undefined> {
@@ -157,7 +178,13 @@ export async function getGap(id: string): Promise<GapRow | undefined> {
     `SELECT ${LIST}, g.input, g.result FROM seo_keyword_gaps g LEFT JOIN users u ON u.id = g.created_by WHERE g.id = ?`,
     [id],
   );
-  return row ? mapRow(row, true) : undefined;
+  if (!row) return undefined;
+  const gap = mapRow(row, true);
+  if (gap.provider === 'treg') {
+    const spend = (await spendForRefs([gap.id]).catch(() => new Map<string, SpendRow>())).get(gap.id);
+    gap.cost = spend ? { estimatedMicro: spend.estimated_micro, actualMicro: spend.actual_micro, source: spend.cost_source, status: spend.status, balanceAfterMicro: spend.balance_after_micro } : null;
+  }
+  return gap;
 }
 
 type SecretRow = {
@@ -178,11 +205,12 @@ function readStored(ciphertext: string | null): string | null {
   try { return decryptSecret(ciphertext); } catch { return null; }
 }
 
-export async function providerFlags(): Promise<{ semrush: boolean; dataforseo: boolean }> {
+export async function providerFlags(): Promise<{ semrush: boolean; dataforseo: boolean; treg: boolean }> {
   const row = await secretRow().catch(() => undefined);
   const semrush = Boolean(process.env.SEMRUSH_API_KEY?.trim() || row?.semrush_key_hint);
   const dataforseo = Boolean((process.env.DATAFORSEO_LOGIN?.trim() && process.env.DATAFORSEO_PASSWORD?.trim()) || (row?.dataforseo_login_hint && row?.dataforseo_password_hint));
-  return { semrush, dataforseo };
+  const treg = Boolean(process.env.TREG_API_KEY?.trim());
+  return { semrush, dataforseo, treg };
 }
 
 export async function providerKeyStatus(): Promise<{ semrush: { configured: boolean; hint: string | null; source: string }; dataforseo: { configured: boolean; hint: string | null; source: string } }> {
