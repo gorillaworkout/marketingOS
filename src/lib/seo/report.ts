@@ -1,5 +1,6 @@
 import { queryAll, queryOne } from '@/lib/database';
 import { addDays } from './gsc-sync';
+import { gscRowsSql, sourceKindForTable } from './gsc-source';
 
 export const RANGE_PRESETS = { '7d': 7, '28d': 28, '90d': 90, '6m': 182, '12m': 365, '16m': 486 } as const;
 export type RangePreset = keyof typeof RANGE_PRESETS;
@@ -66,9 +67,13 @@ export function reportSource(filters: ReportFilters): { table: string; where: st
 
 export interface Totals { clicks: number; impressions: number; ctr: number; position: number | null }
 
-/** Impression-weighted average position, and CTR from summed clicks and impressions. */
-const AGGREGATE = `COALESCE(SUM(clicks), 0)::BIGINT AS clicks, COALESCE(SUM(impressions), 0)::BIGINT AS impressions,
-  SUM(position * impressions) / NULLIF(SUM(impressions), 0) AS position`;
+/**
+ * Sums over gscRowsSql() columns: clicks and impressions are rounded (a
+ * prorated month can be fractional), CTR comes from the sums and position is
+ * impression-weighted.
+ */
+const AGGREGATE = `ROUND(COALESCE(SUM(clicks), 0))::BIGINT AS clicks, ROUND(COALESCE(SUM(impressions), 0))::BIGINT AS impressions,
+  SUM(weighted) / NULLIF(SUM(impressions), 0) AS position`;
 
 function toTotals(row: { clicks: string | number; impressions: string | number; position: string | number | null } | undefined): Totals {
   const clicks = Number(row?.clicks ?? 0);
@@ -78,23 +83,41 @@ function toTotals(row: { clicks: string | number; impressions: string | number; 
 
 type AggregateRow = { clicks: string; impressions: string; position: string | null };
 
+/** Daily rows plus rolled-up monthly rows for the range, with the filter clauses applied outside. */
+function rangeRows(siteId: string, range: DateRange, source: { table: string; where: string; values: unknown[] }) {
+  const rows = gscRowsSql(sourceKindForTable(source.table), siteId, range);
+  return { from: `(${rows.sql}) s WHERE TRUE${source.where}`, values: [...rows.values, ...source.values] };
+}
+
 export async function getTotals(siteId: string, range: DateRange, filters: ReportFilters): Promise<Totals> {
-  const source = reportSource(filters);
-  const row = await queryOne<AggregateRow>(
-    `SELECT ${AGGREGATE} FROM ${source.table} WHERE site_id = ? AND date BETWEEN ? AND ?${source.where}`,
-    [siteId, range.start, range.end, ...source.values],
-  );
+  const rows = rangeRows(siteId, range, reportSource(filters));
+  const row = await queryOne<AggregateRow>(`SELECT ${AGGREGATE} FROM ${rows.from}`, rows.values);
   return toTotals(row);
 }
 
-export async function getTrend(siteId: string, range: DateRange, filters: ReportFilters): Promise<Array<Totals & { date: string }>> {
-  const source = reportSource(filters);
-  const rows = await queryAll<AggregateRow & { date: string }>(
-    `SELECT to_char(date, 'YYYY-MM-DD') AS date, ${AGGREGATE} FROM ${source.table}
-     WHERE site_id = ? AND date BETWEEN ? AND ?${source.where} GROUP BY date ORDER BY date`,
-    [siteId, range.start, range.end, ...source.values],
+export type TrendPoint = Totals & {
+  date: string;
+  /** 'month' points come from rolled-up months: values are daily averages over `days` days, starting at `date`. */
+  granularity: 'day' | 'month';
+  days: number;
+};
+
+/**
+ * One point per day. Rolled-up months (query or page filter on ranges older
+ * than the retention cutoff) give one point per month whose clicks and
+ * impressions are the month's daily average, so the line keeps a daily scale
+ * instead of spiking on the 1st. CTR and position are the month's values.
+ */
+export async function getTrend(siteId: string, range: DateRange, filters: ReportFilters): Promise<TrendPoint[]> {
+  const rows = rangeRows(siteId, range, reportSource(filters));
+  const result = await queryAll<{ date: string; grain: 'day' | 'month'; days: number | string; clicks: string; impressions: string; position: string | null }>(
+    `SELECT to_char(bucket, 'YYYY-MM-DD') AS date, grain, MAX(span_days) AS days,
+       COALESCE(SUM(clicks), 0) / MAX(span_days) AS clicks, COALESCE(SUM(impressions), 0) / MAX(span_days) AS impressions,
+       SUM(weighted) / NULLIF(SUM(impressions), 0) AS position
+     FROM ${rows.from} GROUP BY bucket, grain ORDER BY bucket, grain`,
+    rows.values,
   );
-  return rows.map(row => ({ date: row.date, ...toTotals(row) }));
+  return result.map(row => ({ date: row.date, ...toTotals(row), granularity: row.grain, days: Number(row.days) }));
 }
 
 /** Top queries always come from query+page rows; top pages use page rows unless a query filter is set. */
@@ -105,14 +128,13 @@ export function topRowsSource(dimension: 'query' | 'page', filters: ReportFilter
 }
 
 export async function getTopRows(siteId: string, range: DateRange, filters: ReportFilters, dimension: 'query' | 'page', limit = 50): Promise<Array<Totals & { key: string }>> {
-  const source = topRowsSource(dimension, filters);
-  const rows = await queryAll<AggregateRow & { key: string }>(
-    `SELECT ${dimension} AS key, ${AGGREGATE} FROM ${source.table}
-     WHERE site_id = ? AND date BETWEEN ? AND ?${source.where} GROUP BY ${dimension}
+  const rows = rangeRows(siteId, range, topRowsSource(dimension, filters));
+  const result = await queryAll<AggregateRow & { key: string }>(
+    `SELECT ${dimension} AS key, ${AGGREGATE} FROM ${rows.from} GROUP BY ${dimension}
      ORDER BY SUM(clicks) DESC, SUM(impressions) DESC, ${dimension} LIMIT ?`,
-    [siteId, range.start, range.end, ...source.values, limit],
+    [...rows.values, limit],
   );
-  return rows.map(row => ({ key: row.key, ...toTotals(row) }));
+  return result.map(row => ({ key: row.key, ...toTotals(row) }));
 }
 
 export async function getDataBounds(siteId: string): Promise<{ first: string | null; last: string | null }> {

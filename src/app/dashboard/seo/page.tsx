@@ -17,7 +17,7 @@ type Report = {
   range: { current: { start: string; end: string }; previous: { start: string; end: string }; days: number };
   dataThrough: string | null;
   totals: { current: Totals; previous: Totals };
-  trend: Array<Totals & { date: string }>;
+  trend: Array<Totals & { date: string; granularity?: 'day' | 'month'; days?: number }>;
   topQueries: Row[];
   topPages: Row[];
 };
@@ -220,7 +220,11 @@ function TrendChart({ report, metric, onMetric }: { report: Report; metric: Tren
   const values = useMemo(() => report.trend.map(point => metric === 'position' ? -(point.position ?? 0) : point[metric]), [report.trend, metric]);
   const points = sparklinePoints(values, width, height, 12);
   const labels: Record<TrendMetric, string> = { clicks: 'Clicks', impressions: 'Impressions', ctr: 'CTR', position: 'Position' };
-  return <DataTableFrame title="Trend" description={metric === 'position' ? 'Higher on the chart means a better (lower) position.' : 'Daily totals for the selected range.'} action={
+  const monthly = report.trend.filter(point => point.granularity === 'month');
+  const monthlyNote = monthly.length
+    ? ` Before ${report.trend.find(point => point.granularity !== 'month')?.date ?? 'the end of this range'}, query and page data is kept per month, so each dot is that month's daily average.`
+    : '';
+  return <DataTableFrame title="Trend" description={(metric === 'position' ? 'Higher on the chart means a better (lower) position.' : 'Daily totals for the selected range.') + monthlyNote} action={
     <div className="flex gap-1">{(Object.keys(labels) as TrendMetric[]).map(key => <Button key={key} size="sm" variant={key === metric ? 'primary' : 'secondary'} onClick={() => onMetric(key)}>{labels[key]}</Button>)}</div>
   }>
     <div className="px-5 py-4">
@@ -228,6 +232,11 @@ function TrendChart({ report, metric, onMetric }: { report: Report; metric: Tren
         ? <p className="py-10 text-center text-xs text-[var(--mos-text-faint)]">Not enough days to draw a trend.</p>
         : <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label={`${labels[metric]} trend`} className="h-56 w-full" preserveAspectRatio="none">
           <polyline points={points} fill="none" stroke="var(--mos-accent-soft, #818cf8)" strokeWidth="2" vectorEffect="non-scaling-stroke" />
+          {monthly.length > 0 && points.split(' ').map((point, index) => {
+            if (report.trend[index]?.granularity !== 'month') return null;
+            const [x, y] = point.split(',');
+            return <circle key={report.trend[index].date} cx={x} cy={y} r="4" fill="var(--mos-accent-soft, #818cf8)"><title>{`${report.trend[index].date}: monthly data, daily average over ${report.trend[index].days ?? 0} days`}</title></circle>;
+          })}
         </svg>}
       {report.trend.length >= 2 && <div className="mt-2 flex justify-between text-[11px] text-[var(--mos-text-faint)]"><span>{report.trend[0].date}</span><span>{report.trend[report.trend.length - 1].date}</span></div>}
     </div>

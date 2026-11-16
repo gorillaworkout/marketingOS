@@ -331,7 +331,7 @@ const oneRowClient: GscClient = { async query() { return [{ keys: ['k', 'https:/
 test('runSeoSync upserts each day, records the run, and marks the site synced', async () => {
   const { store, calls } = memoryStore();
   const result = await runSeoSync({ siteId: 's', mode: 'incremental', dates: ['2026-10-20', '2026-10-21'] }, { store, createClient: async () => oneRowClient, newId: () => 'run-1' });
-  assert.deepEqual(result, { status: 'succeeded', runId: 'run-1', daysSynced: 2, rowsUpserted: 6, rangeStart: '2026-10-20', rangeEnd: '2026-10-21' });
+  assert.deepEqual(result, { status: 'succeeded', runId: 'run-1', daysSynced: 2, rowsUpserted: 6, rangeStart: '2026-10-20', rangeEnd: '2026-10-21', skippedRolledUpDays: 0 });
   assert.deepEqual(calls.replaced, ['2026-10-20', '2026-10-21']);
   assert.deepEqual(calls.finished, [{ status: 'succeeded', daysSynced: 2, rowsUpserted: 6, error: null }]);
   assert.equal(calls.synced, 1);
@@ -379,7 +379,11 @@ test('upsert SQL updates metrics on conflict and the day replace deletes stale r
   assert.deepEqual(chunk([1, 2, 3, 4, 5], 2), [[1, 2], [3, 4], [5]]);
 
   const statements: Array<{ sql: string; values: unknown[] }> = [];
-  const transaction = { execute: async (sql: string, values: unknown[] = []) => { statements.push({ sql, values }); return sql.startsWith('INSERT') ? (sql.match(/\(\?/g)?.length ?? 0) : 0; } };
+  const transaction = {
+    execute: async (sql: string, values: unknown[] = []) => { statements.push({ sql, values }); return sql.startsWith('INSERT') ? (sql.match(/\(\?/g)?.length ?? 0) : 0; },
+    queryOne: async () => undefined, // the day's month is not rolled up
+    queryAll: async () => [],
+  };
   const syncedAt = new Date('2026-10-29T00:00:00Z');
   const snapshot: DaySnapshot = {
     site: [{ date: 'd', clicks: 1, impressions: 2, ctr: 0.5, position: 3 }],
