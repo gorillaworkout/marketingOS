@@ -1,4 +1,4 @@
-import 'dotenv/config';
+import './load-env';
 import { closeDb, queryAll } from '../src/lib/database';
 import { NothingToCheckError, startVisibilityRun } from '../src/lib/seo/visibility-run';
 import { HARD_MAX_CHECKS } from '../src/lib/seo/visibility';
@@ -15,7 +15,7 @@ import { RunBusyError, resolveRunUserId } from '../src/lib/seo/visibility-store'
 // Weekly VPS cron, Monday 07:00 WIB (00:00 UTC). Not installed automatically; see docs/seo-os/setup.md:
 // 0 0 * * 1 cd /home/ubuntu/apps/marketingos && npm run seo:visibility >> /home/ubuntu/logs/seo-visibility.log 2>&1
 //
-// Requires DATABASE_URL and GORILLAWORKOUT_API_KEY (already set for the app). Keys are never printed.
+// Requires DATABASE_URL and GORILLAWORKOUT_API_KEY (already set for the app, in .env.local or .env). Keys are never printed.
 
 function argValue(name: string): string | undefined {
   const prefix = `--${name}=`;

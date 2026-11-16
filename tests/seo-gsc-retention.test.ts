@@ -106,3 +106,9 @@ test('migration 060 is additive and idempotent, with a rollback; the CLI default
   const pkg = JSON.parse(readFileSync('package.json', 'utf8'));
   assert.equal(pkg.scripts['seo:gsc-retention'], 'tsx scripts/seo-gsc-retention.ts');
 });
+
+test('seo:visibility loads .env.local like the app (GORILLAWORKOUT_API_KEY lives there on the VPS)', () => {
+  const cli = readFileSync('scripts/seo-visibility.ts', 'utf8');
+  assert.match(cli, /^import '\.\/load-env';/);
+  assert.doesNotMatch(cli, /dotenv\/config/);
+});
