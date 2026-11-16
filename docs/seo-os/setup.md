@@ -194,6 +194,9 @@ The page always shows this label. API answers have no live web search or persona
 **Flow**
 
 1. Add prompts per site: the questions a customer would ask an AI assistant. Each prompt has **brand terms** and **competitors** (`Name` or `Name|alias|alias`). You can add them one by one or import a CSV with the columns `prompt, brand_terms, competitors, active`. Put several terms in one cell separated by `;`. **Check file** is a dry run; re-importing a prompt updates it. Limits: 500 prompts per site, 20 terms per list.
+   - The page has a **How to use AI Visibility** guide. It opens automatically while a site has no prompts and otherwise remembers whether you left it open or closed (per browser). It also shows example rows for a fictional broker (Acme Markets) and its competitors.
+   - Write one question per prompt, worded the way a customer would ask an AI assistant. Avoid generic brand terms that can match by accident.
+   - **Use example** fills the add-prompt form without saving. **Download CSV template** gives the import header plus example rows. The examples live in `src/lib/seo/visibility-examples.ts`.
 2. A run asks every selected prompt on every configured model and stores one row per answer in `seo_ai_checks`. Each row holds the response, `mentioned`, `rank_in_answer`, `cited_urls`, `site_cited`, competitors mentioned, tokens, cost, the answering model and the fallback label.
 3. Mention detection:
    - Brand terms are matched as whole words, case-insensitively. Empty terms fall back to the site name. The site's domain always counts, and so does any link to it.

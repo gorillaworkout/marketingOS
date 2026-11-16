@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Button, DataTableFrame, EmptyState, LoadingState, PageHeader, PageStack, Panel, Select, StatusBadge, TextArea, TextInput } from '@/components/ui/dashboard';
 import { fetchJson, useSeoSites } from '@/components/seo/useSeoSites';
 import { VISIBILITY_DISCLAIMER } from '@/lib/seo/visibility-copy';
+import { EXAMPLE_BRAND, VISIBILITY_EXAMPLES, VISIBILITY_GUIDE_STEPS, visibilityCsvTemplate } from '@/lib/seo/visibility-examples';
 import { groupModelsByProvider } from '@/lib/model-groups';
 
 type Prompt = { id: string; prompt: string; brand_terms: string[]; competitors: string[]; active: boolean; last_checked_at: string | null; checks: number; mentions: number };
@@ -23,7 +24,7 @@ type Check = { id: string; prompt_text: string; model: string; answered_model: s
 type Loaded = { key: string; prompts: Prompt[]; runs: Run[]; report: Report | null; settings: SettingsResponse | null; error: string };
 
 const COLORS = ['#7c9cff', '#3fd0a5', '#f5b14c', '#ef6f8b', '#b18cff', '#5cc8ff'];
-const TEMPLATE = 'prompt,brand_terms,competitors,active\r\nbest cheerleading competition in Indonesia,ICA;Indonesian Cheer Association,Competitor A;Competitor B|alias,yes\r\n';
+const GUIDE_STORAGE_KEY = 'mos.seo.visibility.guideOpen';
 
 function shortDate(value: string | null): string {
   if (!value) return 'never';
@@ -31,6 +32,34 @@ function shortDate(value: string | null): string {
 }
 function pct(value: number | null): string { return value === null ? '–' : `${value}%`; }
 function splitTerms(value: string): string[] { return value.split(/[\n,;]+/).map(term => term.trim()).filter(Boolean); }
+
+function GuidePanel({ open, onToggle, siteName }: { open: boolean; onToggle: () => void; siteName: string }) {
+  return <Panel>
+    <div className="flex flex-col gap-3 text-sm">
+      <button type="button" onClick={onToggle} aria-expanded={open} aria-controls="visibility-guide" className="flex items-center justify-between gap-2 text-left">
+        <span className="font-medium text-[var(--mos-text)]">How to use AI Visibility</span>
+        <span className="text-xs text-[var(--mos-accent-soft)]">{open ? 'Hide' : 'Show'}</span>
+      </button>
+      {open && <div id="visibility-guide" className="flex flex-col gap-4">
+        <ol className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+          {VISIBILITY_GUIDE_STEPS.map((step, index) => <li key={step.title} className="flex gap-3 rounded-lg border border-[var(--mos-border-subtle)] p-3">
+            <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[var(--mos-accent-soft)] text-xs font-semibold text-[var(--mos-bg,#0b0d12)]">{index + 1}</span>
+            <div><p className="font-medium text-[var(--mos-text)]">{step.title}</p><p className="mt-1 text-xs leading-5 text-[var(--mos-text-secondary)]">{step.body}</p></div>
+          </li>)}
+        </ol>
+        <div className="flex flex-col gap-2">
+          <p className="text-xs text-[var(--mos-text-muted)]">Example prompts for a fictional broker, {EXAMPLE_BRAND}. For {siteName}, replace the brand and competitors with your own and ask the questions your customers ask.</p>
+          <div className="overflow-x-auto"><table className="w-full text-xs">
+            <thead><tr className="text-left text-[var(--mos-text-muted)]"><th className="py-1 pr-3">prompt</th><th className="pr-3">brand_terms</th><th>competitors</th></tr></thead>
+            <tbody>{VISIBILITY_EXAMPLES.map(example => <tr key={example.prompt} className="border-t border-[var(--mos-border-subtle)] align-top text-[var(--mos-text-secondary)]">
+              <td className="py-1.5 pr-3 text-[var(--mos-text)]">{example.prompt}</td><td className="pr-3 font-mono">{example.brandTerms}</td><td className="font-mono">{example.competitors}</td>
+            </tr>)}</tbody>
+          </table></div>
+        </div>
+      </div>}
+    </div>
+  </Panel>;
+}
 
 function RunBadge({ run }: { run: Run }) {
   const tone = run.status === 'succeeded' ? 'success' : run.status === 'running' ? 'info' : run.status === 'partial' ? 'warning' : 'danger';
@@ -72,6 +101,13 @@ export default function SeoVisibilityPage() {
   const [check, setCheck] = useState<Check | null>(null);
   const [draftSettings, setDraftSettings] = useState<Settings | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
+  // null = no saved choice: the guide opens when the site has no prompts yet.
+  const [guidePref, setGuidePref] = useState<boolean | null>(null);
+  useEffect(() => {
+    const saved = window.localStorage.getItem(GUIDE_STORAGE_KEY);
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- read the saved choice once after mount (localStorage is client-only)
+    if (saved === 'open' || saved === 'closed') setGuidePref(saved === 'open');
+  }, []);
 
   const key = site ? `${site.id}|${version}` : null;
   useEffect(() => {
@@ -185,7 +221,17 @@ export default function SeoVisibilityPage() {
 
   const cellFor = (promptId: string, model: string) => report?.latest.find(cell => cell.prompt_id === promptId && cell.model === model);
   const lastRun = current?.runs[0] ?? null;
-  const templateHref = `data:text/csv;charset=utf-8,${encodeURIComponent(TEMPLATE)}`;
+  const templateHref = `data:text/csv;charset=utf-8,${encodeURIComponent(visibilityCsvTemplate())}`;
+  const guideOpen = guidePref ?? (current ? current.prompts.length === 0 : false);
+  const toggleGuide = () => {
+    const next = !guideOpen;
+    setGuidePref(next);
+    window.localStorage.setItem(GUIDE_STORAGE_KEY, next ? 'open' : 'closed');
+  };
+  const fillExample = () => {
+    const example = VISIBILITY_EXAMPLES[0];
+    setForm({ id: '', prompt: example.prompt, brandTerms: example.brandTerms, competitors: example.competitors, active: true });
+  };
 
   return <PageStack>
     <PageHeader eyebrow="SEO OS / AI Visibility" title="AI Visibility"
@@ -208,6 +254,8 @@ export default function SeoVisibilityPage() {
     {message && <Panel><p className="text-sm text-[var(--mos-text-secondary)]">{message}</p></Panel>}
 
     {site && current && <>
+      <GuidePanel open={guideOpen} onToggle={toggleGuide} siteName={site.name} />
+
       <Panel>
         <div className="flex flex-wrap items-center gap-3 text-sm text-[var(--mos-text-secondary)]">
           {lastRun ? <>
@@ -232,7 +280,7 @@ export default function SeoVisibilityPage() {
             </tr>)}</tbody>
           </table>
           <TrendChart weekly={report.weekly} models={models} />
-        </div> : <EmptyState title="No answers yet" description="Add prompts, then run a check (admins: Run now; or the weekly cron)." />}
+        </div> : <EmptyState title="No answers yet" description={`${activePrompts ? '' : 'Add at least one active prompt first. '}After the first run (admins: Run now, or the weekly schedule), this table shows each model's mention rate: the share of answers that name ${site.name}. Each prompt below then gets a yes/no badge per model; click it to read the full answer and the URLs it cited. Share of voice against competitors and a weekly trend appear as answers come in.`} />}
       </DataTableFrame>
 
       {report && report.totalAnswers > 0 && <DataTableFrame title="Share of voice" description="How many answers mention each name, as a share of all brand and competitor mentions. Competitors come from each prompt's list.">
@@ -247,20 +295,33 @@ export default function SeoVisibilityPage() {
         </table>
       </DataTableFrame>}
 
-      <DataTableFrame title="Prompts" description="Questions to ask the models. Brand terms are matched as whole words (the site's domain and links to it always count); leave them empty to use the site name. Write competitors as Name or Name|alias.">
+      <DataTableFrame title="Prompts" description="Questions to ask the models. Brand terms are matched as whole words (the site's domain and links to it always count); leave them empty to use the site name. Write competitors as Name or Name|alias, separated by ;.">
         <div className="flex flex-col gap-3 p-4">
-          <TextArea aria-label="Prompt" placeholder="e.g. Which organisation runs cheerleading competitions in Indonesia" value={form.prompt} onChange={event => setForm({ ...form, prompt: event.target.value })} className="min-h-16" />
+          <label className="flex flex-col gap-1">
+            <span className="text-xs font-medium text-[var(--mos-text-secondary)]">Prompt</span>
+            <TextArea aria-label="Prompt" placeholder={`e.g. ${VISIBILITY_EXAMPLES[0].prompt}`} value={form.prompt} onChange={event => setForm({ ...form, prompt: event.target.value })} className="min-h-16" />
+            <span className="text-xs text-[var(--mos-text-muted)]">One question, worded the way a customer would ask an AI assistant. Add more questions as separate prompts.</span>
+          </label>
           <div className="grid gap-2 md:grid-cols-2">
-            <TextInput aria-label="Brand terms" placeholder="Brand terms, comma separated (e.g. ICA, Indonesian Cheer Association)" value={form.brandTerms} onChange={event => setForm({ ...form, brandTerms: event.target.value })} />
-            <TextInput aria-label="Competitors" placeholder="Competitors, comma separated (e.g. Rival|RivalCheer, Other Org)" value={form.competitors} onChange={event => setForm({ ...form, competitors: event.target.value })} />
+            <label className="flex flex-col gap-1">
+              <span className="text-xs font-medium text-[var(--mos-text-secondary)]">Brand terms</span>
+              <TextInput aria-label="Brand terms" placeholder={`e.g. ${VISIBILITY_EXAMPLES[0].brandTerms}`} value={form.brandTerms} onChange={event => setForm({ ...form, brandTerms: event.target.value })} />
+              <span className="text-xs text-[var(--mos-text-muted)]">Separate terms with a semicolon (;). Avoid generic words that can match by accident. Empty = site name.</span>
+            </label>
+            <label className="flex flex-col gap-1">
+              <span className="text-xs font-medium text-[var(--mos-text-secondary)]">Competitors (optional)</span>
+              <TextInput aria-label="Competitors" placeholder={`e.g. ${VISIBILITY_EXAMPLES[0].competitors}`} value={form.competitors} onChange={event => setForm({ ...form, competitors: event.target.value })} />
+              <span className="text-xs text-[var(--mos-text-muted)]">Separate with a semicolon (;). Write aliases as Name|alias.</span>
+            </label>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <label className="flex items-center gap-2 text-sm text-[var(--mos-text-secondary)]"><input type="checkbox" checked={form.active} onChange={event => setForm({ ...form, active: event.target.checked })} /> Active</label>
             <Button variant="primary" size="sm" onClick={savePrompt} disabled={busy || !form.prompt.trim()}>{form.id ? 'Save prompt' : 'Add prompt'}</Button>
             {form.id && <Button size="sm" variant="ghost" onClick={() => setForm({ id: '', prompt: '', brandTerms: '', competitors: '', active: true })}>Cancel edit</Button>}
+            {!form.id && <Button size="sm" variant="ghost" onClick={fillExample} title="Fills the form with an example. Nothing is saved until you click Add prompt.">Use example</Button>}
           </div>
           <div className="flex flex-wrap items-center gap-2 border-t border-[var(--mos-border-subtle)] pt-3 text-sm">
-            <span className="text-[var(--mos-text-muted)]">Or import CSV (prompt, brand_terms, competitors, active; separate terms in a cell with ;). <a href={templateHref} download="ai-visibility-prompts-template.csv" className="text-[var(--mos-accent-soft)] hover:underline">Template</a></span>
+            <span className="text-[var(--mos-text-muted)]">Or import CSV (prompt, brand_terms, competitors, active; separate terms in a cell with ;). <a href={templateHref} download="ai-visibility-prompts-template.csv" className="text-[var(--mos-accent-soft)] hover:underline">Download CSV template</a></span>
             <input ref={fileInput} type="file" accept=".csv,.txt,text/csv,text/plain" aria-label="Prompt CSV file" onChange={event => { setFile(event.target.files?.[0] ?? null); setImportNote(''); }} className="text-sm text-[var(--mos-text-secondary)]" />
             <Button size="sm" onClick={() => upload(true)} disabled={!file || busy}>Check file</Button>
             <Button size="sm" variant="primary" onClick={() => upload(false)} disabled={!file || busy}>Import</Button>
@@ -290,14 +351,14 @@ export default function SeoVisibilityPage() {
             <td className="px-2 py-2">{prompt.checks ? `${prompt.mentions}/${prompt.checks}` : '–'}</td>
             <td className="px-2 py-2 text-xs text-[var(--mos-text-muted)]">{shortDate(prompt.last_checked_at)}</td>
             <td className="px-2 py-2"><div className="flex gap-1">
-              <Button size="sm" variant="ghost" onClick={() => setForm({ id: prompt.id, prompt: prompt.prompt, brandTerms: prompt.brand_terms.join(', '), competitors: prompt.competitors.join(', '), active: prompt.active })}>Edit</Button>
+              <Button size="sm" variant="ghost" onClick={() => setForm({ id: prompt.id, prompt: prompt.prompt, brandTerms: prompt.brand_terms.join('; '), competitors: prompt.competitors.join('; '), active: prompt.active })}>Edit</Button>
               <Button size="sm" variant="ghost" onClick={() => toggle(prompt)}>{prompt.active ? 'Pause' : 'Resume'}</Button>
               <Button size="sm" variant="danger" onClick={() => remove(prompt)}>Delete</Button>
             </div></td>
           </tr>)}</tbody>
         </table>
         <p className="px-4 py-2 text-xs text-[var(--mos-text-faint)]">Latest answer per model. #n = position in the answer&apos;s list (or order of first mention); * = served by a fallback model. Click a cell to read the answer.</p>
-        </div> : <EmptyState title="No prompts yet" description="Add the questions your customers would ask an AI assistant." />}
+        </div> : <EmptyState title="No prompts yet" description="Add the questions your customers would ask an AI assistant, one question per prompt. Click Use example to see a filled-in prompt, or download the CSV template." />}
       </DataTableFrame>
 
       {check && <Panel>

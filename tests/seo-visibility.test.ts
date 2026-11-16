@@ -13,6 +13,7 @@ import type { NewCheck } from '../src/lib/seo/visibility-store';
 import { SEEDED_SOP_IDS, parseSopInput, sopInstructions } from '../src/lib/seo/sops';
 import { parseCreateRequest, buildDraftPrompt } from '../src/lib/seo/content-prompt';
 import { isDashboardNavItemVisible } from '../src/lib/authorization';
+import { VISIBILITY_EXAMPLES, VISIBILITY_GUIDE_STEPS, visibilityCsvTemplate } from '../src/lib/seo/visibility-examples';
 
 const root = process.cwd();
 const read = (file: string) => readFileSync(path.join(root, file), 'utf8');
@@ -274,6 +275,40 @@ test('the visibility page shows the required API disclaimer', () => {
   assert.equal(VISIBILITY_DISCLAIMER, 'Model answers via API, not what ChatGPT.com, Perplexity or Google AI Overviews show users.');
   const page = read('src/app/dashboard/seo/visibility/page.tsx');
   assert.match(page, /VISIBILITY_DISCLAIMER/);
+});
+
+test('onboarding examples: the CSV template imports cleanly and examples parse like the form', () => {
+  const template = visibilityCsvTemplate();
+  assert.ok(template.startsWith('prompt,brand_terms,competitors,active\r\n'));
+  const result = parsePromptCsv(template);
+  assert.deepEqual(result.errors, []);
+  assert.equal(result.rows.length, VISIBILITY_EXAMPLES.length);
+  assert.ok(result.rows.length >= 2 && result.rows.length <= 3);
+  assert.deepEqual(result.rows[0].brandTerms, ['Acme Markets', 'acmemarkets.example']);
+  assert.deepEqual(result.rows[0].competitors, ['Northwind FX|Northwind', 'Contoso Trade']);
+  assert.ok(result.rows.every(row => row.active));
+  for (const example of VISIBILITY_EXAMPLES) {
+    // One question per prompt.
+    assert.equal(example.prompt.match(/\?/g)?.length, 1, example.prompt);
+    const form = parsePromptInput({ prompt: example.prompt, brandTerms: example.brandTerms, competitors: example.competitors });
+    assert.ok(!('error' in form), example.prompt);
+  }
+  const copy = JSON.stringify({ VISIBILITY_EXAMPLES, VISIBILITY_GUIDE_STEPS, template });
+  assert.doesNotMatch(copy, /FCSI|ICA|Dupoin|cheer/i, 'examples use a fictional brand only');
+  assert.ok(VISIBILITY_GUIDE_STEPS.length >= 3 && VISIBILITY_GUIDE_STEPS.length <= 5);
+});
+
+test('the visibility page shows the guide, field help, Use example and the CSV template link', () => {
+  const page = read('src/app/dashboard/seo/visibility/page.tsx');
+  assert.match(page, /How to use AI Visibility/);
+  assert.match(page, /guidePref \?\? \(current \? current\.prompts\.length === 0 : false\)/, 'open by default only when the site has no prompts');
+  assert.match(page, /localStorage\.setItem\(GUIDE_STORAGE_KEY/);
+  assert.match(page, />Use example</);
+  assert.match(page, /Nothing is saved until you click Add prompt/);
+  assert.match(page, /Download CSV template/);
+  assert.match(page, /visibilityCsvTemplate\(\)/);
+  assert.match(page, /After the first run/);
+  assert.doesNotMatch(page, /FCSI/);
 });
 
 test('Run now is admin-only and the cron script exists', () => {
