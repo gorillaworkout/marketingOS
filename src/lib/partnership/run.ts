@@ -3,7 +3,7 @@ import { aiProviderErrorBody } from '@/lib/ai-http-status';
 import { resolveSearchApiKeys, searchSerper } from '@/lib/ai-research-grounding';
 import { generateContent, getUserPreferredModel } from '@/lib/openai';
 import { crawlSite } from '@/lib/seo/audit-crawl';
-import { microToUsd, tregConfig, tregFallbackNotice } from '@/lib/seo/treg-client';
+import { tregConfig } from '@/lib/seo/treg-client';
 import { settleTregRun, type TregRunCost } from '@/lib/seo/treg-cost-guard';
 import { buildCompetitorReport, type CollectDeps } from './collect';
 import { isRefreshDue, parseNewsRssWithDates, type NewsHit } from './intel';
@@ -12,10 +12,14 @@ import {
   ReportInProgressError, createReport, expireStaleReports, failReport, finishReport, getCompetitor, getReport, latestReports,
   listCompetitors, listEvidence, saveEvidenceExtraction, updateReportProgress,
 } from './store';
-import { fetchTregInstagramFeed, type InstagramFeedOutcome } from './treg-instagram';
+import { fetchTregSocialFeeds, type SocialFeedOutcome, type TregPlatform } from './treg-social';
 
 /** A confirmed, reserved treg spend for one refresh (from guardTregSpend). */
-export interface TregRunPlan { spendId: string; estimateMicro: number; balanceBeforeMicro: number | null }
+export interface TregRunPlan {
+  spendId: string; estimateMicro: number; balanceBeforeMicro: number | null;
+  /** Platforms the user confirmed; missing = Instagram only (older clients). */
+  platforms?: TregPlatform[];
+}
 
 export const CRAWL_PAGE_CAP = 25;
 export const CRAWL_BUDGET_MS = 90_000;
@@ -95,7 +99,7 @@ export async function runCompetitorRefresh(reportId: string, options: { treg?: T
   const userId = report.createdBy || await systemUserId();
   const config = tregConfig();
   const plan = options.treg ?? null;
-  let outcome = null as InstagramFeedOutcome | null;
+  let outcome = null as SocialFeedOutcome | null;
   let settled = false;
   const settle = async (): Promise<TregRunCost | null> => {
     if (!plan || settled) return null;
@@ -103,9 +107,9 @@ export async function runCompetitorRefresh(reportId: string, options: { treg?: T
     return settleTregRun({
       config, spendId: plan.spendId, estimateMicro: plan.estimateMicro, balanceBeforeMicro: plan.balanceBeforeMicro,
       ok: Boolean(outcome?.ok), actualMicro: outcome?.costMicro ?? 0, costSource: outcome?.costSource ?? 'reported',
-      calls: outcome ? 1 : 0, callIds: outcome?.ok && outcome.callId ? [outcome.callId] : [],
-      note: outcome && !outcome.ok ? tregFallbackNotice(outcome.error) : null,
-      refusalBalanceMicro: outcome && !outcome.ok ? outcome.error.balanceMicro : null,
+      calls: outcome?.calls ?? 0, callIds: outcome?.callIds ?? [],
+      note: outcome && !outcome.ok ? outcome.notes.join(' ').slice(0, 500) || null : null,
+      refusalBalanceMicro: outcome?.refusalBalanceMicro ?? null,
     }).catch(() => null);
   };
   if (!userId) {
@@ -118,20 +122,20 @@ export async function runCompetitorRefresh(reportId: string, options: { treg?: T
     const evidence = await listEvidence(competitor.id);
     const deps = realDeps(userId, competitor.region, (progress, message) => updateReportProgress(reportId, progress, message));
     if (plan) {
-      deps.instagramFeed = async handle => {
-        outcome = await fetchTregInstagramFeed(config, { handle, reportId });
-        if (outcome.ok) return { posts: outcome.posts, note: `treg Instagram: ${outcome.posts.length} recent post(s) from @${handle}, cost $${microToUsd(outcome.costMicro).toFixed(4)}.` };
-        // Silent fallback: the run continues on free sources; the note explains why.
-        return { posts: [], note: `${tregFallbackNotice(outcome.error)} (Instagram feed); free sources used.` };
+      const platforms = plan.platforms?.length ? plan.platforms : ['instagram' as const];
+      deps.socialFeeds = async () => {
+        outcome = await fetchTregSocialFeeds(config, { reportId, name: competitor.name, website: competitor.website, handles: competitor.socialHandles, platforms });
+        return { instagram: outcome.instagram, posts: outcome.posts, notes: outcome.notes };
       };
     }
     const { result, model } = await buildCompetitorReport(
-      { name: competitor.name, region: competitor.region, website: competitor.website, instagramHandle: competitor.instagramHandle },
+      { name: competitor.name, region: competitor.region, website: competitor.website, instagramHandle: competitor.instagramHandle, socialHandles: competitor.socialHandles },
       evidence.map(item => ({ id: item.id, kind: item.kind, sourceUrl: item.sourceUrl, pastedText: item.pastedText, extractedText: item.extractedText, observedOn: item.observedOn })),
       deps,
     );
     if (options.tregNote) result.notes.push(options.tregNote);
     result.tregCost = await settle();
+    if (outcome?.calls) result.tregPlatforms = outcome.perPlatform;
     await finishReport(reportId, result, model);
   } catch (error) {
     await settle();

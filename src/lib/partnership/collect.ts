@@ -17,6 +17,8 @@ import {
   findBrandHubs, instagramEmbedUrl, instagramPostText, isInstagramPostUrl, canonicalInstagramPostUrl, parseInstagramEmbed, parseInstagramPostPage,
   parseZendeskArticles, zendeskArticlesUrl, type InstagramFeedPost, type InstagramPost,
 } from './campaigns';
+import type { SocialHandles } from './social';
+import { parseYoutubeRss, youtubeChannelIdFromHandle, youtubeChannelIdFromPage, youtubeRssUrl, type SocialFeedPost } from './treg-social';
 
 /** Everything the refresh touches outside this module. Injected so tests run without network. */
 export interface CollectDeps {
@@ -38,6 +40,11 @@ export interface CollectDeps {
    * It must not throw: failures come back as { posts: [], note }.
    */
   instagramFeed?(handle: string): Promise<{ posts: InstagramFeedPost[]; note: string } | null>;
+  /**
+   * Optional paid multi-platform feeds (treg: Instagram, TikTok, Facebook, Meta Ad Library, X)
+   * for a confirmed manual run. Must not throw; failures come back as notes.
+   */
+  socialFeeds?(): Promise<{ instagram: InstagramFeedPost[]; posts: SocialFeedPost[]; notes: string[] } | null>;
   /** Saves a caption read from a team-pasted link so the next refresh does not fetch it again. */
   saveEvidenceText?(evidenceId: string, text: string): Promise<void>;
 }
@@ -47,6 +54,7 @@ export interface CompetitorForReport {
   region: string;
   website: string | null;
   instagramHandle?: string | null;
+  socialHandles?: SocialHandles;
 }
 
 /** Free web-search queries (Serper free tier when SERPER_API_KEY is set). */
@@ -200,7 +208,37 @@ export async function buildCompetitorReport(
     }
   }
 
-  const sources = buildSourceCatalog({ pages, news, web: web.filter(hit => !isInstagramPostUrl(hit.url) || !instagram.some(post => post.url === canonicalInstagramPostUrl(hit.url))), evidence: evidenceForCatalog, instagram }, window);
+  // YouTube: the channel's public RSS feed (free, no login).
+  const social: SocialFeedPost[] = [];
+  const youtube = competitor.socialHandles?.youtube;
+  if (youtube && deps.fetchPublic) {
+    await progress(65, 'Reading YouTube.');
+    let channelId = youtubeChannelIdFromHandle(youtube);
+    if (!channelId) {
+      const page = await deps.fetchPublic(`https://www.youtube.com/${youtube}`).catch(() => null);
+      channelId = page && page.status === 200 ? youtubeChannelIdFromPage(page.body) : null;
+    }
+    const feed = channelId ? await deps.fetchPublic(youtubeRssUrl(channelId), 'application/atom+xml, application/xml, text/xml').catch(() => null) : null;
+    if (feed && feed.status === 200) {
+      const videos = parseYoutubeRss(feed.body);
+      social.push(...videos);
+      notes.push(`YouTube: ${videos.length} recent video(s) from ${youtube} (public feed, free).`);
+    } else {
+      notes.push(`YouTube: could not read the public feed for ${youtube}.`);
+    }
+  }
+  if (deps.socialFeeds) {
+    await progress(67, 'Reading social feeds via treg.');
+    const feeds = await deps.socialFeeds();
+    if (feeds) {
+      const seen = new Set(instagram.map(post => post.url));
+      instagram.push(...feeds.instagram.filter(post => !seen.has(post.url)));
+      social.push(...feeds.posts);
+      notes.push(...feeds.notes);
+    }
+  }
+
+  const sources = buildSourceCatalog({ pages, news, web: web.filter(hit => !isInstagramPostUrl(hit.url) || !instagram.some(post => post.url === canonicalInstagramPostUrl(hit.url))), evidence: evidenceForCatalog, instagram, social }, window);
   if (!sources.length) {
     notes.push('No sources were found. Add the website, or paste Instagram links and captions as evidence, then refresh.');
     return { result: { window, overview: '', campaigns: [], regularContent: [], items: [], opportunities: [], sources: [], notes, counts: countByCategory([]) }, model: null };

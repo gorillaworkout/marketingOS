@@ -182,3 +182,33 @@ test('treg feed that declines (null) leaves a free run untouched', async () => {
   assert.deepEqual(result.campaigns, []);
   assert.equal(result.sources.filter(source => source.kind === 'instagram').length, 0);
 });
+
+test('multi-platform: free YouTube RSS and treg TikTok/Meta ads posts are citable sources in the prompt', async () => {
+  const rss = readFileSync('tests/fixtures/partnership-youtube-rss-mifx.xml', 'utf8');
+  const fetched: string[] = [];
+  let prompt = '';
+  const d = deps({
+    fetchPublic: async url => {
+      fetched.push(url);
+      if (url === 'https://www.youtube.com/user/MifxChannel') return { url, status: 200, body: '<link rel="canonical" href="https://www.youtube.com/channel/UC-l61LxjsphAAjnoQwGTV6Q">' };
+      if (url.startsWith('https://www.youtube.com/feeds/videos.xml')) return { url, status: 200, body: rss };
+      return null;
+    },
+    socialFeeds: async () => ({
+      instagram: [],
+      posts: [
+        { platform: 'meta_ads', url: 'https://www.facebook.com/ads/library/?id=1097899522636371', account: 'Monex Investindo Futures', date: '2026-10-05', text: 'MIFX Priority: layanan prioritas', hashtags: [], kind: 'VIDEO', period: '2026-10-05 to now (active)', placements: ['INSTAGRAM'], landingUrl: 'https://get.mifx.com/mifx-priority' },
+        { platform: 'tiktok', url: 'https://www.tiktok.com/@mifx.indonesia/video/1', account: 'mifx.indonesia', date: '2026-10-10', text: 'Tips trading #MIFX', hashtags: ['#MIFX'], kind: 'video' },
+      ],
+      notes: ['treg TikTok: 1 recent video(s) from @mifx.indonesia, cost $0.0011.'],
+    }),
+    complete: async (_system, user) => { prompt = user; return { model: 'test/model', content: JSON.stringify({ overview: '', items: [], opportunities: [] }) }; },
+  });
+  const { result } = await buildCompetitorReport({ ...competitor, socialHandles: { youtube: 'user/MifxChannel', tiktok: 'mifx.indonesia' } }, [], d);
+  assert.ok(fetched.includes('https://www.youtube.com/feeds/videos.xml?channel_id=UC-l61LxjsphAAjnoQwGTV6Q'));
+  assert.ok(result.sources.some(source => source.kind === 'ads' && source.url?.includes('ads/library')));
+  assert.ok(result.sources.some(source => source.kind === 'social' && source.url?.includes('tiktok.com')));
+  assert.ok(result.notes.some(note => /YouTube: \d+ recent video/.test(note)));
+  assert.match(prompt, /Meta ad/);
+  assert.match(prompt, /tiktok: mifx\.indonesia|TikTok/i);
+});

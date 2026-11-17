@@ -1,0 +1,71 @@
+{
+ "output": {
+  "posts": [
+   {
+    "authorHandle": "xtb_id",
+    "authorId": "1946147487481470976",
+    "authorName": "XTB Indonesia",
+    "bookmarks": 0,
+    "conversationId": "2120840143447974313",
+    "createdUtc": 1794482668,
+    "id": "2120840143447974313",
+    "isPinned": null,
+    "isReply": false,
+    "lang": "in",
+    "likes": 0,
+    "quotes": 0,
+    "replies": 0,
+    "retweets": 0,
+    "source": "",
+    "text": "Besar modal trading bukan satu-satunya hal yang menentukan. Yang lebih penting, kamu tahu seberapa besar risiko yang siap ditanggung di tiap transaksi dan menyesuaikan ukuran posisi dari sana.\n\nDownload aplikasi XTB dan mulai trading sekarang!\n\n#SiapJadiTrader #BelajarTrading https://t.co/DBG7ZCUF1U",
+    "url": "https://x.com/i/web/status/2120840143447974313",
+    "views": 75
+   },
+   {
+    "authorHandle": "xtb_id",
+    "authorId": "1946147487481470976",
+    "authorName": "XTB Indonesia",
+    "bookmarks": 0,
+    "conversationId": "2120475386656268491",
+    "createdUtc": 1794395703,
+    "id": "2120475386656268491",
+    "isPinned": null,
+    "isReply": false,
+    "lang": "in",
+    "likes": 0,
+    "quotes": 0,
+    "replies": 0,
+    "retweets": 0,
+    "source": "",
+    "text": "Harga lagi jalan satu arah, terus tiba-tiba mulai nunjukin tanda mau berbalik? Coba cek 5 candlestick pattern ini! Candlestick pattern apa yang paling sering kamu pakai buat baca potensi reversal? Komen di bawah!👇\n\n#XTBIndonesia #WhereYourMoneyWorks #BelajarTrading #TradingCFD https://t.co/UM0mbIfuYg",
+    "url": "https://x.com/i/web/status/2120475386656268491",
+    "views": 72
+   },
+   {
+    "authorHandle": "xtb_id",
+    "authorId": "1946147487481470976",
+    "authorName": "XTB Indonesia",
+    "bookmarks": 0,
+    "conversationId": "2120111203687203069",
+    "createdUtc": 1794308875,
+    "id": "2120111203687203069",
+    "isPinned": null,
+    "isReply": false,
+    "lang": "in",
+    "likes": 0,
+    "quotes": 0,
+    "replies": 0,
+    "retweets": 0,
+    "source": "",
+    "text": "Ngaku udah paham trading? Kamu bisa bedain semuanya nggak? Kelihatannya mirip, tapi tiap jenis order punya cara kerja dan fungsi yang beda saat kamu masuk ke market! Coba tes dari 4 order ini, berapa yang kamu tahu?\n\n#XTBIndonesia #WhereYourMoneyWorks #BelajarTrading #TradingCFD https://t.co/j99SKHlrpW",
+    "url": "https://x.com/i/web/status/2120111203687203069",
+    "views": 58
+   }
+  ],
+  "next_cursor": "cur_wCWc00M0naKbNL_AD0Fwqg"
+ },
+ "_treg": {
+  "served_by": "anyapi.x.user.posts",
+  "charged_micro": 450
+ }
+}
