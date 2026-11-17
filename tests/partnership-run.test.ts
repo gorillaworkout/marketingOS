@@ -91,3 +91,94 @@ test('a crawl or news failure is noted, not fatal', async () => {
   assert.ok(result.notes.some(note => /news search failed/i.test(note)));
   assert.deepEqual(result.items.map(item => item.title), ['Giveaway reels']);
 });
+
+/* ---- MIFX Priority: free sources vs pasted IG link vs optional treg feed (17 Nov 2026) ---- */
+import { readFileSync } from 'node:fs';
+import { parseTregInstagramPosts } from '../src/lib/partnership/campaigns';
+
+const MIFX_NOW = new Date('2026-11-17T03:00:00Z');
+const ZENDESK = JSON.stringify({ articles: [
+  { title: 'MIFX Priority Hub', html_url: 'https://support.mifx.com/hc/id/articles/43413762259351-MIFX-Priority-Hub', created_at: '2026-09-11T03:00:00Z', updated_at: '2026-11-16T01:00:00Z', body: '<p>MIFX Priority Hub adalah fitur khusus di aplikasi MIFX untuk Priority Client.</p>' },
+  { title: 'Bagaimana Cara Log in?', html_url: 'https://support.mifx.com/hc/id/articles/1', created_at: '2021-05-11T03:00:00Z', updated_at: '2026-11-16T01:00:00Z', body: '' },
+] });
+const IG_PAGE = '<meta property="og:description" content="75 likes, 1 comments - mifx.indonesia on September 21, 2026: &quot;Satu Ruang untuk Segala Keistimewaan Anda.\n\nMulai hari ini, semua keistimewaan Priority Client hadir dalam satu ruang “MIFX Priority Hub”.\n\nKarena trader di level tertinggi, layak mendapat layanan yang eksklusif.\n\n#mifx #tradingforex&quot;." />';
+
+/** Model stub: classifies like the prompt asks, citing only sources that mention MIFX Priority. */
+function mifxModel(calls: string[]) {
+  return async (_system: string, user: string) => {
+    calls.push(user);
+    const blocks = user.split(/\n(?=\[[SE]\d+\])/);
+    const priority = blocks.filter(block => /MIFX Priority/.test(block)).map(block => block.match(/^\[([SE]\d+)\]/)?.[1]).filter(Boolean) as string[];
+    const withComm = blocks.filter(block => /Satu Ruang untuk Segala Keistimewaan/.test(block)).map(block => block.match(/^\[([SE]\d+)\]/)?.[1]).filter(Boolean) as string[];
+    const campaigns = withComm.length ? [{ name: 'MIFX Priority Hub', brandComm: 'Satu Ruang untuk Segala Keistimewaan Anda', hashtags: ['#mifx'], format: 'Reels + carousel launch series', period: 'Sep 2026, ongoing', channels: ['Instagram', 'app'], summary: 'Premium tier hub for Priority Clients.', sourceIds: withComm }] : [];
+    const items = !withComm.length && priority.length ? [{ category: 'products', title: 'MIFX Priority Hub', summary: 'In-app hub for Priority Clients.', sourceIds: priority }] : [];
+    return { model: 'stub', content: JSON.stringify({ overview: 'MIFX.', campaigns, regularContent: [], items, opportunities: [] }) };
+  };
+}
+
+function mifxDeps(extra: Partial<CollectDeps> = {}) {
+  const calls: string[] = [];
+  const fetched: string[] = [];
+  const base: CollectDeps = {
+    now: () => MIFX_NOW,
+    crawlPages: async () => ({ timedOut: false, pages: [{ url: 'https://mifx.com/', html: '<title>MIFX</title><a href="https://support.mifx.com/hc/id">Support</a><a href="https://client.mifx.com/open-live-account">Open</a>' }] }),
+    fetchNews: async () => [],
+    searchWeb: async () => null,
+    fetchPublic: async url => {
+      fetched.push(url);
+      if (url.startsWith('https://support.mifx.com/api/v2/help_center/id/articles.json')) return { url, status: 200, body: ZENDESK };
+      if (url === 'https://www.instagram.com/p/DdjHlscH-Ac/') return { url, status: 200, body: IG_PAGE };
+      return { url, status: 404, body: '' };
+    },
+    complete: mifxModel(calls),
+    ...extra,
+  };
+  return { deps: base, calls, fetched };
+}
+
+const MIFX = { name: 'MIFX', region: 'local', website: 'https://mifx.com/', instagramHandle: 'mifx.indonesia' };
+
+test('MIFX, free sources only: the help center (linked subdomain) surfaces MIFX Priority Hub, but not as a campaign', async () => {
+  const { deps: d, fetched } = mifxDeps();
+  const { result } = await buildCompetitorReport(MIFX, [], d);
+  assert.ok(fetched.some(url => url.includes('support.mifx.com/api/v2/help_center/id/articles.json')), 'help-center API read');
+  assert.ok(!fetched.some(url => url.includes('client.mifx.com')), 'client area never touched');
+  assert.deepEqual(result.items.map(item => item.title), ['MIFX Priority Hub']);
+  assert.deepEqual(result.campaigns, []);
+  assert.ok(result.notes.some(note => /Paste the campaign's Instagram post link/.test(note)));
+});
+
+test('MIFX, team pastes the IG link: caption captured from the public post page and the campaign surfaces', async () => {
+  const saved: Array<[string, string]> = [];
+  const { deps: d } = mifxDeps({ saveEvidenceText: async (id, text) => { saved.push([id, text]); } });
+  const evidence = [{ id: 'ev-ig', kind: 'link', sourceUrl: 'https://www.instagram.com/p/DdjHlscH-Ac/?igsh=abc', pastedText: null, extractedText: null, observedOn: null }];
+  const { result } = await buildCompetitorReport(MIFX, evidence, d);
+  assert.equal(result.campaigns?.length, 1);
+  const campaign = result.campaigns![0];
+  assert.equal(campaign.name, 'MIFX Priority Hub');
+  assert.equal(campaign.brandComm, 'Satu Ruang untuk Segala Keistimewaan Anda');
+  assert.deepEqual(campaign.hashtags, ['#mifx']);
+  assert.equal(campaign.date, '2026-09-21');
+  assert.equal(campaign.sources[0].evidenceId, 'ev-ig');
+  assert.equal(saved[0][0], 'ev-ig');
+  assert.match(saved[0][1], /^Instagram post by @mifx\.indonesia on 2026-09-21/);
+});
+
+test('MIFX, optional treg feed (real sanitized response): the Priority Hub posts become campaign evidence', async () => {
+  const posts = parseTregInstagramPosts(readFileSync('tests/fixtures/partnership-treg-ig-mifx.json', 'utf8'));
+  let asked = '';
+  const { deps: d, calls } = mifxDeps({ instagramFeed: async handle => { asked = handle; return { posts, note: 'treg Instagram: 12 recent post(s) from @mifx.indonesia, cost $0.0009.' }; } });
+  const { result } = await buildCompetitorReport(MIFX, [], d);
+  assert.equal(asked, 'mifx.indonesia');
+  assert.equal(result.campaigns?.[0]?.name, 'MIFX Priority Hub');
+  assert.ok(result.campaigns![0].sources.every(source => source.kind === 'instagram'));
+  assert.ok(result.notes.includes('treg Instagram: 12 recent post(s) from @mifx.indonesia, cost $0.0009.'));
+  assert.match(calls[0], /\(instagram, 2026-09-21\) Instagram carousel by @mifx\.indonesia/);
+});
+
+test('treg feed that declines (null) leaves a free run untouched', async () => {
+  const { deps: d } = mifxDeps({ instagramFeed: async () => null });
+  const { result } = await buildCompetitorReport(MIFX, [], d);
+  assert.deepEqual(result.campaigns, []);
+  assert.equal(result.sources.filter(source => source.kind === 'instagram').length, 0);
+});

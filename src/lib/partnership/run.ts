@@ -3,12 +3,19 @@ import { aiProviderErrorBody } from '@/lib/ai-http-status';
 import { resolveSearchApiKeys, searchSerper } from '@/lib/ai-research-grounding';
 import { generateContent, getUserPreferredModel } from '@/lib/openai';
 import { crawlSite } from '@/lib/seo/audit-crawl';
+import { microToUsd, tregConfig, tregFallbackNotice, type TregConfig } from '@/lib/seo/treg-client';
+import { guardTregSpend, settleTregRun, type TregRunCost } from '@/lib/seo/treg-cost-guard';
 import { buildCompetitorReport, type CollectDeps } from './collect';
 import { isRefreshDue, parseNewsRssWithDates, type NewsHit } from './intel';
+import { fetchPublic } from './public-fetch';
 import {
   ReportInProgressError, createReport, expireStaleReports, failReport, finishReport, getCompetitor, getReport, latestReports,
-  listCompetitors, listEvidence, updateReportProgress,
+  listCompetitors, listEvidence, saveEvidenceExtraction, updateReportProgress,
 } from './store';
+import { TREG_IG_FEATURE, estimateInstagramFeedMicro, fetchTregInstagramFeed, instagramFeedEnabled, type InstagramFeedOutcome } from './treg-instagram';
+
+/** A confirmed, reserved treg spend for one refresh (from guardTregSpend). */
+export interface TregRunPlan { spendId: string; estimateMicro: number; balanceBeforeMicro: number | null }
 
 export const CRAWL_PAGE_CAP = 25;
 export const CRAWL_BUDGET_MS = 90_000;
@@ -35,6 +42,8 @@ function realDeps(userId: string, region: string, onProgress: CollectDeps['onPro
   return {
     now: () => new Date(),
     onProgress,
+    fetchPublic: (url, accept) => fetchPublic(url, accept),
+    saveEvidenceText: (evidenceId, text) => saveEvidenceExtraction(evidenceId, text),
     crawlPages: async startUrl => {
       const pages: Array<{ url: string; html: string }> = [];
       // crawlSite checks every hop: public host, every DNS answer public (DNS-rebinding guard), same host, robots.txt.
@@ -75,7 +84,25 @@ export async function systemUserId(): Promise<string | null> {
   return row?.id ?? null;
 }
 
-export async function runCompetitorRefresh(reportId: string): Promise<void> {
+/**
+ * treg plan for a scheduled refresh: only when the key is set, the competitor has an
+ * Instagram handle, and the reservation fits the balance and the daily spend limit.
+ * Anything else returns null and the refresh uses free sources.
+ */
+export async function planScheduledTreg(competitor: { instagramHandle: string | null }, userId: string | null, config: TregConfig = tregConfig()): Promise<{ plan: TregRunPlan | null; note: string | null }> {
+  if (!competitor.instagramHandle || !userId || !config.apiKey || !instagramFeedEnabled()) return { plan: null, note: null };
+  const estimate = estimateInstagramFeedMicro(1);
+  try {
+    const plan = await guardTregSpend({ config, role: 'admin', userId, feature: TREG_IG_FEATURE, estimate, confirmedEstimateMicro: estimate.totalMicro });
+    if (plan.kind === 'paid') return { plan: { spendId: plan.spendId, estimateMicro: plan.estimateMicro, balanceBeforeMicro: plan.balanceBeforeMicro }, note: null };
+    if (plan.kind === 'skip') return { plan: null, note: `treg Instagram feed skipped (${plan.reason}); free sources used.` };
+    return { plan: null, note: `treg Instagram feed skipped: ${String(plan.body.error || 'refused')}; free sources used.` };
+  } catch {
+    return { plan: null, note: null };
+  }
+}
+
+export async function runCompetitorRefresh(reportId: string, options: { treg?: TregRunPlan | null; tregNote?: string | null } = {}): Promise<void> {
   const report = await getReport(reportId);
   if (!report || report.status === 'succeeded' || report.status === 'failed' || !report.competitorId) return;
   const competitor = await getCompetitor(report.competitorId);
@@ -84,7 +111,23 @@ export async function runCompetitorRefresh(reportId: string): Promise<void> {
     return;
   }
   const userId = report.createdBy || await systemUserId();
+  const config = tregConfig();
+  const plan = options.treg ?? null;
+  let outcome = null as InstagramFeedOutcome | null;
+  let settled = false;
+  const settle = async (): Promise<TregRunCost | null> => {
+    if (!plan || settled) return null;
+    settled = true;
+    return settleTregRun({
+      config, spendId: plan.spendId, estimateMicro: plan.estimateMicro, balanceBeforeMicro: plan.balanceBeforeMicro,
+      ok: Boolean(outcome?.ok), actualMicro: outcome?.costMicro ?? 0, costSource: outcome?.costSource ?? 'reported',
+      calls: outcome ? 1 : 0, callIds: outcome?.ok && outcome.callId ? [outcome.callId] : [],
+      note: outcome && !outcome.ok ? tregFallbackNotice(outcome.error) : null,
+      refusalBalanceMicro: outcome && !outcome.ok ? outcome.error.balanceMicro : null,
+    }).catch(() => null);
+  };
   if (!userId) {
+    await settle();
     await failReport(reportId, 'No user is available to run the refresh.');
     return;
   }
@@ -92,13 +135,24 @@ export async function runCompetitorRefresh(reportId: string): Promise<void> {
     await updateReportProgress(reportId, 2, 'Starting.');
     const evidence = await listEvidence(competitor.id);
     const deps = realDeps(userId, competitor.region, (progress, message) => updateReportProgress(reportId, progress, message));
+    if (plan) {
+      deps.instagramFeed = async handle => {
+        outcome = await fetchTregInstagramFeed(config, { handle, reportId });
+        if (outcome.ok) return { posts: outcome.posts, note: `treg Instagram: ${outcome.posts.length} recent post(s) from @${handle}, cost $${microToUsd(outcome.costMicro).toFixed(4)}.` };
+        // Silent fallback: the run continues on free sources; the note explains why.
+        return { posts: [], note: `${tregFallbackNotice(outcome.error)} (Instagram feed); free sources used.` };
+      };
+    }
     const { result, model } = await buildCompetitorReport(
-      { name: competitor.name, region: competitor.region, website: competitor.website },
+      { name: competitor.name, region: competitor.region, website: competitor.website, instagramHandle: competitor.instagramHandle },
       evidence.map(item => ({ id: item.id, kind: item.kind, sourceUrl: item.sourceUrl, pastedText: item.pastedText, extractedText: item.extractedText, observedOn: item.observedOn })),
       deps,
     );
+    if (options.tregNote) result.notes.push(options.tregNote);
+    result.tregCost = await settle();
     await finishReport(reportId, result, model);
   } catch (error) {
+    await settle();
     await failReport(reportId, aiProviderErrorBody(error).error || (error instanceof Error ? error.message : 'The refresh failed.'));
   }
 }
@@ -126,7 +180,9 @@ export async function runDueCompetitorRefreshes(now: Date = new Date()): Promise
       if (error instanceof ReportInProgressError) { summary.skipped += 1; continue; }
       throw error;
     }
-    await runCompetitorRefresh(reportId);
+    // Weekly cron: the treg Instagram feed only when the balance and the daily spend limit allow it.
+    const treg = await planScheduledTreg(competitor, userId);
+    await runCompetitorRefresh(reportId, { treg: treg.plan, tregNote: treg.note });
     const finished = await getReport(reportId);
     if (finished?.status === 'succeeded') summary.refreshed += 1;
     else summary.failed += 1;

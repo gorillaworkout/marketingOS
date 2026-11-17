@@ -5,10 +5,43 @@ import {
   Button, DataTableFrame, EmptyState, FormField, LoadingState, PageHeader, PageStack, Panel, SectionHeader, Select, StatusBadge, TextArea, TextInput,
 } from '@/components/ui/dashboard';
 import { fetchJson } from '@/components/seo/useSeoSites';
+import { TregCostNotice, useTregStatus, type TregStatus } from '@/components/seo/TregCostNotice';
+import { CONTENT_PATTERN_LABELS, type CampaignItem, type RegularContentItem } from '@/lib/partnership/campaigns';
 import {
   INTEL_CATEGORIES, INTEL_CATEGORY_LABELS, REGION_LABELS, buildTimeline,
-  type ComparisonRow, type IntelOpportunity, type IntelReportResult, type Region, type SourceRef,
+  type ComparisonRow, type IntelItem, type IntelOpportunity, type IntelReportResult, type Region, type SourceRef,
 } from '@/lib/partnership/intel';
+
+type PartnershipTregStatus = TregStatus & { instagram?: { perCompetitorMicro: number; maxPerCompetitorUsd: number } };
+/** Item categories shown under "Other activity"; legacy campaigns/social items are shown as regular content. */
+const OTHER_CATEGORIES = INTEL_CATEGORIES.filter(category => category !== 'campaigns' && category !== 'social');
+
+function CampaignCard({ campaign }: { campaign: CampaignItem }) {
+  return <li className="rounded-[var(--mos-radius-control)] border border-[var(--mos-border)] p-3 text-sm" data-testid="campaign-card">
+    <div className="flex flex-wrap items-baseline justify-between gap-2">
+      <p className="font-medium text-[var(--mos-text)]">{campaign.name}</p>
+      <span className="text-xs text-[var(--mos-text-faint)]">{[campaign.period, campaign.date].filter(Boolean).join(' · ')}</span>
+    </div>
+    <dl className="mt-2 grid gap-x-4 gap-y-1 text-xs sm:grid-cols-[110px_1fr]">
+      <dt className="text-[var(--mos-text-faint)]">Brand comm</dt><dd className="text-[var(--mos-text-secondary)]">{campaign.brandComm ? `“${campaign.brandComm}”` : '—'}</dd>
+      <dt className="text-[var(--mos-text-faint)]">Hashtags</dt>
+      <dd className="flex flex-wrap gap-1">{campaign.hashtags.length ? campaign.hashtags.map(tag => <span key={tag} className="rounded bg-[var(--mos-accent)]/15 px-1.5 py-0.5 text-[var(--mos-accent-soft)]">{tag}</span>) : <span className="text-[var(--mos-text-secondary)]">—</span>}</dd>
+      <dt className="text-[var(--mos-text-faint)]">Format</dt><dd className="text-[var(--mos-text-secondary)]">{campaign.format || '—'}</dd>
+      <dt className="text-[var(--mos-text-faint)]">Channels</dt><dd className="text-[var(--mos-text-secondary)]">{campaign.channels.join(', ') || '—'}</dd>
+    </dl>
+    {campaign.summary && <p className="mt-2 text-[var(--mos-text-secondary)]">{campaign.summary}</p>}
+    <div className="mt-2"><SourceLinks sources={campaign.sources} /></div>
+  </li>;
+}
+
+/** Regular content by pattern, plus promo/social items from reports made before the campaign split. */
+type RegularRow = { key: string; label: string; summary: string; examples: string[]; sources: SourceRef[] };
+function regularRows(result: IntelReportResult): RegularRow[] {
+  const rows: RegularRow[] = (result.regularContent || []).map((item: RegularContentItem) => ({ key: item.pattern, label: CONTENT_PATTERN_LABELS[item.pattern], summary: item.summary, examples: item.examples, sources: item.sources }));
+  const legacy = result.items.filter((item: IntelItem) => item.category === 'campaigns' || item.category === 'social');
+  for (const item of legacy) rows.push({ key: `${item.category}-${item.title}`, label: INTEL_CATEGORY_LABELS[item.category], summary: item.summary || item.title, examples: [item.title], sources: item.sources });
+  return rows;
+}
 
 type RunInfo = { id: string; status: 'queued' | 'running' | 'succeeded' | 'failed'; progress: number; message: string; error: string | null; trigger: string };
 type CompetitorSummary = {
@@ -46,7 +79,7 @@ function CompetitorFields({ form, setForm }: { form: CompetitorForm; setForm: (n
       </Select>
     </FormField>
     <FormField label="Website" hint="Official site only. Leave blank if unknown."><TextInput value={form.website} placeholder="https://" spellCheck={false} onChange={event => setForm({ ...form, website: event.target.value })} /></FormField>
-    <FormField label="Instagram handle" hint="Stored as a link; never scraped."><TextInput value={form.instagramHandle} placeholder="@handle" spellCheck={false} onChange={event => setForm({ ...form, instagramHandle: event.target.value })} /></FormField>
+    <FormField label="Instagram handle" hint="Used in free web searches. If treg is set up, a confirmed refresh also reads its recent public posts (paid, optional)."><TextInput value={form.instagramHandle} placeholder="@handle" spellCheck={false} onChange={event => setForm({ ...form, instagramHandle: event.target.value })} /></FormField>
     <FormField label="Notes" className="md:col-span-2"><TextArea rows={2} maxLength={1000} value={form.notes} onChange={event => setForm({ ...form, notes: event.target.value })} /></FormField>
   </div>;
 }
@@ -65,6 +98,9 @@ export default function CompetitorIntelligencePage() {
   const [evidenceFile, setEvidenceFile] = useState<File | null>(null);
   const [fileInputKey, setFileInputKey] = useState(0);
   const [busy, setBusy] = useState(false);
+  const [confirmTreg, setConfirmTreg] = useState(false);
+  const { status: tregRaw, reload: reloadTreg } = useTregStatus('/api/partnership/treg');
+  const treg = tregRaw as PartnershipTregStatus | null;
 
   const loadList = useCallback(async () => {
     const { ok, data } = await fetchJson<ListResponse>('/api/partnership/competitors');
@@ -105,11 +141,16 @@ export default function CompetitorIntelligencePage() {
     setDetail(null);
   };
 
-  const refresh = async (id: string) => {
+  const refresh = async (id: string, withTreg = false) => {
     setMessage('');
-    const { ok, data } = await fetchJson<{ id: string }>(`/api/partnership/competitors/${encodeURIComponent(id)}/refresh`, { method: 'POST' });
-    setMessage(ok ? 'Refresh started. It reads the website, news, and team evidence, then summarizes.' : data.error || 'Could not start the refresh.');
+    setConfirmTreg(false);
+    const body = withTreg ? JSON.stringify({ treg: { confirmedEstimateMicro: treg?.instagram?.perCompetitorMicro ?? 0 } }) : undefined;
+    const { ok, data } = await fetchJson<{ id: string; treg?: string }>(`/api/partnership/competitors/${encodeURIComponent(id)}/refresh`, { method: 'POST', body, headers: body ? { 'content-type': 'application/json' } : undefined });
+    setMessage(ok
+      ? `Refresh started. It reads the website, linked help/program pages, news, Instagram post captions, and team evidence, then summarizes.${data.treg === 'reserved' ? ' treg will also read recent Instagram posts.' : data.treg === 'skipped' ? ' treg was skipped (balance or key), so free sources only.' : ''}`
+      : data.error || 'Could not start the refresh.');
     await loadList();
+    if (withTreg) void reloadTreg();
   };
 
   const saveNew = async () => {
@@ -176,7 +217,7 @@ export default function CompetitorIntelligencePage() {
     <PageHeader
       eyebrow="Partnership / Competitor Intelligence"
       title="Competitor Intelligence"
-      description="What competitor brokers did in the last 3 months, from their websites, news, and Instagram evidence the team pastes. Every item links to its source; anything without a source is not shown."
+      description="What competitor brokers did in the last 3 months, as brand campaigns (named idea + tagline/hashtag + format) apart from regular social content, from their websites, linked help/program pages, news, public Instagram post captions, and evidence the team pastes. Every item links to its source; anything without a source is not shown."
       actions={<Button variant="primary" onClick={() => setAdding(value => !value)}>{adding ? 'Cancel' : 'Add competitor'}</Button>}
     />
     {message && <Panel padding="compact"><p className="text-sm text-[var(--mos-text-secondary)]">{message}</p></Panel>}
@@ -193,6 +234,7 @@ export default function CompetitorIntelligencePage() {
         <thead className="border-b border-[var(--mos-border)] text-left text-xs uppercase tracking-wide text-[var(--mos-text-faint)]">
           <tr>
             <th className="p-3">Competitor</th><th className="p-3">Region</th>
+            <th className="p-3 text-right" title="Brand campaigns: named idea + tagline/hashtag + format">Campaigns</th>
             {INTEL_CATEGORIES.map(category => <th key={category} className="p-3 text-right" title={INTEL_CATEGORY_LABELS[category]}>{INTEL_CATEGORY_LABELS[category].split(' /')[0]}</th>)}
             <th className="p-3 text-right">Total</th><th className="p-3">Latest headline</th><th className="p-3">Last refresh</th><th className="p-3"></th>
           </tr>
@@ -204,6 +246,7 @@ export default function CompetitorIntelligencePage() {
             return <tr key={competitor.id} className={`border-b border-[var(--mos-border)] text-[var(--mos-text-secondary)] ${competitor.id === selectedId ? 'bg-white/[0.04]' : ''}`}>
               <td className="p-3"><button type="button" className="font-medium text-[var(--mos-text)] hover:underline" onClick={() => select(competitor.id)}>{competitor.name}</button>{!competitor.website && <span className="ml-2 text-[11px] text-amber-200">No website</span>}</td>
               <td className="p-3"><StatusBadge tone={competitor.region === 'local' ? 'info' : 'neutral'}>{REGION_LABELS[competitor.region]}</StatusBadge></td>
+              <td className="p-3 text-right tabular-nums font-medium text-[var(--mos-text)]">{row?.lastRefreshed ? row.campaignCount : '—'}</td>
               {INTEL_CATEGORIES.map(category => <td key={category} className="p-3 text-right tabular-nums">{row?.lastRefreshed ? row.counts[category] : '—'}</td>)}
               <td className="p-3 text-right tabular-nums">{row?.lastRefreshed ? row.total : '—'}</td>
               <td className="max-w-[240px] truncate p-3 text-xs" title={row?.headline || ''}>{row?.headline || '—'}</td>
@@ -246,14 +289,25 @@ export default function CompetitorIntelligencePage() {
             </p>
             {detail.competitor.notes && <p className="mt-2 text-sm text-[var(--mos-text-secondary)]">{detail.competitor.notes}</p>}
           </div>
-          <div className="flex gap-2">
-            <Button size="sm" disabled={running(selected?.latestRun)} onClick={() => refresh(detail.competitor.id)}>{running(selected?.latestRun) ? 'Refreshing…' : 'Refresh'}</Button>
+          <div className="flex flex-wrap gap-2">
+            <Button size="sm" disabled={running(selected?.latestRun)} onClick={() => refresh(detail.competitor.id)}>{running(selected?.latestRun) ? 'Refreshing…' : 'Refresh (free sources)'}</Button>
+            {treg?.canRun && detail.competitor.instagramHandle && <Button size="sm" variant="primary" disabled={running(selected?.latestRun)} onClick={() => setConfirmTreg(true)}>Refresh + Instagram via treg</Button>}
             <Button size="sm" onClick={() => setEditForm(editForm ? null : {
               name: detail.competitor.name, region: detail.competitor.region, website: detail.competitor.website || '', instagramHandle: detail.competitor.instagramHandle || '', notes: detail.competitor.notes || '',
             })}>{editForm ? 'Cancel edit' : 'Edit'}</Button>
             {list.canDelete && <Button size="sm" variant="ghost" onClick={remove}>Delete</Button>}
           </div>
         </div>
+        {treg?.configured && detail.competitor.instagramHandle && <TregCostNotice
+          feature="Competitor Intelligence"
+          status={treg}
+          estimate={{ totalMicro: treg.instagram?.perCompetitorMicro ?? 0, calls: 1, detail: `recent posts of @${detail.competitor.instagramHandle}, capped at $${(treg.instagram?.maxPerCompetitorUsd ?? 0).toFixed(3)}` }}
+          confirming={confirmTreg}
+          busy={running(selected?.latestRun)}
+          onConfirm={() => refresh(detail.competitor.id, true)}
+          onCancel={() => setConfirmTreg(false)}
+        />}
+        {treg?.configured && !detail.competitor.instagramHandle && <p className="mt-3 text-xs text-[var(--mos-text-muted)]">Add the Instagram handle to let treg read recent posts (optional, paid).</p>}
         {running(selected?.latestRun) && <div className="mt-3 h-2 overflow-hidden rounded-full bg-white/10"><div className="h-full bg-[var(--mos-accent)]" style={{ width: `${selected?.latestRun?.progress || 0}%` }} /></div>}
         {editForm && <div className="mt-4">
           <CompetitorFields form={editForm} setForm={setEditForm} />
@@ -267,10 +321,30 @@ export default function CompetitorIntelligencePage() {
           <SectionHeader title={`Last 3 months (${result.window.start} to ${result.window.end})`} description={`Refreshed ${when(detail.report?.finishedAt || null)}${detail.report?.model ? ` · ${detail.report.model}` : ''}`} className="mb-3" />
           {result.overview && <p className="text-sm leading-6 text-[var(--mos-text-secondary)]">{result.overview}</p>}
           {result.notes.length > 0 && <ul className="mt-3 list-disc space-y-1 pl-5 text-xs text-[var(--mos-text-muted)]">{result.notes.map(note => <li key={note}>{note}</li>)}</ul>}
+          {result.tregCost && treg && <TregCostNotice feature="Competitor Intelligence" status={treg} estimate={{ totalMicro: result.tregCost.estimatedMicro, calls: result.tregCost.calls }}
+            result={{ estimatedMicro: result.tregCost.estimatedMicro, actualMicro: result.tregCost.actualMicro, source: result.tregCost.source, balanceAfterMicro: result.tregCost.balanceAfterMicro }} />}
         </Panel>
 
+        <Panel>
+          <SectionHeader title={`Brand campaigns (${result.campaigns?.length ?? 0})`} description="Brand-level communication with a named idea or tagline, a hashtag, and a content format. Giveaways, quizzes and educational posts are listed under regular social content instead." className="mb-3" />
+          {!result.campaigns && <p className="text-sm text-[var(--mos-text-muted)]">This refresh ran before campaigns were split out. Refresh to rebuild it.</p>}
+          {result.campaigns && !result.campaigns.length && <p className="text-sm text-[var(--mos-text-muted)]">No campaign could be cited. If you have seen one on Instagram, paste its post link under evidence below and refresh.</p>}
+          <ul className="grid gap-3 lg:grid-cols-2">{(result.campaigns || []).map((campaign, index) => <CampaignCard key={`${campaign.name}-${index}`} campaign={campaign} />)}</ul>
+        </Panel>
+
+        <Panel>
+          <SectionHeader title="Regular social content" description="Everyday posting, summarized by pattern." className="mb-3" />
+          {!regularRows(result).length && <p className="text-sm text-[var(--mos-text-muted)]">Nothing cited in this window.</p>}
+          <ul className="space-y-3">{regularRows(result).map(row => <li key={row.key} className="text-sm" data-testid="regular-content">
+            <p className="text-[var(--mos-text)]"><span className="mr-2 rounded bg-white/10 px-1.5 py-0.5 text-xs text-[var(--mos-text-muted)]">{row.label}</span>{row.summary}</p>
+            {row.examples.length > 0 && <p className="mt-0.5 text-xs text-[var(--mos-text-faint)]">e.g. {row.examples.join(' · ')}</p>}
+            <div className="mt-1"><SourceLinks sources={row.sources} /></div>
+          </li>)}</ul>
+        </Panel>
+
+        <SectionHeader title="Other activity" />
         <div className="grid gap-4 lg:grid-cols-2">
-          {INTEL_CATEGORIES.map(category => {
+          {OTHER_CATEGORIES.map(category => {
             const items = result.items.filter(item => item.category === category);
             return <Panel key={category} padding="compact">
               <SectionHeader title={`${INTEL_CATEGORY_LABELS[category]} (${items.length})`} className="mb-2" />
@@ -315,7 +389,7 @@ export default function CompetitorIntelligencePage() {
       </>}
 
       <Panel>
-        <SectionHeader title="Instagram and other evidence" description="Paste a post link with its caption, or upload a screenshot. Links are stored, never scraped. Screenshots are read by a vision model when one is available." className="mb-4" />
+        <SectionHeader title="Instagram and other evidence" description="Paste a public Instagram post link: its caption, date and hashtags are read from the public post page (no login). Or paste caption text, or upload a screenshot (read by a vision model when one is available). A pasted campaign post is the most reliable way to capture a campaign." className="mb-4" />
         <div className="grid gap-3 md:grid-cols-2">
           <FormField label="Post link" hint="Instagram, TikTok, or any URL"><TextInput value={evidenceUrl} placeholder="https://www.instagram.com/p/…" spellCheck={false} onChange={event => setEvidenceUrl(event.target.value)} /></FormField>
           <FormField label="Posted on" hint="Optional"><TextInput type="date" value={evidenceDate} onChange={event => setEvidenceDate(event.target.value)} /></FormField>
@@ -336,6 +410,7 @@ export default function CompetitorIntelligencePage() {
               {item.sourceUrl && <a className="block truncate text-xs text-[var(--mos-accent-soft)] hover:underline" href={item.sourceUrl} target="_blank" rel="noopener noreferrer nofollow">{item.sourceUrl}</a>}
               {item.pastedText && <p className="mt-1 whitespace-pre-wrap text-[var(--mos-text-secondary)]">{item.pastedText}</p>}
               {item.hasScreenshot && item.extractionStatus === 'done' && <p className="mt-1 whitespace-pre-wrap text-xs text-[var(--mos-text-muted)]">Screenshot text: {item.extractedText}</p>}
+              {!item.hasScreenshot && item.extractedText && <p className="mt-1 whitespace-pre-wrap text-xs text-[var(--mos-text-muted)]">Read from the public post: {item.extractedText}</p>}
               {item.hasScreenshot && item.extractionStatus === 'failed' && <p className="mt-1 text-xs text-amber-200">No vision model read this screenshot. It is stored; add the caption text so the refresh can use it.</p>}
               {item.hasScreenshot && item.extractionStatus === 'none' && <p className="mt-1 text-xs text-[var(--mos-text-faint)]">Reading screenshot…</p>}
             </div>

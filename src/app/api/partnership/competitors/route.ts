@@ -24,7 +24,7 @@ export async function GET(request: NextRequest) {
   });
   const comparison = buildComparison(competitors.map(competitor => {
     const report = succeeded.get(competitor.id);
-    return { competitor, report: report?.result ? { finishedAt: report.finishedAt, items: report.result.items } : null };
+    return { competitor, report: report?.result ? { finishedAt: report.finishedAt, items: report.result.items, campaigns: report.result.campaigns } : null };
   }));
   const opportunities = buildCombinedOpportunities(competitors.flatMap(competitor => {
     const report = succeeded.get(competitor.id);

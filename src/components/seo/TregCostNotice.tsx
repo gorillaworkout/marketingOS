@@ -24,13 +24,13 @@ export interface TregCostResult {
 export const usd = (value: number, digits = 4) => `$${value.toFixed(digits)}`;
 const fromMicro = (micro: number, digits = 4) => usd(micro / 1_000_000, digits);
 
-/** Reads GET /api/seo/treg (balance cached 5 minutes on the server). */
-export function useTregStatus(): { status: TregStatus | null; reload: () => Promise<void> } {
+/** Reads GET /api/seo/treg (balance cached 5 minutes on the server). Partnership passes /api/partnership/treg. */
+export function useTregStatus(path = '/api/seo/treg'): { status: TregStatus | null; reload: () => Promise<void> } {
   const [status, setStatus] = useState<TregStatus | null>(null);
   const reload = useCallback(async () => {
-    const { ok, data } = await fetchJson<TregStatus>('/api/seo/treg');
+    const { ok, data } = await fetchJson<TregStatus>(path);
     if (ok) setStatus(data);
-  }, []);
+  }, [path]);
   useEffect(() => {
     const timer = window.setTimeout(() => { void reload(); }, 0);
     return () => window.clearTimeout(timer);
