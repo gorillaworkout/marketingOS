@@ -73,9 +73,11 @@ export interface TregCostNoticeProps {
   onCancel?: () => void;
   /** After a generate: what it cost and the balance left. */
   result?: TregCostResult | null;
+  /** What the estimate covers, e.g. "3 competitors". Default "one generate". */
+  scopeLabel?: string;
 }
 
-export function TregCostNotice({ feature, status, estimate, confirming, busy, onConfirm, onCancel, result }: TregCostNoticeProps) {
+export function TregCostNotice({ feature, status, estimate, confirming, busy, onConfirm, onCancel, result, scopeLabel = 'one generate' }: TregCostNoticeProps) {
   if (!status?.configured) return null;
   if (result) {
     const actual = result.actualMicro;
@@ -91,7 +93,7 @@ export function TregCostNotice({ feature, status, estimate, confirming, busy, on
   const short = after !== null && after < 0;
   return <div className="mt-3 space-y-2" data-testid="treg-cost-estimate">
     <p className="text-sm text-[var(--mos-text-secondary)]">
-      Estimated cost for one generate: <span className="font-medium text-[var(--mos-text)]">~{fromMicro(estimate.totalMicro)}</span> ({estimate.calls} treg call{estimate.calls === 1 ? '' : 's'}{estimate.detail ? `: ${estimate.detail}` : ''})
+      Estimated cost for {scopeLabel}: <span className="font-medium text-[var(--mos-text)]">~{fromMicro(estimate.totalMicro)}</span> ({estimate.calls} treg call{estimate.calls === 1 ? '' : 's'}{estimate.detail ? `: ${estimate.detail}` : ''})
       {' · '}Remaining balance: <span className="font-medium text-[var(--mos-text)]">{balanceMicro === null ? '—' : fromMicro(balanceMicro, 2)}</span>
       {after !== null && !short && <span className="text-xs text-[var(--mos-text-muted)]"> (about {fromMicro(after, 2)} after this run)</span>}
       <span className="block text-xs text-[var(--mos-text-muted)]">Estimate from treg&apos;s catalog price. The recorded cost is what treg reports after the run.</span>

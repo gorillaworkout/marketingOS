@@ -1,4 +1,4 @@
-import 'dotenv/config';
+import './load-env';
 import { closeDb } from '../src/lib/database';
 import { runDueCompetitorRefreshes } from '../src/lib/partnership/run';
 import { runDueTrendsDigest } from '../src/lib/partnership/trends-run';

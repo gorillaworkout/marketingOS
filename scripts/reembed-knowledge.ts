@@ -4,7 +4,7 @@
  *
  *   npx tsx scripts/reembed-knowledge.ts
  */
-import 'dotenv/config';
+import './load-env';
 import { closeDb, execute, queryAll } from '../src/lib/database';
 import {
   EMBEDDING_DIM,

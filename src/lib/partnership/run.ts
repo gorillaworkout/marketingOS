@@ -3,8 +3,8 @@ import { aiProviderErrorBody } from '@/lib/ai-http-status';
 import { resolveSearchApiKeys, searchSerper } from '@/lib/ai-research-grounding';
 import { generateContent, getUserPreferredModel } from '@/lib/openai';
 import { crawlSite } from '@/lib/seo/audit-crawl';
-import { microToUsd, tregConfig, tregFallbackNotice, type TregConfig } from '@/lib/seo/treg-client';
-import { guardTregSpend, settleTregRun, type TregRunCost } from '@/lib/seo/treg-cost-guard';
+import { microToUsd, tregConfig, tregFallbackNotice } from '@/lib/seo/treg-client';
+import { settleTregRun, type TregRunCost } from '@/lib/seo/treg-cost-guard';
 import { buildCompetitorReport, type CollectDeps } from './collect';
 import { isRefreshDue, parseNewsRssWithDates, type NewsHit } from './intel';
 import { fetchPublic } from './public-fetch';
@@ -12,7 +12,7 @@ import {
   ReportInProgressError, createReport, expireStaleReports, failReport, finishReport, getCompetitor, getReport, latestReports,
   listCompetitors, listEvidence, saveEvidenceExtraction, updateReportProgress,
 } from './store';
-import { TREG_IG_FEATURE, estimateInstagramFeedMicro, fetchTregInstagramFeed, instagramFeedEnabled, type InstagramFeedOutcome } from './treg-instagram';
+import { fetchTregInstagramFeed, type InstagramFeedOutcome } from './treg-instagram';
 
 /** A confirmed, reserved treg spend for one refresh (from guardTregSpend). */
 export interface TregRunPlan { spendId: string; estimateMicro: number; balanceBeforeMicro: number | null }
@@ -84,24 +84,6 @@ export async function systemUserId(): Promise<string | null> {
   return row?.id ?? null;
 }
 
-/**
- * treg plan for a scheduled refresh: only when the key is set, the competitor has an
- * Instagram handle, and the reservation fits the balance and the daily spend limit.
- * Anything else returns null and the refresh uses free sources.
- */
-export async function planScheduledTreg(competitor: { instagramHandle: string | null }, userId: string | null, config: TregConfig = tregConfig()): Promise<{ plan: TregRunPlan | null; note: string | null }> {
-  if (!competitor.instagramHandle || !userId || !config.apiKey || !instagramFeedEnabled()) return { plan: null, note: null };
-  const estimate = estimateInstagramFeedMicro(1);
-  try {
-    const plan = await guardTregSpend({ config, role: 'admin', userId, feature: TREG_IG_FEATURE, estimate, confirmedEstimateMicro: estimate.totalMicro });
-    if (plan.kind === 'paid') return { plan: { spendId: plan.spendId, estimateMicro: plan.estimateMicro, balanceBeforeMicro: plan.balanceBeforeMicro }, note: null };
-    if (plan.kind === 'skip') return { plan: null, note: `treg Instagram feed skipped (${plan.reason}); free sources used.` };
-    return { plan: null, note: `treg Instagram feed skipped: ${String(plan.body.error || 'refused')}; free sources used.` };
-  } catch {
-    return { plan: null, note: null };
-  }
-}
-
 export async function runCompetitorRefresh(reportId: string, options: { treg?: TregRunPlan | null; tregNote?: string | null } = {}): Promise<void> {
   const report = await getReport(reportId);
   if (!report || report.status === 'succeeded' || report.status === 'failed' || !report.competitorId) return;
@@ -164,7 +146,7 @@ export interface DueRunSummary {
   skipped: number;
 }
 
-/** Weekly refresh: every active competitor whose last successful refresh is 7+ days old, one at a time. */
+/** Weekly refresh: every active competitor whose last successful refresh is 7+ days old, one at a time, free sources only (never treg). */
 export async function runDueCompetitorRefreshes(now: Date = new Date()): Promise<DueRunSummary> {
   await expireStaleReports();
   const competitors = await listCompetitors();
@@ -180,9 +162,9 @@ export async function runDueCompetitorRefreshes(now: Date = new Date()): Promise
       if (error instanceof ReportInProgressError) { summary.skipped += 1; continue; }
       throw error;
     }
-    // Weekly cron: the treg Instagram feed only when the balance and the daily spend limit allow it.
-    const treg = await planScheduledTreg(competitor, userId);
-    await runCompetitorRefresh(reportId, { treg: treg.plan, tregNote: treg.note });
+    // Scheduled runs never spend treg balance: free sources only. treg runs only
+    // after a signed-in user confirms the estimate (POST .../refresh with { treg }).
+    await runCompetitorRefresh(reportId, { treg: null });
     const finished = await getReport(reportId);
     if (finished?.status === 'succeeded') summary.refreshed += 1;
     else summary.failed += 1;

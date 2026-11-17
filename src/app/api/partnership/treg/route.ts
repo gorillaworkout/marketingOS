@@ -20,6 +20,6 @@ export async function GET(request: NextRequest) {
     ...status,
     configured: status.configured && enabled,
     canRun: status.canRun && enabled,
-    instagram: { perCompetitorMicro: estimateInstagramFeedMicro(1).totalMicro, maxPerCompetitorUsd: TREG_IG_POSTS_MAX_USD },
+    instagram: { perCompetitorMicro: estimateInstagramFeedMicro(1).totalMicro, maxPerCompetitorUsd: TREG_IG_POSTS_MAX_USD, enabled },
   });
 }
