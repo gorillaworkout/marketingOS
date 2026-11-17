@@ -21,18 +21,39 @@ test('treg availability: each reason the treg mode is disabled', () => {
   assert.match(tregUnavailableReason({ ...ready, configured: false, canRun: false, instagram: { ...ready.instagram!, enabled: false } })!, /PARTNERSHIP_TREG_INSTAGRAM=false/);
   assert.match(tregUnavailableReason({ ...ready, configured: false, canRun: false })!, /not configured/);
   assert.match(tregUnavailableReason({ ...ready, canRun: false })!, /admin-only/);
-  assert.match(tregUnavailableReason({ ...ready, balanceUsd: 0.0005 })!, /Balance \$0\.00 is below/);
+  assert.match(tregUnavailableReason({ ...ready, balanceUsd: 0.0004 })!, /Balance \$0\.00 is below/);
   assert.match(tregUnavailableReason({ ...ready, spentTodayUsd: 2 })!, /limit/);
   // Unknown balance (treg unreachable) still lets the user try; the server guard decides.
   assert.equal(tregUnavailableReason({ ...ready, balanceUsd: null, balanceError: 'treg balance unavailable' }), null);
 });
 
-test('batch plan: treg only for competitors with an Instagram handle; total estimate', () => {
+test('batch plan: Instagram only (older default) needs an Instagram handle; total estimate', () => {
   const plan = planRefreshBatch(competitors, ['c', 'a', 'b'], 'treg', ready);
-  assert.deepEqual(plan.items.map(item => [item.id, item.useTreg, item.freeReason]), [['a', true, null], ['b', false, 'No Instagram handle'], ['c', true, null]]);
+  assert.deepEqual(plan.items.map(item => [item.id, item.useTreg, item.freeReason]), [['a', true, null], ['b', false, 'No account on the selected platforms'], ['c', true, null]]);
   assert.equal(plan.tregCount, 2);
   assert.equal(plan.estimateMicro, 1800);
   assert.equal(plan.coveredByBalance, 2);
+});
+
+test('batch plan: multi-platform estimate = sum of the platforms each competitor has, with a per-platform breakdown', () => {
+  const rows = [
+    { id: 'a', name: 'MIFX', instagramHandle: 'mifx.indonesia', socialHandles: { instagram: 'mifx.indonesia', tiktok: 'mifx.indonesia', youtube: 'user/MifxChannel' } },
+    { id: 'b', name: 'Elve', instagramHandle: null, socialHandles: {} },
+    { id: 'c', name: 'XTB', instagramHandle: 'xtb_id', socialHandles: { instagram: 'xtb_id', x: 'xtb_id' } },
+  ];
+  const plan = planRefreshBatch(rows, ['a', 'b', 'c'], 'treg', ready, ['instagram', 'tiktok', 'facebook', 'x']);
+  assert.deepEqual(plan.items.map(item => [item.id, item.platforms, item.estimateMicro]), [
+    ['a', ['instagram', 'tiktok'], 900 + 1140], ['b', [], 0], ['c', ['instagram', 'x'], 900 + 500],
+  ]);
+  assert.deepEqual(plan.items[0].missing, ['facebook', 'x']);
+  assert.equal(plan.estimateMicro, 900 + 1140 + 900 + 500);
+  assert.equal(plan.calls, 1 + 2 + 1 + 1);
+  assert.deepEqual(plan.breakdown, [
+    { platform: 'instagram', competitors: 2, micro: 1800 }, { platform: 'tiktok', competitors: 1, micro: 1140 }, { platform: 'x', competitors: 1, micro: 500 },
+  ]);
+  // Meta Ad Library runs on the company name, so even a competitor with no saved account can use it.
+  const ads = planRefreshBatch(rows, ['b'], 'treg', ready, ['meta_ads']);
+  assert.deepEqual([ads.items[0].useTreg, ads.items[0].estimateMicro], [true, 1200]);
 });
 
 test('batch plan: free mode never uses treg and costs nothing', () => {
@@ -69,7 +90,9 @@ test('page: refresh controls live in the top toolbar; rows no longer carry their
   assert.match(toolbar, /for \(const job of queue\)/);
   assert.match(toolbar, /await waitFor\(job, data\.id\)/);
   assert.match(toolbar, /\/api\/partnership\/competitors\/\$\{encodeURIComponent\(job\.id\)\}\/refresh/);
-  assert.match(toolbar, /confirmedEstimateMicro: perMicro/);
+  assert.match(toolbar, /treg: \{ platforms: job\.platforms, confirmedEstimateMicro: job\.estimateMicro \}/);
+  assert.match(toolbar, /data-testid="treg-platforms"/);
+  assert.doesNotMatch(toolbar, />no IG</);
   assert.match(toolbar, /<TregCostNotice/);
   const list = readFileSync('src/app/api/partnership/competitors/route.ts', 'utf8');
   assert.match(list, /lastRefreshMode: report\?\.result \? reportMode\(report\.result\.tregCost\) : null/);
@@ -92,6 +115,9 @@ test('scheduled refreshes never use treg: free sources only', () => {
   const route = readFileSync('src/app/api/partnership/competitors/[id]/refresh/route.ts', 'utf8');
   assert.match(route, /createReport\(id, 'manual', auth\.id\)/);
   assert.match(route, /confirmedEstimateMicro/);
+  assert.match(route, /estimateCompetitorTreg\(competitor\.socialHandles, platforms\)/);
+  // The discovery route only reads websites: it never calls treg.
+  assert.doesNotMatch(readFileSync('src/app/api/partnership/competitors/[id]/discover-social/route.ts', 'utf8'), /treg/i);
 });
 
 test('cron and CLI scripts load .env.local before .env', () => {

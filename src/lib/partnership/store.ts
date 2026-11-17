@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { execute, queryAll, queryOne } from '@/lib/database';
 import type { CompetitorInput, EvidenceInput, IntelReportResult, Region } from './intel';
+import { parseSocialHandles, withInstagram, type SocialHandles } from './social';
 
 export type ReportStatus = 'queued' | 'running' | 'succeeded' | 'failed';
 
@@ -10,6 +11,8 @@ export interface CompetitorRow {
   region: Region;
   website: string | null;
   instagramHandle: string | null;
+  /** Accounts per platform; instagram mirrors instagramHandle. */
+  socialHandles: SocialHandles;
   notes: string | null;
   active: boolean;
   sortOrder: number;
@@ -77,6 +80,7 @@ function mapCompetitor(row: Record<string, unknown>): CompetitorRow {
     region: row.region === 'international' ? 'international' : 'local',
     website: str(row.website),
     instagramHandle: str(row.instagram_handle),
+    socialHandles: withInstagram(parseSocialHandles(row.social_handles), str(row.instagram_handle)),
     notes: str(row.notes),
     active: row.active !== false,
     sortOrder: Number(row.sort_order) || 0,
@@ -120,7 +124,7 @@ function mapReport(row: Record<string, unknown>, withResult = true): ReportRow {
   };
 }
 
-const COMPETITOR_COLUMNS = `id, name, region, website, instagram_handle, notes, active, sort_order, created_by, updated_at::text AS updated_at`;
+const COMPETITOR_COLUMNS = `id, name, region, website, instagram_handle, social_handles, notes, active, sort_order, created_by, updated_at::text AS updated_at`;
 const REPORT_COLUMNS = `id, kind, competitor_id, trigger, status, progress, message, result, model, error, created_by, created_at::text AS created_at, finished_at::text AS finished_at`;
 
 export async function listCompetitors(): Promise<CompetitorRow[]> {
@@ -137,9 +141,9 @@ export async function createCompetitor(input: CompetitorInput, userId: string): 
   const id = randomUUID();
   try {
     await execute(
-      `INSERT INTO partnership_competitors (id, name, region, website, instagram_handle, notes, sort_order, created_by, updated_by)
-       VALUES (?, ?, ?, ?, ?, ?, (SELECT COALESCE(MAX(sort_order), 0) + 10 FROM partnership_competitors), ?, ?)`,
-      [id, input.name, input.region, input.website, input.instagramHandle, input.notes, userId, userId],
+      `INSERT INTO partnership_competitors (id, name, region, website, instagram_handle, social_handles, notes, sort_order, created_by, updated_by)
+       VALUES (?, ?, ?, ?, ?, ?::jsonb, ?, (SELECT COALESCE(MAX(sort_order), 0) + 10 FROM partnership_competitors), ?, ?)`,
+      [id, input.name, input.region, input.website, input.instagramHandle, JSON.stringify(input.socialHandles), input.notes, userId, userId],
     );
   } catch (error) {
     if (isUniqueViolation(error)) throw new DuplicateCompetitorError();
@@ -151,8 +155,8 @@ export async function createCompetitor(input: CompetitorInput, userId: string): 
 export async function updateCompetitor(id: string, input: CompetitorInput, userId: string): Promise<void> {
   try {
     await execute(
-      `UPDATE partnership_competitors SET name = ?, region = ?, website = ?, instagram_handle = ?, notes = ?, updated_by = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
-      [input.name, input.region, input.website, input.instagramHandle, input.notes, userId, id],
+      `UPDATE partnership_competitors SET name = ?, region = ?, website = ?, instagram_handle = ?, social_handles = ?::jsonb, notes = ?, updated_by = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+      [input.name, input.region, input.website, input.instagramHandle, JSON.stringify(input.socialHandles), input.notes, userId, id],
     );
   } catch (error) {
     if (isUniqueViolation(error)) throw new DuplicateCompetitorError();

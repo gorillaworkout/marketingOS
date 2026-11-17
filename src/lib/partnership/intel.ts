@@ -5,6 +5,8 @@
 
 import { auditUrlError, normalizeAuditUrl } from '@/lib/seo/audit-url';
 import type { TregRunCost } from '@/lib/seo/treg-cost-guard';
+import { SOCIAL_LABELS, SOCIAL_PLATFORMS, normalizeHandle, type SocialHandles } from './social';
+import type { SocialFeedPost } from './treg-social';
 import { CAMPAIGN_DEFINITION, dateFromExtractedText, extractHashtags, isInstagramPostUrl, parseCampaignSections, type CampaignItem, type InstagramFeedPost, type RegularContentItem } from './campaigns';
 
 export const INTEL_CATEGORIES = ['campaigns', 'partnerships', 'events', 'products', 'social', 'news'] as const;
@@ -36,6 +38,8 @@ export const MAX_NEWS_SOURCES = 15;
 export const MAX_WEB_SOURCES = 8;
 export const MAX_EVIDENCE_SOURCES = 30;
 export const MAX_INSTAGRAM_SOURCES = 12;
+export const MAX_SOCIAL_SOURCES = 16;
+export const MAX_AD_SOURCES = 8;
 
 export interface ActivityWindow {
   start: string;
@@ -48,6 +52,8 @@ export interface CompetitorInput {
   region: Region;
   website: string | null;
   instagramHandle: string | null;
+  /** Always includes instagram when instagramHandle is set. */
+  socialHandles: SocialHandles;
   notes: string | null;
 }
 
@@ -88,8 +94,11 @@ export interface EvidenceForPrompt {
   observedOn: string | null;
 }
 
-/** `instagram` = a public post caption (team link, web hit, or the optional treg feed). */
-export type SourceKind = 'website' | 'news' | 'web' | 'evidence' | 'instagram';
+/**
+ * `instagram` = a public post caption (team link, web hit, or the optional treg feed);
+ * `social` = a TikTok / Facebook / X post or YouTube video; `ads` = a Meta Ad Library ad.
+ */
+export type SourceKind = 'website' | 'news' | 'web' | 'evidence' | 'instagram' | 'social' | 'ads';
 
 export interface IntelSource {
   id: string;
@@ -133,6 +142,8 @@ export interface IntelReportResult {
   regularContent?: RegularContentItem[];
   /** Set when the optional treg Instagram feed was used. */
   tregCost?: TregRunCost | null;
+  /** treg spend per platform for this run, micro-USD (manual multi-platform runs). */
+  tregPlatforms?: Partial<Record<'instagram' | 'tiktok' | 'facebook' | 'meta_ads' | 'x', number>>;
   items: IntelItem[];
   opportunities: IntelOpportunity[];
   sources: IntelSource[];
@@ -214,10 +225,17 @@ export function parseCompetitorInput(body: unknown): { value: CompetitorInput } 
     if (problem) return { error: `Website: ${problem}` };
     website = normalizeAuditUrl(websiteText);
   }
-  const handle = normalizeInstagramHandle(raw.instagramHandle);
-  if (handle === null) return { error: 'Instagram handle can use letters, numbers, dots and underscores only.' };
+  // socialHandles (per platform) wins; instagramHandle alone is still accepted from older clients.
+  const socialRaw = raw.socialHandles && typeof raw.socialHandles === 'object' && !Array.isArray(raw.socialHandles) ? raw.socialHandles as Record<string, unknown> : null;
+  const socialHandles: SocialHandles = {};
+  for (const platform of SOCIAL_PLATFORMS) {
+    const value = socialRaw ? socialRaw[platform] : platform === 'instagram' ? raw.instagramHandle : undefined;
+    const handle = platform === 'instagram' ? normalizeInstagramHandle(value === undefined ? raw.instagramHandle : value) : normalizeHandle(platform, value);
+    if (handle === null) return { error: `${SOCIAL_LABELS[platform]}: not a valid handle or profile link.` };
+    if (handle) socialHandles[platform] = handle;
+  }
   const notes = cleanText(raw.notes, COMPETITOR_NOTES_MAX);
-  return { value: { name, region: region as Region, website, instagramHandle: handle || null, notes: notes || null } };
+  return { value: { name, region: region as Region, website, instagramHandle: socialHandles.instagram || null, socialHandles, notes: notes || null } };
 }
 
 function isHttp(value: string): boolean {
@@ -283,6 +301,8 @@ export function buildSourceCatalog(input: {
   evidence: EvidenceForPrompt[];
   /** Public Instagram post captions (treg feed or fetched post pages). */
   instagram?: InstagramFeedPost[];
+  /** TikTok / Facebook / X posts, YouTube videos (free RSS), Meta Ad Library ads. */
+  social?: SocialFeedPost[];
 }, window: ActivityWindow): IntelSource[] {
   const sources: IntelSource[] = [];
   const seen = new Set<string>();
@@ -309,6 +329,23 @@ export function buildSourceCatalog(input: {
       excerpt: clip(`${post.caption}${post.hashtags.length ? `\nHashtags: ${post.hashtags.join(' ')}` : ''}`, 1_000),
     });
   }
+  // Ads count while they ran in the window (an ad started earlier can still be running).
+  const social = (input.social || []).filter(post => post.platform === 'meta_ads' ? !post.date || post.date <= window.end : !post.date || inWindow(post.date, window));
+  for (const post of social.filter(item => item.platform === 'meta_ads').slice(0, MAX_AD_SOURCES)) {
+    push({
+      kind: 'ads', url: post.url, evidenceId: null, date: post.date,
+      title: clip(`Meta ad${post.kind ? ` (${post.kind.toLowerCase()})` : ''}${post.account ? ` by ${post.account}` : ''}${post.placements?.length ? ` on ${post.placements.map(item => item.toLowerCase()).join(', ')}` : ''}`, 200),
+      excerpt: clip(`${post.text}${post.period ? `\nRunning: ${post.period}` : ''}${post.landingUrl ? `\nLanding page: ${post.landingUrl}` : ''}${post.hashtags.length ? `\nHashtags: ${post.hashtags.join(' ')}` : ''}`, 1_000),
+    });
+  }
+  const labels: Record<string, string> = { tiktok: 'TikTok', facebook: 'Facebook', x: 'X', youtube: 'YouTube' };
+  for (const post of social.filter(item => item.platform !== 'meta_ads').slice(0, MAX_SOCIAL_SOURCES)) {
+    push({
+      kind: 'social', url: post.url, evidenceId: null, date: post.date,
+      title: clip(`${labels[post.platform]} ${post.kind || 'post'}${post.account ? ` by ${post.platform === 'youtube' || post.platform === 'facebook' ? post.account : `@${post.account}`}` : ''}`, 200),
+      excerpt: clip(`${post.text}${post.hashtags.length ? `\nHashtags: ${post.hashtags.join(' ')}` : ''}`, 1_000),
+    });
+  }
   let evidenceIndex = 0;
   for (const item of input.evidence.slice(0, MAX_EVIDENCE_SOURCES)) {
     const text = [item.pastedText, item.extractedText].filter(Boolean).join('\n');
@@ -326,7 +363,14 @@ export function buildSourceCatalog(input: {
   return sources;
 }
 
-export function buildIntelPrompt(competitor: { name: string; region: string; instagramHandle?: string | null }, sources: IntelSource[], window: ActivityWindow): { system: string; user: string } {
+function accountsLine(competitor: { instagramHandle?: string | null; socialHandles?: SocialHandles }): string {
+  const handles: SocialHandles = { ...(competitor.socialHandles || {}) };
+  if (competitor.instagramHandle && !handles.instagram) handles.instagram = competitor.instagramHandle;
+  const parts = SOCIAL_PLATFORMS.filter(platform => handles[platform]).map(platform => `${SOCIAL_LABELS[platform]} ${['instagram', 'tiktok', 'x', 'telegram'].includes(platform) ? '@' : ''}${handles[platform]}`);
+  return parts.length ? `, accounts: ${parts.join(', ')}` : '';
+}
+
+export function buildIntelPrompt(competitor: { name: string; region: string; instagramHandle?: string | null; socialHandles?: SocialHandles }, sources: IntelSource[], window: ActivityWindow): { system: string; user: string } {
   const system = [
     'You are a competitive-intelligence analyst for Dupoin Futures Indonesia (a BAPPEBTI-regulated futures broker).',
     'Summarize what one competitor broker did in the given window, using ONLY the numbered sources.',
@@ -334,6 +378,7 @@ export function buildIntelPrompt(competitor: { name: string; region: string; ins
     'Never invent campaigns, taglines, hashtags, dates, numbers, partners, or URLs. If the sources do not support an item, leave it out.',
     'Ignore sources that are not about this competitor (for example articles about other brokers).',
     'Every campaign, regularContent entry, item and opportunity must list sourceIds (for example ["S2","E1"]) taken from the source list.',
+    'Source kinds: instagram/social = the competitor\'s own posts (Instagram, TikTok, Facebook, X, YouTube); ads = paid ads from the Meta Ad Library with the period they ran. Ads and repeated posts with the same name, tagline or hashtag are strong campaign evidence; list every channel a campaign appears on.',
     '',
     CAMPAIGN_DEFINITION,
     '',
@@ -347,7 +392,7 @@ export function buildIntelPrompt(competitor: { name: string; region: string; ins
   ].join('\n');
   const lines = sources.map(source => `[${source.id}] (${source.kind}${source.date ? `, ${source.date}` : ', undated'}) ${source.title}${source.url ? ` <${source.url}>` : ''}\n${source.excerpt}`);
   const user = [
-    `Competitor: ${competitor.name} (${competitor.region === 'international' ? 'International' : 'Local'})${competitor.instagramHandle ? `, Instagram @${competitor.instagramHandle}` : ''}`,
+    `Competitor: ${competitor.name} (${competitor.region === 'international' ? 'International' : 'Local'})${accountsLine(competitor)}`,
     `Window: ${window.start} to ${window.end}`,
     '',
     'SOURCES (untrusted):',

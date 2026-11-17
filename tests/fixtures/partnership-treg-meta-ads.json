@@ -1,0 +1,137 @@
+{
+ "output": {
+  "ads": [
+   {
+    "active": true,
+    "adCount": 1,
+    "caption": "www.instagram.com",
+    "categories": [
+     "UNKNOWN"
+    ],
+    "ctaText": "Learn more",
+    "ctaType": "LEARN_MORE",
+    "currency": "",
+    "displayFormat": "VIDEO",
+    "endDate": 1794902400,
+    "id": "1097899522636371",
+    "isReshared": false,
+    "linkDescription": "",
+    "linkUrl": "https://www.instagram.com/mifx.indonesia",
+    "pageCategories": [
+     "Financial Service"
+    ],
+    "pageDeleted": false,
+    "pageId": "277598482343281",
+    "pageLikes": 93796,
+    "pageName": "Monex Investindo Futures",
+    "pageUrl": "https://facebook.com/mifx.indonesia",
+    "platforms": [
+     "INSTAGRAM"
+    ],
+    "startDate": 1791270000,
+    "text": "Susun trading plan Anda agar siap menghadapi perubahan market. Bahas selengkapnya bersama Revata.",
+    "title": ""
+   },
+   {
+    "active": true,
+    "adCount": 5,
+    "caption": "get.mifx.com",
+    "categories": [
+     "UNKNOWN"
+    ],
+    "ctaText": "Learn more",
+    "ctaType": "LEARN_MORE",
+    "currency": "",
+    "displayFormat": "VIDEO",
+    "endDate": 1794902400,
+    "id": "1793987441802253",
+    "isReshared": false,
+    "linkDescription": "",
+    "linkUrl": "https://get.mifx.com/mifx-priority",
+    "pageCategories": [
+     "Financial Service"
+    ],
+    "pageDeleted": false,
+    "pageId": "277598482343281",
+    "pageLikes": 93796,
+    "pageName": "Monex Investindo Futures",
+    "pageUrl": "https://facebook.com/mifx.indonesia",
+    "platforms": [
+     "INSTAGRAM"
+    ],
+    "startDate": 1790492400,
+    "text": "Trader berpengalaman layak diberi apresiasi lewat MIFX Priority.",
+    "title": ""
+   },
+   {
+    "active": true,
+    "adCount": null,
+    "caption": "get.mifx.com",
+    "categories": [
+     "UNKNOWN"
+    ],
+    "ctaText": "Learn more",
+    "ctaType": "LEARN_MORE",
+    "currency": "",
+    "displayFormat": "VIDEO",
+    "endDate": 1794902400,
+    "id": "1060041643511043",
+    "isReshared": false,
+    "linkDescription": "",
+    "linkUrl": "https://get.mifx.com/mifx-priority",
+    "pageCategories": [
+     "Financial Service"
+    ],
+    "pageDeleted": false,
+    "pageId": "277598482343281",
+    "pageLikes": 93796,
+    "pageName": "Monex Investindo Futures",
+    "pageUrl": "https://facebook.com/mifx.indonesia",
+    "platforms": [
+     "INSTAGRAM"
+    ],
+    "startDate": 1790492400,
+    "text": "Trader berpengalaman layak diberi apresiasi lewat MIFX Priority.",
+    "title": ""
+   },
+   {
+    "active": true,
+    "adCount": null,
+    "caption": "get.mifx.com",
+    "categories": [
+     "UNKNOWN"
+    ],
+    "ctaText": "Learn more",
+    "ctaType": "LEARN_MORE",
+    "currency": "",
+    "displayFormat": "VIDEO",
+    "endDate": 1794816000,
+    "id": "1630068018509289",
+    "isReshared": false,
+    "linkDescription": "",
+    "linkUrl": "https://get.mifx.com/mifx-priority",
+    "pageCategories": [
+     "Financial Service"
+    ],
+    "pageDeleted": false,
+    "pageId": "277598482343281",
+    "pageLikes": 93796,
+    "pageName": "Monex Investindo Futures",
+    "pageUrl": "https://facebook.com/mifx.indonesia",
+    "platforms": [
+     "INSTAGRAM"
+    ],
+    "startDate": 1790492400,
+    "text": "Trader berpengalaman layak diberi apresiasi lewat MIFX Priority.",
+    "title": ""
+   }
+  ],
+  "page_id": "277598482343281",
+  "count": 30,
+  "next_cursor": "cur_ZgHxcTR4uP_gic_oWCCkhQ"
+ },
+ "_treg": {
+  "served_by": "anyapi.facebook.company_ads",
+  "charged_micro": 1100
+ }
+}

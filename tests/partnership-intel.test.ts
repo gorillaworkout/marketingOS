@@ -36,7 +36,7 @@ test('the six categories are fixed', () => {
 
 test('competitor input: name required, region checked, website must be public http(s), no invented URL', () => {
   assert.deepEqual(parseCompetitorInput({ name: '  Elve ', region: 'international', website: '', instagramHandle: '', notes: '' }), {
-    value: { name: 'Elve', region: 'international', website: null, instagramHandle: null, notes: null },
+    value: { name: 'Elve', region: 'international', website: null, instagramHandle: null, socialHandles: {}, notes: null },
   });
   assert.ok('error' in parseCompetitorInput({ name: '', region: 'local' }));
   assert.ok('error' in parseCompetitorInput({ name: 'X', region: 'mars' }));

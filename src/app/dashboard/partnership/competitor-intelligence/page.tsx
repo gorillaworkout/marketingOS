@@ -7,6 +7,9 @@ import {
 import { fetchJson } from '@/components/seo/useSeoSites';
 import { TregCostNotice, useTregStatus, type TregStatus } from '@/components/seo/TregCostNotice';
 import { RefreshToolbar } from '@/components/partnership/RefreshToolbar';
+import { SocialDiscoveryPanel } from '@/components/partnership/SocialDiscoveryPanel';
+import { SOCIAL_LABELS, SOCIAL_PLACEHOLDERS, SOCIAL_PLATFORMS, socialDisplay, socialProfileUrl, type SocialHandles, type SocialPlatform } from '@/lib/partnership/social';
+import { TREG_PLATFORM_SPECS } from '@/lib/partnership/treg-platforms';
 import { CONTENT_PATTERN_LABELS, type CampaignItem, type RegularContentItem } from '@/lib/partnership/campaigns';
 import {
   INTEL_CATEGORIES, INTEL_CATEGORY_LABELS, REGION_LABELS, buildTimeline,
@@ -47,7 +50,7 @@ function regularRows(result: IntelReportResult): RegularRow[] {
 
 type RunInfo = { id: string; status: 'queued' | 'running' | 'succeeded' | 'failed'; progress: number; message: string; error: string | null; trigger: string };
 type CompetitorSummary = {
-  id: string; name: string; region: Region; website: string | null; instagramHandle: string | null; notes: string | null;
+  id: string; name: string; region: Region; website: string | null; instagramHandle: string | null; socialHandles?: SocialHandles; notes: string | null;
   lastRefreshedAt: string | null; lastRefreshMode: ReportMode | null; itemCount: number; overview: string; latestRun: RunInfo | null;
 };
 type ListResponse = { competitors: CompetitorSummary[]; comparison: ComparisonRow[]; opportunities: Array<IntelOpportunity & { competitorName: string }>; canDelete: boolean };
@@ -57,9 +60,15 @@ type Evidence = {
 };
 type ReportRow = { id: string; status: string; trigger: string; message: string; error: string | null; createdAt: string; finishedAt: string | null; model: string | null; result: IntelReportResult | null; tregCost?: IntelReportResult['tregCost'] };
 type DetailResponse = { competitor: CompetitorSummary; evidence: Evidence[]; report: ReportRow | null; history: ReportRow[] };
-type CompetitorForm = { name: string; region: Region; website: string; instagramHandle: string; notes: string };
+type CompetitorForm = { name: string; region: Region; website: string; socialHandles: Record<SocialPlatform, string>; notes: string };
 
-const EMPTY_FORM: CompetitorForm = { name: '', region: 'local', website: '', instagramHandle: '', notes: '' };
+const EMPTY_HANDLES = Object.fromEntries(SOCIAL_PLATFORMS.map(platform => [platform, ''])) as Record<SocialPlatform, string>;
+const EMPTY_FORM: CompetitorForm = { name: '', region: 'local', website: '', socialHandles: EMPTY_HANDLES, notes: '' };
+const handlesOf = (item: CompetitorSummary): SocialHandles => ({ ...(item.socialHandles || {}), ...(item.instagramHandle && !item.socialHandles?.instagram ? { instagram: item.instagramHandle } : {}) });
+const formOf = (item: CompetitorSummary): CompetitorForm => ({
+  name: item.name, region: item.region, website: item.website || '', notes: item.notes || '',
+  socialHandles: { ...EMPTY_HANDLES, ...Object.fromEntries(Object.entries(handlesOf(item)).map(([platform, handle]) => [platform, handle ? socialDisplay(platform as SocialPlatform, handle) : ''])) },
+});
 const when = (value: string | null) => (value ? new Date(value).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' }) : '—');
 const running = (run: RunInfo | null | undefined) => run?.status === 'queued' || run?.status === 'running';
 
@@ -87,7 +96,16 @@ function CompetitorFields({ form, setForm }: { form: CompetitorForm; setForm: (n
       </Select>
     </FormField>
     <FormField label="Website" hint="Official site only. Leave blank if unknown."><TextInput value={form.website} placeholder="https://" spellCheck={false} onChange={event => setForm({ ...form, website: event.target.value })} /></FormField>
-    <FormField label="Instagram handle" hint="Used in free web searches. If treg is set up, a confirmed refresh also reads its recent public posts (paid, optional)."><TextInput value={form.instagramHandle} placeholder="@handle" spellCheck={false} onChange={event => setForm({ ...form, instagramHandle: event.target.value })} /></FormField>
+    <div className="md:col-span-2">
+      <p className="text-xs font-medium text-[var(--mos-text-secondary)]">Social accounts</p>
+      <p className="mt-0.5 text-xs text-[var(--mos-text-muted)]">Handle or profile link per platform; leave blank if none. Used in free web searches and the free YouTube feed; a confirmed treg refresh also reads Instagram, TikTok, Facebook and X posts (paid, optional). Find social accounts can fill these from the website.</p>
+      <div className="mt-2 grid gap-3 md:grid-cols-2 xl:grid-cols-4" data-testid="social-fields">
+        {SOCIAL_PLATFORMS.map(platform => <FormField key={platform} label={SOCIAL_LABELS[platform]}>
+          <TextInput value={form.socialHandles[platform]} placeholder={SOCIAL_PLACEHOLDERS[platform]} spellCheck={false} aria-label={`${SOCIAL_LABELS[platform]} account`}
+            onChange={event => setForm({ ...form, socialHandles: { ...form.socialHandles, [platform]: event.target.value } })} />
+        </FormField>)}
+      </div>
+    </div>
     <FormField label="Notes" className="md:col-span-2"><TextArea rows={2} maxLength={1000} value={form.notes} onChange={event => setForm({ ...form, notes: event.target.value })} /></FormField>
   </div>;
 }
@@ -108,6 +126,7 @@ export default function CompetitorIntelligencePage() {
   const [busy, setBusy] = useState(false);
   const [refreshIds, setRefreshIds] = useState<string[]>([]);
   const [batchActive, setBatchActive] = useState(false);
+  const [discoverIds, setDiscoverIds] = useState<string[] | null>(null);
   const { status: tregRaw, reload: reloadTreg } = useTregStatus('/api/partnership/treg');
   const treg = tregRaw as PartnershipTregStatus | null;
 
@@ -221,7 +240,7 @@ export default function CompetitorIntelligencePage() {
     <PageHeader
       eyebrow="Partnership / Competitor Intelligence"
       title="Competitor Intelligence"
-      description="What competitor brokers did in the last 3 months, as brand campaigns (named idea + tagline/hashtag + format) apart from regular social content, from their websites, linked help/program pages, news, public Instagram post captions, and evidence the team pastes. Every item links to its source; anything without a source is not shown."
+      description="What competitor brokers did in the last 3 months, as brand campaigns (named idea + tagline/hashtag + format) apart from regular social content, from their websites, linked help/program pages, news, public social posts (Instagram, TikTok, Facebook, X, YouTube), Meta ads, and evidence the team pastes. Every item links to its source; anything without a source is not shown."
       actions={<Button variant="primary" onClick={() => setAdding(value => !value)}>{adding ? 'Cancel' : 'Add competitor'}</Button>}
     />
     <RefreshToolbar
@@ -235,7 +254,15 @@ export default function CompetitorIntelligencePage() {
         if (selectedId) void loadDetail(selectedId);
       }}
       onBatchChange={setBatchActive}
+      onFindSocial={ids => setDiscoverIds([...ids])}
     />
+    {discoverIds && <SocialDiscoveryPanel
+      key={discoverIds.join(',')}
+      competitors={list.competitors}
+      ids={discoverIds}
+      onClose={() => setDiscoverIds(null)}
+      onSaved={async () => { await loadList(); if (selectedId) await loadDetail(selectedId); }}
+    />}
     {message && <Panel padding="compact"><p className="text-sm text-[var(--mos-text-secondary)]">{message}</p></Panel>}
 
     {adding && <Panel>
@@ -300,19 +327,18 @@ export default function CompetitorIntelligencePage() {
             <p className="mt-1 text-xs text-[var(--mos-text-muted)]">
               {REGION_LABELS[detail.competitor.region]}
               {detail.competitor.website && <> · <a className="text-[var(--mos-accent-soft)] hover:underline" href={detail.competitor.website} target="_blank" rel="noopener noreferrer nofollow">{detail.competitor.website}</a></>}
-              {detail.competitor.instagramHandle && <> · <a className="text-[var(--mos-accent-soft)] hover:underline" href={`https://www.instagram.com/${detail.competitor.instagramHandle}/`} target="_blank" rel="noopener noreferrer nofollow">@{detail.competitor.instagramHandle}</a></>}
+              {SOCIAL_PLATFORMS.filter(platform => handlesOf(detail.competitor)[platform]).map(platform => { const handle = handlesOf(detail.competitor)[platform] as string; return <span key={platform}> · <a className="text-[var(--mos-accent-soft)] hover:underline" title={SOCIAL_LABELS[platform]} href={socialProfileUrl(platform, handle)} target="_blank" rel="noopener noreferrer nofollow">{SOCIAL_LABELS[platform]} {socialDisplay(platform, handle)}</a></span>; })}
             </p>
             {detail.competitor.notes && <p className="mt-2 text-sm text-[var(--mos-text-secondary)]">{detail.competitor.notes}</p>}
           </div>
           <div className="flex flex-wrap gap-2">
             <Button size="sm" disabled={running(selected?.latestRun) || batchActive} onClick={() => pickForRefresh(detail.competitor.id)}>{running(selected?.latestRun) ? 'Refreshing…' : 'Refresh…'}</Button>
-            <Button size="sm" onClick={() => setEditForm(editForm ? null : {
-              name: detail.competitor.name, region: detail.competitor.region, website: detail.competitor.website || '', instagramHandle: detail.competitor.instagramHandle || '', notes: detail.competitor.notes || '',
-            })}>{editForm ? 'Cancel edit' : 'Edit'}</Button>
+            <Button size="sm" onClick={() => { setDiscoverIds([detail.competitor.id]); window.scrollTo({ top: 0, behavior: 'smooth' }); }} data-testid="find-social">Find social accounts</Button>
+            <Button size="sm" onClick={() => setEditForm(editForm ? null : formOf(detail.competitor))}>{editForm ? 'Cancel edit' : 'Edit'}</Button>
             {list.canDelete && <Button size="sm" variant="ghost" onClick={remove}>Delete</Button>}
           </div>
         </div>
-        {treg?.configured && !detail.competitor.instagramHandle && <p className="mt-3 text-xs text-[var(--mos-text-muted)]">Add the Instagram handle to let treg read recent posts (optional, paid).</p>}
+        {!Object.keys(handlesOf(detail.competitor)).length && <p className="mt-3 text-xs text-[var(--mos-text-muted)]">No social accounts saved. Use Find social accounts to read them from the website, or add them in Edit.</p>}
         {running(selected?.latestRun) && <div className="mt-3 h-2 overflow-hidden rounded-full bg-white/10"><div className="h-full bg-[var(--mos-accent)]" style={{ width: `${selected?.latestRun?.progress || 0}%` }} /></div>}
         {editForm && <div className="mt-4">
           <CompetitorFields form={editForm} setForm={setEditForm} />
@@ -325,6 +351,7 @@ export default function CompetitorIntelligencePage() {
         <Panel>
           <SectionHeader title={`Last 3 months (${result.window.start} to ${result.window.end})`} description={`Refreshed ${when(detail.report?.finishedAt || null)}${detail.report?.model ? ` · ${detail.report.model}` : ''}`} action={<span className="flex items-center gap-1.5 text-xs text-[var(--mos-text-faint)]" data-testid="report-mode">Source <ModeBadge mode={reportMode(result.tregCost)} /></span>} className="mb-3" />
           {result.overview && <p className="text-sm leading-6 text-[var(--mos-text-secondary)]">{result.overview}</p>}
+          {result.tregPlatforms && Object.keys(result.tregPlatforms).length > 0 && <p className="mt-2 text-xs text-[var(--mos-text-muted)]" data-testid="report-treg-platforms">treg cost by platform: {(Object.entries(result.tregPlatforms) as Array<[keyof typeof TREG_PLATFORM_SPECS, number]>).map(([platform, micro]) => `${TREG_PLATFORM_SPECS[platform]?.label || platform} $${(micro / 1_000_000).toFixed(4)}`).join(' · ')}</p>}
           {result.notes.length > 0 && <ul className="mt-3 list-disc space-y-1 pl-5 text-xs text-[var(--mos-text-muted)]">{result.notes.map(note => <li key={note}>{note}</li>)}</ul>}
           {result.tregCost && treg && <TregCostNotice feature="Competitor Intelligence" status={treg} estimate={{ totalMicro: result.tregCost.estimatedMicro, calls: result.tregCost.calls }}
             result={{ estimatedMicro: result.tregCost.estimatedMicro, actualMicro: result.tregCost.actualMicro, source: result.tregCost.source, balanceAfterMicro: result.tregCost.balanceAfterMicro }} />}
