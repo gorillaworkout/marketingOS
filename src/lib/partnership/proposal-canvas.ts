@@ -221,12 +221,12 @@ export function estimateTextHeight(value: string, size: number, width: number, l
   return lines * (size * 1.2 + lineGap);
 }
 
-export function createPptxCanvas(): Canvas {
+export function createPptxCanvas(title = 'Dupoin collaboration proposal'): Canvas {
   const pres = new PptxGenJS();
   pres.layout = 'LAYOUT_16x9';
   pres.author = 'Dupoin Futures Indonesia';
   pres.company = 'PT Dupoin Futures Indonesia';
-  pres.title = 'Dupoin collaboration proposal';
+  pres.title = title;
   let slide: PptxGenJS.Slide | null = null;
   const masters = new Set<string>();
   const current = () => {
