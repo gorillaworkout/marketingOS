@@ -1,5 +1,6 @@
 import { after, NextRequest, NextResponse } from 'next/server';
 import { partnershipCronAuthorization } from '@/lib/partnership/cron';
+import { runDueMediaRefresh } from '@/lib/partnership/media-run';
 import { runDueCompetitorRefreshes } from '@/lib/partnership/run';
 import { runDueTrendsDigest } from '@/lib/partnership/trends-run';
 
@@ -7,7 +8,8 @@ export const dynamic = 'force-dynamic';
 export const maxDuration = 300;
 
 /**
- * Weekly Competitor Intelligence refresh plus the Global Industry Trends digest, for an HTTP cron.
+ * Weekly Competitor Intelligence refresh plus the Global Industry Trends digest and a
+ * free-only Media Monitoring refresh, for an HTTP cron. Scheduled work uses free sources only.
  * Header: x-partnership-cron-secret: $PARTNERSHIP_CRON_SECRET. The work runs after the response.
  * The VPS can run `npm run partnership:refresh` instead.
  */
@@ -29,6 +31,12 @@ export async function POST(request: NextRequest) {
       console.log(`Global Industry Trends: ${trends.status}${trends.reason ? ` (${trends.reason})` : ''}.`);
     } catch (error) {
       console.error('Global Industry Trends digest failed', error);
+    }
+    try {
+      const media = await runDueMediaRefresh();
+      console.log(`Media Monitoring: ${media.status}${media.reason ? ` (${media.reason})` : ''}.`);
+    } catch (error) {
+      console.error('Media Monitoring refresh failed', error);
     }
   });
   return NextResponse.json({ accepted: true }, { status: 202 });
