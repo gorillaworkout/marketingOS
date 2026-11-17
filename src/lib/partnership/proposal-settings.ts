@@ -1,5 +1,5 @@
 /**
- * Admin-editable proposal settings: the rate card, offline materials, and the
+ * Admin-editable proposal settings: the Digital Exposure item list, offline materials, and the
  * "Dupoin by Numbers" figures. Defaults are copied exactly from the approved
  * Tadakado (16:9) and Kopi Kenangan (A4) proposals; nothing here is invented.
  * An admin can change them on Proposal Builder > Settings. Saved values live in
@@ -14,9 +14,10 @@ export interface RateCardItem {
   /** `{partner}` is replaced with the partner name. */
   platform: string;
   quantityLabel: string;
-  /** Rupiah value of one unit of this package, as on the rate card. */
-  value: number;
 }
+// Prices are NOT part of settings any more: every proposal types its own
+// numbers in the builder (ExposureSelection.unitValue). A `value` saved by an
+// older version in partnership_settings is ignored when parsed.
 
 export interface OfflineMaterial {
   id: string;
@@ -57,11 +58,11 @@ export interface ProposalSettings {
 
 export const DEFAULT_PROPOSAL_SETTINGS: ProposalSettings = {
   rateCard: [
-    { id: 'ig-feed-collab', content: 'Poster collaboration activity', platform: 'Instagram feed (collab)', quantityLabel: '1x', value: 3_000_000 },
-    { id: 'ig-story', content: 'Promotion activity', platform: 'Instagram story (Dupoin & {partner})', quantityLabel: '2x/week (3 slides story)', value: 12_000_000 },
-    { id: 'article', content: 'Collaboration article', platform: 'Dupoin Website', quantityLabel: '1x', value: 7_000_000 },
-    { id: 'media-coverage', content: 'Media coverage', platform: 'Publishers (guarantee 2-3 media)', quantityLabel: '3x', value: 6_000_000 },
-    { id: 'home-banner', content: 'Clickable Home banner (Apps & website)', platform: 'Dupoin Indonesia & {partner}', quantityLabel: '1 each', value: 50_000_000 },
+    { id: 'ig-feed-collab', content: 'Poster collaboration activity', platform: 'Instagram feed (collab)', quantityLabel: '1x' },
+    { id: 'ig-story', content: 'Promotion activity', platform: 'Instagram story (Dupoin & {partner})', quantityLabel: '2x/week (3 slides story)' },
+    { id: 'article', content: 'Collaboration article', platform: 'Dupoin Website', quantityLabel: '1x' },
+    { id: 'media-coverage', content: 'Media coverage', platform: 'Publishers (guarantee 2-3 media)', quantityLabel: '3x' },
+    { id: 'home-banner', content: 'Clickable Home banner (Apps & website)', platform: 'Dupoin Indonesia & {partner}', quantityLabel: '1 each' },
   ],
   offlineMaterials: [
     { id: 'x-banner', material: 'X-Banner (60x160cm)', content: 'Collaboration info', placement: '{partner} offline store', quantity: 1 },
@@ -168,16 +169,10 @@ function labelValues(raw: unknown, fallback: LabelValue[]): LabelValue[] {
     .filter(row => row.label || row.value);
 }
 
-function money(value: unknown): number | null {
-  const number = typeof value === 'number' ? value : typeof value === 'string' && /\d/.test(value) ? Number(value.replace(/[^\d]/g, '')) : NaN;
-  if (!Number.isFinite(number) || number < 0 || number > 1e13) return null;
-  return Math.round(number);
-}
-
 /**
  * Validates a settings object from the admin editor (or the database) and
- * fills any missing part from the defaults. Returns errors for bad rate card
- * rows instead of silently dropping prices.
+ * fills any missing part from the defaults. Returns an error for an item row
+ * without a name instead of silently dropping it.
  */
 export function parseProposalSettings(raw: unknown): { value: ProposalSettings } | { error: string } {
   if (!raw || typeof raw !== 'object') return { value: DEFAULT_PROPOSAL_SETTINGS };
@@ -191,13 +186,11 @@ export function parseProposalSettings(raw: unknown): { value: ProposalSettings }
     for (const row of input.rateCard.slice(0, MAX_ROWS)) {
       const item = row as Partial<RateCardItem>;
       const content = text(item?.content, 120);
-      if (!content) return { error: 'Every rate card row needs a content name.' };
-      const value = money(item?.value);
-      if (value === null) return { error: `Rate card "${content}" needs a valid Rupiah value.` };
+      if (!content) return { error: 'Every Digital Exposure item needs a content name.' };
       let id = text(item?.id, 40) || slug(content) || `item-${rateCard.length + 1}`;
       while (seen.has(id)) id = `${id}-${rateCard.length + 1}`;
       seen.add(id);
-      rateCard.push({ id, content, platform: text(item?.platform, 160), quantityLabel: text(item?.quantityLabel, 80) || '1x', value });
+      rateCard.push({ id, content, platform: text(item?.platform, 160), quantityLabel: text(item?.quantityLabel, 80) || '1x' });
     }
   }
 

@@ -6,7 +6,7 @@
 import PDFDocument from 'pdfkit';
 import { PALETTE as C, decodeDataUrl, dupoinLogo, imageSize, laurelLeaves, starPoints } from './proposal-art';
 import { containBox, pdfFont, registerFonts } from './proposal-canvas';
-import { formatRupiah, type ProposalDocument } from './proposal';
+import { exposureTable, formatRupiah, valueOrTbd, type ProposalDocument } from './proposal';
 import type { FontWeight } from './proposal-art';
 
 const PAGE_W = 595.28;
@@ -292,8 +292,10 @@ export async function renderDocumentPdf(model: ProposalDocument): Promise<{ data
   const t = model.totals;
   if (include.digitalExposure && t.exposureLines.length) {
     h2(L.exposureDoc, 110);
-    table([[L.colNo, L.colContent, L.colPlatform, L.colQuantity, L.colValue], ...t.exposureLines.map(line => [`${line.no}.`, line.content, line.platform, line.quantity, formatRupiah(line.value)])], [34, 120, 120, 90, 100], ['center', 'left', 'left', 'left', 'left']);
-    totalLine(`${L.exposureTotal}: ${formatRupiah(t.exposureTotal)}`);
+    const exposure = exposureTable(t, L);
+    if (exposure.showValue) table(exposure.rows, [34, 120, 120, 90, 100], ['center', 'left', 'left', 'left', 'left']);
+    else table(exposure.rows, [34, 160, 170, 100], ['center', 'left', 'left', 'left']);
+    if (exposure.totalText) totalLine(`${L.exposureTotal}: ${exposure.totalText}`);
   }
 
   if (include.offlineMaterials && model.offline.length) {
@@ -308,9 +310,9 @@ export async function renderDocumentPdf(model: ProposalDocument): Promise<{ data
     for (const need of t.needLines) {
       rows.push([`${rows.length}.`, need.quantity !== null ? `${need.description} (${need.quantity.toLocaleString('id-ID')} qty)` : need.description, need.total ? formatRupiah(need.total) : '—', need.unitValue !== null ? `@${formatRupiah(need.unitValue)}` : L.contributionRow]);
     }
-    rows.push([`${rows.length}.`, L.exposureValueRow, formatRupiah(t.exposureTotal), L.exposureValueNote]);
+    if (t.exposureLines.length) rows.push([`${rows.length}.`, L.exposureValueRow, `${valueOrTbd(t.exposureTotal, L)}${t.exposurePriced && t.exposureUnpriced ? ` ${L.exposurePartial}` : ''}`, L.exposureValueNote]);
     table(rows, [34, 150, 110, 140], ['center', 'left', 'left', 'left']);
-    totalLine(`${L.packageTotal}: ${formatRupiah(t.packageTotal)}`);
+    totalLine(`${L.packageTotal}: ${valueOrTbd(t.packageTotal, L)}`);
   }
 
   if (include.notes && content.notes.length) {

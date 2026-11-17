@@ -7,7 +7,7 @@ import {
 import { fetchJson } from '@/components/seo/useSeoSites';
 import { ProposalSettingsEditor } from '@/components/partnership/proposal-settings-editor';
 import {
-  SECTION_KEYS, SECTION_LABELS, TEMPLATE_LABELS, computeTotals, formatRupiah,
+  COLLAB_EXPOSURE_ITEM, SECTION_KEYS, SECTION_LABELS, TEMPLATE_LABELS, computeTotals, formatPriceInput, formatRupiah, parsePrice,
   type ExposureSelection, type NeedItem, type OfflineSelection, type ProposalContent, type ProposalInput, type ProposalTemplate, type SectionKey,
 } from '@/lib/partnership/proposal';
 import { DEFAULT_PROPOSAL_SETTINGS, type ProposalSettings } from '@/lib/partnership/proposal-settings';
@@ -29,7 +29,8 @@ const when = (value: string) => new Date(value).toLocaleString('en-GB', { dateSt
 function emptyInput(settings: ProposalSettings): ProposalInput {
   return {
     partnerName: '', partnerDescription: '', objective: 'User Acquisition', collaborationScheme: '', userBenefit: '',
-    exposures: settings.rateCard.slice(0, 4).map(item => ({ itemId: item.id, content: item.content, platform: item.platform, quantityLabel: item.quantityLabel, unitValue: item.value, units: 1 })),
+    // Items are pre-ticked for convenience; prices start empty because every proposal has different numbers.
+    exposures: settings.rateCard.slice(0, 4).map(item => ({ itemId: item.id, content: item.content, platform: item.platform, quantityLabel: item.quantityLabel, unitValue: null, units: 1 })),
     offline: [], needs: [], baseFee: null, notes: '', language: 'id', template: 'slide', useCompetitorInsights: false, year: String(new Date().getFullYear()),
   };
 }
@@ -74,20 +75,45 @@ function BriefForm({ input, setInput, settings, logo, setLogo }: {
   const set = <K extends keyof ProposalInput>(key: K, value: ProposalInput[K]) => setInput({ ...input, [key]: value });
   const exposureFor = (id: string) => input.exposures.find(item => item.itemId === id);
   const offlineFor = (id: string) => input.offline.find(item => item.materialId === id);
+  const exposureItems = [...settings.rateCard, COLLAB_EXPOSURE_ITEM];
   const toggleExposure = (id: string, checked: boolean) => {
-    const card = settings.rateCard.find(item => item.id === id);
+    const card = exposureItems.find(item => item.id === id);
     if (!card) return;
     set('exposures', checked
-      ? [...input.exposures, { itemId: id, content: card.content, platform: card.platform, quantityLabel: card.quantityLabel, unitValue: card.value, units: 1 }]
+      ? [...input.exposures, { itemId: id, content: card.content, platform: card.platform, quantityLabel: card.quantityLabel, unitValue: null, units: 1 }]
       : input.exposures.filter(item => item.itemId !== id));
   };
   const setUnits = (id: string, units: number) => set('exposures', input.exposures.map(item => (item.itemId === id ? { ...item, units: Math.max(1, Math.min(100, units || 1)) } : item)));
+  const setPrice = (id: string, raw: string) => set('exposures', input.exposures.map(item => (item.itemId === id ? { ...item, unitValue: parsePrice(raw) } : item)));
+  const exposureRow = (card: { id: string; content: string; platform: string; quantityLabel: string }, label?: string) => {
+    const selected = exposureFor(card.id);
+    const partner = input.partnerName || 'Partner';
+    return <div key={card.id} className="flex flex-wrap items-center gap-3 rounded-[var(--mos-radius-control)] border border-[var(--mos-border)] px-3 py-2 text-sm">
+      <label className="flex min-w-[260px] flex-1 items-center gap-2 text-[var(--mos-text-secondary)]">
+        <input type="checkbox" checked={Boolean(selected)} onChange={event => toggleExposure(card.id, event.target.checked)} />
+        {label
+          ? <span className="text-[var(--mos-text)]">{label}</span>
+          : <span><span className="text-[var(--mos-text)]">{card.content}</span> · {card.platform.replace(/\{partner\}/g, partner)} · {card.quantityLabel}</span>}
+      </label>
+      {selected && <>
+        <label className="flex items-center gap-2 text-xs text-[var(--mos-text-muted)]">Price
+          <span className="flex items-center rounded-[var(--mos-radius-control)] border border-[var(--mos-border)] pl-2">
+            <span className="text-[var(--mos-text-faint)]">Rp</span>
+            <TextInput className="w-36 border-0 text-right tabular-nums" inputMode="numeric" placeholder="Enter price" value={formatPriceInput(selected.unitValue)} aria-label={`${card.content} price (Rp)`} onChange={event => setPrice(card.id, event.target.value)} />
+          </span>
+        </label>
+        <label className="flex items-center gap-2 text-xs text-[var(--mos-text-muted)]">Units
+          <TextInput className="w-16" inputMode="numeric" value={String(selected.units)} aria-label={`${card.content} units`} onChange={event => setUnits(card.id, Number(event.target.value.replace(/[^\d]/g, '')))} />
+        </label>
+      </>}
+    </div>;
+  };
   const toggleOffline = (material: ProposalSettings['offlineMaterials'][number], checked: boolean) => set('offline', checked
     ? [...input.offline, { materialId: material.id, material: material.material, content: material.content, placement: material.placement, quantity: material.quantity }]
     : input.offline.filter(item => item.materialId !== material.id));
   const updateOffline = (id: string, patch: Partial<OfflineSelection>) => set('offline', input.offline.map(item => (item.materialId === id ? { ...item, ...patch } : item)));
   const updateNeed = (index: number, patch: Partial<NeedItem>) => set('needs', input.needs.map((need, i) => (i === index ? { ...need, ...patch } : need)));
-  const orphanExposures = input.exposures.filter(item => !settings.rateCard.some(card => card.id === item.itemId));
+  const orphanExposures = input.exposures.filter(item => !exposureItems.some(card => card.id === item.itemId));
 
   const onLogo = async (file: File | undefined) => {
     setLogoError('');
@@ -134,22 +160,11 @@ function BriefForm({ input, setInput, settings, logo, setLogo }: {
     </div>
 
     <div>
-      <SectionHeader title="Digital exposure" description="Values come from the rate card in Settings. Units multiply the package." className="mb-2" />
+      <SectionHeader title="Digital exposure" description="Tick the items for this proposal and type each price; prices differ per proposal. An empty price shows as (TBD) and is left out of the totals. Units multiply the price." className="mb-2" />
       <div className="space-y-2">
-        {settings.rateCard.map(card => {
-          const selected = exposureFor(card.id);
-          return <div key={card.id} className="flex flex-wrap items-center gap-3 rounded-[var(--mos-radius-control)] border border-[var(--mos-border)] px-3 py-2 text-sm">
-            <label className="flex min-w-[260px] flex-1 items-center gap-2 text-[var(--mos-text-secondary)]">
-              <input type="checkbox" checked={Boolean(selected)} onChange={event => toggleExposure(card.id, event.target.checked)} />
-              <span><span className="text-[var(--mos-text)]">{card.content}</span> · {card.platform.replace(/\{partner\}/g, input.partnerName || 'Partner')} · {card.quantityLabel}</span>
-            </label>
-            <span className="tabular-nums text-xs text-[var(--mos-text-muted)]">{formatRupiah(card.value)}</span>
-            {selected && <label className="flex items-center gap-2 text-xs text-[var(--mos-text-muted)]">Units
-              <TextInput className="w-16" inputMode="numeric" value={String(selected.units)} aria-label={`${card.content} units`} onChange={event => setUnits(card.id, Number(event.target.value.replace(/[^\d]/g, '')))} />
-            </label>}
-          </div>;
-        })}
-        {orphanExposures.map((item: ExposureSelection) => <p key={item.itemId} className="text-xs text-amber-200">{item.content} is no longer on the rate card; it keeps its saved value {formatRupiah(item.unitValue)}. Untick to remove: <button type="button" className="underline" onClick={() => set('exposures', input.exposures.filter(row => row.itemId !== item.itemId))}>remove</button></p>)}
+        {settings.rateCard.map(card => exposureRow(card))}
+        {exposureRow(COLLAB_EXPOSURE_ITEM, COLLAB_EXPOSURE_ITEM.label)}
+        {orphanExposures.map((item: ExposureSelection) => <p key={item.itemId} className="text-xs text-amber-200">{item.content} is no longer in Settings; it keeps its saved price {item.unitValue === null ? '(TBD)' : formatRupiah(item.unitValue)}. To drop it: <button type="button" className="underline" onClick={() => set('exposures', input.exposures.filter(row => row.itemId !== item.itemId))}>remove</button></p>)}
       </div>
     </div>
 
@@ -199,10 +214,12 @@ function BriefForm({ input, setInput, settings, logo, setLogo }: {
 function TotalsBar({ input }: { input: ProposalInput }) {
   const totals = computeTotals(input);
   return <div className="grid gap-3 rounded-[var(--mos-radius-control)] border border-[var(--mos-border)] p-3 text-sm sm:grid-cols-4">
-    <div><p className="text-[11px] text-[var(--mos-text-muted)]">Digital exposure</p><p className="tabular-nums text-[var(--mos-text)]">{formatRupiah(totals.exposureTotal)}</p></div>
+    <div><p className="text-[11px] text-[var(--mos-text-muted)]">Digital exposure</p><p className="tabular-nums text-[var(--mos-text)]">{totals.exposurePriced ? formatRupiah(totals.exposureTotal) : '(TBD)'}</p>
+      {totals.exposureUnpriced > 0 && totals.exposureLines.length > 0 && <p className="text-[11px] text-amber-200">{totals.exposureUnpriced} item{totals.exposureUnpriced === 1 ? '' : 's'} without a price (TBD)</p>}</div>
     <div><p className="text-[11px] text-[var(--mos-text-muted)]">Partner contribution</p><p className="tabular-nums text-[var(--mos-text)]">{formatRupiah(totals.needTotal)}</p></div>
     <div><p className="text-[11px] text-[var(--mos-text-muted)]">Base fee</p><p className="tabular-nums text-[var(--mos-text)]">{totals.baseFee === null ? '(TBD)' : formatRupiah(totals.baseFee)}</p></div>
-    <div><p className="text-[11px] text-[var(--mos-text-muted)]">Package total</p><p className="tabular-nums font-medium text-[var(--mos-accent-soft)]">{formatRupiah(totals.packageTotal)}</p></div>
+    <div><p className="text-[11px] text-[var(--mos-text-muted)]">Package total</p><p className="tabular-nums font-medium text-[var(--mos-accent-soft)]">{totals.packageTotal > 0 ? formatRupiah(totals.packageTotal) : '(TBD)'}</p>
+      {totals.packageTotal > 0 && (totals.exposureUnpriced > 0 || totals.baseFee === null) && <p className="text-[11px] text-[var(--mos-text-muted)]">excl. items marked (TBD)</p>}</div>
   </div>;
 }
 
@@ -377,7 +394,7 @@ export default function ProposalBuilderPage() {
           <td className="p-3">{TEMPLATE_LABELS[item.template]}</td>
           <td className="p-3 uppercase">{item.language}</td>
           <td className="p-3"><StatusBadge tone={item.status === 'final' ? 'success' : 'neutral'}>{item.status === 'final' ? 'Final' : 'Draft'} · v{item.version}</StatusBadge></td>
-          <td className="p-3 text-right tabular-nums">{formatRupiah(item.packageTotal)}</td>
+          <td className="p-3 text-right tabular-nums">{item.packageTotal > 0 ? formatRupiah(item.packageTotal) : '(TBD)'}</td>
           <td className="p-3 text-xs">{when(item.updatedAt)}{item.updatedByName ? ` · ${item.updatedByName}` : ''}</td>
           <td className="p-3 text-right"><span className="flex justify-end gap-2">
             <Button size="sm" onClick={() => openEdit(item.id)}>Open</Button>

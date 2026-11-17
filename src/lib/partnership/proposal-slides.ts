@@ -6,7 +6,7 @@
 import { PALETTE as C, dupoinLogo, decodeDataUrl, imageSize, laurelLeaves } from './proposal-art';
 import type { Canvas } from './proposal-canvas';
 import { SLIDE_H, SLIDE_W } from './proposal-canvas';
-import { formatRupiah, type ProposalDocument, type SectionKey } from './proposal';
+import { exposureTable, formatRupiah, valueOrTbd, type ProposalDocument, type SectionKey } from './proposal';
 
 interface Group { title: string; keys: SectionKey[] }
 
@@ -304,9 +304,12 @@ async function exposure(c: Canvas, doc: ProposalDocument) {
   const L = doc.labels;
   await c.newSlide('content');
   title(c, L.exposureDoc, 36);
-  const rows = [[L.colNo, L.colContent, L.colPlatform, L.colQuantity, L.colValue], ...doc.totals.exposureLines.map(line => [`${line.no}.`, line.content, line.platform, line.quantity, formatRupiah(line.value)])];
-  const height = c.table(rows, { x: 90, y: 96, colW: [44, 220, 220, 150, 146], size: 11.5, headFill: C.header, headColor: '#FFFFFF', lineColor: C.line, padding: 8, align: ['center', 'left', 'left', 'left', 'right'] });
-  c.text(`${L.exposureEstimate}: ${formatRupiah(doc.totals.exposureTotal)}`, { x: 72, y: Math.min(470, 96 + height + 26), w: 816, h: 30, size: 20, weight: 'semibold', color: C.ink, align: 'center' });
+  const { rows, showValue, totalText } = exposureTable(doc.totals, L);
+  const layout = showValue
+    ? { colW: [44, 220, 220, 150, 146], align: ['center', 'left', 'left', 'left', 'right'] as Array<'left' | 'center' | 'right'> }
+    : { colW: [44, 290, 290, 156], align: ['center', 'left', 'left', 'left'] as Array<'left' | 'center' | 'right'> };
+  const height = c.table(rows, { x: 90, y: 96, colW: layout.colW, size: 11.5, headFill: C.header, headColor: '#FFFFFF', lineColor: C.line, padding: 8, align: layout.align });
+  if (totalText) c.text(`${L.exposureEstimate}: ${totalText}`, { x: 72, y: Math.min(470, 96 + height + 26), w: 816, h: 30, size: 20, weight: 'semibold', color: C.ink, align: 'center' });
 }
 
 async function offline(c: Canvas, doc: ProposalDocument) {
@@ -338,7 +341,7 @@ async function pack(c: Canvas, doc: ProposalDocument) {
     c.bullets(column.items.length ? column.items : ['—'], { x: x + 20, y: 140, w: 220, h: 170, size: 14, color: C.ink, gap: 4 });
     if (column.total !== null && column.total > 0) c.text(`${L.totalValue}: ${formatRupiah(column.total).replace(/,-$/, '')}`, { x: x + 20, y: 340, w: 226, h: 40, size: 14, weight: 'semibold', color: C.ink });
   });
-  c.text(`${L.packageEstimate}: ${formatRupiah(t.packageTotal)}`, { x: 60, y: 432, w: 840, h: 34, size: 22, weight: 'semibold', color: C.ink, align: 'center' });
+  c.text(`${L.packageEstimate}: ${valueOrTbd(t.packageTotal, L)}`, { x: 60, y: 432, w: 840, h: 34, size: 22, weight: 'semibold', color: C.ink, align: 'center' });
   if (t.baseFee === null && t.needLines.length === 0) c.text(`${L.baseFee}: ${L.tbd}`, { x: 60, y: 468, w: 840, h: 20, size: 12, color: C.muted, align: 'center' });
 }
 
