@@ -1,13 +1,26 @@
 import { after, NextRequest, NextResponse } from 'next/server';
 import { requireFeature } from '@/lib/auth';
 import { EVIDENCE_IMAGE_MAX_BYTES, EVIDENCE_IMAGE_TYPES, extractScreenshotText, storeScreenshot } from '@/lib/partnership/evidence';
+import { instagramPostText, isInstagramPostUrl } from '@/lib/partnership/campaigns';
+import { readInstagramPost } from '@/lib/partnership/collect';
 import { parseEvidenceInput } from '@/lib/partnership/intel';
+import { fetchPublic } from '@/lib/partnership/public-fetch';
 import { createEvidence, deleteEvidence, getCompetitor, getEvidence, saveEvidenceExtraction } from '@/lib/partnership/store';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 120;
 
 type RouteContext = { params: Promise<{ id: string }> };
+
+/** Reads the caption, date and hashtags of a pasted public Instagram post (no login) and stores them on the evidence. */
+function captureInstagramCaption(evidenceId: string, sourceUrl: string | null, hasScreenshot: boolean) {
+  if (!sourceUrl || !isInstagramPostUrl(sourceUrl)) return;
+  after(async () => {
+    const post = await readInstagramPost(sourceUrl, (url, accept) => fetchPublic(url, accept)).catch(() => null);
+    // A screenshot's vision text wins; the caption is only stored for link evidence.
+    if (post && !hasScreenshot) await saveEvidenceExtraction(evidenceId, instagramPostText(post));
+  });
+}
 
 export async function POST(request: NextRequest, context: RouteContext) {
   const auth = await requireFeature(request, 'partnership');
@@ -34,12 +47,14 @@ export async function POST(request: NextRequest, context: RouteContext) {
       // Vision runs after the response; without a vision model the screenshot stays stored and the caption text is used.
       after(async () => { await saveEvidenceExtraction(evidenceId, await extractScreenshotText(auth.id, screenshotKey)); });
     }
+    captureInstagramCaption(evidenceId, parsed.value.sourceUrl, Boolean(screenshotKey));
     return NextResponse.json({ id: evidenceId }, { status: 201 });
   }
 
   const parsed = parseEvidenceInput(await request.json().catch(() => null));
   if ('error' in parsed) return NextResponse.json({ error: parsed.error }, { status: 400 });
   const evidenceId = await createEvidence(id, parsed.value, auth.id);
+  captureInstagramCaption(evidenceId, parsed.value.sourceUrl, false);
   return NextResponse.json({ id: evidenceId }, { status: 201 });
 }
 

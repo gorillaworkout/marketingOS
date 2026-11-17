@@ -30,7 +30,7 @@ test('migration 058 applies twice, stores proposals with versions and settings, 
     const { parseProposalInput, templateContent } = await import('../src/lib/partnership/proposal');
     const { DEFAULT_PROPOSAL_SETTINGS } = await import('../src/lib/partnership/proposal-settings');
     try {
-      const parsed = parseProposalInput({ partnerName: 'Kopi Kenangan', exposures: [{ itemId: 'home-banner', units: 1 }], template: 'document' }, DEFAULT_PROPOSAL_SETTINGS);
+      const parsed = parseProposalInput({ partnerName: 'Kopi Kenangan', exposures: [{ itemId: 'home-banner', units: 1, unitValue: 50_000_000 }], template: 'document' }, DEFAULT_PROPOSAL_SETTINGS);
       assert.ok('value' in parsed);
       const content = templateContent(parsed.value);
       const id = await store.createProposal({ input: parsed.value, content, partnerLogo: null, status: 'draft', model: 'stub', note: 'AI draft' }, 'user-1');

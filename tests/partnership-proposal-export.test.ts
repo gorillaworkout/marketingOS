@@ -10,11 +10,13 @@ import { slideGroups } from '../src/lib/partnership/proposal-slides';
 import { accountFeatureFromPath, isDashboardNavItemVisible } from '../src/lib/authorization';
 
 const read = (file: string) => readFileSync(file, 'utf8');
+const PRICES: Record<string, number> = { 'ig-feed-collab': 3_000_000, 'ig-story': 12_000_000, article: 7_000_000, 'media-coverage': 6_000_000, 'home-banner': 50_000_000 };
+const priced = (ids: string[]) => ids.map(itemId => ({ itemId, units: 1, unitValue: PRICES[itemId] }));
 
 function sample(overrides: Record<string, unknown> = {}) {
   const parsed = parseProposalInput({
     partnerName: 'Tadakado Indonesia',
-    exposures: ['ig-feed-collab', 'ig-story', 'article', 'media-coverage'].map(itemId => ({ itemId, units: 1 })),
+    exposures: priced(['ig-feed-collab', 'ig-story', 'article', 'media-coverage']),
     needs: [{ description: 'vouchers', quantity: 1000, unitValue: 30000 }],
     offline: [{ materialId: 'x-banner' }],
     language: 'en',
@@ -73,7 +75,7 @@ test('PPTX has one slide per PDF page, native tables, and the same totals', asyn
 });
 
 test('A4 document PDF follows the Kopi Kenangan structure with exposure, offline, and value package tables', async () => {
-  const doc = sample({ partnerName: 'Kopi Kenangan', language: 'id', template: 'document', needs: [], exposures: ['ig-feed-collab', 'ig-story', 'article', 'media-coverage', 'home-banner'].map(itemId => ({ itemId, units: 1 })) });
+  const doc = sample({ partnerName: 'Kopi Kenangan', language: 'id', template: 'document', needs: [], exposures: priced(['ig-feed-collab', 'ig-story', 'article', 'media-coverage', 'home-banner']) });
   const out = await exportProposal(doc, 'document', 'pdf');
   const { text, totalPages } = await pdfText(out.data);
   assert.equal(totalPages, out.pages);
@@ -82,6 +84,18 @@ test('A4 document PDF follows the Kopi Kenangan structure with exposure, offline
     assert.ok(text.includes(phrase), phrase);
   }
   assert.equal(exportFileName('Kopi Kenangan!', 'document', 'pdf'), 'Dupoin-x-Kopi-Kenangan-A4.pdf');
+});
+
+test('exports with empty exposure prices print no Rp 0 and no old rate-card price', async () => {
+  for (const template of ['slide', 'document'] as const) {
+    const doc = sample({ template, needs: [], exposures: [{ itemId: 'ig-story' }, { itemId: 'collab-exposure-content' }] });
+    const out = await exportProposal(doc, template, 'pdf');
+    const { text } = await pdfText(out.data);
+    assert.ok(!text.includes('Rp 0,-'), `${template}: Rp 0`);
+    assert.ok(!text.includes('12.000.000'), `${template}: hardcoded price`);
+    assert.ok(text.includes('Collaboration Exposure Content'), `${template}: collab item`);
+    assert.ok(text.includes('(TBD)'), `${template}: TBD`);
+  }
 });
 
 test('Proposal Builder sits under Partnership in the sidebar, gated by the partnership feature', () => {

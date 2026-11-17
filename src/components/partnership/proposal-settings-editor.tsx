@@ -3,7 +3,6 @@
 import { useEffect, useState } from 'react';
 import { Button, FormField, LoadingState, Panel, SectionHeader, TextArea, TextInput } from '@/components/ui/dashboard';
 import { fetchJson } from '@/components/seo/useSeoSites';
-import { formatRupiah } from '@/lib/partnership/proposal';
 import type { VerifiedFacts } from '@/lib/partnership/proposal-facts';
 import type { LabelValue, OfflineMaterial, ProposalSettings, RateCardItem } from '@/lib/partnership/proposal-settings';
 import { RowsEditor } from './rows-editor';
@@ -60,20 +59,19 @@ export function ProposalSettingsEditor({ onSaved }: { onSaved?: (settings: Propo
   return <div className="space-y-4">
     <Panel>
       <SectionHeader
-        title="Rate card"
-        description={readOnly ? 'Set by an admin. Exposure values and package totals are computed from it.' : 'Values per unit, in Rupiah. Use {partner} in Platform to insert the partner name.'}
+        title="Digital Exposure items"
+        description={readOnly ? 'Set by an admin. The items you can tick in a proposal; prices are typed per proposal.' : 'The items users can tick in a proposal. No prices here: every proposal types its own. Use {partner} in Platform to insert the partner name. "Collaboration Exposure Content - 1x IG Reels + Mirrored TikTok" is always offered as its own checkbox.'}
         action={!readOnly && <span className="flex gap-2"><Button size="sm" disabled={busy} onClick={reset}>Reset to defaults</Button><Button size="sm" variant="primary" disabled={busy} onClick={save}>Save settings</Button></span>}
         className="mb-3"
       />
       <RowsEditor<RateCardItem>
         rows={draft.rateCard}
         readOnly={readOnly}
-        columns={[{ key: 'content', label: 'Content', width: '28%' }, { key: 'platform', label: 'Platform', width: '30%' }, { key: 'quantityLabel', label: 'Quantity', width: '18%' }, { key: 'value', label: 'Value (Rp)', type: 'number', width: '18%' }]}
-        blank={() => ({ id: '', content: '', platform: '', quantityLabel: '1x', value: 0 })}
+        columns={[{ key: 'content', label: 'Content', width: '34%' }, { key: 'platform', label: 'Platform', width: '38%' }, { key: 'quantityLabel', label: 'Quantity', width: '22%' }]}
+        blank={() => ({ id: '', content: '', platform: '', quantityLabel: '1x' })}
         onChange={rows => set('rateCard', rows)}
-        addLabel="Add rate card item"
+        addLabel="Add exposure item"
       />
-      <p className="mt-2 text-xs text-[var(--mos-text-faint)]">{draft.rateCard.map(item => `${item.content}: ${formatRupiah(item.value)}`).join(' · ')}</p>
       {message && <p className="mt-3 text-sm text-[var(--mos-accent-soft)]" role="status">{message}</p>}
       {data.updatedAt && <p className="mt-1 text-xs text-[var(--mos-text-faint)]">Last changed {new Date(data.updatedAt).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' })}{data.updatedByName ? ` by ${data.updatedByName}` : ''}.</p>}
     </Panel>

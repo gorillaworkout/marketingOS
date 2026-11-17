@@ -44,9 +44,25 @@ export interface ExposureSelection {
   content: string;
   platform: string;
   quantityLabel: string;
-  unitValue: number;
+  /**
+   * Rupiah price per unit, typed per proposal. `null` = not filled in yet.
+   * Every proposal has different numbers, so nothing is prefilled.
+   */
+  unitValue: number | null;
   units: number;
 }
+
+/**
+ * Fixed Digital Exposure item offered as its own checkbox in the builder
+ * (not part of the admin-editable item list, so it is always available).
+ */
+export const COLLAB_EXPOSURE_ITEM = {
+  id: 'collab-exposure-content',
+  label: 'Collaboration Exposure Content - 1x IG Reels + Mirrored TikTok',
+  content: 'Collaboration Exposure Content',
+  platform: 'Instagram Reels + mirrored TikTok (Dupoin & {partner})',
+  quantityLabel: '1x',
+} as const;
 
 export interface OfflineSelection {
   materialId: string;
@@ -119,7 +135,22 @@ export function formatRupiah(value: number): string {
 
 export const withPartner = (template: string, partnerName: string) => template.replace(/\{partner\}/g, partnerName || 'Partner');
 
-/** Validates the builder form. Rate card prices come from the current settings, not the request. */
+/**
+ * Price typed in the builder: digits only ("3.000.000", "Rp 3jt" is not parsed as 3jt).
+ * Empty or 0 means "no price yet" and is stored as null.
+ */
+export function parsePrice(value: unknown): number | null {
+  const number = typeof value === 'number' ? value : typeof value === 'string' && /\d/.test(value) ? Number(value.replace(/[^\d]/g, '')) : NaN;
+  if (!Number.isFinite(number) || number <= 0) return null;
+  return Math.min(1e12, Math.round(number));
+}
+
+/** "3000000" -> "3.000.000" for the IDR price inputs; null -> "". */
+export function formatPriceInput(value: number | null): string {
+  return value === null ? '' : String(Math.round(value)).replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+}
+
+/** Validates the builder form. Item names come from the current settings; prices are typed per proposal. */
 export function parseProposalInput(raw: unknown, settings: ProposalSettings, now: Date = new Date()): { value: ProposalInput } | { error: string } {
   if (!raw || typeof raw !== 'object') return { error: 'Proposal input is missing.' };
   const body = raw as Record<string, unknown>;
@@ -132,15 +163,16 @@ export function parseProposalInput(raw: unknown, settings: ProposalSettings, now
     const selection = row as Partial<ExposureSelection>;
     const itemId = line(selection?.itemId, 40);
     const units = int(selection?.units, 1, 100) ?? 1;
-    const card = cardById.get(itemId);
+    const unitValue = parsePrice(selection?.unitValue);
+    const card = itemId === COLLAB_EXPOSURE_ITEM.id ? COLLAB_EXPOSURE_ITEM : cardById.get(itemId);
     if (card) {
-      exposures.push({ itemId, content: card.content, platform: card.platform, quantityLabel: card.quantityLabel, unitValue: card.value, units });
+      if (exposures.some(row => row.itemId === itemId)) continue;
+      exposures.push({ itemId, content: card.content, platform: card.platform, quantityLabel: card.quantityLabel, unitValue, units });
       continue;
     }
-    // A row whose rate card item was removed later keeps the values it was saved with.
-    const unitValue = int(selection?.unitValue, 0, 1e12);
+    // A row whose item was removed from Settings later keeps the values it was saved with.
     const content = line(selection?.content, 120);
-    if (!itemId || !content || unitValue === null) continue;
+    if (!itemId || !content) continue;
     exposures.push({ itemId, content, platform: line(selection?.platform, 160), quantityLabel: line(selection?.quantityLabel, 80) || '1x', unitValue, units });
   }
 
@@ -193,11 +225,16 @@ export function parseProposalInput(raw: unknown, settings: ProposalSettings, now
   };
 }
 
-export interface ExposureLine { no: number; content: string; platform: string; quantity: string; value: number }
+/** `value` is null when no price was typed: shown as (TBD), never as Rp 0. */
+export interface ExposureLine { no: number; content: string; platform: string; quantity: string; value: number | null }
 export interface NeedLine { description: string; quantity: number | null; unitValue: number | null; total: number }
 export interface ProposalTotals {
   exposureLines: ExposureLine[];
+  /** Sum of the priced lines only. */
   exposureTotal: number;
+  /** Lines with a price / without one. */
+  exposurePriced: number;
+  exposureUnpriced: number;
   needLines: NeedLine[];
   needTotal: number;
   baseFee: number | null;
@@ -211,9 +248,10 @@ export function computeTotals(input: Pick<ProposalInput, 'exposures' | 'needs' |
     content: item.content,
     platform: withPartner(item.platform, input.partnerName),
     quantity: item.units > 1 ? `${item.units} × ${item.quantityLabel}` : item.quantityLabel,
-    value: item.unitValue * item.units,
+    value: item.unitValue === null || item.unitValue === undefined ? null : item.unitValue * item.units,
   }));
-  const exposureTotal = exposureLines.reduce((sum, row) => sum + row.value, 0);
+  const exposureTotal = exposureLines.reduce((sum, row) => sum + (row.value ?? 0), 0);
+  const exposurePriced = exposureLines.filter(row => row.value !== null).length;
   const needLines = input.needs.map(need => ({
     description: need.description,
     quantity: need.quantity,
@@ -222,8 +260,29 @@ export function computeTotals(input: Pick<ProposalInput, 'exposures' | 'needs' |
   }));
   const needTotal = needLines.reduce((sum, row) => sum + row.total, 0);
   const baseFee = input.baseFee;
-  return { exposureLines, exposureTotal, needLines, needTotal, baseFee, packageTotal: exposureTotal + needTotal + (baseFee ?? 0) };
+  return {
+    exposureLines, exposureTotal, exposurePriced, exposureUnpriced: exposureLines.length - exposurePriced,
+    needLines, needTotal, baseFee, packageTotal: exposureTotal + needTotal + (baseFee ?? 0),
+  };
 }
+
+/**
+ * Digital Exposure table for both renderers. Empty-price rule:
+ * - no item has a price: the Value column and the exposure total are left out;
+ * - some items have a price: empty ones show (TBD) and the total says it excludes them;
+ * - every item has a price: plain table and total.
+ * An empty price is never printed as Rp 0 or as an old rate-card value.
+ */
+export function exposureTable(totals: ProposalTotals, L: ProposalLabels): { rows: string[][]; showValue: boolean; totalText: string | null } {
+  const showValue = totals.exposurePriced > 0;
+  const head = [L.colNo, L.colContent, L.colPlatform, L.colQuantity, ...(showValue ? [L.colValue] : [])];
+  const rows = [head, ...totals.exposureLines.map(row => [`${row.no}.`, row.content, row.platform, row.quantity, ...(showValue ? [row.value === null ? L.tbd : formatRupiah(row.value)] : [])])];
+  const totalText = showValue ? `${formatRupiah(totals.exposureTotal)}${totals.exposureUnpriced ? ` ${L.exposurePartial}` : ''}` : null;
+  return { rows, showValue, totalText };
+}
+
+/** Package or exposure value for summary lines: Rupiah when there is a figure, (TBD) otherwise. */
+export const valueOrTbd = (value: number, L: ProposalLabels) => (value > 0 ? formatRupiah(value) : L.tbd);
 
 export const DEFAULT_INCLUDE: Record<SectionKey, boolean> = Object.fromEntries(SECTION_KEYS.map(key => [key, true])) as Record<SectionKey, boolean>;
 
@@ -487,6 +546,8 @@ export interface ProposalLabels {
   baseFeeNote: string;
   exposureValueRow: string;
   exposureValueNote: string;
+  /** Appended to an exposure total when some items have no price yet. */
+  exposurePartial: string;
   contributionRow: string;
   tbd: string;
   license: string;
@@ -506,7 +567,7 @@ export const PROPOSAL_LABELS: Record<ProposalLanguage, ProposalLabels> = {
     totalValue: 'Total value', packageEstimate: 'Collaboration estimation package', packageTotal: 'Total collaboration value package', notes: 'Notes on costs',
     colNo: 'No.', colContent: 'Content', colPlatform: 'Platform', colQuantity: 'Quantity', colValue: 'Value', colMaterial: 'Material', colPlacement: 'Placement',
     colItem: 'Item', colFee: 'Fee', colNotes: 'Notes', baseFee: 'Base partnership fee', baseFeeNote: 'Calculation on discount products',
-    exposureValueRow: 'Digital exposure value', exposureValueNote: 'Price may vary depends on agreed package', contributionRow: 'Partner contribution', tbd: '(TBD)',
+    exposureValueRow: 'Digital exposure value', exposureValueNote: 'Price may vary depends on agreed package', exposurePartial: '(excl. items marked TBD)', contributionRow: 'Partner contribution', tbd: '(TBD)',
     license: 'License', ratingBy: 'by',
   },
   id: {
@@ -521,7 +582,7 @@ export const PROPOSAL_LABELS: Record<ProposalLanguage, ProposalLabels> = {
     totalValue: 'Total nilai', packageEstimate: 'Estimasi paket kolaborasi', packageTotal: 'Total nilai paket kolaborasi', notes: 'Catatan biaya',
     colNo: 'No.', colContent: 'Konten', colPlatform: 'Platform', colQuantity: 'Jumlah', colValue: 'Nilai', colMaterial: 'Materi', colPlacement: 'Penempatan',
     colItem: 'Item', colFee: 'Biaya', colNotes: 'Catatan', baseFee: 'Base partnership fee', baseFeeNote: 'Dihitung dari produk diskon',
-    exposureValueRow: 'Nilai eksposur digital', exposureValueNote: 'Harga dapat berubah sesuai paket yang disepakati', contributionRow: 'Kontribusi partner', tbd: '(TBD)',
+    exposureValueRow: 'Nilai eksposur digital', exposureValueNote: 'Harga dapat berubah sesuai paket yang disepakati', exposurePartial: '(belum termasuk item TBD)', contributionRow: 'Kontribusi partner', tbd: '(TBD)',
     license: 'Izin', ratingBy: 'oleh',
   },
 };
