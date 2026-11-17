@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireFeature } from '@/lib/auth';
 import { buildCombinedOpportunities, buildComparison, parseCompetitorInput } from '@/lib/partnership/intel';
+import { reportMode } from '@/lib/partnership/refresh-plan';
+import { spendForRefs } from '@/lib/seo/treg-spend';
 import { DuplicateCompetitorError, createCompetitor, expireStaleReports, latestReports, listCompetitors } from '@/lib/partnership/store';
 
 export const dynamic = 'force-dynamic';
@@ -11,15 +13,21 @@ export async function GET(request: NextRequest) {
   await expireStaleReports();
   const competitors = await listCompetitors();
   const { succeeded, newest } = await latestReports();
+  // treg spend ledger per latest run: the actual cost of a paid run, also when it failed.
+  const spend = await spendForRefs([...newest.values()].map(report => report.id)).catch(() => new Map());
   const rows = competitors.map(competitor => {
     const report = succeeded.get(competitor.id) ?? null;
     const latest = newest.get(competitor.id) ?? null;
     return {
       ...competitor,
       lastRefreshedAt: report?.finishedAt ?? null,
+      lastRefreshMode: report?.result ? reportMode(report.result.tregCost) : null,
       itemCount: report?.result?.items.length ?? 0,
       overview: report?.result?.overview ?? '',
-      latestRun: latest ? { id: latest.id, status: latest.status, progress: latest.progress, message: latest.message, error: latest.error, trigger: latest.trigger } : null,
+      latestRun: latest ? {
+        id: latest.id, status: latest.status, progress: latest.progress, message: latest.message, error: latest.error, trigger: latest.trigger,
+        tregCostMicro: spend.get(latest.id)?.actual_micro ?? null,
+      } : null,
     };
   });
   const comparison = buildComparison(competitors.map(competitor => {

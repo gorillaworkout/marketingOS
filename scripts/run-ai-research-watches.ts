@@ -1,4 +1,4 @@
-import 'dotenv/config';
+import './load-env';
 import { closeDb } from '../src/lib/database';
 import { runDueResearchWatches } from '../src/lib/ai-research-watch-run';
 

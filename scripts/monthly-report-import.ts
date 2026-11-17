@@ -15,7 +15,7 @@
  * ignored); --ftd-offset defaults to --offset. --report prints the
  * month's numbers from the database after importing.
  */
-import 'dotenv/config';
+import './load-env';
 import { readFileSync } from 'node:fs';
 import { basename } from 'node:path';
 

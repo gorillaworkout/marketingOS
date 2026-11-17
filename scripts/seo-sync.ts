@@ -1,4 +1,4 @@
-import 'dotenv/config';
+import './load-env';
 import { closeDb } from '../src/lib/database';
 import { runSeoSyncForSite, syncableSiteIds } from '../src/lib/seo/sync-service';
 

@@ -6,13 +6,15 @@ import {
 } from '@/components/ui/dashboard';
 import { fetchJson } from '@/components/seo/useSeoSites';
 import { TregCostNotice, useTregStatus, type TregStatus } from '@/components/seo/TregCostNotice';
+import { RefreshToolbar } from '@/components/partnership/RefreshToolbar';
 import { CONTENT_PATTERN_LABELS, type CampaignItem, type RegularContentItem } from '@/lib/partnership/campaigns';
 import {
   INTEL_CATEGORIES, INTEL_CATEGORY_LABELS, REGION_LABELS, buildTimeline,
   type ComparisonRow, type IntelItem, type IntelOpportunity, type IntelReportResult, type Region, type SourceRef,
 } from '@/lib/partnership/intel';
+import { reportMode, reportModeLabel, type ReportMode, type ToolbarTregStatus } from '@/lib/partnership/refresh-plan';
 
-type PartnershipTregStatus = TregStatus & { instagram?: { perCompetitorMicro: number; maxPerCompetitorUsd: number } };
+type PartnershipTregStatus = TregStatus & ToolbarTregStatus;
 /** Item categories shown under "Other activity"; legacy campaigns/social items are shown as regular content. */
 const OTHER_CATEGORIES = INTEL_CATEGORIES.filter(category => category !== 'campaigns' && category !== 'social');
 
@@ -46,20 +48,26 @@ function regularRows(result: IntelReportResult): RegularRow[] {
 type RunInfo = { id: string; status: 'queued' | 'running' | 'succeeded' | 'failed'; progress: number; message: string; error: string | null; trigger: string };
 type CompetitorSummary = {
   id: string; name: string; region: Region; website: string | null; instagramHandle: string | null; notes: string | null;
-  lastRefreshedAt: string | null; itemCount: number; overview: string; latestRun: RunInfo | null;
+  lastRefreshedAt: string | null; lastRefreshMode: ReportMode | null; itemCount: number; overview: string; latestRun: RunInfo | null;
 };
 type ListResponse = { competitors: CompetitorSummary[]; comparison: ComparisonRow[]; opportunities: Array<IntelOpportunity & { competitorName: string }>; canDelete: boolean };
 type Evidence = {
   id: string; kind: string; sourceUrl: string | null; pastedText: string | null; extractedText: string | null; extractionStatus: string;
   hasScreenshot: boolean; observedOn: string | null; createdByName: string | null; createdAt: string; canDelete: boolean;
 };
-type ReportRow = { id: string; status: string; trigger: string; message: string; error: string | null; createdAt: string; finishedAt: string | null; model: string | null; result: IntelReportResult | null };
+type ReportRow = { id: string; status: string; trigger: string; message: string; error: string | null; createdAt: string; finishedAt: string | null; model: string | null; result: IntelReportResult | null; tregCost?: IntelReportResult['tregCost'] };
 type DetailResponse = { competitor: CompetitorSummary; evidence: Evidence[]; report: ReportRow | null; history: ReportRow[] };
 type CompetitorForm = { name: string; region: Region; website: string; instagramHandle: string; notes: string };
 
 const EMPTY_FORM: CompetitorForm = { name: '', region: 'local', website: '', instagramHandle: '', notes: '' };
 const when = (value: string | null) => (value ? new Date(value).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' }) : '—');
 const running = (run: RunInfo | null | undefined) => run?.status === 'queued' || run?.status === 'running';
+
+/** "Free" or "treg $0.0009": which source a finished refresh used. */
+function ModeBadge({ mode }: { mode: ReportMode | null | undefined }) {
+  if (!mode) return null;
+  return <StatusBadge tone={mode.kind === 'treg' ? 'warning' : 'neutral'} className="h-5 px-1.5 text-[10px]">{reportModeLabel(mode)}</StatusBadge>;
+}
 
 function SourceLinks({ sources }: { sources: SourceRef[] }) {
   return <span className="flex flex-wrap gap-x-2 gap-y-1">
@@ -98,7 +106,8 @@ export default function CompetitorIntelligencePage() {
   const [evidenceFile, setEvidenceFile] = useState<File | null>(null);
   const [fileInputKey, setFileInputKey] = useState(0);
   const [busy, setBusy] = useState(false);
-  const [confirmTreg, setConfirmTreg] = useState(false);
+  const [refreshIds, setRefreshIds] = useState<string[]>([]);
+  const [batchActive, setBatchActive] = useState(false);
   const { status: tregRaw, reload: reloadTreg } = useTregStatus('/api/partnership/treg');
   const treg = tregRaw as PartnershipTregStatus | null;
 
@@ -127,13 +136,14 @@ export default function CompetitorIntelligencePage() {
 
   const anyRunning = Boolean(list?.competitors.some(item => running(item.latestRun)));
   useEffect(() => {
-    if (!anyRunning) return;
+    // While a toolbar batch runs, the toolbar polls the list itself.
+    if (!anyRunning || batchActive) return;
     const timer = window.setInterval(() => {
       void loadList();
       if (selectedId) void loadDetail(selectedId);
     }, 3000);
     return () => window.clearInterval(timer);
-  }, [anyRunning, selectedId, loadList, loadDetail]);
+  }, [anyRunning, batchActive, selectedId, loadList, loadDetail]);
 
   const select = (id: string) => {
     setSelectedId(id);
@@ -141,16 +151,10 @@ export default function CompetitorIntelligencePage() {
     setDetail(null);
   };
 
-  const refresh = async (id: string, withTreg = false) => {
-    setMessage('');
-    setConfirmTreg(false);
-    const body = withTreg ? JSON.stringify({ treg: { confirmedEstimateMicro: treg?.instagram?.perCompetitorMicro ?? 0 } }) : undefined;
-    const { ok, data } = await fetchJson<{ id: string; treg?: string }>(`/api/partnership/competitors/${encodeURIComponent(id)}/refresh`, { method: 'POST', body, headers: body ? { 'content-type': 'application/json' } : undefined });
-    setMessage(ok
-      ? `Refresh started. It reads the website, linked help/program pages, news, Instagram post captions, and team evidence, then summarizes.${data.treg === 'reserved' ? ' treg will also read recent Instagram posts.' : data.treg === 'skipped' ? ' treg was skipped (balance or key), so free sources only.' : ''}`
-      : data.error || 'Could not start the refresh.');
-    await loadList();
-    if (withTreg) void reloadTreg();
+  /** Detail view shortcut: pick this competitor in the top toolbar and scroll up to it. */
+  const pickForRefresh = (id: string) => {
+    setRefreshIds([id]);
+    document.querySelector('[data-testid="refresh-toolbar"]')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   };
 
   const saveNew = async () => {
@@ -220,6 +224,18 @@ export default function CompetitorIntelligencePage() {
       description="What competitor brokers did in the last 3 months, as brand campaigns (named idea + tagline/hashtag + format) apart from regular social content, from their websites, linked help/program pages, news, public Instagram post captions, and evidence the team pastes. Every item links to its source; anything without a source is not shown."
       actions={<Button variant="primary" onClick={() => setAdding(value => !value)}>{adding ? 'Cancel' : 'Add competitor'}</Button>}
     />
+    <RefreshToolbar
+      competitors={list.competitors}
+      treg={treg}
+      selectedIds={refreshIds}
+      setSelectedIds={setRefreshIds}
+      reloadTreg={reloadTreg}
+      onList={data => {
+        setList(current => (current ? { ...current, ...(data as Partial<ListResponse>) } : current));
+        if (selectedId) void loadDetail(selectedId);
+      }}
+      onBatchChange={setBatchActive}
+    />
     {message && <Panel padding="compact"><p className="text-sm text-[var(--mos-text-secondary)]">{message}</p></Panel>}
 
     {adding && <Panel>
@@ -228,7 +244,7 @@ export default function CompetitorIntelligencePage() {
       <div className="mt-4"><Button variant="primary" disabled={busy || !newForm.name.trim()} onClick={saveNew}>Save competitor</Button></div>
     </Panel>}
 
-    <DataTableFrame title="Comparison" description="Cited items per category in each competitor's latest refresh. Refreshes run weekly; Refresh runs one now.">
+    <DataTableFrame title="Comparison" description="Cited items per category in each competitor's latest refresh. Weekly refreshes use free sources; use the toolbar above to refresh now.">
       {!list.competitors.length && <EmptyState title="No competitors yet" description="Add a competitor to start." />}
       {list.competitors.length > 0 && <table className="w-full min-w-[1080px] text-sm">
         <thead className="border-b border-[var(--mos-border)] text-left text-xs uppercase tracking-wide text-[var(--mos-text-faint)]">
@@ -251,12 +267,11 @@ export default function CompetitorIntelligencePage() {
               <td className="p-3 text-right tabular-nums">{row?.lastRefreshed ? row.total : '—'}</td>
               <td className="max-w-[240px] truncate p-3 text-xs" title={row?.headline || ''}>{row?.headline || '—'}</td>
               <td className="p-3 text-xs">
-                {running(run) ? <span>{run?.message || 'Running'} ({run?.progress}%)</span> : when(competitor.lastRefreshedAt)}
+                {running(run) ? <span>{run?.message || 'Running'} ({run?.progress}%)</span> : <span className="flex flex-wrap items-center gap-1.5">{when(competitor.lastRefreshedAt)}<ModeBadge mode={competitor.lastRefreshMode} /></span>}
                 {run?.status === 'failed' && <span className="block text-red-300" title={run.error || ''}>Last refresh failed</span>}
               </td>
               <td className="p-3 text-right"><span className="flex justify-end gap-2">
                 <Button size="sm" onClick={() => select(competitor.id)}>Open</Button>
-                <Button size="sm" disabled={running(run)} onClick={() => refresh(competitor.id)}>{running(run) ? 'Refreshing…' : 'Refresh'}</Button>
               </span></td>
             </tr>;
           })}
@@ -290,23 +305,13 @@ export default function CompetitorIntelligencePage() {
             {detail.competitor.notes && <p className="mt-2 text-sm text-[var(--mos-text-secondary)]">{detail.competitor.notes}</p>}
           </div>
           <div className="flex flex-wrap gap-2">
-            <Button size="sm" disabled={running(selected?.latestRun)} onClick={() => refresh(detail.competitor.id)}>{running(selected?.latestRun) ? 'Refreshing…' : 'Refresh (free sources)'}</Button>
-            {treg?.canRun && detail.competitor.instagramHandle && <Button size="sm" variant="primary" disabled={running(selected?.latestRun)} onClick={() => setConfirmTreg(true)}>Refresh + Instagram via treg</Button>}
+            <Button size="sm" disabled={running(selected?.latestRun) || batchActive} onClick={() => pickForRefresh(detail.competitor.id)}>{running(selected?.latestRun) ? 'Refreshing…' : 'Refresh…'}</Button>
             <Button size="sm" onClick={() => setEditForm(editForm ? null : {
               name: detail.competitor.name, region: detail.competitor.region, website: detail.competitor.website || '', instagramHandle: detail.competitor.instagramHandle || '', notes: detail.competitor.notes || '',
             })}>{editForm ? 'Cancel edit' : 'Edit'}</Button>
             {list.canDelete && <Button size="sm" variant="ghost" onClick={remove}>Delete</Button>}
           </div>
         </div>
-        {treg?.configured && detail.competitor.instagramHandle && <TregCostNotice
-          feature="Competitor Intelligence"
-          status={treg}
-          estimate={{ totalMicro: treg.instagram?.perCompetitorMicro ?? 0, calls: 1, detail: `recent posts of @${detail.competitor.instagramHandle}, capped at $${(treg.instagram?.maxPerCompetitorUsd ?? 0).toFixed(3)}` }}
-          confirming={confirmTreg}
-          busy={running(selected?.latestRun)}
-          onConfirm={() => refresh(detail.competitor.id, true)}
-          onCancel={() => setConfirmTreg(false)}
-        />}
         {treg?.configured && !detail.competitor.instagramHandle && <p className="mt-3 text-xs text-[var(--mos-text-muted)]">Add the Instagram handle to let treg read recent posts (optional, paid).</p>}
         {running(selected?.latestRun) && <div className="mt-3 h-2 overflow-hidden rounded-full bg-white/10"><div className="h-full bg-[var(--mos-accent)]" style={{ width: `${selected?.latestRun?.progress || 0}%` }} /></div>}
         {editForm && <div className="mt-4">
@@ -315,10 +320,10 @@ export default function CompetitorIntelligencePage() {
         </div>}
       </Panel>
 
-      {!result && <Panel><p className="text-sm text-[var(--mos-text-muted)]">No refresh yet. Click Refresh to build the 3-month summary.</p></Panel>}
+      {!result && <Panel><p className="text-sm text-[var(--mos-text-muted)]">No refresh yet. Use Refresh competitors at the top to build the 3-month summary.</p></Panel>}
       {result && <>
         <Panel>
-          <SectionHeader title={`Last 3 months (${result.window.start} to ${result.window.end})`} description={`Refreshed ${when(detail.report?.finishedAt || null)}${detail.report?.model ? ` · ${detail.report.model}` : ''}`} className="mb-3" />
+          <SectionHeader title={`Last 3 months (${result.window.start} to ${result.window.end})`} description={`Refreshed ${when(detail.report?.finishedAt || null)}${detail.report?.model ? ` · ${detail.report.model}` : ''}`} action={<span className="flex items-center gap-1.5 text-xs text-[var(--mos-text-faint)]" data-testid="report-mode">Source <ModeBadge mode={reportMode(result.tregCost)} /></span>} className="mb-3" />
           {result.overview && <p className="text-sm leading-6 text-[var(--mos-text-secondary)]">{result.overview}</p>}
           {result.notes.length > 0 && <ul className="mt-3 list-disc space-y-1 pl-5 text-xs text-[var(--mos-text-muted)]">{result.notes.map(note => <li key={note}>{note}</li>)}</ul>}
           {result.tregCost && treg && <TregCostNotice feature="Competitor Intelligence" status={treg} estimate={{ totalMicro: result.tregCost.estimatedMicro, calls: result.tregCost.calls }}
@@ -422,11 +427,12 @@ export default function CompetitorIntelligencePage() {
 
       {detail.history.length > 0 && <DataTableFrame title="Refresh history">
         <table className="w-full min-w-[640px] text-sm">
-          <thead className="border-b border-[var(--mos-border)] text-left text-xs uppercase tracking-wide text-[var(--mos-text-faint)]"><tr><th className="p-3">Started</th><th className="p-3">Trigger</th><th className="p-3">Status</th><th className="p-3">Detail</th></tr></thead>
+          <thead className="border-b border-[var(--mos-border)] text-left text-xs uppercase tracking-wide text-[var(--mos-text-faint)]"><tr><th className="p-3">Started</th><th className="p-3">Trigger</th><th className="p-3">Source</th><th className="p-3">Status</th><th className="p-3">Detail</th></tr></thead>
           <tbody>
             {detail.history.map(run => <tr key={run.id} className="border-b border-[var(--mos-border)] text-[var(--mos-text-secondary)]">
               <td className="p-3 text-xs">{when(run.createdAt)}</td>
               <td className="p-3 text-xs">{run.trigger}</td>
+              <td className="p-3 text-xs">{run.status === 'succeeded' ? <ModeBadge mode={reportMode(run.tregCost)} /> : '—'}</td>
               <td className="p-3 text-xs"><StatusBadge tone={run.status === 'succeeded' ? 'success' : run.status === 'failed' ? 'danger' : 'info'}>{run.status}</StatusBadge></td>
               <td className="p-3 text-xs">{run.error || run.message}</td>
             </tr>)}

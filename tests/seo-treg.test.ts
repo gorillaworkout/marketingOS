@@ -312,7 +312,8 @@ test('Keyword Gap uses the shared <TregCostNotice> before and after a generate',
   assert.match(page, /<TregBalancePanel status=\{treg\} \/>/);
   assert.match(page, /<TregCostNotice[\s\S]*confirming=\{confirming\}/);
   assert.match(page, /result=\{gap\.cost\}/);
-  assert.match(component, /Estimated cost for one generate/);
+  assert.match(component, /Estimated cost for \{scopeLabel\}/);
+  assert.match(component, /scopeLabel = 'one generate'/);
   assert.match(component, /Remaining balance/);
   assert.match(component, /reported by treg/);
   assert.equal(/TREG_API_KEY=\S/.test(component + page), false);

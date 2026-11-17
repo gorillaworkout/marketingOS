@@ -46,6 +46,8 @@ export interface ReportRow {
   createdBy: string | null;
   createdAt: string;
   finishedAt: string | null;
+  /** History rows only: the treg cost of a finished run (null = free sources). */
+  tregCost?: IntelReportResult['tregCost'];
 }
 
 export class ReportInProgressError extends Error {
@@ -279,9 +281,9 @@ export async function latestReports(): Promise<{ succeeded: Map<string, ReportRo
 export async function recentReports(competitorId: string, limit = 10): Promise<ReportRow[]> {
   const rows = await queryAll(
     `SELECT id, kind, competitor_id, trigger, status, progress, message, NULL AS result, model, error, created_by,
-            created_at::text AS created_at, finished_at::text AS finished_at
+            created_at::text AS created_at, finished_at::text AS finished_at, result->'tregCost' AS treg_cost
      FROM partnership_reports WHERE competitor_id = ? ORDER BY created_at DESC LIMIT ?`,
     [competitorId, limit],
   );
-  return rows.map(row => mapReport(row, false));
+  return rows.map(row => ({ ...mapReport(row, false), tregCost: asJson<NonNullable<IntelReportResult['tregCost']>>(row.treg_cost) }));
 }
