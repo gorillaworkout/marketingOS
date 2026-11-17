@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { queryAll } from '@/lib/database';
 import { getSession } from '@/lib/auth';
 import { linkedGeneratedImages } from '@/lib/image-remix';
+import { readAllGeneratedImageMeta } from '@/lib/generated-image-meta';
 import fs from 'fs';
 import path from 'path';
 
@@ -52,6 +53,8 @@ export async function GET(request: NextRequest) {
     model: string | null;
     includeSwipeLeft: boolean | null;
     dupoinAcademy: boolean | null;
+    logo: 'dupoin' | 'academy' | 'none' | null;
+    footer: boolean | null;
   }>();
   for (const task of tasks) {
     try {
@@ -73,6 +76,8 @@ export async function GET(request: NextRequest) {
           model: linked.model,
           includeSwipeLeft: linked.includeSwipeLeft,
           dupoinAcademy: linked.dupoinAcademy,
+          logo: linked.logo ?? null,
+          footer: linked.footer ?? null,
         });
       }
     } catch {
@@ -80,9 +85,35 @@ export async function GET(request: NextRequest) {
     }
   }
 
+  // Generate Image results without a task keep their inputs in a sidecar file.
+  const metaByFile = readAllGeneratedImageMeta();
+
   // 3. Build combined image list
   let allImages = fsImages.map(img => {
     const taskInfo = taskImageMap.get(img.filename);
+    const meta = taskInfo ? null : metaByFile.get(img.filename);
+    if (meta) {
+      return {
+        filename: img.filename,
+        url: `/api/generated-images/${encodeURIComponent(img.filename)}`,
+        createdAt: img.createdAt,
+        taskId: null,
+        brief: meta.brief || null,
+        title: null,
+        userId: meta.userId,
+        username: null,
+        name: null,
+        type: 'generate-image',
+        prompt: meta.prompt,
+        aspectRatio: meta.aspectRatio,
+        model: meta.model,
+        includeSwipeLeft: meta.includeSwipeLeft,
+        dupoinAcademy: meta.dupoinAcademy,
+        logo: meta.logo,
+        footer: meta.footer,
+        linked: false,
+      };
+    }
     return {
       filename: img.filename,
       url: `/api/generated-images/${encodeURIComponent(img.filename)}`,
@@ -99,6 +130,8 @@ export async function GET(request: NextRequest) {
       model: taskInfo?.model || null,
       includeSwipeLeft: taskInfo?.includeSwipeLeft ?? null,
       dupoinAcademy: taskInfo?.dupoinAcademy ?? null,
+      logo: taskInfo?.logo ?? null,
+      footer: taskInfo?.footer ?? null,
       linked: !!taskInfo,
     };
   });

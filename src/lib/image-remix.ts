@@ -4,14 +4,20 @@
  * Prompts are not a separate table. They live on the task row the gallery
  * already reads: `tasks.output_data` JSON, on `images[]` (`prompt`,
  * `aspectRatio`, `model`, `includeSwipeLeft`, `dupoinAcademy`) with a fallback to `imagePrompt`.
- * `tasks.type` picks the editor. Only Social Post generates images today.
+ * `tasks.type` picks the editor. Images now live on Generate Image
+ * (/dashboard/generate-image); Social Post is caption-only, so images from
+ * Social Post tasks also remix there. Standalone Generate Image results keep
+ * their inputs in data/generated-image-meta/ (see generated-image-meta.ts).
  */
 
 export const IMAGE_REMIX_QUERY = 'remix';
 export const IMAGE_REMIX_STORAGE_KEY = 'mos.image-remix';
 export const IMAGE_REMIX_MAX_AGE_MS = 2 * 60 * 60 * 1000;
 
-export type ImageRemixTarget = 'social-post';
+export type ImageRemixTarget = 'generate-image';
+
+/** Stored before Social Post became caption-only. Still read, then sent to Generate Image. */
+const LEGACY_REMIX_TARGETS = ['social-post'];
 
 export interface LinkedGeneratedImage {
   filename: string;
@@ -20,6 +26,8 @@ export interface LinkedGeneratedImage {
   model: string | null;
   includeSwipeLeft: boolean | null;
   dupoinAcademy: boolean | null;
+  logo?: 'dupoin' | 'academy' | 'none' | null;
+  footer?: boolean | null;
 }
 
 export interface ImageRemixRecord {
@@ -30,6 +38,8 @@ export interface ImageRemixRecord {
   model?: string;
   includeSwipeLeft?: boolean;
   dupoinAcademy?: boolean;
+  logo?: 'dupoin' | 'academy' | 'none';
+  footer?: boolean;
   taskId?: string;
   filename?: string;
   imageUrl?: string;
@@ -37,11 +47,15 @@ export interface ImageRemixRecord {
 }
 
 export function imageRemixTarget(type: string | null | undefined): ImageRemixTarget | null {
-  return type === 'social-post' ? 'social-post' : null;
+  return type === 'social-post' || type === 'generate-image' ? 'generate-image' : null;
 }
 
-export function imageRemixHref(target: ImageRemixTarget = 'social-post'): string {
+export function imageRemixHref(target: ImageRemixTarget = 'generate-image'): string {
   return `/dashboard/${target}?${IMAGE_REMIX_QUERY}=1`;
+}
+
+function readLogo(value: unknown): 'dupoin' | 'academy' | 'none' | null {
+  return value === 'dupoin' || value === 'academy' || value === 'none' ? value : null;
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -106,6 +120,8 @@ export function linkedGeneratedImages(output: unknown): LinkedGeneratedImage[] {
       model: readModel(entry),
       includeSwipeLeft: swipe ?? fallbackSwipe,
       dupoinAcademy: academy ?? fallbackAcademy,
+      logo: entry ? readLogo(entry.logo) : null,
+      footer: entry ? readBool(entry.footer) : null,
     });
   };
 
@@ -138,7 +154,9 @@ export function readImageRemix(target: ImageRemixTarget, now = Date.now()): Imag
     const raw = sessionStorage.getItem(IMAGE_REMIX_STORAGE_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as Partial<ImageRemixRecord>;
-    if (parsed.target !== target || typeof parsed.prompt !== 'string' || !parsed.prompt.trim()) return null;
+    const storedTarget = typeof parsed.target === 'string' ? parsed.target : '';
+    if (storedTarget !== target && !LEGACY_REMIX_TARGETS.includes(storedTarget)) return null;
+    if (typeof parsed.prompt !== 'string' || !parsed.prompt.trim()) return null;
     const savedAt = typeof parsed.savedAt === 'string' ? Date.parse(parsed.savedAt) : NaN;
     if (!Number.isFinite(savedAt) || now - savedAt > IMAGE_REMIX_MAX_AGE_MS || savedAt > now + 60_000) return null;
     return {
@@ -149,6 +167,8 @@ export function readImageRemix(target: ImageRemixTarget, now = Date.now()): Imag
       model: typeof parsed.model === 'string' ? parsed.model : undefined,
       includeSwipeLeft: typeof parsed.includeSwipeLeft === 'boolean' ? parsed.includeSwipeLeft : undefined,
       dupoinAcademy: typeof parsed.dupoinAcademy === 'boolean' ? parsed.dupoinAcademy : undefined,
+      logo: readLogo(parsed.logo) ?? undefined,
+      footer: typeof parsed.footer === 'boolean' ? parsed.footer : undefined,
       taskId: typeof parsed.taskId === 'string' ? parsed.taskId : undefined,
       filename: typeof parsed.filename === 'string' ? parsed.filename : undefined,
       imageUrl: typeof parsed.imageUrl === 'string' ? parsed.imageUrl : undefined,

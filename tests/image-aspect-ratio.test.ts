@@ -51,16 +51,17 @@ test('withImageAspectPrompt bakes dropdown size into prompt text without stackin
   assert.equal(withImageAspectPrompt(second, '1:1'), second);
 });
 
-test('Social Post chooser precedes Generate image and submits selected ratio plus prompt locks', () => {
-  const page = read('src/app/dashboard/social-post/page.tsx');
+test('Generate Image chooser precedes Generate image and submits selected ratio; server applies the prompt locks', () => {
+  const page = read('src/app/dashboard/generate-image/page.tsx');
   assert.match(page, /useState<ImageAspectRatio>\(DEFAULT_IMAGE_ASPECT_RATIO\)/);
-  assert.match(page, /applyDupoinImagePromptLocks\(editableImagePrompt, imageAspectRatio, \{ includeSwipeLeft, dupoinAcademy \}\)/);
-  assert.match(page, /JSON\.stringify\(\{[\s\S]*prompt: imagePrompt[\s\S]*aspectRatio: imageAspectRatio[\s\S]*includeSwipeLeft/);
-  const chooser = page.indexOf('Image aspect ratio');
-  const generate = page.indexOf("generatingImage ? 'Generating image…' : 'Generate image'");
+  assert.match(page, /applyDupoinImagePromptLocks\(prompt, aspectRatio, \{ includeSwipeLeft, logo, footer, brandStyle \}\)/, 'final prompt preview uses the same locks as the server');
+  assert.match(page, /JSON\.stringify\(\{[\s\S]*prompt: prompt\.trim\(\)[\s\S]*aspectRatio,[\s\S]*includeSwipeLeft/);
+  const chooser = page.indexOf('label="Aspect ratio"');
+  const generate = page.indexOf("generating ? 'Generating image…'");
   assert.ok(chooser >= 0 && chooser < generate, 'ratio chooser must render before Generate image');
   assert.match(page, /IMAGE_ASPECT_RATIOS\.map\(ratio => <option key=\{ratio\} value=\{ratio\}>\{ratio\}<\/option>\)/);
-  assert.match(page, /applyDupoinImagePromptLocks\(prev, ratio, \{ includeSwipeLeft, dupoinAcademy \}\)/);
+  const social = read('src/app/dashboard/social-post/page.tsx');
+  assert.doesNotMatch(social, /Image aspect ratio|applyDupoinImagePromptLocks|\/api\/generate-image/, 'Social Post is caption-only');
 });
 
 test('route threads ratio through gateway request, job result, and task history', () => {
@@ -68,7 +69,7 @@ test('route threads ratio through gateway request, job result, and task history'
   const status = read('src/lib/image-job-status.ts');
   assert.match(route, /parseImageAspectRatio\(body\.aspectRatio\)/);
   assert.match(route, /runImageJob\([\s\S]*aspectRatio/);
-  assert.match(route, /applyDupoinImagePromptLocks\(prompt, aspectRatio, \{ includeSwipeLeft: swipeLeft, dupoinAcademy: academy \}\)/);
+  assert.match(route, /applyDupoinImagePromptLocks\(prompt, aspectRatio, \{ includeSwipeLeft: swipeLeft, logo, footer, brandStyle \}\)/);
   assert.match(route, /prompt: gatewayPrompt/);
   assert.match(route, /size: generationSpec\.size/);
   assert.match(route, /result: ImageJobResult = \{[\s\S]*aspectRatio/);

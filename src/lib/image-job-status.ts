@@ -20,6 +20,16 @@ export interface ImageJobResult {
   includeSwipeLeft?: boolean;
   /** Social Post only: the centered header used the Dupoin Academy logo. */
   dupoinAcademy?: boolean;
+  /** Header logo that was composited: Dupoin, Dupoin Academy, or none. */
+  logo?: 'dupoin' | 'academy' | 'none';
+  /** The regulatory footer + risk warning was composited. */
+  footer?: boolean;
+  /** Billed to OpenRouter credits. */
+  paid?: boolean;
+  /** Actual charge reported by OpenRouter, when it reported one. */
+  costUsd?: number | null;
+  referenceCount?: number;
+  assetCount?: number;
 }
 
 export interface ImageJob {

@@ -57,13 +57,14 @@ assert.match(generateImage, /resolveImageModel/);
 assert.match(generateImage, /generateWithAntigravityCapacityFallback/);
 assert.doesNotMatch(generateImage, /gpt-5\.4-image|ag\/nanobanana/);
 
-const socialPost = readFileSync('src/app/dashboard/social-post/page.tsx', 'utf8');
-assert.match(socialPost, /AVAILABLE_IMAGE_MODELS/);
-assert.match(socialPost, /DEFAULT_IMAGE_MODEL/);
-assert.doesNotMatch(socialPost, /gpt-5\.4-image|gpt-5\.5-image|ag\/nanobanana/);
-assert.match(socialPost, /useState\(DEFAULT_IMAGE_MODEL\)/, 'initial selection before /api/image-models loads');
-assert.match(socialPost, /selectableImageModel\(restoredModelId/);
-assert.match(socialPost, /selectableImageModel\(remix\.model/);
+// The image model picker lives on Generate Image now (Social Post is caption-only).
+const imagePage = readFileSync('src/app/dashboard/generate-image/page.tsx', 'utf8');
+assert.match(imagePage, /AVAILABLE_IMAGE_MODELS/);
+assert.match(imagePage, /DEFAULT_IMAGE_MODEL/);
+assert.doesNotMatch(imagePage, /gpt-5\.4-image|gpt-5\.5-image|ag\/nanobanana/);
+assert.match(imagePage, /useState\(DEFAULT_IMAGE_MODEL\)/, 'initial selection before /api/image-models loads');
+assert.match(imagePage, /selectableImageModel\(item\.model/);
+assert.match(imagePage, /selectableImageModel\(remix\.model/);
 assert.match(generateImage, /: DEFAULT_IMAGE_MODEL;/, 'requests without a model use the default');
 
 // Production shape after the admin switch: allowed still lists the dead id.

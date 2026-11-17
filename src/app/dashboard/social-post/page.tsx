@@ -12,14 +12,11 @@ import {
   Select,
   StatusBadge,
   TextArea,
-  Toolbar,
 } from '@/components/ui/dashboard';
 import InlineModelSelector from '@/components/InlineModelSelector';
 import { SocialPostAdvanced } from '@/components/social-post-advanced';
 import { CaptionAnalyzer } from '@/components/caption-analyzer';
-import { DEFAULT_IMAGE_ASPECT_RATIO, IMAGE_ASPECT_RATIOS, type ImageAspectRatio } from '@/lib/image-aspect-ratio';
-import { applyDupoinImagePromptLocks } from '@/lib/dupoin-image-prompt';
-import { AVAILABLE_IMAGE_MODELS, DEFAULT_IMAGE_MODEL, imageModelLabel, selectableImageModel } from '@/lib/image-models';
+import { imageModelLabel } from '@/lib/image-models';
 import { AI_RESEARCH_HANDOFF_QUERY, AI_RESEARCH_HANDOFF_VALUE, readAiResearchHandoff } from '@/lib/ai-research-handoff';
 import { readStoredSocialPostInput, VIDEO_HANDOFF_STORAGE_KEY, videoScriptHref, type SocialContentType, type SocialCta, type SocialReference, type SocialTone } from '@/lib/social-post-brief';
 import {
@@ -28,7 +25,8 @@ import {
   viewingPostWithConfirmedStatus,
 } from '@/lib/social-post-status';
 import { TASK_EDITOR_QUERY, fetchOwnHistoryTask } from '@/lib/history-editor';
-import { IMAGE_REMIX_QUERY, readImageRemix, type ImageRemixRecord } from '@/lib/image-remix';
+import { IMAGE_REMIX_QUERY, imageRemixHref } from '@/lib/image-remix';
+import { generateImageHref, writeGenerateImageHandoff } from '@/lib/generate-image-handoff';
 import {
   defaultSocialPostBrandGuidelineId,
   readSocialPostBrandGuidelines,
@@ -78,13 +76,6 @@ interface ProgressState {
   elapsed: number;
 }
 
-interface ImageProgressState {
-  step: string;
-  progress: number;
-  message: string;
-  elapsed: number;
-}
-
 interface ProgressEvent {
   step: string;
   progress: number;
@@ -93,35 +84,6 @@ interface ProgressEvent {
   researchPosts?: ResearchPost[];
   webResearch?: SocialPostWebResearch;
   qcResults?: QCResult[];
-}
-
-interface ImageJobResponse {
-  jobId?: string;
-  status?: string;
-  progress?: number;
-  message?: string;
-  error?: string;
-  result?: {
-    success?: boolean;
-    imageUrl?: string;
-    fileName?: string;
-    sopName?: string;
-    model?: string;
-    usedModel?: string;
-    fallbackFrom?: string;
-    fallbackMessage?: string;
-    aspectRatio?: ImageAspectRatio;
-    includeSwipeLeft?: boolean;
-    dupoinAcademy?: boolean;
-  };
-}
-
-async function readImageJobResponse(response: Response): Promise<ImageJobResponse> {
-  try {
-    return await response.json() as ImageJobResponse;
-  } catch {
-    return {};
-  }
 }
 
 interface PostOption {
@@ -324,27 +286,10 @@ export default function SocialPostPage() {
   const [error, setError] = useState('');
   const [tokenUsage, setTokenUsage] = useState<any>(null);
   const [taskId, setTaskId] = useState<string | null>(null);
-  const [generatingImage, setGeneratingImage] = useState(false);
-  const [generatedImage, setGeneratedImage] = useState<string | null>(null);
+  // Images are made on Generate Image now. Social Post only lists the ones already saved on a post.
   const [previewImage, setPreviewImage] = useState<{ src: string; alt: string } | null>(null);
-  const [editableImagePrompt, setEditableImagePrompt] = useState('');
-  const [promptEditorOpen, setPromptEditorOpen] = useState(false);
-  const [imageModel, setImageModel] = useState(DEFAULT_IMAGE_MODEL);
-  const [imageAspectRatio, setImageAspectRatio] = useState<ImageAspectRatio>(DEFAULT_IMAGE_ASPECT_RATIO);
-  // Off by default: header and footer chrome only, matching posts from before this option.
-  const [includeSwipeLeft, setIncludeSwipeLeft] = useState(false);
-  // Off by default: the left Dupoin wordmark and CNN laurel. On uses the centered Academy logo.
-  const [dupoinAcademy, setDupoinAcademy] = useState(false);
-  const [availableImageModels, setAvailableImageModels] = useState(AVAILABLE_IMAGE_MODELS);
-  const [imageProgress, setImageProgress] = useState<ImageProgressState | null>(null);
-  const [imageNotice, setImageNotice] = useState('');
-  const [generatedImageModel, setGeneratedImageModel] = useState<string | null>(null);
-  const imageProgressTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const imagePollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const imageRunRef = useRef(0);
   // Statuses already saved this session. History reloads must not paint the previous value back.
   const confirmedStatusRef = useRef<Record<string, string>>({});
-  const imageModelLocked = useRef(false);
   const [ratingMessage, setRatingMessage] = useState('');
   const [recentPosts, setRecentPosts] = useState<any[]>([]);
   const [imageHistory, setImageHistory] = useState<any[]>([]);
@@ -382,19 +327,6 @@ export default function SocialPostPage() {
         setResearchHandoff(true);
       }
     }
-    
-    // Fetch available image models
-    fetch('/api/image-models')
-      .then(res => res.json())
-      .then(data => {
-        if (data.models && Array.isArray(data.models) && data.models.length > 0) {
-          setAvailableImageModels(data.models);
-          if (data.defaultModel) {
-            setImageModel(current => imageModelLocked.current ? current : data.defaultModel);
-          }
-        }
-      })
-      .catch(err => console.error('Failed to load image models:', err));
   }, []);
 
   // Load recent posts on mount
@@ -452,26 +384,13 @@ export default function SocialPostPage() {
     }
   }, []);
 
-  const stopImageTracking = useCallback(() => {
-    if (imageProgressTimerRef.current) {
-      clearInterval(imageProgressTimerRef.current);
-      imageProgressTimerRef.current = null;
-    }
-    if (imagePollTimerRef.current) {
-      clearInterval(imagePollTimerRef.current);
-      imagePollTimerRef.current = null;
-    }
-  }, []);
-
   // Cleanup on unmount
   useEffect(() => {
     return () => {
       stopElapsedTimer();
-      imageRunRef.current += 1;
-      stopImageTracking();
       abortControllerRef.current?.abort();
     };
-  }, [stopElapsedTimer, stopImageTracking]);
+  }, [stopElapsedTimer]);
 
   useEffect(() => {
     if (!previewImage) return;
@@ -544,18 +463,27 @@ export default function SocialPostPage() {
     router.push(videoScriptHref());
   };
 
+  /** Social Post is caption-only: hand the caption and its image direction to Generate Image. */
+  const openGenerateImage = (input: { imagePrompt?: string; hook?: string; caption?: string }) => {
+    writeGenerateImageHandoff({
+      prompt: input.imagePrompt || '',
+      brief,
+      hook: input.hook,
+      caption: input.caption,
+      taskId,
+      platform,
+    });
+    router.push(generateImageHref(true));
+  };
+
   const handleGenerate = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setError('');
     setOptions(null);
     setResult(null);
-    setGeneratedImage(null);
     setPreviewImage(null);
     setImageHistory([]);
-    setPromptEditorOpen(false);
-    setImageNotice('');
-    setGeneratedImageModel(null);
     setTokenUsage(null);
     setViewingPost(null);
     setSelectedIndex(null);
@@ -639,9 +567,6 @@ export default function SocialPostPage() {
                 setResult(r);
                 setTaskId(r.taskId);
                 setTokenUsage(r.usage);
-                if (r.options?.[0]) {
-                  setEditableImagePrompt(applyDupoinImagePromptLocks(r.options[0].imagePrompt || r.imagePrompt || '', imageAspectRatio, { includeSwipeLeft, dupoinAcademy }));
-                }
                 if (r.qcResults) setQcResults(r.qcResults);
                 if (r.dupoinFileName) setDupoinFileName(r.dupoinFileName);
                 if (r.researchPosts) setResearchPosts(r.researchPosts);
@@ -712,7 +637,6 @@ export default function SocialPostPage() {
       }
 
       setKnowledgeSaved(true);
-      setEditableImagePrompt(applyDupoinImagePromptLocks(selected.imagePrompt || '', imageAspectRatio, { includeSwipeLeft, dupoinAcademy }));
       setTimeout(() => setKnowledgeSaved(false), 5000);
     } catch (e) {
       const message = e instanceof Error ? e.message : 'Unknown error';
@@ -778,126 +702,12 @@ export default function SocialPostPage() {
     { value: 'archived', label: '📦 Archived', color: 'text-[var(--mos-text-faint)]' },
   ];
 
-  const generateImage = async () => {
-    if (!editableImagePrompt.trim()) return;
-    imageRunRef.current += 1;
-    const runId = imageRunRef.current;
-    stopImageTracking();
-    setGeneratingImage(true);
-    setError('');
-    setGeneratedImage(null);
-    setPreviewImage(null);
-    setImageNotice('');
-    setGeneratedImageModel(null);
-    setImageProgress({ step: 'trying', progress: 5, message: 'Starting image generation...', elapsed: 0 });
-
-    const startTime = Date.now();
-    imageProgressTimerRef.current = setInterval(() => {
-      setImageProgress(prev => prev ? { ...prev, elapsed: Math.floor((Date.now() - startTime) / 1000) } : null);
-    }, 1000);
-
-    try {
-      const imagePrompt = applyDupoinImagePromptLocks(editableImagePrompt, imageAspectRatio, { includeSwipeLeft, dupoinAcademy });
-      setEditableImagePrompt(imagePrompt);
-      const res = await fetch('/api/generate-image', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt: imagePrompt, taskId, type: 'social-post', brief: brief || imagePrompt.substring(0, 100), model: imageModel, aspectRatio: imageAspectRatio, includeSwipeLeft, dupoinAcademy }),
-      });
-
-      const startup = await readImageJobResponse(res);
-      if (!res.ok) throw new Error(startup.error || `Unable to start image generation (HTTP ${res.status}).`);
-      if (typeof startup.jobId !== 'string') throw new Error('Image generation did not return a job ID.');
-      const jobId = startup.jobId;
-
-      const poll = async (): Promise<boolean> => {
-        if (imageRunRef.current !== runId) return true;
-        try {
-          const statusResponse = await fetch(`/api/generate-image?jobId=${encodeURIComponent(jobId)}`, { cache: 'no-store' });
-          const status = await readImageJobResponse(statusResponse);
-          if (!statusResponse.ok) throw new Error(status.error || `Unable to check image generation status (HTTP ${statusResponse.status}).`);
-          if (imageRunRef.current !== runId) return true;
-
-          setImageProgress({
-            step: status.status || 'generating',
-            progress: typeof status.progress === 'number' ? status.progress : 0,
-            message: status.message || 'Generating image...',
-            elapsed: Math.floor((Date.now() - startTime) / 1000),
-          });
-
-          if (status.status === 'done' && status.result?.success && status.result.imageUrl) {
-            const usedModelId = status.result.usedModel || imageModel;
-            const usedModelLabel = status.result.model
-              || availableImageModels.find(item => item.id === usedModelId)?.name
-              || usedModelId;
-            setGeneratedImage(status.result.imageUrl);
-            setGeneratedImageModel(usedModelLabel);
-            if (status.result.fallbackMessage) setImageNotice(status.result.fallbackMessage);
-            setGeneratingImage(false);
-            stopImageTracking();
-            // The image is now attached to the task row; refresh history views.
-            fetchPosts();
-            if (taskId) {
-              setImageHistory(prev => [...prev, {
-                imageUrl: status.result!.imageUrl,
-                fileName: status.result!.fileName,
-                sopName: status.result!.sopName,
-                model: usedModelId,
-                fallbackFrom: status.result!.fallbackFrom,
-                fallbackMessage: status.result!.fallbackMessage,
-                aspectRatio: status.result!.aspectRatio || imageAspectRatio,
-                includeSwipeLeft: status.result!.includeSwipeLeft === true,
-                dupoinAcademy: status.result!.dupoinAcademy === true,
-                prompt: imagePrompt,
-                generatedAt: new Date().toISOString(),
-              }]);
-            }
-            setTimeout(() => {
-              if (imageRunRef.current === runId) setImageProgress(null);
-            }, 3000);
-            return true;
-          }
-          if (status.status === 'error') {
-            setError(status.error || status.message || 'Image generation failed.');
-            setGeneratingImage(false);
-            stopImageTracking();
-            return true;
-          }
-          return false;
-        } catch (pollError: any) {
-          if (imageRunRef.current === runId) {
-            setError(pollError.message || 'Unable to check image generation status.');
-            setImageProgress(null);
-            setGeneratingImage(false);
-            stopImageTracking();
-          }
-          return true;
-        }
-      };
-
-      const finished = await poll();
-      if (!finished && imageRunRef.current === runId) {
-        imagePollTimerRef.current = setInterval(() => { void poll(); }, 1500);
-      }
-    } catch (e: any) {
-      if (imageRunRef.current === runId) {
-        setError(e.message || 'Unable to start image generation.');
-        setImageProgress(null);
-        setGeneratingImage(false);
-        stopImageTracking();
-      }
-    }
-  };
-
   const viewPost = (post: any) => {
     setViewingPost(post);
     setOptions(null);
     setResult(null);
     setSelectedIndex(null);
-    setGeneratedImage(null);
     setPreviewImage(null);
-    setImageNotice('');
-    setGeneratedImageModel(null);
     setKnowledgeSaved(false);
     setError('');
     setResearchPosts([]);
@@ -909,28 +719,14 @@ export default function SocialPostPage() {
     try {
       const data = JSON.parse(post.output_data || '{}');
       const history = Array.isArray(data.images) ? data.images : [];
-      const latest = history[history.length - 1];
-      const restoredRatio = IMAGE_ASPECT_RATIOS.includes(latest?.aspectRatio) ? latest.aspectRatio : DEFAULT_IMAGE_ASPECT_RATIO;
-      const restoredSwipe = latest?.includeSwipeLeft === true;
-      const restoredAcademy = latest?.dupoinAcademy === true;
-      const generatedPrompt = typeof latest?.prompt === 'string' ? latest.prompt.trim() : '';
-      setImageAspectRatio(restoredRatio);
-      setIncludeSwipeLeft(restoredSwipe);
-      setDupoinAcademy(restoredAcademy);
       // Handle both old format (single result) and new format (3 options).
-      // Prefer the prompt stored on the generated image; fall back to the caption prompt.
       if (data.options && Array.isArray(data.options)) {
         setOptions(data.options);
         setTaskId(post.id);
-        const captionPrompt = data.options[0]?.imagePrompt || data.imagePrompt || '';
-        const prompt = generatedPrompt || captionPrompt;
-        if (prompt) setEditableImagePrompt(applyDupoinImagePromptLocks(prompt, restoredRatio, { includeSwipeLeft: restoredSwipe, dupoinAcademy: restoredAcademy }));
       } else {
         // Old format - convert to single option
-        const imagePrompt = generatedPrompt || data.imagePrompt || '';
-        setResult({ caption: data.captionData || data, imagePrompt, taskId: post.id });
+        setResult({ caption: data.captionData || data, imagePrompt: data.imagePrompt || '', taskId: post.id });
         setTaskId(post.id);
-        setEditableImagePrompt(applyDupoinImagePromptLocks(imagePrompt, restoredRatio, { includeSwipeLeft: restoredSwipe, dupoinAcademy: restoredAcademy }));
       }
       // Load SOP data if available
       if (data.qcResults) setQcResults(data.qcResults);
@@ -960,61 +756,20 @@ export default function SocialPostPage() {
         setCampaignId(stored.campaignId || '');
         setCompetitorIds(stored.competitorRefIds || []);
       }
-      // Replay previously generated images for this post
+      // Images already saved on this post (made here before, or on Generate Image).
       setImageHistory(history);
-      const restoredUrl = latest?.imageUrl || data.imageUrl || null;
-      if (restoredUrl) setGeneratedImage(restoredUrl);
-      const restoredModelId = latest?.usedModel || latest?.model;
-      if (typeof restoredModelId === 'string' && restoredModelId) {
-        imageModelLocked.current = true;
-        setImageModel(selectableImageModel(restoredModelId, availableImageModels));
-      }
-      setGeneratedImageModel(
-        restoredModelId
-          ? (availableImageModels.find(item => item.id === restoredModelId)?.name || imageModelLabel(restoredModelId))
-          : null,
-      );
-      setImageNotice(typeof latest?.fallbackMessage === 'string' ? latest.fallbackMessage : '');
     } catch {}
-  };
-
-  const applyImageRemix = (remix: ImageRemixRecord) => {
-    const ratio = (IMAGE_ASPECT_RATIOS as readonly string[]).includes(remix.aspectRatio || '')
-      ? remix.aspectRatio as ImageAspectRatio
-      : DEFAULT_IMAGE_ASPECT_RATIO;
-    const swipe = remix.includeSwipeLeft === true;
-    const academy = remix.dupoinAcademy === true;
-    setImageAspectRatio(ratio);
-    setIncludeSwipeLeft(swipe);
-    setDupoinAcademy(academy);
-    setEditableImagePrompt(applyDupoinImagePromptLocks(remix.prompt, ratio, { includeSwipeLeft: swipe, dupoinAcademy: academy }));
-    if (remix.brief) setBrief(remix.brief);
-    if (remix.model) {
-      imageModelLocked.current = true;
-      setImageModel(selectableImageModel(remix.model, availableImageModels));
-    }
-    if (remix.imageUrl) setGeneratedImage(remix.imageUrl);
-    setPromptEditorOpen(true);
-  };
-
-  const useImageInEditor = (img: { prompt?: unknown; aspectRatio?: unknown; model?: unknown; usedModel?: unknown; includeSwipeLeft?: unknown; dupoinAcademy?: unknown }) => {
-    if (typeof img.prompt !== 'string' || !img.prompt.trim()) return;
-    applyImageRemix({
-      target: 'social-post',
-      prompt: img.prompt,
-      aspectRatio: typeof img.aspectRatio === 'string' ? img.aspectRatio : undefined,
-      model: typeof img.model === 'string' ? img.model : typeof img.usedModel === 'string' ? img.usedModel : undefined,
-      includeSwipeLeft: img.includeSwipeLeft === true,
-      dupoinAcademy: img.dupoinAcademy === true,
-      savedAt: new Date().toISOString(),
-    });
-    document.getElementById('image-prompt-editor')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   };
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    const remix = params.get(IMAGE_REMIX_QUERY) === '1' ? readImageRemix('social-post') : null;
-    const requestedTaskId = params.get(TASK_EDITOR_QUERY) || remix?.taskId || '';
+    // Old gallery / bookmark links still point at Social Post for image remixes.
+    // Images live on Generate Image now, which reads the same stored remix.
+    if (params.get(IMAGE_REMIX_QUERY) === '1') {
+      router.replace(imageRemixHref('generate-image'));
+      return;
+    }
+    const requestedTaskId = params.get(TASK_EDITOR_QUERY) || '';
     let active = true;
     void (async () => {
       if (requestedTaskId) {
@@ -1022,14 +777,9 @@ export default function SocialPostPage() {
         if (!active) return;
         if (task) viewPost(task);
       }
-      if (!active || !remix) return;
-      applyImageRemix(remix);
-      requestAnimationFrame(() => {
-        document.getElementById('image-prompt-editor')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      });
     })();
     return () => { active = false; };
-    // Read the URL once. viewPost and applyImageRemix close over stable setters.
+    // Read the URL once. viewPost closes over stable setters.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -1063,7 +813,7 @@ export default function SocialPostPage() {
 
   return (
     <PageStack className="max-w-6xl">
-      <PageHeader eyebrow="Create / Social" title="Social media post" description="Generate three structured options with research, quality control, naming, and delivery review." />
+      <PageHeader eyebrow="Create / Social" title="Social media post" description="Generate three caption options with research, quality control, naming, and delivery review. Make the visual on Generate image." />
       <InlineModelSelector feature="social-post" />
       <div className="flex gap-2">
         <Button type="button" variant={workspace === 'generate' ? 'primary' : 'secondary'} onClick={() => setWorkspace('generate')}>Generate</Button>
@@ -1270,11 +1020,6 @@ export default function SocialPostPage() {
           )}
 
           {error && <div className="bg-red-500/10 border border-red-500/20 text-red-400 px-4 py-3 rounded-lg">{error}</div>}
-          {imageNotice && !error && (
-            <div role="status" className="bg-amber-500/10 border border-amber-500/20 text-amber-200 px-4 py-3 rounded-lg">
-              {imageNotice}
-            </div>
-          )}
 
           {/* Knowledge saved notification */}
           {knowledgeSaved && (
@@ -1429,6 +1174,12 @@ export default function SocialPostPage() {
                                 className="text-xs px-3 py-1.5 bg-[var(--mos-raised)] hover:bg-[var(--mos-raised)] text-[var(--mos-text-secondary)] rounded-lg">
                                 Copy Caption
                               </button>
+                              {contentType !== 'video' && (
+                                <button type="button" data-testid="social-post-create-image" onClick={() => openGenerateImage({ imagePrompt: opt.imagePrompt || result?.imagePrompt, hook: opt.hook, caption: opt.caption })}
+                                  className="text-xs px-3 py-1.5 bg-[var(--mos-raised)] hover:bg-[var(--mos-raised)] text-[var(--mos-text-secondary)] rounded-lg">
+                                  Create image
+                                </button>
+                              )}
                               <button type="button" onClick={() => void suggestHashtags(opt.caption, opt.style).then(data => {
                                 if (!data?.recommended) return;
                                 setOptions(current => current?.map((item, itemIndex) => itemIndex === index ? { ...item, hashtags: data.recommended } : item) || null);
@@ -1516,7 +1267,10 @@ export default function SocialPostPage() {
               <Panel>
                 <div className="flex items-center justify-between mb-4">
                   <SectionHeader title="Caption" description="Previously generated social copy." />
-                  <Button size="sm" onClick={() => copyToClipboard(result.caption?.caption || '')}>Copy</Button>
+                  <div className="flex gap-2">
+                    <Button size="sm" onClick={() => copyToClipboard(result.caption?.caption || '')}>Copy</Button>
+                    <Button size="sm" data-testid="social-post-create-image-legacy" onClick={() => openGenerateImage({ imagePrompt: result.imagePrompt, hook: result.caption?.hook, caption: result.caption?.caption })}>Create image</Button>
+                  </div>
                 </div>
                 <div className="bg-white rounded-[var(--mos-radius-panel)] p-5 max-w-md mx-auto">
                   {result.caption?.hook && <p className="text-gray-900 font-semibold text-base mb-3">{result.caption.hook}</p>}
@@ -1527,217 +1281,26 @@ export default function SocialPostPage() {
             </div>
           )}
 
-          {/* Image Prompt + Generate (shown when options exist or result exists) */}
-          {(options || result || promptEditorOpen) && contentType !== 'video' && (
-            <Panel padding="none" id="image-prompt-editor">
-              {/* Header */}
-              <div className="flex items-center justify-between border-b border-[var(--mos-border-subtle)] px-5 py-4">
-                <div className="flex items-center gap-3">
-                  <div>
-                    <h3 className="text-sm font-[560] text-[var(--mos-text)]">Image prompt</h3>
-                    <p className="text-xs text-[var(--mos-text-muted)]">{promptEditorOpen && !options && !result ? 'Loaded from the gallery. Adjust the prompt, then generate again.' : 'Edit the prompt before you generate the image'}</p>
-                  </div>
-                </div>
-                <Button size="sm" onClick={() => copyToClipboard(editableImagePrompt)}>Copy</Button>
-              </div>
-
-              {/* Editor */}
-              <div className="p-6 space-y-4">
-                <div className="relative">
-                  <TextArea
-                    value={editableImagePrompt}
-                    onChange={(e) => setEditableImagePrompt(e.target.value)}
-                    style={{ minHeight: '120px', maxHeight: '400px', resize: 'vertical' }}
-                    className="font-mono"
-                    placeholder="Describe the image you want to generate..."
-                    rows={6}
-                  />
-                  <div className="absolute bottom-3 right-3 text-xs text-gray-600">
-                    {editableImagePrompt.length} chars
-                  </div>
-                </div>
-
-                {/* Quick suggestions */}
-                {editableImagePrompt && (
-                  <div className="flex flex-wrap gap-2">
-                    {['professional', 'minimalist', 'vibrant colors', 'dark theme', 'with text overlay', '1080x1350'].map(tag => (
-                      <button key={tag} onClick={() => setEditableImagePrompt(prev => prev + ', ' + tag)}
-                        className="px-2.5 py-1 bg-[var(--mos-raised)] hover:bg-[var(--mos-raised)] text-[var(--mos-text-muted)] text-xs rounded-full border border-[var(--mos-border)] transition-colors">
-                        + {tag}
-                      </button>
-                    ))}
-                  </div>
-                )}
-
-                {/* Image Model Selector */}
-                <div className="space-y-2">
-                  <label className="block text-xs text-[var(--mos-text-faint)] uppercase tracking-wide">Image Generation Model</label>
-                  <Select value={imageModel} onChange={(e) => setImageModel(e.target.value)}>
-                    {(availableImageModels.length > 0 ? availableImageModels : AVAILABLE_IMAGE_MODELS).map(model => (
-                      <option key={model.id} value={model.id}>
-                        {model.name} — {model.description}
-                      </option>
-                    ))}
-                  </Select>
-                  <p className="text-xs text-[var(--mos-text-faint)]">Model di-generate melalui GorillaWorkout gateway (llmdupoin.gorillaworkout.id)</p>
-                </div>
-
-                <FormField label="Image aspect ratio">
-                  <Select value={imageAspectRatio} onChange={(e) => {
-                    const ratio = e.target.value as ImageAspectRatio;
-                    setImageAspectRatio(ratio);
-                    setEditableImagePrompt(prev => prev.trim() ? applyDupoinImagePromptLocks(prev, ratio, { includeSwipeLeft, dupoinAcademy }) : prev);
-                  }}>
-                    {IMAGE_ASPECT_RATIOS.map(ratio => <option key={ratio} value={ratio}>{ratio}</option>)}
-                  </Select>
-                </FormField>
-
-                <label className="flex cursor-pointer items-start gap-3 rounded-[var(--mos-radius-control)] border border-[var(--mos-border)] bg-[var(--mos-surface)] px-3 py-2.5">
-                  <input
-                    type="checkbox"
-                    className="mt-0.5 h-4 w-4 accent-cyan-500"
-                    checked={includeSwipeLeft}
-                    data-testid="social-post-swipe-left"
-                    onChange={(event) => {
-                      const next = event.target.checked;
-                      setIncludeSwipeLeft(next);
-                      setEditableImagePrompt(prev => prev.trim()
-                        ? applyDupoinImagePromptLocks(prev, imageAspectRatio, { includeSwipeLeft: next, dupoinAcademy })
-                        : prev);
-                    }}
-                  />
-                  <span>
-                    <span className="block text-sm font-medium text-[var(--mos-text-secondary)]">Swipe left button</span>
-                    <span className="mt-0.5 block text-xs leading-5 text-[var(--mos-text-faint)]">When on, a centered pill sits just above the footer.</span>
-                  </span>
-                </label>
-
-                <label className="flex cursor-pointer items-start gap-3 rounded-[var(--mos-radius-control)] border border-[var(--mos-border)] bg-[var(--mos-surface)] px-3 py-2.5">
-                  <input
-                    type="checkbox"
-                    className="mt-0.5 h-4 w-4 accent-cyan-500"
-                    checked={dupoinAcademy}
-                    data-testid="social-post-dupoin-academy"
-                    onChange={(event) => {
-                      const next = event.target.checked;
-                      setDupoinAcademy(next);
-                      setEditableImagePrompt(prev => prev.trim()
-                        ? applyDupoinImagePromptLocks(prev, imageAspectRatio, { includeSwipeLeft, dupoinAcademy: next })
-                        : prev);
-                    }}
-                  />
-                  <span>
-                    <span className="block text-sm font-medium text-[var(--mos-text-secondary)]">Dupoin Academy</span>
-                    <span className="mt-0.5 block text-xs leading-5 text-[var(--mos-text-faint)]">When on, the centered header uses the Dupoin Academy logo.</span>
-                  </span>
-                </label>
-
-                {/* Generate button */}
-                <Button variant="primary" className="w-full" onClick={generateImage} disabled={generatingImage || !editableImagePrompt.trim()}>
-                  {generatingImage ? 'Generating image…' : 'Generate image'}
-                </Button>
-
-                {/* Image Generation Progress */}
-                {imageProgress && generatingImage && (
-                  <div className="mt-4 space-y-3">
-                    <div className="relative h-2.5 bg-[var(--mos-raised)] rounded-full overflow-hidden">
-                      <div
-                        className="h-full rounded-full bg-[var(--mos-accent)] transition-all duration-700 ease-out"
-                        style={{ width: `${imageProgress.progress}%` }}
-                      />
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <p className="text-xs text-[var(--mos-text-secondary)]">{imageProgress.message}</p>
-                      <span className="text-xs font-mono text-purple-400">{imageProgress.progress}%</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs text-[var(--mos-text-faint)]">{imageProgress.elapsed}s elapsed</span>
-                      {imageProgress.elapsed > 30 && (
-                        <span className="text-xs text-yellow-500/70">— may take up to 120s</span>
-                      )}
-                    </div>
-                  </div>
-                )}
-              </div>
-            </Panel>
-          )}
-
-          {/* Generated Image */}
-          {generatedImage && (
-            <Panel>
-              <div className="flex items-center justify-between mb-4">
-                <SectionHeader
-                  title="Generated image"
-                  description={generatedImageModel
-                    ? `Final visual asset · ${generatedImageModel}`
-                    : 'Final visual asset for this post.'}
-                />
-                <a href={generatedImage} download className="inline-flex h-8 items-center rounded-[var(--mos-radius-control)] border border-[var(--mos-border)] bg-[var(--mos-raised)] px-3 text-xs font-medium text-[var(--mos-text-secondary)]">Download</a>
-              </div>
-              {imageNotice && (
-                <div role="status" className="mb-3 bg-amber-500/10 border border-amber-500/20 text-amber-200 px-3 py-2 rounded-lg text-xs">
-                  {imageNotice}
-                </div>
-              )}
-              <div className="bg-[var(--mos-surface)] rounded-lg p-2 flex flex-col items-center justify-center gap-2">
-                <button
-                  type="button"
-                  data-testid="social-post-generated-image"
-                  aria-label="Enlarge image"
-                  className="cursor-zoom-in rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--mos-accent-ring)]"
-                  onClick={() => setPreviewImage({ src: generatedImage, alt: 'Generated social post' })}
-                >
-                  <img src={generatedImage} alt="Generated" className="max-w-full max-h-[500px] rounded-lg" />
-                </button>
-                <p className="text-xs text-[var(--mos-text-faint)]">Click the image to enlarge.</p>
-              </div>
-            </Panel>
-          )}
-
-          {/* Image generation history for this post */}
+          {/* Images saved on this post (read-only; new images are made on Generate Image) */}
           {imageHistory.length > 0 && (
             <Panel>
-              <SectionHeader title="Image history" description={`${imageHistory.length} image(s) generated for this post.`} />
-              <div className="mt-4 space-y-2">
-                {imageHistory.slice().reverse().map((img: any, i: number) => {
-                  const previewAlt = img.sopName || img.fileName || 'Generated social post';
-                  const openHistoryPreview = () => setPreviewImage({ src: img.imageUrl, alt: previewAlt });
-                  return (
-                  <div key={`${img.fileName || img.imageUrl}-${i}`} className="flex items-center gap-3 rounded-[var(--mos-radius-control)] border border-[var(--mos-border)] bg-[var(--mos-surface)] p-2">
-                    <button type="button" onClick={openHistoryPreview} aria-label={`Enlarge ${previewAlt}`} className="shrink-0 cursor-zoom-in rounded">
-                      <img src={img.imageUrl} alt="" className="pointer-events-none h-14 w-14 rounded object-cover" />
-                    </button>
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-xs text-[var(--mos-text-secondary)]">{img.sopName || img.fileName}</p>
-                      <p className="truncate text-[10px] text-[var(--mos-text-faint)]">
-                        {availableImageModels.find(item => item.id === img.model)?.name || img.model || 'unknown model'}
-                        {img.fallbackFrom ? ` · fallback from ${availableImageModels.find(item => item.id === img.fallbackFrom)?.name || img.fallbackFrom}` : ''}
-                        {img.aspectRatio ? ` · ${img.aspectRatio}` : ''}
-                        {img.dupoinAcademy ? ' · Dupoin Academy' : ''}
-                        {img.generatedAt ? ` · ${new Date(img.generatedAt).toLocaleString('id-ID')}` : ''}
-                      </p>
-                    </div>
-                    {typeof img.prompt === 'string' && img.prompt.trim() && (
-                      <button
-                        type="button"
-                        data-testid="social-post-image-history-remix"
-                        onClick={() => useImageInEditor(img)}
-                        className="relative z-10 shrink-0 rounded-[var(--mos-radius-control)] px-2 py-1.5 text-xs font-medium text-[var(--mos-accent-soft)] underline-offset-2 hover:underline"
-                      >
-                        Use in editor
-                      </button>
-                    )}
-                    <button
-                      type="button"
-                      data-testid="social-post-image-history-view"
-                      onClick={openHistoryPreview}
-                      className="relative z-10 shrink-0 rounded-[var(--mos-radius-control)] px-2 py-1.5 text-xs font-medium text-[var(--mos-accent-soft)] underline-offset-2 hover:underline"
-                    >
-                      View
-                    </button>
-                  </div>
-                  );
-                })}
+              <SectionHeader
+                title="Images for this post"
+                description={`${imageHistory.length} image(s). Make new ones on Generate image.`}
+                action={<Button size="sm" onClick={() => openGenerateImage({ imagePrompt: (selectedOption || options?.[0])?.imagePrompt || result?.imagePrompt, hook: (selectedOption || options?.[0])?.hook, caption: (selectedOption || options?.[0])?.caption })}>Create image</Button>}
+              />
+              <div className="mt-4 grid grid-cols-3 gap-2 sm:grid-cols-6" data-testid="social-post-image-history">
+                {imageHistory.slice().reverse().map((img: any, i: number) => (
+                  <button
+                    key={`${img.fileName || img.imageUrl}-${i}`}
+                    type="button"
+                    onClick={() => setPreviewImage({ src: img.imageUrl, alt: img.sopName || img.fileName || 'Generated social post' })}
+                    className="cursor-zoom-in overflow-hidden rounded border border-[var(--mos-border)]"
+                    title={`${imageModelLabel(img.model || '')}${img.aspectRatio ? ` · ${img.aspectRatio}` : ''}`}
+                  >
+                    <img src={img.imageUrl} alt="" className="h-20 w-full object-cover" />
+                  </button>
+                ))}
               </div>
             </Panel>
           )}

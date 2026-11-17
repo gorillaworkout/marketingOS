@@ -131,4 +131,13 @@ export const VERIFIED_OPENROUTER_IMAGE_MODELS = [
   'openai/gpt-5-image',
   'openai/gpt-5-image-mini',
   'openai/gpt-5.4-image-2',
+  // Added 2026-11-17 from https://openrouter.ai/api/v1/images/models (Generate Image paid models).
+  'google/gemini-nano-banana-2.1',
+  'openai/gpt-image-1',
+  'openai/gpt-image-1-mini',
+  'openai/gpt-image-2',
+  'openai/gpt-image-2.5-flare',
+  'openai/gpt-image-2.5-sunburst',
+  'openai/gpt-image-2.6-flare',
+  'openai/gpt-image-2.6-sunburst',
 ] as const;

@@ -525,6 +525,76 @@ export type ImageExchange = {
   authNotice?: string | null;
 };
 
+/** OpenRouter `POST /api/v1/images` image-to-image field: `input_references` of image_url parts. */
+export function openRouterInputReferences(inputImages: readonly string[] | undefined): Array<{ type: 'image_url'; image_url: { url: string } }> | undefined {
+  const images = (inputImages || []).filter(url => typeof url === 'string' && url.length > 0);
+  if (images.length === 0) return undefined;
+  return images.map(url => ({ type: 'image_url' as const, image_url: { url } }));
+}
+
+/**
+ * 9router's Antigravity image adapter reads one input image from `image`
+ * (data URI) and also accepts `images[0]`. Callers merge several uploads into
+ * one reference sheet before this point, so only the first entry is sent.
+ */
+export function gatewayImageInputFields(inputImages: readonly string[] | undefined): { image?: string; images?: string[] } {
+  const first = (inputImages || []).find(url => typeof url === 'string' && url.length > 0);
+  return first ? { image: first, images: [first] } : {};
+}
+
+/**
+ * A paid OpenRouter image model picked on purpose by the user (Generate Image).
+ *
+ * Sent straight to OpenRouter with its exact id. It never touches the Dupoin
+ * circuit and is never chosen as a fallback. Refused unless the AI Models
+ * "Use paid OpenRouter models" toggle is on, so credit is only spent after an
+ * admin opted in. Provider mode is not changed or consulted here.
+ */
+export async function postPaidOpenRouterImage(input: {
+  model: string;
+  prompt: string;
+  aspectRatio?: string;
+  inputImages?: string[];
+  timeoutMs: number;
+  referer?: string;
+  title?: string;
+  now?: number;
+}): Promise<ImageExchange> {
+  const settings = await loadSettings(input.now ?? Date.now());
+  if (settings.usePaidOpenRouter !== true) {
+    throw new Error(`PAID_IMAGE_DISABLED: ${imageModelLabel(input.model)} is a paid OpenRouter model. Turn on "Use paid OpenRouter models" in AI Models first.`);
+  }
+  const references = openRouterInputReferences(input.inputImages);
+  const isOpenAi = input.model.startsWith('openai/');
+  const attempt = await attemptFetch({
+    url: `${OPENROUTER_API_BASE}${imageRequestPath('openrouter')}`,
+    apiKey: settings.openrouterKey,
+    missingKeyMessage: 'OpenRouter API key is not configured. Add it in LLM Provider settings.',
+    body: {
+      model: input.model,
+      prompt: input.prompt,
+      n: 1,
+      ...(input.aspectRatio ? { aspect_ratio: input.aspectRatio } : {}),
+      // Keep the per-image charge near the estimate shown in the UI.
+      ...(isOpenAi ? { quality: 'medium' } : { resolution: '1K' }),
+      ...(references ? { input_references: references } : {}),
+    },
+    referer: input.referer || 'https://marketingos.local',
+    title: input.title || 'MarketingOS',
+    timeoutMs: input.timeoutMs,
+  });
+  if (attempt.kind !== 'http') throw attempt.error;
+  if (!attempt.response.ok) {
+    const errText = await attempt.response.text();
+    throw new Error(explainLlmHttpError('openrouter', attempt.response.status, errText, 'image'));
+  }
+  const payload = await attempt.response.json() as ImageExchange;
+  if (!payload?.data?.[0]?.b64_json && !payload?.data?.[0]?.url) {
+    throw new Error(`OpenRouter returned no image for ${input.model}. POST /api/v1/images did not include data[].b64_json or data[].url.`);
+  }
+  return { ...payload, provider: 'openrouter', upstreamModel: input.model };
+}
+
 /**
  * A free OpenRouter image id goes straight to OpenRouter with its exact id: it
  * has no Dupoin twin, is never mapped to a paid model, and never touches the
@@ -533,7 +603,7 @@ export type ImageExchange = {
  */
 async function postFreeOpenRouterImage(
   settings: LlmSettings,
-  input: { model: string; prompt: string; aspectRatio?: string; timeoutMs: number },
+  input: { model: string; prompt: string; aspectRatio?: string; timeoutMs: number; inputImages?: string[] },
   referer: string,
   title: string,
 ): Promise<ImageExchange> {
@@ -544,7 +614,13 @@ async function postFreeOpenRouterImage(
     url: `${OPENROUTER_API_BASE}${imageRequestPath('openrouter')}`,
     apiKey: settings.openrouterKey,
     missingKeyMessage: 'OpenRouter API key is not configured. Add it in LLM Provider settings.',
-    body: { model: input.model, prompt: input.prompt, n: 1, ...(input.aspectRatio ? { aspect_ratio: input.aspectRatio } : {}) },
+    body: {
+      model: input.model,
+      prompt: input.prompt,
+      n: 1,
+      ...(input.aspectRatio ? { aspect_ratio: input.aspectRatio } : {}),
+      ...(openRouterInputReferences(input.inputImages) ? { input_references: openRouterInputReferences(input.inputImages) } : {}),
+    },
     referer,
     title,
     timeoutMs: input.timeoutMs,
@@ -566,6 +642,8 @@ export async function postImage(input: {
   prompt: string;
   size: string;
   aspectRatio?: string;
+  /** Data URIs sent as real image input (visual reference / asset), not as text. */
+  inputImages?: string[];
   timeoutMs: number;
   referer?: string;
   title?: string;
@@ -593,9 +671,10 @@ export async function postImage(input: {
         + 'Image generation uses POST /api/v1/images. Map it to a model listed on https://openrouter.ai/api/v1/images/models, such as google/gemini-3.1-flash-image.',
       );
     }
+    const references = openRouterInputReferences(input.inputImages);
     const body = provider === 'openrouter'
-      ? { model: target.model, prompt: input.prompt, n: 1, aspect_ratio: input.aspectRatio }
-      : { model: target.model, prompt: input.prompt, n: 1, size: input.size };
+      ? { model: target.model, prompt: input.prompt, n: 1, aspect_ratio: input.aspectRatio, ...(references ? { input_references: references } : {}) }
+      : { model: target.model, prompt: input.prompt, n: 1, size: input.size, ...gatewayImageInputFields(input.inputImages) };
     const attempt = await attemptFetch({
       url: `${target.baseUrl}${imageRequestPath(provider)}`,
       apiKey: target.apiKey,
@@ -828,4 +907,29 @@ export async function probeModelsInOrder(
     results.push(await probeModel(targets[index]));
   }
   return results;
+}
+
+/**
+ * Remaining OpenRouter credit for the paid image notice, from
+ * `GET /api/v1/credits` (total_credits − total_usage). Returns null when the
+ * key is missing or the endpoint does not answer; never returns the key.
+ */
+export async function readOpenRouterCreditBalance(): Promise<{ remainingUsd: number | null; configured: boolean; usePaid: boolean }> {
+  const settings = await loadSettings(Date.now());
+  if (!settings.openrouterKey) return { remainingUsd: null, configured: false, usePaid: settings.usePaidOpenRouter === true };
+  try {
+    const response = await fetchImpl(`${OPENROUTER_API_BASE}/credits`, {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${settings.openrouterKey}` },
+      signal: AbortSignal.timeout(8_000),
+    });
+    if (!response.ok) return { remainingUsd: null, configured: true, usePaid: settings.usePaidOpenRouter === true };
+    const body = await response.json() as { data?: { total_credits?: unknown; total_usage?: unknown } };
+    const total = Number(body?.data?.total_credits);
+    const used = Number(body?.data?.total_usage);
+    const remainingUsd = Number.isFinite(total) && Number.isFinite(used) ? Math.max(0, Math.round((total - used) * 10_000) / 10_000) : null;
+    return { remainingUsd, configured: true, usePaid: settings.usePaidOpenRouter === true };
+  } catch {
+    return { remainingUsd: null, configured: true, usePaid: settings.usePaidOpenRouter === true };
+  }
 }

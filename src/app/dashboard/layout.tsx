@@ -76,6 +76,7 @@ function NavIcon({ name }: { name: IconName }) {
 
 const generateItems = [
   { href: '/dashboard/social-post', label: 'Social post', icon: 'social', feature: 'social-post' },
+  { href: '/dashboard/generate-image', label: 'Generate image', icon: 'image', feature: 'social-post' },
   { href: '/dashboard/video-script', label: 'Video script', icon: 'video', feature: 'video-script' },
   { href: '/dashboard/event-plan', label: 'Event plan', icon: 'event', feature: 'event-plan' },
   { href: '/dashboard/sop', label: 'Article Market News', icon: 'article', feature: 'article-market-news' },
