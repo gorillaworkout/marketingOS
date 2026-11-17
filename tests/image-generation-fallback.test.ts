@@ -151,11 +151,11 @@ test('logging contract uses the actual model that produced the image', async () 
   assert.match(route, /explainImageFailure\(reason, safeModel[,)]/, 'errors name the model that was actually sent');
 });
 
-test('Social Post surfaces usedModel and fallback toast copy', () => {
-  const page = read('src/app/dashboard/social-post/page.tsx');
+test('Generate Image surfaces usedModel and fallback toast copy', () => {
+  const page = read('src/app/dashboard/generate-image/page.tsx');
   assert.match(page, /fallbackMessage/);
   assert.match(page, /usedModel/);
-  assert.match(page, /setImageNotice\(status\.result\.fallbackMessage\)/);
+  assert.match(page, /notice: status\.result\.fallbackMessage \|\| ''/);
   assert.match(page, /role="status"/);
-  assert.match(page, /status\.result\.usedModel \|\| imageModel/);
+  assert.match(page, /status\.result\.usedModel \|\| effectiveModel/);
 });

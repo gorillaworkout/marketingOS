@@ -22,9 +22,10 @@ const typeLabels: Record<string, string> = {
 };
 
 const quickActions = [
-  { href: '/dashboard/social-post', index: '01', title: 'Social post', description: 'Develop captions and image directions for social channels.' },
-  { href: '/dashboard/video-script', index: '02', title: 'Video script', description: 'Build structured short-form scripts from a campaign brief.' },
-  { href: '/dashboard/event-plan', index: '03', title: 'Event plan', description: 'Research and prepare event proposals with budget controls.' },
+  { href: '/dashboard/social-post', feature: 'social-post', index: '01', title: 'Social post', description: 'Write captions, hooks, and hashtags for social channels.' },
+  { href: '/dashboard/generate-image', feature: 'social-post', index: '02', title: 'Generate image', description: 'Create on-brand visuals from a prompt, reference images, and your own assets.' },
+  { href: '/dashboard/video-script', feature: 'video-script', index: '03', title: 'Video script', description: 'Build structured short-form scripts from a campaign brief.' },
+  { href: '/dashboard/event-plan', feature: 'event-plan', index: '04', title: 'Event plan', description: 'Research and prepare event proposals with budget controls.' },
 ];
 
 export default function DashboardPage() {
@@ -59,8 +60,8 @@ export default function DashboardPage() {
 
       <section>
         <SectionHeader title="Start new work" description="Choose a production workflow. Your brief and generated output remain within that workflow." />
-        <div className="mt-3 grid gap-3 md:grid-cols-3">
-          {quickActions.filter(action => stats?.enabledFeatures?.includes(action.href.split('/').pop() || '')).map(action => (
+        <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          {quickActions.filter(action => stats?.enabledFeatures?.includes(action.feature)).map(action => (
             <Link key={action.href} href={action.href} className="group rounded-[var(--mos-radius-panel)] border border-[var(--mos-border)] bg-[var(--mos-panel)] p-5 transition hover:border-[var(--mos-border-strong)] hover:bg-[var(--mos-raised)]">
               <div className="flex items-center justify-between">
                 <span className="font-mono text-[10px] text-[var(--mos-text-faint)]">{action.index}</span>

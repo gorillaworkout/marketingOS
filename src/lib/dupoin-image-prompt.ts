@@ -146,7 +146,14 @@ export interface SocialPostImagePromptInput {
   aspectRatio?: ImageAspectRatio;
 }
 
-const CHROME_LOCK_RE = /\n\nLeave the top \d+% of the frame empty of type, faces, and logos \(background and texture may continue\) for the composited (?:centered )?Dupoin (?:header lockup|Academy logo), and the bottom \d+% empty for the composited white regulatory footer\.(?: Leave an additional \d+% directly above that footer empty of type, faces, and logos for the composited centered Swipe left button\. Do not draw a swipe button, pill, arrow, or the words "Swipe left"\.)?(?: Do not draw a graduation cap or the word "ACADEMY"; the Dupoin Academy logo is composited in the top center\.)? Draw no logo, no wordmark, no CNN badge, no laurel, no regulatory footer, and no "Dupoin" lettering anywhere in the image\. Primary accent Dupoin Blue #2EB5C4 as real light inside the scene\./g;
+/**
+ * Every chrome reservation this module writes: optional "Leave …" sentences,
+ * then the fixed no-logo sentence and the Dupoin Blue line. Covers the
+ * original header+footer line and the Generate Image variants (no logo, no
+ * footer), so re-applying the locks replaces rather than stacks.
+ */
+const CHROME_LOCK_RE = /\n\n(?:Leave [^\n]*? )?Draw no logo, no wordmark, no CNN badge, no laurel, no regulatory footer, and no "Dupoin" lettering anywhere in the image\. Primary accent Dupoin Blue #2EB5C4 as real light inside the scene\./g;
+const CHROME_LOCK_ONLY_RE = /^(?:Leave [^\n]*? )?Draw no logo, no wordmark, no CNN badge, no laurel, no regulatory footer, and no "Dupoin" lettering anywhere in the image\. Primary accent Dupoin Blue #2EB5C4 as real light inside the scene\.$/;
 
 const STYLE_LOCKS = [DUPOIN_IG_STYLE_LOCK, DUPOIN_IG_STYLE_LOCK_SWIPE_COMPOSITED];
 
@@ -161,14 +168,30 @@ export function stripDupoinStyleLock(prompt: string): string {
 
 /** Drop a previously baked chrome reservation so a new aspect ratio can replace the percentages. */
 export function stripDupoinChromeLock(prompt: string): string {
-  return String(prompt || '').replace(CHROME_LOCK_RE, '');
+  const text = String(prompt || '').replace(CHROME_LOCK_RE, '');
+  return CHROME_LOCK_ONLY_RE.test(text.trim()) ? '' : text;
 }
+
+export type DupoinLogoChoice = 'dupoin' | 'academy' | 'none';
 
 export interface DupoinImagePromptLockOptions {
   /** Reserve the composited Swipe left pill and tell the model not to draw it. */
   includeSwipeLeft?: boolean;
   /** Reserve the taller centered Dupoin Academy logo instead of the Dupoin wordmark. */
   dupoinAcademy?: boolean;
+  /** Generate Image logo choice. Wins over dupoinAcademy when set. "none" reserves no header band. */
+  logo?: DupoinLogoChoice;
+  /** Regulatory footer + risk warning. Default true. False reserves no footer band. */
+  footer?: boolean;
+  /** Dupoin Instagram style lock (navy field, Dupoin Blue). Default true. Off lets a visual reference set the look. */
+  brandStyle?: boolean;
+}
+
+/** Normalise the logo choice from the new `logo` field or the older `dupoinAcademy` flag. */
+export function resolveDupoinLogoChoice(options?: { logo?: unknown; dupoinAcademy?: unknown } | null): DupoinLogoChoice {
+  const logo = options?.logo;
+  if (logo === 'dupoin' || logo === 'academy' || logo === 'none') return logo;
+  return options?.dupoinAcademy === true ? 'academy' : 'dupoin';
 }
 
 /** English reservation appended to every image prompt. Percentages follow the selected canvas. */
@@ -178,20 +201,45 @@ export function dupoinChromeLockLine(
 ): string {
   const spec = getImageGenerationSpec(aspectRatio);
   const [width, height] = spec.size.split('x').map(Number);
-  const academy = options?.dupoinAcademy === true;
+  const logo = resolveDupoinLogoChoice(options);
+  const footer = options?.footer !== false;
+  const academy = logo === 'academy';
   const { headerPercent, footerPercent } = chromeClearancePercents(
     width,
     height,
     academy ? { headerPx: DUPOIN_IG_ACADEMY_HEADER_BAND_PX, footerPx: DUPOIN_IG_FOOTER_BAND_PX } : undefined,
   );
-  const swipeSentence = options?.includeSwipeLeft
-    ? ` Leave an additional ${swipePromptClearancePercent(width, height)}% directly above that footer empty of type, faces, and logos for the composited centered Swipe left button. Do not draw a swipe button, pill, arrow, or the words "Swipe left".`
-    : '';
-  const academySentence = academy
-    ? ' Do not draw a graduation cap or the word "ACADEMY"; the Dupoin Academy logo is composited in the top center.'
-    : '';
-  const lockupName = academy ? 'centered Dupoin Academy logo' : 'Dupoin header lockup';
-  return `Leave the top ${headerPercent}% of the frame empty of type, faces, and logos (background and texture may continue) for the composited ${lockupName}, and the bottom ${footerPercent}% empty for the composited white regulatory footer.${swipeSentence}${academySentence} ${DUPOIN_LOGO_REQUIRED_LINE} anywhere in the image. Primary accent Dupoin Blue ${DUPOIN_BLUE_HEX} as real light inside the scene.`;
+  const tail = `${DUPOIN_LOGO_REQUIRED_LINE} anywhere in the image. Primary accent Dupoin Blue ${DUPOIN_BLUE_HEX} as real light inside the scene.`;
+  const swipeDont = 'Do not draw a swipe button, pill, arrow, or the words "Swipe left".';
+
+  if (logo !== 'none' && footer) {
+    // Original Social Post wording, kept byte-for-byte.
+    const swipeSentence = options?.includeSwipeLeft
+      ? ` Leave an additional ${swipePromptClearancePercent(width, height)}% directly above that footer empty of type, faces, and logos for the composited centered Swipe left button. ${swipeDont}`
+      : '';
+    const academySentence = academy
+      ? ' Do not draw a graduation cap or the word "ACADEMY"; the Dupoin Academy logo is composited in the top center.'
+      : '';
+    const lockupName = academy ? 'centered Dupoin Academy logo' : 'Dupoin header lockup';
+    return `Leave the top ${headerPercent}% of the frame empty of type, faces, and logos (background and texture may continue) for the composited ${lockupName}, and the bottom ${footerPercent}% empty for the composited white regulatory footer.${swipeSentence}${academySentence} ${tail}`;
+  }
+
+  const sentences: string[] = [];
+  if (logo !== 'none') {
+    const lockupName = academy ? 'centered Dupoin Academy logo' : 'Dupoin header lockup';
+    sentences.push(`Leave the top ${headerPercent}% of the frame empty of type, faces, and logos (background and texture may continue) for the composited ${lockupName}.`);
+    if (academy) sentences.push('Do not draw a graduation cap or the word "ACADEMY"; the Dupoin Academy logo is composited in the top center.');
+  }
+  if (footer) {
+    sentences.push(`Leave the bottom ${footerPercent}% empty for the composited white regulatory footer.`);
+  }
+  if (options?.includeSwipeLeft) {
+    const where = footer ? 'directly above that footer' : 'near the bottom edge';
+    sentences.push(`Leave about ${swipePromptClearancePercent(width, height)}% ${where} empty of type, faces, and logos for the composited centered Swipe left button. ${swipeDont}`);
+  }
+  if (sentences.length === 0) return tail;
+  // Every branch opens with "Leave …", which CHROME_LOCK_RE relies on.
+  return `${sentences.join(' ')} ${tail}`;
 }
 
 /** Guarantee the Instagram chrome reservation is present, replacing any stale percentages. */
@@ -270,7 +318,10 @@ export function applyDupoinImagePromptLocks(
   options?: DupoinImagePromptLockOptions,
 ): string {
   const includeSwipeLeft = options?.includeSwipeLeft === true;
-  const dupoinAcademy = options?.dupoinAcademy === true;
+  const logo = resolveDupoinLogoChoice(options);
+  const dupoinAcademy = logo === 'academy';
+  const footer = options?.footer !== false;
+  const brandStyle = options?.brandStyle !== false;
   const cleaned = stripDupoinStyleLock(
     stripDupoinChromeLock(stripImageAspectPrompt(stripFlatOverlayLanguage(prompt))),
   ).trim();
@@ -278,11 +329,11 @@ export function applyDupoinImagePromptLocks(
     ? cleaned
     : `${cleaned}\n\n${SCENE_INTEGRITY_NEGATIVES}`.trim();
   const styleLock = includeSwipeLeft ? DUPOIN_IG_STYLE_LOCK_SWIPE_COMPOSITED : DUPOIN_IG_STYLE_LOCK;
-  const withStyle = guarded.includes(styleLock)
+  const withStyle = !brandStyle || guarded.includes(styleLock)
     ? guarded
     : `${guarded}\n\n${styleLock}`.trim();
   return withImageAspectPrompt(
-    ensureOfficialDupoinLogo(withStyle, aspectRatio, { includeSwipeLeft, dupoinAcademy }),
+    ensureOfficialDupoinLogo(withStyle, aspectRatio, { includeSwipeLeft, dupoinAcademy, logo, footer }),
     aspectRatio,
   );
 }
@@ -310,4 +361,19 @@ Chrome: JANGAN digambar. Wordmark Dupoin kiri atas, badge CNN 2025, dan footer r
 
 DILARANG: overlay, panel, box, scrim, banner, atau bar di belakang teks; nilai opacity/transparansi; gradient sebagai lapisan di atas gambar; hex code untuk background. Kalau teks kurang terbaca, atur ulang cahaya dan komposisi — jangan menambal dengan lapisan.
 Negatif lain: no hashtags, no long captions, no fake claims/numbers not in the brief, no wrong teal, no logo, no wordmark, no CNN badge, no laurel, no regulatory footer, no "Dupoin" lettering drawn into the art, no generic stock look.`;
+}
+
+/**
+ * Remove everything applyDupoinImagePromptLocks adds (aspect line, chrome
+ * reservation, style lock, scene negatives) so a stored prompt can be edited
+ * as plain scene text on Generate Image. The server applies the locks again
+ * from the chosen options.
+ */
+export function stripDupoinImagePromptLocks(prompt: string): string {
+  const withoutLocks = stripDupoinStyleLock(stripDupoinChromeLock(stripImageAspectPrompt(String(prompt || ''))));
+  return withoutLocks
+    .split(`\n\n${SCENE_INTEGRITY_NEGATIVES}`).join('')
+    .split(SCENE_INTEGRITY_NEGATIVES).join('')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
 }

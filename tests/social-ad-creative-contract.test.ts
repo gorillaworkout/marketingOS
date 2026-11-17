@@ -169,15 +169,17 @@ test('Social Post generate route uses the Brand Guidelines 2026 image-prompt bui
   assert.doesNotMatch(openai, /small Dupoin logo in the (bottom|lower)-right corner/);
 });
 
-test('Social Post image route composites Instagram chrome instead of the lower-right wordmark', () => {
+test('Social Post / Generate Image route composites Instagram chrome instead of the lower-right wordmark', () => {
   const imageRoute = read('src/app/api/generate-image/route.ts');
   assert.match(imageRoute, /compositeDupoinInstagramChrome/);
-  assert.match(imageRoute, /body\.includeSwipeLeft === true/);
-  assert.match(imageRoute, /body\.dupoinAcademy === true/);
-  assert.match(imageRoute, /const swipeLeft = type === 'social-post' && includeSwipeLeft/);
-  assert.match(imageRoute, /const academy = type === 'social-post' && dupoinAcademy/);
-  assert.match(imageRoute, /applyDupoinImagePromptLocks\(prompt, aspectRatio, \{ includeSwipeLeft: swipeLeft, dupoinAcademy: academy \}\)/);
-  assert.match(imageRoute, /type === 'social-post'\s*\?\s*await compositeDupoinInstagramChrome\(imageBytes, \{ includeSwipeLeft: swipeLeft, dupoinAcademy: academy \}\)\s*:\s*await compositeDupoinLogo\(imageBytes\)/);
+  assert.match(imageRoute, /includeSwipeLeft: body\.includeSwipeLeft === true/);
+  assert.match(imageRoute, /resolveDupoinLogoChoice\(\{ logo: body\.logo, dupoinAcademy: body\.dupoinAcademy \}\)/);
+  assert.match(imageRoute, /footer: body\.footer !== false/, 'footer defaults on');
+  assert.match(imageRoute, /const CHROME_TYPES = new Set\(\['social-post', 'generate-image'\]\)/);
+  assert.match(imageRoute, /const swipeLeft = chrome && options\.includeSwipeLeft/);
+  assert.match(imageRoute, /const footer = type === 'social-post' \? true : options\.footer/, 'Social Post keeps its footer');
+  assert.match(imageRoute, /applyDupoinImagePromptLocks\(prompt, aspectRatio, \{ includeSwipeLeft: swipeLeft, logo, footer, brandStyle \}\)/);
+  assert.match(imageRoute, /chrome\s*\?\s*await compositeDupoinInstagramChrome\(imageBytes, \{ includeSwipeLeft: swipeLeft, logo, footer \}\)\s*:\s*await compositeDupoinLogo\(imageBytes\)/);
   assert.match(imageRoute, /dupoinAcademy: academy/);
   assert.doesNotMatch(imageRoute, /imageBytes = await compositeDupoinLogo\(imageBytes\)/);
 });
@@ -232,47 +234,49 @@ test('academy prompt reservation swaps the centered lockup and does not stack', 
   assert.equal(applyDupoinImagePromptLocks(both, '3:4'), off);
 });
 
-test('Social Post page offers the swipe button before Generate image', () => {
-  const page = read('src/app/dashboard/social-post/page.tsx');
+test('Generate Image offers logo, footer, and swipe options before Generate image', () => {
+  const page = read('src/app/dashboard/generate-image/page.tsx');
   assert.match(page, /const \[includeSwipeLeft, setIncludeSwipeLeft\] = useState\(false\)/);
-  assert.match(page, /const \[dupoinAcademy, setDupoinAcademy\] = useState\(false\)/);
-  assert.match(page, /data-testid="social-post-swipe-left"/);
-  assert.match(page, /data-testid="social-post-dupoin-academy"/);
-  assert.match(page, /Swipe left button/);
-  assert.match(page, /When on, a centered pill sits just above the footer\./);
-  assert.match(page, />Dupoin Academy</);
-  assert.match(page, /When on, the centered header uses the Dupoin Academy logo\./);
-  assert.match(page, /aspectRatio: imageAspectRatio, includeSwipeLeft, dupoinAcademy \}/);
-  const aspect = page.indexOf('Image aspect ratio');
-  const swipe = page.indexOf('>Swipe left button<');
-  const academy = page.indexOf('>Dupoin Academy<');
-  const generate = page.indexOf("generatingImage ? 'Generating image…' : 'Generate image'");
-  assert.ok(aspect >= 0 && swipe > aspect && academy > swipe && generate > academy, 'academy option sits after the swipe toggle and before Generate image');
+  assert.match(page, /const \[logo, setLogo\] = useState<DupoinLogoChoice>\('dupoin'\)/);
+  assert.match(page, /const \[footer, setFooter\] = useState\(true\)/, 'footer is on by default');
+  assert.match(page, /data-testid="generate-image-swipe-left"/);
+  assert.match(page, /data-testid=\{`generate-image-logo-\$\{option\.value\}`\}/);
+  assert.match(page, /data-testid="generate-image-footer"/);
+  for (const label of ['Dupoin logo', 'Dupoin Academy logo', 'No logo', 'Regulatory footer', 'Swipe left button']) {
+    assert.ok(page.includes(label), label);
+  }
+  assert.match(page, /includeSwipeLeft,\s*logo,\s*dupoinAcademy: logo === 'academy',\s*footer,/);
+  const logoPicker = page.indexOf('legend className');
+  const footerToggle = page.indexOf('data-testid="generate-image-footer"');
+  const swipe = page.indexOf('data-testid="generate-image-swipe-left"');
+  const generate = page.indexOf('data-testid="generate-image-submit"');
+  assert.ok(logoPicker >= 0 && footerToggle > logoPicker && swipe > footerToggle && generate > swipe);
 });
 
-test('Social Post result image and history View open the same preview', () => {
+test('Social Post is caption-only and hands a caption to Generate Image', () => {
   const page = read('src/app/dashboard/social-post/page.tsx');
-  assert.match(page, /data-testid="social-post-generated-image"/);
+  assert.doesNotMatch(page, /Generate image'|\/api\/generate-image|setIncludeSwipeLeft|setDupoinAcademy|image-prompt-editor/);
+  assert.match(page, /data-testid="social-post-create-image"/);
+  assert.match(page, /writeGenerateImageHandoff\(/);
+  assert.match(page, /router\.push\(generateImageHref\(true\)\)/);
+  assert.match(page, /data-testid="social-post-image-preview"/, 'saved post images still open the preview');
+});
+
+test('Generate Image result and history open the same preview', () => {
+  const page = read('src/app/dashboard/generate-image/page.tsx');
+  assert.match(page, /data-testid="generate-image-result"/);
   assert.match(page, /aria-label="Enlarge image"/);
-  assert.match(page, /setPreviewImage\(\{ src: generatedImage, alt: 'Generated social post' \}\)/);
-  assert.match(page, /data-testid="social-post-image-history-view"/);
-  assert.match(page, /const openHistoryPreview = \(\) => setPreviewImage\(\{ src: img\.imageUrl, alt: previewAlt \}\)/);
-  assert.match(page, /onClick=\{openHistoryPreview\}/);
-  assert.doesNotMatch(page, /setGeneratedImage\(img\.imageUrl\)/);
-  assert.match(page, /data-testid="social-post-image-preview"/);
+  assert.match(page, /setPreviewImage\(\{ src: result\.url, alt: 'Generated image' \}\)/);
+  assert.match(page, /setPreviewImage\(\{ src: item\.imageUrl, alt: item\.fileName \}\)/);
+  assert.match(page, /data-testid="generate-image-preview"/);
   assert.match(page, /role="dialog"/);
   assert.match(page, /aria-modal="true"/);
-  assert.match(page, /aria-label="Image preview"/);
   assert.match(page, /Click the image to enlarge\./);
-  const generated = page.indexOf('data-testid="social-post-generated-image"');
-  const view = page.indexOf('data-testid="social-post-image-history-view"');
-  const dialog = page.indexOf('data-testid="social-post-image-preview"');
-  assert.ok(generated > 0 && view > generated && dialog > view);
 });
 
-test('Social Post client prompt helpers do not import the sharp compositor', () => {
+test('client prompt helpers do not import the sharp compositor', () => {
   const prompt = read('src/lib/dupoin-image-prompt.ts');
-  const page = read('src/app/dashboard/social-post/page.tsx');
+  const page = read('src/app/dashboard/generate-image/page.tsx');
   const layout = read('src/lib/dupoin-ig-chrome-layout.ts');
 
   assert.match(prompt, /from '@\/lib\/dupoin-ig-chrome-layout'/);
@@ -280,7 +284,7 @@ test('Social Post client prompt helpers do not import the sharp compositor', () 
   assert.doesNotMatch(prompt, /from 'sharp'/);
   assert.doesNotMatch(prompt, /node:fs/);
   assert.match(page, /applyDupoinImagePromptLocks/);
-  assert.doesNotMatch(page, /dupoin-ig-chrome/);
+  assert.doesNotMatch(page, /dupoin-ig-chrome|image-reference-inputs|generated-image-meta/);
   assert.doesNotMatch(layout, /from 'sharp'/);
   assert.doesNotMatch(layout, /node:fs/);
   assert.doesNotMatch(layout, /node:path/);

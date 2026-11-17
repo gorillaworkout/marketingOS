@@ -5,7 +5,7 @@ import { queryOne, execute } from '@/lib/database';
 import { rateLimit } from '@/lib/rate-limit';
 import { createImageJobStore, type ImageJob, type ImageJobResult } from '@/lib/image-job-status';
 import { getImageGenerationSpec, parseImageAspectRatio, type ImageAspectRatio } from '@/lib/image-aspect-ratio';
-import { applyDupoinImagePromptLocks } from '@/lib/dupoin-image-prompt';
+import { applyDupoinImagePromptLocks, resolveDupoinLogoChoice, type DupoinLogoChoice } from '@/lib/dupoin-image-prompt';
 import { compositeDupoinInstagramChrome } from '@/lib/dupoin-ig-chrome';
 import { compositeDupoinLogo } from '@/lib/dupoin-logo-composite';
 import {
@@ -15,8 +15,11 @@ import {
   nextImageFallback,
   parseImageApiErrorStatus,
 } from '@/lib/image-generation-fallback';
-import { AVAILABLE_IMAGE_MODELS, DEFAULT_IMAGE_MODEL, imageModelLabel, resolveAssignedImageModels, resolveImageModel } from '@/lib/image-models';
-import { postImage } from '@/lib/llm-provider';
+import { AVAILABLE_IMAGE_MODELS, DEFAULT_IMAGE_MODEL, imageModelLabel, isPaidImageModel, maxInputImagesFor, resolveAssignedImageModels, resolveImageModel } from '@/lib/image-models';
+import { postImage, postPaidOpenRouterImage } from '@/lib/llm-provider';
+import { getLlmSettings } from '@/lib/llm-provider-store';
+import { prepareModelInputImages, readInputImageLists, referencePromptBlock, type ParsedInputImage } from '@/lib/image-reference-inputs';
+import { writeGeneratedImageMeta } from '@/lib/generated-image-meta';
 import { freeImageBackupModel } from '@/lib/llm-provider-defaults';
 import { logTokenUsage } from '@/lib/token-log';
 import { parseImageGenerationUsage } from '@/lib/token-usage';
@@ -31,6 +34,25 @@ const JOB_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]
 // of spawning the Codex CLI directly, so every generate feature is one-door.
 // The gateway maps cx/* image models to the connected Codex (ChatGPT) account.
 
+/** Image types that wear the Dupoin Instagram chrome (header logo + regulatory footer). */
+const CHROME_TYPES = new Set(['social-post', 'generate-image']);
+
+export interface ImageJobOptions {
+  prompt: string;
+  brief: string;
+  type: string;
+  model: string;
+  taskId: string | null;
+  aspectRatio: ImageAspectRatio;
+  includeSwipeLeft: boolean;
+  logo: DupoinLogoChoice;
+  footer: boolean;
+  brandStyle: boolean;
+  references: ParsedInputImage[];
+  assets: ParsedInputImage[];
+  assetNote: string;
+}
+
 export async function POST(request: NextRequest) {
   const rl = rateLimit(request);
   if (rl) return rl;
@@ -43,7 +65,11 @@ export async function POST(request: NextRequest) {
   const userId = auth.id;
   if (!userId) return jsonError('Unauthorized', 401);
 
-  let body: { prompt?: unknown; type?: unknown; brief?: unknown; model?: unknown; taskId?: unknown; aspectRatio?: unknown; includeSwipeLeft?: unknown; dupoinAcademy?: unknown };
+  let body: {
+    prompt?: unknown; type?: unknown; brief?: unknown; model?: unknown; taskId?: unknown; aspectRatio?: unknown;
+    includeSwipeLeft?: unknown; dupoinAcademy?: unknown; logo?: unknown; footer?: unknown; brandStyle?: unknown;
+    referenceImages?: unknown; assetImages?: unknown; assetNote?: unknown;
+  };
   try {
     body = await request.json();
   } catch {
@@ -65,12 +91,43 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     return jsonError(error instanceof Error ? error.message : 'Invalid image aspect ratio', 400);
   }
-  const includeSwipeLeft = body.includeSwipeLeft === true;
-  const dupoinAcademy = body.dupoinAcademy === true;
+  let uploads: { references: ParsedInputImage[]; assets: ParsedInputImage[] };
+  try {
+    uploads = readInputImageLists(body);
+  } catch (error) {
+    return jsonError(error instanceof Error ? error.message : 'Invalid uploaded image', 400);
+  }
+  const safeModel = resolveImageModel(model);
+  if (isPaidImageModel(safeModel)) {
+    // Paid models only run after an admin turned on paid OpenRouter in AI Models.
+    const settings = await getLlmSettings().catch(() => null);
+    if (settings?.usePaidOpenRouter !== true) {
+      return jsonError(`${imageModelLabel(safeModel)} is a paid OpenRouter model. Ask an admin to turn on "Use paid OpenRouter models" in AI Models, or pick a free model.`, 403);
+    }
+    const max = maxInputImagesFor(safeModel);
+    if (uploads.references.length + uploads.assets.length > max) {
+      return jsonError(`${imageModelLabel(safeModel)} accepts at most ${max} input image(s). Remove some references or assets, or pick another model.`, 400);
+    }
+  }
+  const logo = resolveDupoinLogoChoice({ logo: body.logo, dupoinAcademy: body.dupoinAcademy });
   const job = imageJobs.create(userId);
 
   // Deliberately detached from the HTTP request: tunnel/browser disconnects must not stop the job.
-  void runImageJob(job, prompt, brief, type, model, taskId, aspectRatio, includeSwipeLeft, dupoinAcademy);
+  void runImageJob(job, {
+    prompt,
+    brief,
+    type,
+    model: safeModel,
+    taskId,
+    aspectRatio,
+    includeSwipeLeft: body.includeSwipeLeft === true,
+    logo,
+    footer: body.footer !== false,
+    brandStyle: body.brandStyle !== false,
+    references: uploads.references,
+    assets: uploads.assets,
+    assetNote: typeof body.assetNote === 'string' ? body.assetNote.slice(0, 500) : '',
+  });
 
   return NextResponse.json({ jobId: job.id, status: job.status }, { status: 202 });
 }
@@ -108,45 +165,103 @@ async function enabledImageIds(): Promise<string[]> {
   }
 }
 
-async function runImageJob(job: ImageJob, prompt: string, brief: string, type: string, model: string, taskId: string | null, aspectRatio: ImageAspectRatio, includeSwipeLeft: boolean, dupoinAcademy: boolean) {
+async function runImageJob(job: ImageJob, options: ImageJobOptions) {
+  const { prompt, brief, type, model, taskId, aspectRatio } = options;
   const cwd = process.cwd() || '/Users/bayudarmawan/marketingos';
   const sopName = generateSOPFileName(brief || prompt, type);
   // Retired ids (e.g. cx/gpt-5.5-image) map to their replacement and unknown ids
   // fall back to the default image model, before anything is shown or sent.
   const safeModel = resolveImageModel(model);
+  const paid = isPaidImageModel(safeModel);
+  const hasUploads = options.references.length + options.assets.length > 0;
   const enabled = await enabledImageIds();
   // An enabled catalog model wins; otherwise the free OpenRouter backup covers
-  // an Antigravity quota hit while it is still offered.
-  const fallback = nextImageFallback(safeModel, enabled) ?? freeImageBackupModel();
+  // an Antigravity quota hit while it is still offered. The Recraft backup is
+  // text-only, so it is skipped when the user uploaded visual references or
+  // assets: a result that ignores them would look like success but is not.
+  const fallback = paid ? null : (nextImageFallback(safeModel, enabled) ?? (hasUploads ? null : freeImageBackupModel()));
 
   try {
     imageJobs.update(job.id, job.ownerId, {
-      status: 'generating', progress: 30, message: `🤖 Generating image with ${imageModelLabel(safeModel)} (30-90s)...`,
+      status: 'generating', progress: 20, message: hasUploads ? '🖼️ Preparing your reference images...' : `🤖 Generating image with ${imageModelLabel(safeModel)} (30-90s)...`,
     });
 
     const generationSpec = getImageGenerationSpec(aspectRatio);
-    const swipeLeft = type === 'social-post' && includeSwipeLeft;
-    const academy = type === 'social-post' && dupoinAcademy;
-    const gatewayPrompt = applyDupoinImagePromptLocks(prompt, aspectRatio, { includeSwipeLeft: swipeLeft, dupoinAcademy: academy });
+    const chrome = CHROME_TYPES.has(type);
+    const swipeLeft = chrome && options.includeSwipeLeft;
+    // Social Post keeps its old behaviour: Dupoin or Academy header plus footer, always.
+    const logo: DupoinLogoChoice = chrome ? (type === 'social-post' && options.logo === 'none' ? 'dupoin' : options.logo) : 'dupoin';
+    const footer = type === 'social-post' ? true : options.footer;
+    const brandStyle = type === 'social-post' ? true : options.brandStyle;
+    const academy = chrome && logo === 'academy';
+    const lockedPrompt = applyDupoinImagePromptLocks(prompt, aspectRatio, { includeSwipeLeft: swipeLeft, logo, footer, brandStyle });
 
-    const { payload, usedModel, fallbackFrom, fallbackMessage } = await generateWithAntigravityCapacityFallback(
-      safeModel,
-      (attemptModel) => requestGatewayImage(attemptModel, gatewayPrompt, generationSpec, aspectRatio),
-      {
-        ...(fallback ? { fallbackModel: fallback } : {}),
-        onRetry: (fallbackModel, fromModel) => {
-          console.warn(`[generate-image] ${fromModel} capacity/quota exhausted; retrying once with ${fallbackModel}`);
-          imageJobs.update(job.id, job.ownerId, {
-            status: 'generating',
-            progress: 55,
-            message: `Antigravity quota full — retrying with ${imageModelLabel(fallbackModel)} instead of ${imageModelLabel(fromModel)}...`,
-          });
+    const prepared = await prepareModelInputImages({
+      references: options.references,
+      assets: options.assets,
+      maxInputImages: maxInputImagesFor(safeModel),
+      // 9router forwards one input image, so several uploads become one labelled sheet.
+      singleInputOnly: !paid,
+    });
+    const referenceBlock = referencePromptBlock({ ...prepared, assetNote: options.assetNote });
+    const gatewayPrompt = referenceBlock ? `${referenceBlock}\n\n${lockedPrompt}` : lockedPrompt;
+
+    imageJobs.update(job.id, job.ownerId, {
+      status: 'generating',
+      progress: 30,
+      message: `🤖 Generating image with ${imageModelLabel(safeModel)}${prepared.images.length ? ` using ${prepared.referenceCount + prepared.assetCount} uploaded image(s)` : ''} (30-90s)...`,
+    });
+
+    let paidFallbackMessage: string | undefined;
+    const runPaid = async () => {
+      try {
+        const payload = await postPaidOpenRouterImage({
+          model: safeModel,
+          prompt: gatewayPrompt,
+          aspectRatio,
+          inputImages: prepared.images,
+          timeoutMs: 240_000,
+        });
+        return { payload: payload as GatewayImagePayload, usedModel: safeModel, fallbackFrom: undefined as string | undefined, fallbackMessage: undefined as string | undefined };
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : '';
+        if (!isOpenRouterCreditFailure(reason)) throw error;
+        // Out of credit: fall back to the free model rather than failing outright.
+        console.warn(`[generate-image] ${safeModel} has no OpenRouter credit; using ${DEFAULT_IMAGE_MODEL}`);
+        paidFallbackMessage = `OpenRouter credit ran out for ${imageModelLabel(safeModel)} — used ${imageModelLabel(DEFAULT_IMAGE_MODEL)} (free) instead`;
+        imageJobs.update(job.id, job.ownerId, { status: 'generating', progress: 55, message: `${paidFallbackMessage}...` });
+        const freeInputs = await prepareModelInputImages({
+          references: options.references,
+          assets: options.assets,
+          maxInputImages: maxInputImagesFor(DEFAULT_IMAGE_MODEL),
+          singleInputOnly: true,
+        });
+        const freeBlock = referencePromptBlock({ ...freeInputs, assetNote: options.assetNote });
+        const payload = await requestGatewayImage(DEFAULT_IMAGE_MODEL, freeBlock ? `${freeBlock}\n\n${lockedPrompt}` : lockedPrompt, generationSpec, aspectRatio, freeInputs.images);
+        return { payload, usedModel: DEFAULT_IMAGE_MODEL, fallbackFrom: safeModel, fallbackMessage: paidFallbackMessage };
+      }
+    };
+
+    const { payload, usedModel, fallbackFrom, fallbackMessage } = paid
+      ? await runPaid()
+      : await generateWithAntigravityCapacityFallback(
+        safeModel,
+        (attemptModel) => requestGatewayImage(attemptModel, gatewayPrompt, generationSpec, aspectRatio, prepared.images),
+        {
+          ...(fallback ? { fallbackModel: fallback } : { fallbackModel: null }),
+          onRetry: (fallbackModel, fromModel) => {
+            console.warn(`[generate-image] ${fromModel} capacity/quota exhausted; retrying once with ${fallbackModel}`);
+            imageJobs.update(job.id, job.ownerId, {
+              status: 'generating',
+              progress: 55,
+              message: `Antigravity quota full — retrying with ${imageModelLabel(fallbackModel)} instead of ${imageModelLabel(fromModel)}...`,
+            });
+          },
+          onFallbackError: (fallbackModel, fallbackError) => {
+            console.warn(`[generate-image] backup ${fallbackModel} also failed:`, fallbackError instanceof Error ? fallbackError.message.slice(0, 300) : fallbackError);
+          },
         },
-        onFallbackError: (fallbackModel, fallbackError) => {
-          console.warn(`[generate-image] backup ${fallbackModel} also failed:`, fallbackError instanceof Error ? fallbackError.message.slice(0, 300) : fallbackError);
-        },
-      },
-    );
+      );
 
     const first = payload?.data?.[0];
     if (!first) throw new Error('Image API returned no image.');
@@ -164,13 +279,12 @@ async function runImageJob(job: ImageJob, prompt: string, brief: string, type: s
 
     if (imageBytes.length < 10_000) throw new Error('Image API returned a suspiciously small image.');
 
-    // Social Post wears Bayu's Instagram chrome: the left header lockup plus
-    // the white regulatory footer, composited from the asset. Academy posts
-    // replace that lockup with the centered Dupoin Academy logo. A lower-right
-    // wordmark on the same image would double-brand it. Other image types
-    // still get the wordmark-only stamp.
-    imageBytes = type === 'social-post'
-      ? await compositeDupoinInstagramChrome(imageBytes, { includeSwipeLeft: swipeLeft, dupoinAcademy: academy })
+    // Social Post / Generate Image wear Bayu's Instagram chrome: the left
+    // header lockup (or the centered Academy logo, or no logo) plus the white
+    // regulatory footer when it is on. A lower-right wordmark on the same
+    // image would double-brand it. Other image types keep the wordmark stamp.
+    imageBytes = chrome
+      ? await compositeDupoinInstagramChrome(imageBytes, { includeSwipeLeft: swipeLeft, logo, footer })
       : await compositeDupoinLogo(imageBytes);
 
     const directory = path.join(cwd, 'public', 'outputs', 'images');
@@ -178,6 +292,8 @@ async function runImageJob(job: ImageJob, prompt: string, brief: string, type: s
     const fileName = `${sopName}.png`;
     fs.writeFileSync(path.join(directory, fileName), imageBytes);
 
+    const usage = parseImageGenerationUsage(payload);
+    const costUsd = payload.provider === 'openrouter' && Number.isFinite(usage.cost) ? usage.cost : null;
     const imageUrl = `/api/generated-images/${encodeURIComponent(fileName)}`;
     const result: ImageJobResult = {
       success: true,
@@ -189,6 +305,12 @@ async function runImageJob(job: ImageJob, prompt: string, brief: string, type: s
       aspectRatio,
       includeSwipeLeft: swipeLeft,
       dupoinAcademy: academy,
+      logo,
+      footer,
+      paid: payload.provider === 'openrouter' && isPaidImageModel(usedModel),
+      costUsd,
+      referenceCount: prepared.referenceCount,
+      assetCount: prepared.assetCount,
       ...(fallbackFrom ? { fallbackFrom, fallbackMessage } : {}),
     };
     imageJobs.update(job.id, job.ownerId, {
@@ -202,12 +324,47 @@ async function runImageJob(job: ImageJob, prompt: string, brief: string, type: s
     } catch (error) {
       console.error('[generate-image] Failed to log token usage:', error);
     }
-    void recordImageOnTask(taskId, job.ownerId, {
+    const record = {
       imageUrl, fileName, sopName, model: usedModel, prompt, aspectRatio,
       includeSwipeLeft: swipeLeft,
       dupoinAcademy: academy,
+      logo,
+      footer,
+      brandStyle,
+      referenceCount: prepared.referenceCount,
+      assetCount: prepared.assetCount,
+      ...(costUsd !== null ? { costUsd } : {}),
       ...(fallbackFrom ? { fallbackFrom, fallbackMessage } : {}),
-    });
+    };
+    void recordImageOnTask(taskId, job.ownerId, record);
+    if (type === 'generate-image') {
+      try {
+        writeGeneratedImageMeta({
+          fileName,
+          imageUrl,
+          userId: job.ownerId,
+          type: 'generate-image',
+          prompt,
+          brief: brief.slice(0, 300),
+          model: usedModel,
+          aspectRatio,
+          logo,
+          footer,
+          includeSwipeLeft: swipeLeft,
+          dupoinAcademy: academy,
+          brandStyle,
+          referenceCount: prepared.referenceCount,
+          assetCount: prepared.assetCount,
+          paid: result.paid === true,
+          costUsd,
+          taskId,
+          ...(fallbackFrom ? { fallbackFrom, fallbackMessage } : {}),
+          generatedAt: new Date().toISOString(),
+        }, cwd);
+      } catch (error) {
+        console.error('[generate-image] Failed to save image metadata:', error);
+      }
+    }
   } catch (error) {
     const reason = error instanceof Error ? error.message : 'unknown error';
     console.error('[generate-image] Image job failed:', reason);
@@ -219,6 +376,15 @@ async function runImageJob(job: ImageJob, prompt: string, brief: string, type: s
       status: 'error', progress: 0, message: `❌ ${explained}`, error: explained,
     });
   }
+}
+
+/** OpenRouter answered "no credit" (402 / credits copy) for a paid image call. */
+function isOpenRouterCreditFailure(reason: string): boolean {
+  const lower = reason.toLowerCase();
+  return reason.includes('image generation needs OpenRouter credits')
+    || /OpenRouter image error 402/.test(reason)
+    || lower.includes('insufficient credit')
+    || lower.includes('more credits');
 }
 
 type GatewayImagePayload = {
@@ -234,13 +400,16 @@ async function requestGatewayImage(
   gatewayPrompt: string,
   generationSpec: { size: string },
   aspectRatio: ImageAspectRatio,
+  inputImages: string[] = [],
 ): Promise<GatewayImagePayload> {
   // Dupoin keeps POST /images/generations. OpenRouter uses POST /api/v1/images.
+  // Uploaded references/assets ride along as real image input.
   return postImage({
     model,
     prompt: gatewayPrompt,
     size: generationSpec.size,
     aspectRatio,
+    ...(inputImages.length ? { inputImages } : {}),
     timeoutMs: 240_000,
   });
 }
@@ -316,6 +485,12 @@ async function recordImageOnTask(
     aspectRatio: ImageAspectRatio;
     includeSwipeLeft?: boolean;
     dupoinAcademy?: boolean;
+    logo?: DupoinLogoChoice;
+    footer?: boolean;
+    brandStyle?: boolean;
+    referenceCount?: number;
+    assetCount?: number;
+    costUsd?: number;
     fallbackFrom?: string;
     fallbackMessage?: string;
   },
@@ -385,7 +560,7 @@ function jsonError(error: string, status: number) {
 function generateSOPFileName(brief: string, type: string): string {
   const cleaned = brief.replace(/[^a-zA-Z0-9\s]/g, '').trim().split(/\s+/).slice(0, 4).map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join('');
   const contentName = cleaned || 'Content';
-  const typeMap: Record<string, string> = { 'social-post': 'SocialPost', 'video-script': 'VideoScript', 'event-plan': 'EventPlan', generated: 'Image' };
+  const typeMap: Record<string, string> = { 'social-post': 'SocialPost', 'generate-image': 'GenImage', 'video-script': 'VideoScript', 'event-plan': 'EventPlan', generated: 'Image' };
   const fileType = typeMap[type] || 'Image';
   const date = new Date().toISOString().split('T')[0].replace(/-/g, '');
   const directory = path.join(process.cwd(), 'public', 'outputs', 'images');

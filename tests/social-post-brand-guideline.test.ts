@@ -102,10 +102,9 @@ test('Social Post page offers a Brand guideline picker and sends the selected id
   assert.match(page, /readSocialPostBrandGuidelines/);
   assert.match(page, /socialPostGenerateRequestBody\(\{/);
   assert.match(page, /brandGuidelineId/);
-  assert.match(page, /applyDupoinImagePromptLocks/);
 
-  const imageStart = page.indexOf('const generateImage');
-  const imageBody = page.slice(imageStart, page.indexOf("fetch('/api/generate-image'", imageStart));
-  assert.doesNotMatch(imageBody, /brandGuidelineId/);
-  assert.match(page, /aspectRatio: imageAspectRatio, includeSwipeLeft, dupoinAcademy \}/);
+  // Images moved to Generate Image; the brand guideline id never reaches the image route.
+  const imagePage = readFileSync(path.join(process.cwd(), 'src/app/dashboard/generate-image/page.tsx'), 'utf8');
+  const imageBody = imagePage.slice(imagePage.indexOf("fetch('/api/generate-image'"));
+  assert.doesNotMatch(imageBody.slice(0, 1200), /brandGuidelineId/);
 });

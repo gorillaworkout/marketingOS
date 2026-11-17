@@ -282,6 +282,10 @@ export interface InstagramChromeOptions {
   includeSwipeLeft?: boolean;
   /** Use the centered Dupoin Academy logo instead of the Dupoin wordmark and CNN laurel. */
   dupoinAcademy?: boolean;
+  /** Generate Image logo choice; wins over dupoinAcademy. "none" stamps no header. */
+  logo?: 'dupoin' | 'academy' | 'none';
+  /** Regulatory footer + risk warning. Default true. */
+  footer?: boolean;
 }
 
 /**
@@ -302,7 +306,12 @@ export async function compositeDupoinInstagramChrome(
   imageBytes: Buffer,
   options?: InstagramChromeOptions,
 ): Promise<Buffer> {
-  const academy = options?.dupoinAcademy === true;
+  const logo = options?.logo === 'dupoin' || options?.logo === 'academy' || options?.logo === 'none'
+    ? options.logo
+    : (options?.dupoinAcademy === true ? 'academy' : 'dupoin');
+  const academy = logo === 'academy';
+  const stampFooter = options?.footer !== false;
+  if (logo === 'none' && !stampFooter && !options?.includeSwipeLeft) return sharp(imageBytes).png().toBuffer();
   const [header, footer] = await Promise.all([keyedHeader(), keyedFooter()]);
   const base = sharp(imageBytes);
   const baseMeta = await base.metadata();
@@ -322,11 +331,13 @@ export async function compositeDupoinInstagramChrome(
     place.footerHeight,
   );
 
-  const layers: sharp.OverlayOptions[] = [
-    { input: footerStrip, left: place.left, top: baseMeta.height - place.footerHeight },
-  ];
+  const layers: sharp.OverlayOptions[] = stampFooter
+    ? [{ input: footerStrip, left: place.left, top: baseMeta.height - place.footerHeight }]
+    : [];
 
-  if (academy) {
+  if (logo === 'none') {
+    // No header stamp.
+  } else if (academy) {
     const logo = await loadAcademyLogo();
     const spot = headerLockupPlacement(baseMeta.width, baseMeta.height, {
       width: logo.width,
@@ -344,7 +355,8 @@ export async function compositeDupoinInstagramChrome(
 
   if (options?.includeSwipeLeft) {
     const button = await loadSwipeButton();
-    const swipe = swipeButtonPlacement(baseMeta.width, baseMeta.height, place.footerHeight, place.headerHeight);
+    // Without the footer the pill keeps the same spot, so it still clears the bottom edge.
+    const swipe = swipeButtonPlacement(baseMeta.width, baseMeta.height, place.footerHeight, logo === 'none' ? 0 : place.headerHeight);
     const sized = swipe.width === button.width && swipe.height === button.height
       ? sharp(button.png)
       : sharp(button.png).resize(swipe.width, swipe.height, { fit: 'fill' });

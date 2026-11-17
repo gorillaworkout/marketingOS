@@ -43,6 +43,8 @@ test('linked images keep the prompt and generation inputs stored on that file', 
     model: 'gpt-image-2',
     includeSwipeLeft: false,
     dupoinAcademy: null,
+    logo: null,
+    footer: null,
   });
   assert.equal(linked[1]?.prompt, 'Latest scene prompt');
   assert.equal(linked[1]?.includeSwipeLeft, true);
@@ -62,11 +64,13 @@ test('a filename-only image falls back to the task image prompt and does not inv
   assert.equal(linkedGeneratedImages(null).length, 0);
 });
 
-test('remix routes only Social Post images and history opens the matching editor', () => {
-  assert.equal(imageRemixTarget('social-post'), 'social-post');
+test('remix sends Social Post and Generate Image images to Generate Image; history opens the matching editor', () => {
+  assert.equal(imageRemixTarget('social-post'), 'generate-image');
+  assert.equal(imageRemixTarget('generate-image'), 'generate-image');
   assert.equal(imageRemixTarget('video-script'), null);
   assert.equal(imageRemixTarget(null), null);
-  assert.equal(imageRemixHref('social-post'), '/dashboard/social-post?remix=1');
+  assert.equal(imageRemixHref('generate-image'), '/dashboard/generate-image?remix=1');
+  assert.equal(imageRemixHref(), '/dashboard/generate-image?remix=1');
   assert.equal(historyEditorHref('social-post', 'task 1'), '/dashboard/social-post?task=task%201');
   assert.equal(historyEditorHref('video-script', 'abc'), '/dashboard/video-script?task=abc');
   assert.equal(historyEditorHref('event-plan', 'abc'), '/dashboard/event-plan?task=abc');
@@ -83,6 +87,7 @@ test('gallery and history surface the stored prompt without pulling sharp into t
   const history = read('src/app/dashboard/history/page.tsx');
   const historyApi = read('src/app/api/dashboard/history/route.ts');
   const social = read('src/app/dashboard/social-post/page.tsx');
+  const generateImage = read('src/app/dashboard/generate-image/page.tsx');
   const remix = read('src/lib/image-remix.ts');
   const editor = read('src/lib/history-editor.ts');
 
@@ -97,13 +102,15 @@ test('gallery and history surface the stored prompt without pulling sharp into t
   assert.match(history, /data-testid="history-use-in-editor"/);
   assert.match(historyApi, /searchParams\.get\('id'\)/);
   assert.match(historyApi, /user_id = \? AND id = \?/);
+  assert.match(galleryApi, /readAllGeneratedImageMeta/, 'standalone Generate Image results keep their prompt in the gallery');
   assert.match(social, /IMAGE_REMIX_QUERY/);
+  assert.match(social, /router\.replace\(imageRemixHref\('generate-image'\)\)/, 'old Social Post remix links redirect');
   assert.match(social, /TASK_EDITOR_QUERY/);
-  assert.match(social, /includeSwipeLeft/);
-  assert.match(social, /data-testid="social-post-image-history-remix"/);
-  assert.doesNotMatch(social, /setGeneratedImage\(img\.imageUrl\)/);
+  assert.match(generateImage, /readImageRemix\('generate-image'\)/);
+  assert.match(generateImage, /includeSwipeLeft/);
+  assert.match(generateImage, /stripDupoinImagePromptLocks\(remix\.prompt\)/);
 
-  for (const source of [gallery, history, social, remix, editor]) {
+  for (const source of [gallery, history, social, generateImage, remix, editor]) {
     assert.doesNotMatch(source, /from 'sharp'/);
     assert.doesNotMatch(source, /dupoin-ig-chrome['"]/);
   }

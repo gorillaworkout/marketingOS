@@ -49,7 +49,7 @@ test('keeps image jobs isolated to their owner and exposes terminal results', ()
 test('uses JSON job handoff and polling instead of a request-bound image stream', () => {
   const root = path.resolve(import.meta.dirname, '..');
   const route = fs.readFileSync(path.join(root, 'src/app/api/generate-image/route.ts'), 'utf8');
-  const client = fs.readFileSync(path.join(root, 'src/app/dashboard/social-post/page.tsx'), 'utf8');
+  const client = fs.readFileSync(path.join(root, 'src/app/dashboard/generate-image/page.tsx'), 'utf8');
 
   assert.match(route, /export async function POST/);
   assert.match(route, /export async function GET/);

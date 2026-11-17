@@ -20,6 +20,8 @@ interface ImageItem {
   model: string | null;
   includeSwipeLeft: boolean | null;
   dupoinAcademy: boolean | null;
+  logo?: 'dupoin' | 'academy' | 'none' | null;
+  footer?: boolean | null;
   linked: boolean;
 }
 
@@ -128,6 +130,8 @@ export default function ImagesPage() {
       model: img.model || undefined,
       includeSwipeLeft: typeof img.includeSwipeLeft === 'boolean' ? img.includeSwipeLeft : undefined,
       dupoinAcademy: typeof img.dupoinAcademy === 'boolean' ? img.dupoinAcademy : undefined,
+      logo: img.logo === 'dupoin' || img.logo === 'academy' || img.logo === 'none' ? img.logo : undefined,
+      footer: typeof img.footer === 'boolean' ? img.footer : undefined,
       taskId: img.taskId || undefined,
       filename: img.filename,
       imageUrl: img.url,

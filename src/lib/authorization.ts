@@ -117,9 +117,20 @@ export function generationFeatureFromPath(pathname: string): GenerationFeature |
 /** Features whose whole route tree (href and every nested path) belongs to the feature. */
 const PREFIX_MATCHED_FEATURES = [INTERNAL_DOCS_FEATURE, SEO_FEATURE, MONTHLY_REPORT_FEATURE, SETTLEMENT_REPORT_FEATURE, PARTNERSHIP_FEATURE] as const;
 
+/**
+ * Dashboard pages that belong to an existing feature without being its main href.
+ * Generate Image grew out of Social Post (which is now caption-only), so the
+ * same Social Post grant opens it. No new Accounts feature, no migration.
+ */
+export const DASHBOARD_FEATURE_ALIAS_HREFS: Readonly<Record<string, AccountFeature>> = {
+  '/dashboard/generate-image': 'social-post',
+};
+
 /** Exact href match, plus nested routes for prefix-matched features (Internal Docs, SEO OS, Onboarding, Settlement, Partnership). */
 export function accountFeatureFromPath(pathname: string): AccountFeature | undefined {
   const normalized = normalizeDashboardPath(pathname);
+  const alias = DASHBOARD_FEATURE_ALIAS_HREFS[normalized];
+  if (alias) return alias;
   for (const feature of PREFIX_MATCHED_FEATURES) {
     const href = DASHBOARD_FEATURE_HREFS[feature];
     if (normalized === href || normalized.startsWith(`${href}/`)) return feature;
