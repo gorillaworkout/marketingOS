@@ -15,6 +15,7 @@ import InlineModelSelector from '@/components/InlineModelSelector';
 import { TASK_EDITOR_QUERY, fetchOwnHistoryTask } from '@/lib/history-editor';
 import { EventQuotationTable } from '@/components/event-quotation-table';
 import { parseQuotationLines, type QuotationLine } from '@/lib/event-plan-quotation';
+import { downloadEventPlanPptx } from '@/lib/event-plan-pptx-client';
 
 type BudgetItem = { category: string; estimatedCost: number | null; notes: string; suggestedVendor?: string; venue?: string; sourceUrl?: string | null; source?: string };
 type Budget = { currency: 'IDR'; total?: number | null; items: BudgetItem[]; contingency?: number | null; preliminary?: boolean; publicPricesFound?: boolean; ceilingNote?: string };
@@ -128,6 +129,8 @@ export default function EventPlanPage() {
   const [fallbackLabel, setFallbackLabel] = useState('');
   const [recent, setRecent] = useState<EventPlanHistoryTask[]>([]);
   const [recentError, setRecentError] = useState('');
+  const [pptBusy, setPptBusy] = useState(false);
+  const [pptError, setPptError] = useState('');
 
   const fetchRecent = useCallback(async () => {
     try {
@@ -317,6 +320,25 @@ export default function EventPlanPage() {
     URL.revokeObjectURL(link.href);
   };
 
+  const handlePptDownload = async () => {
+    if (!rawResult) return;
+    setPptBusy(true);
+    setPptError('');
+    try {
+      // The latest edited state: the selected option plus the current quotation table and contingency.
+      await downloadEventPlanPptx({
+        eventName, location, theme, targetDate, venueName,
+        participants: participants ? Number(participants) : null,
+        speakers, quotations, contingencyPercent,
+        option: { ...rawResult, research },
+      });
+    } catch (cause) {
+      setPptError(cause instanceof Error ? cause.message : 'Could not build the presentation.');
+    } finally {
+      setPptBusy(false);
+    }
+  };
+
   return (
     <PageStack className="max-w-5xl">
       <PageHeader eyebrow="Create / Events" title="Event plan" description="Research, proposal, and budgeting in one workflow with a clear source check." actions={<Link href={`/dashboard/history?type=${EVENT_PLAN_HISTORY_TYPE}`} className="inline-flex h-9 items-center rounded-[var(--mos-radius-control)] border border-[var(--mos-border)] bg-[var(--mos-raised)] px-3.5 text-sm font-medium text-[var(--mos-text-secondary)] hover:border-[var(--mos-border-strong)]">Open history</Link>} />
@@ -387,7 +409,9 @@ export default function EventPlanPage() {
             {result.timeline && <Detail label="Timeline" value={result.timeline} preserveWhitespace />}
             <ResearchPanel research={research} missingPriceText={missingPriceNote(hasQuotation)} />
           </Panel>
-          <Toolbar><div className="flex flex-wrap gap-2"><Button variant="primary" onClick={() => handleDownload('doc')}>Download event plan (.doc)</Button><Button onClick={() => handleDownload('json')}>Download JSON</Button></div>{tokenUsage && <div className="text-right"><p className="text-xs font-medium text-[var(--mos-text-secondary)]">{(tokenUsage.inputTokens || 0) + (tokenUsage.outputTokens || 0)} tokens</p>{tokenUsage.model && <p className="text-[11px] text-[var(--mos-text-faint)]">{tokenUsage.model}</p>}</div>}</Toolbar>
+          <Toolbar><div className="flex flex-wrap gap-2"><Button variant="primary" data-testid="event-plan-download-ppt" disabled={pptBusy} onClick={() => void handlePptDownload()}>{pptBusy ? 'Building PPT…' : 'Download PPT'}</Button><Button onClick={() => handleDownload('doc')}>Download event plan (.doc)</Button><Button onClick={() => handleDownload('json')}>Download JSON</Button></div>{tokenUsage && <div className="text-right"><p className="text-xs font-medium text-[var(--mos-text-secondary)]">{(tokenUsage.inputTokens || 0) + (tokenUsage.outputTokens || 0)} tokens</p>{tokenUsage.model && <p className="text-[11px] text-[var(--mos-text-faint)]">{tokenUsage.model}</p>}</div>}</Toolbar>
+          <p className="-mt-3 text-[11px] text-[var(--mos-text-faint)]">The PPT uses the selected plan with the current quotation table and contingency.</p>
+          {pptError && <p className="text-sm text-red-300" role="alert">{pptError}</p>}
           {fallbackLabel && <p data-testid="event-plan-fallback-label" className="text-[11px] text-[var(--mos-text-faint)]">{fallbackLabel}</p>}
         </div>
       )}

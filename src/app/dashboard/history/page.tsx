@@ -8,6 +8,7 @@ import { formatMarketResearchEvidenceLevel, type MarketResearchItem } from '@/li
 import { formatMarketResearchSourceStatus } from '@/lib/market-research-status';
 import { Button, EmptyState, FilterGroup, LoadingState, Panel, PageHeader, PageStack, StatusBadge, Toolbar } from '@/components/ui/dashboard';
 import { historyEditorHref, historyEditorLabel } from '@/lib/history-editor';
+import { deckInputFromHistory, downloadEventPlanPptx } from '@/lib/event-plan-pptx-client';
 
 interface HistoryTask {
   id: string;
@@ -28,6 +29,8 @@ export default function HistoryPage() {
   const [articleFactReviewConfirmed, setArticleFactReviewConfirmed] = useState(false);
   const [marketResearchReviewConfirmed, setMarketResearchReviewConfirmed] = useState(false);
   const [historyError, setHistoryError] = useState('');
+  const [pptBusy, setPptBusy] = useState(false);
+  const [pptError, setPptError] = useState('');
 
   useEffect(() => {
     const requested = new URLSearchParams(window.location.search).get('type');
@@ -67,6 +70,18 @@ export default function HistoryPage() {
 
   const typeLabels: Record<string, string> = { 'social-post': 'Social Post', 'video-script': 'Video Script', 'event-plan': 'Event Plan', 'article-market-news': 'Article Market News', 'market-research': 'Market Research' };
   const filteredTasks = tasks;
+
+  const downloadEventPlanPpt = async (task: HistoryTask) => {
+    setPptBusy(true);
+    setPptError('');
+    try {
+      await downloadEventPlanPptx(deckInputFromHistory(task));
+    } catch (cause) {
+      setPptError(cause instanceof Error ? cause.message : 'Could not build the presentation.');
+    } finally {
+      setPptBusy(false);
+    }
+  };
 
   const downloadJSON = (task: HistoryTask) => {
     const blob = new Blob([task.output_data || '{}'], { type: 'application/json' });
@@ -129,7 +144,7 @@ export default function HistoryPage() {
         <Panel padding="none" className="lg:col-span-1 max-h-[70vh] overflow-y-auto">
           {filteredTasks.length > 0 ? filteredTasks.map(task => (
             <div key={task.id}
-              onClick={() => { setSelected(task); setArticleFactReviewConfirmed(false); setMarketResearchReviewConfirmed(false); }}
+              onClick={() => { setSelected(task); setArticleFactReviewConfirmed(false); setMarketResearchReviewConfirmed(false); setPptError(''); }}
               className={`p-4 border-b border-[var(--mos-border)] cursor-pointer hover:bg-[var(--mos-raised)] transition-colors ${selected?.id === task.id ? 'bg-blue-600/10 border-l-2 border-l-blue-500' : ''}`}>
               <div className="flex items-center gap-2 mb-1">
                 <span className="text-xs text-[var(--mos-text-faint)]">{typeLabels[task.type] || task.type}</span>
@@ -162,6 +177,11 @@ export default function HistoryPage() {
                       {historyEditorLabel(selected.type)}
                     </Button>
                   )}
+                  {selected.type === 'event-plan' && (
+                    <Button variant="primary" data-testid="history-download-ppt" disabled={pptBusy} onClick={() => void downloadEventPlanPpt(selected)}>
+                      {pptBusy ? 'Building PPT…' : 'Download PPT'}
+                    </Button>
+                  )}
                   <Button variant="primary" onClick={() => selected.type === 'market-research' ? void downloadMarketResearchDocx(selected) : selected.type === 'article-market-news' ? void downloadArticleDocx(selected) : downloadJSON(selected)}
                     disabled={(selected.type === 'article-market-news' && !articleFactReviewConfirmed) || (selected.type === 'market-research' && !marketResearchReviewConfirmed)}
                   >
@@ -170,6 +190,7 @@ export default function HistoryPage() {
                 </div>
               </div>
 
+              {pptError && <p className="mb-4 text-sm text-red-300" role="alert">{pptError}</p>}
               <div className="space-y-4">
                 {/* Brief */}
                 {selected.brief && (
