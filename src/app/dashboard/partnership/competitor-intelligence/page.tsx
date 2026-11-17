@@ -1,9 +1,11 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { Suspense, useCallback, useEffect, useRef, useState } from 'react';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import {
   Button, DataTableFrame, EmptyState, FormField, LoadingState, PageHeader, PageStack, Panel, SectionHeader, Select, StatusBadge, TextArea, TextInput,
 } from '@/components/ui/dashboard';
+import { ModalDialog } from '@/components/ui/ModalDialog';
 import { fetchJson } from '@/components/seo/useSeoSites';
 import { TregCostNotice, useTregStatus, type TregStatus } from '@/components/seo/TregCostNotice';
 import { RefreshToolbar } from '@/components/partnership/RefreshToolbar';
@@ -16,6 +18,7 @@ import {
   type ComparisonRow, type IntelItem, type IntelOpportunity, type IntelReportResult, type Region, type SourceRef,
 } from '@/lib/partnership/intel';
 import { reportMode, reportModeLabel, type ReportMode, type ToolbarTregStatus } from '@/lib/partnership/refresh-plan';
+import { competitorIdFromSearch, competitorPageUrl } from '@/lib/partnership/competitor-param';
 
 type PartnershipTregStatus = TregStatus & ToolbarTregStatus;
 /** Item categories shown under "Other activity"; legacy campaigns/social items are shown as regular content. */
@@ -111,9 +114,18 @@ function CompetitorFields({ form, setForm }: { form: CompetitorForm; setForm: (n
 }
 
 export default function CompetitorIntelligencePage() {
+  return <Suspense fallback={<LoadingState label="Loading Competitor Intelligence" />}><CompetitorIntelligence /></Suspense>;
+}
+
+function CompetitorIntelligence() {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const selectedId = competitorIdFromSearch(searchParams);
+  const openedViaPush = useRef(false);
   const [list, setList] = useState<ListResponse | null>(null);
-  const [selectedId, setSelectedId] = useState('');
   const [detail, setDetail] = useState<DetailResponse | null>(null);
+  const [detailError, setDetailError] = useState<{ id: string; message: string } | null>(null);
   const [message, setMessage] = useState('');
   const [adding, setAdding] = useState(false);
   const [newForm, setNewForm] = useState<CompetitorForm>(EMPTY_FORM);
@@ -138,7 +150,11 @@ export default function CompetitorIntelligencePage() {
 
   const loadDetail = useCallback(async (id: string) => {
     const { ok, data } = await fetchJson<DetailResponse>(`/api/partnership/competitors/${encodeURIComponent(id)}`);
-    if (!ok) { setMessage(data.error || 'Could not load the competitor.'); return; }
+    if (!ok) {
+      setDetailError({ id, message: data.error || 'Could not load the competitor.' });
+      return;
+    }
+    setDetailError(null);
     setDetail(data);
   }, []);
 
@@ -148,7 +164,10 @@ export default function CompetitorIntelligencePage() {
   }, [loadList]);
 
   useEffect(() => {
-    if (!selectedId) return;
+    if (!selectedId) {
+      openedViaPush.current = false;
+      return;
+    }
     const timer = window.setTimeout(() => { void loadDetail(selectedId); }, 0);
     return () => window.clearTimeout(timer);
   }, [selectedId, loadDetail]);
@@ -164,16 +183,35 @@ export default function CompetitorIntelligencePage() {
     return () => window.clearInterval(timer);
   }, [anyRunning, batchActive, selectedId, loadList, loadDetail]);
 
-  const select = (id: string) => {
-    setSelectedId(id);
+  const closeDetail = (mode: 'back' | 'replace' = 'back') => {
     setEditForm(null);
-    setDetail(null);
+    const next = competitorPageUrl(pathname, searchParams, null);
+    const canBack = mode === 'back' && openedViaPush.current;
+    openedViaPush.current = false;
+    if (canBack) router.back();
+    else router.replace(next, { scroll: false });
   };
 
-  /** Detail view shortcut: pick this competitor in the top toolbar and scroll up to it. */
+  const select = (id: string) => {
+    setEditForm(null);
+    if (id === selectedId) return;
+    setDetail(null);
+    openedViaPush.current = true;
+    router.push(competitorPageUrl(pathname, searchParams, id), { scroll: false });
+  };
+
+  /** Close the dialog so the top toolbar is visible, then pick this competitor there. */
   const pickForRefresh = (id: string) => {
     setRefreshIds([id]);
-    document.querySelector('[data-testid="refresh-toolbar"]')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    closeDetail('replace');
+    window.setTimeout(() => {
+      document.querySelector('[data-testid="refresh-toolbar"]')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 0);
+  };
+
+  const findSocial = (id: string) => {
+    setDiscoverIds([id]);
+    closeDetail('replace');
   };
 
   const saveNew = async () => {
@@ -202,7 +240,9 @@ export default function CompetitorIntelligencePage() {
     if (!detail || !window.confirm(`Delete ${detail.competitor.name}, its evidence, and its reports?`)) return;
     const { ok, data } = await fetchJson(`/api/partnership/competitors/${encodeURIComponent(detail.competitor.id)}`, { method: 'DELETE' });
     if (!ok) { setMessage(data.error || 'Could not delete.'); return; }
-    setSelectedId(''); setDetail(null);
+    openedViaPush.current = false;
+    setDetail(null);
+    router.replace(competitorPageUrl(pathname, searchParams, null), { scroll: false });
     await loadList();
   };
 
@@ -287,7 +327,7 @@ export default function CompetitorIntelligencePage() {
             const row = list.comparison.find(item => item.competitorId === competitor.id);
             const run = competitor.latestRun;
             return <tr key={competitor.id} className={`border-b border-[var(--mos-border)] text-[var(--mos-text-secondary)] ${competitor.id === selectedId ? 'bg-white/[0.04]' : ''}`}>
-              <td className="p-3"><button type="button" className="font-medium text-[var(--mos-text)] hover:underline" onClick={() => select(competitor.id)}>{competitor.name}</button>{!competitor.website && <span className="ml-2 text-[11px] text-amber-200">No website</span>}</td>
+              <td className="p-3"><button type="button" className="font-medium text-[var(--mos-text)] hover:underline" aria-haspopup="dialog" onClick={() => select(competitor.id)}>{competitor.name}</button>{!competitor.website && <span className="ml-2 text-[11px] text-amber-200">No website</span>}</td>
               <td className="p-3"><StatusBadge tone={competitor.region === 'local' ? 'info' : 'neutral'}>{REGION_LABELS[competitor.region]}</StatusBadge></td>
               <td className="p-3 text-right tabular-nums font-medium text-[var(--mos-text)]">{row?.lastRefreshed ? row.campaignCount : '—'}</td>
               {INTEL_CATEGORIES.map(category => <td key={category} className="p-3 text-right tabular-nums">{row?.lastRefreshed ? row.counts[category] : '—'}</td>)}
@@ -298,7 +338,7 @@ export default function CompetitorIntelligencePage() {
                 {run?.status === 'failed' && <span className="block text-red-300" title={run.error || ''}>Last refresh failed</span>}
               </td>
               <td className="p-3 text-right"><span className="flex justify-end gap-2">
-                <Button size="sm" onClick={() => select(competitor.id)}>Open</Button>
+                <Button size="sm" aria-haspopup="dialog" onClick={() => select(competitor.id)}>Open</Button>
               </span></td>
             </tr>;
           })}
@@ -318,12 +358,15 @@ export default function CompetitorIntelligencePage() {
       </ul>
     </Panel>
 
-    {selected && !detail && <LoadingState label={`Loading ${selected.name}`} />}
-    {detail && <>
+    {selectedId && <ModalDialog open title={detail?.competitor.name || selected?.name || 'Competitor'} onClose={() => closeDetail()} testId="competitor-detail">
+      {message && <Panel padding="compact"><p className="text-sm text-[var(--mos-text-secondary)]">{message}</p></Panel>}
+      {detailError?.id === selectedId && <Panel padding="compact"><p className="text-sm text-red-300">{detailError.message}</p></Panel>}
+      {detailError?.id !== selectedId && (!detail || detail.competitor.id !== selectedId) && <div className="flex items-center gap-3 py-8 text-sm text-[var(--mos-text-muted)]"><span className="h-4 w-4 animate-spin rounded-full border border-[var(--mos-border-strong)] border-t-[var(--mos-accent)]" /><span>Loading {selected?.name || 'competitor'}</span></div>}
+      {detail && detail.competitor.id === selectedId && <>
       <Panel>
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <h2 className="text-lg font-medium text-[var(--mos-text)]">{detail.competitor.name}</h2>
+            <p className="text-lg font-medium text-[var(--mos-text)]">{detail.competitor.name}</p>
             <p className="mt-1 text-xs text-[var(--mos-text-muted)]">
               {REGION_LABELS[detail.competitor.region]}
               {detail.competitor.website && <> · <a className="text-[var(--mos-accent-soft)] hover:underline" href={detail.competitor.website} target="_blank" rel="noopener noreferrer nofollow">{detail.competitor.website}</a></>}
@@ -333,7 +376,7 @@ export default function CompetitorIntelligencePage() {
           </div>
           <div className="flex flex-wrap gap-2">
             <Button size="sm" disabled={running(selected?.latestRun) || batchActive} onClick={() => pickForRefresh(detail.competitor.id)}>{running(selected?.latestRun) ? 'Refreshing…' : 'Refresh…'}</Button>
-            <Button size="sm" onClick={() => { setDiscoverIds([detail.competitor.id]); window.scrollTo({ top: 0, behavior: 'smooth' }); }} data-testid="find-social">Find social accounts</Button>
+            <Button size="sm" onClick={() => findSocial(detail.competitor.id)} data-testid="find-social">Find social accounts</Button>
             <Button size="sm" onClick={() => setEditForm(editForm ? null : formOf(detail.competitor))}>{editForm ? 'Cancel edit' : 'Edit'}</Button>
             {list.canDelete && <Button size="sm" variant="ghost" onClick={remove}>Delete</Button>}
           </div>
@@ -467,5 +510,6 @@ export default function CompetitorIntelligencePage() {
         </table>
       </DataTableFrame>}
     </>}
+    </ModalDialog>}
   </PageStack>;
 }
