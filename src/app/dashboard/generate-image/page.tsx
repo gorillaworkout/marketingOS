@@ -14,6 +14,7 @@ import {
   TextArea,
 } from '@/components/ui/dashboard';
 import { DEFAULT_IMAGE_ASPECT_RATIO, IMAGE_ASPECT_RATIOS, type ImageAspectRatio } from '@/lib/image-aspect-ratio';
+import { quotaExhaustedText, quotaPickerHint } from '@/lib/image-quota';
 import { applyDupoinImagePromptLocks, stripDupoinImagePromptLocks, type DupoinLogoChoice } from '@/lib/dupoin-image-prompt';
 import {
   AVAILABLE_IMAGE_MODELS,
@@ -33,6 +34,9 @@ import { prepareUpload, type PreparedUpload } from '@/lib/client-image-upload';
 
 const MAX_REFERENCES = 4;
 const MAX_ASSETS = 4;
+
+/** /api/image-models `quota`: models still out of quota and their reset time (ISO, or null if unknown). */
+type QuotaMap = Record<string, { resetAt: string | null }>;
 
 interface ImageJobResponse {
   jobId?: string;
@@ -151,6 +155,8 @@ export default function GenerateImagePage() {
   const [freeModels, setFreeModels] = useState<ImageModelInfo[]>(AVAILABLE_IMAGE_MODELS);
   const [paidModels, setPaidModels] = useState<ImageModelInfo[]>(() => livePaidImageModels());
   const [paidEnabled, setPaidEnabled] = useState(false);
+  const [quota, setQuota] = useState<QuotaMap>({});
+  const [clock, setClock] = useState(() => Date.now());
   const [model, setModel] = useState(DEFAULT_IMAGE_MODEL);
   const modelLocked = useRef(false);
   const [balance, setBalance] = useState<{ remainingUsd: number | null; configured: boolean } | null>(null);
@@ -194,16 +200,21 @@ export default function GenerateImagePage() {
     }
   }, []);
 
-  useEffect(() => {
-    fetch('/api/image-models')
+  const loadModels = useCallback(() => {
+    fetch('/api/image-models', { cache: 'no-store' })
       .then(response => response.json())
-      .then((data: { models?: ImageModelInfo[]; defaultModel?: string; paidModels?: ImageModelInfo[]; paidEnabled?: boolean }) => {
+      .then((data: { models?: ImageModelInfo[]; defaultModel?: string; paidModels?: ImageModelInfo[]; paidEnabled?: boolean; quota?: QuotaMap }) => {
         if (Array.isArray(data.models) && data.models.length > 0) setFreeModels(data.models);
         if (Array.isArray(data.paidModels)) setPaidModels(data.paidModels);
         setPaidEnabled(data.paidEnabled === true);
+        setQuota(data.quota && typeof data.quota === 'object' ? data.quota : {});
         if (data.defaultModel) setModel(current => (modelLocked.current ? current : data.defaultModel as string));
       })
       .catch(err => console.error('Failed to load image models:', err));
+  }, []);
+
+  useEffect(() => {
+    loadModels();
     fetch('/api/generate-image/history', { cache: 'no-store' })
       .then(async response => {
         const data = await readJson<{ images?: HistoryItem[]; error?: string }>(response);
@@ -215,7 +226,23 @@ export default function GenerateImagePage() {
       runRef.current += 1;
       stopTracking();
     };
-  }, [stopTracking]);
+  }, [stopTracking, loadModels]);
+
+  // Re-render quota hints once a minute so a reset time that has passed disappears.
+  useEffect(() => {
+    const timer = setInterval(() => setClock(Date.now()), 60_000);
+    return () => clearInterval(timer);
+  }, []);
+
+  /** Reset time (ms) for a model still out of quota, null when unknown, undefined when it has quota. */
+  const quotaResetFor = useCallback((id: string): number | null | undefined => {
+    const entry = quota[id];
+    if (!entry) return undefined;
+    if (!entry.resetAt) return null;
+    const at = Date.parse(entry.resetAt);
+    if (!Number.isFinite(at)) return null;
+    return at > clock ? at : undefined;
+  }, [quota, clock]);
 
   useEffect(() => {
     if (!selectedPaid) return;
@@ -381,6 +408,7 @@ export default function GenerateImagePage() {
             setGenerating(false);
             stopTracking();
             void loadHistory();
+            loadModels();
             if (selectedPaid) {
               fetch('/api/image-models/balance', { cache: 'no-store' })
                 .then(r => r.json())
@@ -392,6 +420,7 @@ export default function GenerateImagePage() {
           }
           if (status.status === 'error') {
             fail(status.error || status.message || 'Image generation failed.');
+            loadModels();
             return true;
           }
           return false;
@@ -479,7 +508,7 @@ export default function GenerateImagePage() {
           <Panel>
             <SectionHeader
               title="Visual references"
-              description="The model sees these images and follows their style, layout, colors, and mood. Up to 4."
+              description="Guide style, pose, or subject only. They are never placed in the result. Up to 4."
               action={<StatusBadge tone={references.length ? 'info' : 'neutral'}>{references.length}/{MAX_REFERENCES}</StatusBadge>}
             />
             <label className="mt-4 flex cursor-pointer flex-col items-center justify-center gap-1 rounded-[var(--mos-radius-control)] border border-dashed border-[var(--mos-border-strong)] bg-[var(--mos-surface)] px-4 py-6 text-center">
@@ -500,7 +529,7 @@ export default function GenerateImagePage() {
           <Panel>
             <SectionHeader
               title="Assets to include"
-              description="Images that must appear inside the result, such as a product photo, a person, or a chart. Up to 4."
+              description="Items that must appear in the scene, such as a product, a person, or a chart. The model redraws them into the scene, not as pasted photos. For style or pose ideas, use Visual references. No need to upload the Dupoin logo: it is added automatically. Up to 4."
               action={<StatusBadge tone={assets.length ? 'info' : 'neutral'}>{assets.length}/{MAX_ASSETS}</StatusBadge>}
             />
             <label className="mt-4 flex cursor-pointer flex-col items-center justify-center gap-1 rounded-[var(--mos-radius-control)] border border-dashed border-[var(--mos-border-strong)] bg-[var(--mos-surface)] px-4 py-6 text-center">
@@ -594,9 +623,14 @@ export default function GenerateImagePage() {
               <FormField label="Image model">
                 <Select value={effectiveModel} data-testid="generate-image-model" onChange={event => { modelLocked.current = true; setModel(event.target.value); }}>
                   <optgroup label="Free (included)">
-                    {freeModels.map(item => (
-                      <option key={item.id} value={item.id}>{item.name}</option>
-                    ))}
+                    {freeModels.map(item => {
+                      const reset = quotaResetFor(item.id);
+                      return (
+                        <option key={item.id} value={item.id}>
+                          {reset === undefined ? item.name : `${item.name} · ${quotaPickerHint(reset, clock)}`}
+                        </option>
+                      );
+                    })}
                   </optgroup>
                   {paidModels.length > 0 && (
                     <optgroup label={paidEnabled ? 'Paid · OpenRouter credits' : 'Paid · turned off in AI Models'}>
@@ -615,6 +649,11 @@ export default function GenerateImagePage() {
                 </Select>
               </FormField>
             </div>
+            {selectedModel && !selectedPaid && quotaResetFor(selectedModel.id) !== undefined && (
+              <p className="text-xs text-amber-200" role="status" data-testid="generate-image-quota-hint">
+                {quotaExhaustedText(selectedModel.name, quotaResetFor(selectedModel.id), clock)}. {selectedModel.id.startsWith('ag/') ? 'You can still generate: if it is still out, a free backup model makes the image instead.' : 'You can still try it, or pick another model.'}
+              </p>
+            )}
             {!paidEnabled && paidModels.length > 0 && (
               <p className="text-xs text-[var(--mos-text-faint)]" data-testid="generate-image-paid-off">
                 The models in the Free group run on LLM Dupoin at no cost, including GPT Image through the ChatGPT account. The models in the Paid group are billed per image through OpenRouter, and an admin has to turn on “Use paid OpenRouter models” in AI Models before they can be used.

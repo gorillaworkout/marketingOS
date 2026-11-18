@@ -20,6 +20,18 @@ import { postImage, postPaidOpenRouterImage } from '@/lib/llm-provider';
 import { getLlmSettings } from '@/lib/llm-provider-store';
 import { prepareModelInputImages, readInputImageLists, referencePromptBlock, type ParsedInputImage } from '@/lib/image-reference-inputs';
 import { writeGeneratedImageMeta } from '@/lib/generated-image-meta';
+import {
+  allFreeModelsExhaustedText,
+  allImageModelsExhausted,
+  clearImageModelQuota,
+  imageModelQuotaState,
+  markImageModelExhausted,
+  parseQuotaResetAt,
+  quotaExhaustedText,
+  quotaFallbackNotice,
+  shortModelName,
+  type ImageQuotaInfo,
+} from '@/lib/image-quota';
 import { freeImageBackupModel } from '@/lib/llm-provider-defaults';
 import { logTokenUsage } from '@/lib/token-log';
 import { parseImageGenerationUsage } from '@/lib/token-usage';
@@ -249,6 +261,7 @@ async function runImageJob(job: ImageJob, options: ImageJobOptions) {
         (attemptModel) => requestGatewayImage(attemptModel, gatewayPrompt, generationSpec, aspectRatio, prepared.images),
         {
           ...(fallback ? { fallbackModel: fallback } : { fallbackModel: null }),
+          onAttemptError: recordQuotaFailure,
           onRetry: (fallbackModel, fromModel) => {
             console.warn(`[generate-image] ${fromModel} capacity/quota exhausted; retrying once with ${fallbackModel}`);
             imageJobs.update(job.id, job.ownerId, {
@@ -265,6 +278,16 @@ async function runImageJob(job: ImageJob, options: ImageJobOptions) {
 
     const first = payload?.data?.[0];
     if (!first) throw new Error('Image API returned no image.');
+    clearImageModelQuota(usedModel);
+    // Quota fallback: say which model ran out, when it resets (WIB), and which free model made the image.
+    const quotaState = fallbackFrom ? imageModelQuotaState(fallbackFrom) : null;
+    const quota: ImageQuotaInfo | undefined = fallbackFrom && quotaState
+      ? { model: fallbackFrom, modelLabel: shortModelName(imageModelLabel(fallbackFrom)), resetAt: quotaState.resetAt ? new Date(quotaState.resetAt).toISOString() : null }
+      : undefined;
+    const quotaNotice = fallbackFrom && quotaState
+      ? quotaFallbackNotice({ fromLabel: imageModelLabel(fallbackFrom), resetAt: quotaState.resetAt, usedLabel: imageModelLabel(usedModel), usedFree: !isPaidImageModel(usedModel) })
+      : undefined;
+    const finalFallbackMessage = quotaNotice ?? fallbackMessage;
 
     let imageBytes: Buffer;
     if (first.b64_json) {
@@ -311,12 +334,13 @@ async function runImageJob(job: ImageJob, options: ImageJobOptions) {
       costUsd,
       referenceCount: prepared.referenceCount,
       assetCount: prepared.assetCount,
-      ...(fallbackFrom ? { fallbackFrom, fallbackMessage } : {}),
+      ...(fallbackFrom ? { fallbackFrom, fallbackMessage: finalFallbackMessage } : {}),
+      ...(quota ? { quota } : {}),
     };
     imageJobs.update(job.id, job.ownerId, {
       status: 'done',
       progress: 100,
-      message: payload.authNotice || (fallbackMessage ? `✅ ${fallbackMessage}` : '✅ Image generated!'),
+      message: payload.authNotice || (finalFallbackMessage ? `✅ ${finalFallbackMessage}` : '✅ Image generated!'),
       result,
     });
     try {
@@ -334,7 +358,7 @@ async function runImageJob(job: ImageJob, options: ImageJobOptions) {
       referenceCount: prepared.referenceCount,
       assetCount: prepared.assetCount,
       ...(costUsd !== null ? { costUsd } : {}),
-      ...(fallbackFrom ? { fallbackFrom, fallbackMessage } : {}),
+      ...(fallbackFrom ? { fallbackFrom, fallbackMessage: finalFallbackMessage } : {}),
     };
     void recordImageOnTask(taskId, job.ownerId, record);
     if (type === 'generate-image') {
@@ -358,7 +382,7 @@ async function runImageJob(job: ImageJob, options: ImageJobOptions) {
           paid: result.paid === true,
           costUsd,
           taskId,
-          ...(fallbackFrom ? { fallbackFrom, fallbackMessage } : {}),
+          ...(fallbackFrom ? { fallbackFrom, fallbackMessage: finalFallbackMessage } : {}),
           generatedAt: new Date().toISOString(),
         }, cwd);
       } catch (error) {
@@ -371,11 +395,43 @@ async function runImageJob(job: ImageJob, options: ImageJobOptions) {
     // Report WHY it failed. A blanket "please try again" sent users retrying a
     // quota or an expired upstream token forever, with the real cause only ever
     // visible in the server log.
-    const explained = explainImageFailure(reason, safeModel, fallback && safeModel.startsWith('ag/') ? imageModelLabel(fallback) : null);
+    if (paid) recordQuotaFailure(safeModel, error);
+    const explained = isCapacityOrRateLimitFailure(reason)
+      ? explainQuotaFailure(safeModel, fallback && safeModel.startsWith('ag/') ? fallback : null, enabled)
+      : explainImageFailure(reason, safeModel, fallback && safeModel.startsWith('ag/') ? imageModelLabel(fallback) : null);
     imageJobs.update(job.id, job.ownerId, {
       status: 'error', progress: 0, message: `❌ ${explained}`, error: explained,
     });
   }
+}
+
+/** A failed attempt that was a quota / capacity hit: remember the model as exhausted until its reset. */
+function recordQuotaFailure(model: string, error: unknown) {
+  const reason = error instanceof Error ? error.message : String(error ?? '');
+  if (!isCapacityOrRateLimitFailure(reason)) return;
+  const resetAt = parseQuotaResetAt(reason);
+  markImageModelExhausted(model, resetAt);
+  console.warn(`[generate-image] ${model} quota exhausted; reset ${resetAt ? new Date(resetAt).toISOString() : 'unknown'}`);
+}
+
+/**
+ * Quota failure copy with the reset time in WIB. When every enabled free
+ * model is out, say so and give the earliest reset instead of a generic error.
+ */
+export function explainQuotaFailure(model: string, backup: string | null, enabled: readonly string[], now: number = Date.now()): string {
+  const free = enabled.filter(id => !isPaidImageModel(id));
+  const all = allImageModelsExhausted(free.length ? free : [model], now);
+  if (all) {
+    return allFreeModelsExhaustedText(all.map(state => ({ label: imageModelLabel(state.model), resetAt: state.resetAt })), now);
+  }
+  const own = imageModelQuotaState(model, now);
+  const head = quotaExhaustedText(imageModelLabel(model), own?.resetAt ?? null, now);
+  if (!backup) return `${head}. Pick another image model.`;
+  const backupState = imageModelQuotaState(backup, now);
+  const backupText = backupState
+    ? quotaExhaustedText(imageModelLabel(backup), backupState.resetAt, now)
+    : `backup ${shortModelName(imageModelLabel(backup))} was also unavailable`;
+  return `${head}; ${backupText}. Pick another image model.`;
 }
 
 /** OpenRouter answered "no credit" (402 / credits copy) for a paid image call. */
