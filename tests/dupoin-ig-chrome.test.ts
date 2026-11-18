@@ -240,7 +240,7 @@ test('compositing uses the plate pixels and leaves the middle scene alone', asyn
   for (let y = 0; y < 220 && !sample; y++) {
     for (let x = 0; x < 800; x++) {
       const i = (y * width + x) * 4;
-      if (keyed[i + 3] > 240 && isTeal(keyed[i], keyed[i + 1], keyed[i + 2])) {
+      if (keyed[i + 3] === 255 && isTeal(keyed[i], keyed[i + 1], keyed[i + 2])) {
         sample = { x, y, rgba: [keyed[i], keyed[i + 1], keyed[i + 2], keyed[i + 3]] };
         break;
       }
@@ -588,4 +588,29 @@ test('Academy compositing centers the Academy logo and leaves the Dupoin wordmar
   assert.ok(normalMaxX < width / 2 + 80, 'normal Dupoin lockup does not cross into a centered placement');
   const normalRight = width - 1 - normalMaxX;
   assert.ok(normalRight > normalMinX + 200, `left lockup must leave a wide right margin, ${normalMinX} vs ${normalRight}`);
+});
+
+test('anti-aliased plate edges un-blend from black instead of staying opaque (no dark outline)', async () => {
+  // One solid cyan pixel, a half-coverage edge pixel beside it, then black.
+  const src = solid(8, 3, [0, 0, 0, 255]);
+  setPixel(src, 2, 1, [46, 181, 196, 255]);
+  setPixel(src, 3, 1, [23, 90, 98, 255]);
+  const keyed = knockOutBlackBackground(src, false);
+  const edge = (1 * 8 + 3) * 4;
+  assert.equal(keyed[(1 * 8 + 2) * 4 + 3], 255, 'solid artwork stays opaque');
+  assert.deepEqual([...keyed.subarray((1 * 8 + 2) * 4, (1 * 8 + 2) * 4 + 3)], [46, 181, 196], 'solid colour is exact');
+  assert.ok(keyed[edge + 3] > 110 && keyed[edge + 3] < 145, `edge alpha ~half, got ${keyed[edge + 3]}`);
+  assert.ok(Math.abs(keyed[edge + 2] - 196) <= 4, 'edge colour is the cyan, not a dark blend');
+
+  // Real plate on a light scene: no dark fringe pixels around the lockup.
+  const canvas = await sharp({ create: { width: DUPOIN_IG_CHROME_WIDTH, height: DUPOIN_IG_CHROME_HEIGHT, channels: 3, background: { r: 238, g: 238, b: 240 } } }).png().toBuffer();
+  const { data, info } = await raw(await compositeDupoinInstagramChrome(canvas, { logo: 'dupoin', footer: false }));
+  let dark = 0;
+  for (let y = 40; y < 170; y++) {
+    for (let x = 60; x < 560; x++) {
+      const i = (y * info.width + x) * 4;
+      if (Math.max(data[i], data[i + 1], data[i + 2]) < 150) dark += 1;
+    }
+  }
+  assert.equal(dark, 0, 'no dark outline pixels around the Dupoin wordmark / CNN laurel on a light scene');
 });

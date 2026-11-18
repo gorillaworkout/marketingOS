@@ -418,3 +418,17 @@ test('an OpenRouter image key without credits fails with a clear message', async
     new RegExp(IMAGE_CREDITS_MESSAGE),
   );
 });
+
+test('Dupoin image requests use GORILLAWORKOUT_IMAGE_API_BASE when set; chat keeps the normal base', () => {
+  const previous = process.env.GORILLAWORKOUT_IMAGE_API_BASE;
+  process.env.GORILLAWORKOUT_IMAGE_API_BASE = 'http://127.0.0.1:20128/v1';
+  try {
+    const image = resolveProviderTarget({ settings: settings({ mode: 'dupoin' }), provider: 'dupoin', kind: 'image', model: 'cx/gpt-6-sol-image' });
+    assert.equal(image.baseUrl, 'http://127.0.0.1:20128/v1');
+    const chat = resolveProviderTarget({ settings: settings({ mode: 'dupoin' }), provider: 'dupoin', kind: 'chat', model: 'cx/gpt-5.6-sol' });
+    assert.notEqual(chat.baseUrl, 'http://127.0.0.1:20128/v1');
+  } finally {
+    if (previous === undefined) delete process.env.GORILLAWORKOUT_IMAGE_API_BASE;
+    else process.env.GORILLAWORKOUT_IMAGE_API_BASE = previous;
+  }
+});

@@ -1,4 +1,4 @@
-import { resolveGorillaWorkoutApiBase, resolveGorillaWorkoutApiKey } from '@/lib/gateway-config';
+import { resolveGorillaWorkoutApiBase, resolveGorillaWorkoutApiKey, resolveGorillaWorkoutImageApiBase } from '@/lib/gateway-config';
 import { quotaHeaderSuffix } from './image-quota';
 import {
   DEFAULT_OPENROUTER_CHAT_MODEL,
@@ -121,7 +121,7 @@ export function resolveProviderTarget(input: {
 }): { baseUrl: string; apiKey: string; model: string; provider: ProviderChoice; missingKeyMessage: string } {
   if (input.provider === 'dupoin') {
     return {
-      baseUrl: resolveGorillaWorkoutApiBase(),
+      baseUrl: input.kind === 'image' ? resolveGorillaWorkoutImageApiBase() : resolveGorillaWorkoutApiBase(),
       apiKey: resolveGorillaWorkoutApiKey(),
       model: input.model,
       provider: 'dupoin',

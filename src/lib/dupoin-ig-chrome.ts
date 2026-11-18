@@ -95,12 +95,29 @@ export interface RgbaImage {
   height: number;
 }
 
+/** Radius (px, plate scale) searched for the solid artwork colour behind an anti-aliased edge. */
+const EDGE_RADIUS = 2;
+
+/** Darkest channel level treated as solid artwork when un-blending edges (the cyan wordmark peaks at 196). */
+const EDGE_SOLID_MIN = 180;
+
+/** A pixel is an edge when something this dark (black field or its blend) lies within `EDGE_RADIUS`. */
+const EDGE_DARK_MAX = 64;
+
 /**
  * Turn the plate's black field into transparency.
  *
  * Every near-black pixel outside a white bar becomes alpha 0, including black
  * enclosed by the laurel linework. Rows that are mostly white (the regulatory
  * bar) are protected so the black Indonesian type is not punched out.
+ *
+ * Anti-aliased edges are the artwork colour blended with the black field
+ * (pixel = colour × coverage). Keeping them opaque drew a dark outline around
+ * the wordmark and laurel on light scenes, so each edge pixel's coverage is
+ * estimated against the brightest artwork pixel within `EDGE_RADIUS` (only for
+ * pixels near the black field, so interior shading stays opaque). It becomes
+ * the alpha, and the colour is un-blended (divided by it). Solid artwork pixels
+ * keep alpha 255 and their exact colour.
  */
 export function knockOutBlackBackground(image: RgbaImage, protectWhiteBar: boolean): Buffer {
   const { width, height } = image;
@@ -128,15 +145,57 @@ export function knockOutBlackBackground(image: RgbaImage, protectWhiteBar: boole
     protectedRow.set(dilated);
   }
 
+  // Brightest channel per pixel, then its max over a (2r+1)² window (separable).
+  const level = new Uint8Array(width * height);
+  for (let p = 0, i = 0; p < level.length; p++, i += 4) {
+    const r = image.data[i];
+    const g = image.data[i + 1];
+    const b = image.data[i + 2];
+    level[p] = r > g ? (r > b ? r : b) : (g > b ? g : b);
+  }
+  const rowMax = new Uint8Array(width * height);
+  const rowMin = new Uint8Array(width * height);
+  for (let y = 0; y < height; y++) {
+    const row = y * width;
+    for (let x = 0; x < width; x++) {
+      let m = 0;
+      let n = 255;
+      for (let xx = Math.max(0, x - EDGE_RADIUS); xx <= Math.min(width - 1, x + EDGE_RADIUS); xx++) {
+        if (level[row + xx] > m) m = level[row + xx];
+        if (level[row + xx] < n) n = level[row + xx];
+      }
+      rowMax[row + x] = m;
+      rowMin[row + x] = n;
+    }
+  }
+
   for (let y = 0; y < height; y++) {
     if (protectedRow[y]) continue;
-    const row = y * width * 4;
+    const row = y * width;
     for (let x = 0; x < width; x++) {
-      const i = row + x * 4;
-      const maxChannel = out[i] > out[i + 1]
-        ? (out[i] > out[i + 2] ? out[i] : out[i + 2])
-        : (out[i + 1] > out[i + 2] ? out[i + 1] : out[i + 2]);
-      if (maxChannel <= NEAR_BLACK_MAX) out[i + 3] = 0;
+      const p = row + x;
+      const i = p * 4;
+      const own = level[p];
+      if (own <= NEAR_BLACK_MAX) {
+        out[i + 3] = 0;
+        continue;
+      }
+      let solid = 0;
+      let darkest = 255;
+      for (let yy = Math.max(0, y - EDGE_RADIUS); yy <= Math.min(height - 1, y + EDGE_RADIUS); yy++) {
+        if (rowMax[yy * width + x] > solid) solid = rowMax[yy * width + x];
+        if (rowMin[yy * width + x] < darkest) darkest = rowMin[yy * width + x];
+      }
+      // Only pixels touching the black field are edges; interior shading stays opaque.
+      if (darkest > EDGE_DARK_MAX) continue;
+      // A dim speck with no solid artwork around it is a faint blend, not a solid colour.
+      const reference = solid > EDGE_SOLID_MIN ? solid : EDGE_SOLID_MIN;
+      if (own >= reference) continue;
+      const coverage = own / reference;
+      out[i] = Math.min(255, Math.round(image.data[i] / coverage));
+      out[i + 1] = Math.min(255, Math.round(image.data[i + 1] / coverage));
+      out[i + 2] = Math.min(255, Math.round(image.data[i + 2] / coverage));
+      out[i + 3] = Math.round(image.data[i + 3] * coverage);
     }
   }
   return out;

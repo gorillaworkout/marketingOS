@@ -512,6 +512,10 @@ export function explainImageFailure(reason: string, model: string, backupName?: 
   if (status === 402 || lower.includes('insufficient credit') || lower.includes('billing')) {
     return `The image service has run out of credit for ${model}. Please contact the administrator.`;
   }
+  if (status === 524 || lower.includes('524: a timeout occurred')) {
+    // Cloudflare cut the gateway connection at ~100 s; the model itself may still be fine.
+    return `${imageModelLabel(model)} took longer than the gateway's 100-second limit (524), so the request was cut off. Try again, use fewer or smaller uploads, or pick a faster free model such as GPT Image 2.`;
+  }
   if (status >= 500 || lower.includes('bad gateway') || lower.includes('service unavailable')) {
     return `The image service is temporarily down (${status || 'upstream error'}).${waitHint}`;
   }

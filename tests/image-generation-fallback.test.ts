@@ -159,3 +159,12 @@ test('Generate Image surfaces usedModel and fallback toast copy', () => {
   assert.match(page, /role="status"/);
   assert.match(page, /status\.result\.usedModel \|\| effectiveModel/);
 });
+
+test('a Cloudflare 524 says the 100-second gateway limit cut the request, not that the service is down', () => {
+  const cf524 = 'Image API error 524: <!DOCTYPE html>\n<html class="no-js" lang="en-US">\n<head>\n<title>gorillaworkout.id | 524: A timeout occurred</title> [retry-after: 120]';
+  const message = explainImageFailure(cf524, 'cx/gpt-6-sol-image');
+  assert.match(message, /^GPT-6 Sol Image \(ChatGPT\) took longer than the gateway's 100-second limit \(524\)/);
+  assert.doesNotMatch(message, /temporarily down/);
+  assert.equal(isCapacityOrRateLimitFailure(cf524), false);
+  assert.match(explainImageFailure(PLAIN_502, 'cx/gpt-6-sol-image'), /temporarily down \(502\)/);
+});
