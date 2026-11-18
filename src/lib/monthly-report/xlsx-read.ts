@@ -5,6 +5,29 @@ export interface SheetRows {
   rows: unknown[][];
 }
 
+/**
+ * SheetJS logs `Bad uncompressed size: N != 0` (and the compressed twin) via console.error when a
+ * zip entry's data descriptor stores its sizes as 8-byte ZIP64 values: it reads only 4 bytes, so the
+ * upper half (0) is compared with the real size. The entry is still read with the central-directory
+ * sizes, so the workbook parses correctly; the line is noise. The back-office exports
+ * (obd_kyc_registration_*.xlsx, user_approved_record_*.xlsx) hit this on every upload.
+ * Only that exact warning is muted, and only for the synchronous duration of the read.
+ */
+export const SHEETJS_ZIP_DESCRIPTOR_WARNING = /^Bad (?:un)?compressed size: \d+ != 0$/;
+
+export function readWorkbook(data: Parameters<typeof XLSX.read>[0], options: XLSX.ParsingOptions): XLSX.WorkBook {
+  const original = console.error;
+  console.error = (...args: unknown[]) => {
+    if (args.length === 1 && typeof args[0] === 'string' && SHEETJS_ZIP_DESCRIPTOR_WARNING.test(args[0])) return;
+    original.apply(console, args);
+  };
+  try {
+    return XLSX.read(data, options);
+  } finally {
+    console.error = original;
+  }
+}
+
 export function isZipWorkbook(buffer: Buffer | Uint8Array): boolean {
   return buffer.length > 3 && buffer[0] === 0x50 && buffer[1] === 0x4b;
 }
@@ -17,8 +40,8 @@ export function readSheetRows(buffer: Buffer | Uint8Array, preferredSheet?: stri
   // `maxRows` limits parsing to the first rows (cheap header sniffing for auto-detect).
   const limit = options.maxRows ? { sheetRows: options.maxRows } : {};
   const workbook = isZipWorkbook(buffer)
-    ? XLSX.read(buffer, { type: 'buffer', cellDates: false, dense: false, ...limit })
-    : XLSX.read(Buffer.from(buffer).toString('utf8').replace(/^\uFEFF/, ''), { type: 'string', raw: true, cellDates: false, ...limit });
+    ? readWorkbook(buffer, { type: 'buffer', cellDates: false, dense: false, ...limit })
+    : readWorkbook(Buffer.from(buffer).toString('utf8').replace(/^\uFEFF/, ''), { type: 'string', raw: true, cellDates: false, ...limit });
   const sheetName = preferredSheet && workbook.SheetNames.includes(preferredSheet)
     ? preferredSheet
     : workbook.SheetNames[0];

@@ -2,6 +2,7 @@ import JSZip from 'jszip';
 import mammoth from 'mammoth';
 import { extractText, getDocumentProxy } from 'unpdf';
 import * as XLSX from 'xlsx';
+import { readWorkbook } from './monthly-report/xlsx-read';
 import { extractHtmlBytes, formatHtmlForResearch } from './ai-research-html';
 import {
   AI_RESEARCH_MAX_DOCUMENT_PAGES,
@@ -204,7 +205,7 @@ export function extractSpreadsheetText(bytes: Uint8Array, mimeType: string, name
     return extractCsvText(bytes);
   }
 
-  const workbook = XLSX.read(bytes, { type: 'array', raw: false, cellDates: true });
+  const workbook = readWorkbook(bytes, { type: 'array', raw: false, cellDates: true });
   const parts = workbook.SheetNames.map((sheetName) => {
     const sheet = workbook.Sheets[sheetName];
     const rows = XLSX.utils.sheet_to_json<unknown[]>(sheet, {
