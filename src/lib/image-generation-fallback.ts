@@ -12,6 +12,11 @@ import { imageModelLabel, isAllowedImageModel } from './image-models';
  * "Antigravity image quota/rate limit is full" error from
  * `explainImageFailure`. Set this to a verified, catalogued, non-`ag/` image
  * id to re-enable the retry.
+ *
+ * Since 2026-11-18 the generate-image route passes its own fallback from
+ * `nextImageFallback` over the enabled catalog, which now holds the free
+ * gateway GPT Image ids (`cx/gpt-image-2` first), so an Antigravity quota hit
+ * retries once on GPT Image through LLM Dupoin.
  */
 export const ANTIGRAVITY_IMAGE_FALLBACK_MODEL: string | null = null;
 

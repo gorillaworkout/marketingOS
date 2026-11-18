@@ -15,7 +15,21 @@ import {
 const ids = AVAILABLE_IMAGE_MODELS.map(model => model.id);
 
 assert.equal(DEFAULT_IMAGE_MODEL, 'ag/gemini-3.1-flash-image');
-assert.deepEqual(ids, ['ag/gemini-3.1-flash-image']);
+assert.deepEqual(ids, [
+  'ag/gemini-3.1-flash-image',
+  // Free GPT Image on the LLM Dupoin gateway (ChatGPT account), probed on prod 2026-11-18.
+  'cx/gpt-image-2',
+  'cx/gpt-image-2.5',
+  'cx/gpt-image-2.5-flare',
+  'cx/gpt-image-2.5-sunburst',
+  'cx/gpt-image-1.5',
+  'cx/gpt-6-sol-image',
+]);
+for (const model of AVAILABLE_IMAGE_MODELS) {
+  assert.equal(model.provider, 'gateway', `${model.id} runs on LLM Dupoin`);
+  assert.equal(model.paid, false, `${model.id} is free`);
+  assert.equal(model.estimatedCostUsd, 0);
+}
 // 400 on a ChatGPT-account Codex connection (2026-11-02); migration 042 repoints stored assignments.
 assert.equal(ids.includes('cx/gpt-5.5-image'), false);
 assert.equal(isAllowedImageModel('cx/gpt-5.5-image'), false);
@@ -70,6 +84,10 @@ assert.match(generateImage, /: DEFAULT_IMAGE_MODEL;/, 'requests without a model 
 // Production shape after the admin switch: allowed still lists the dead id.
 const prod = resolveAssignedImageModels(['cx/gpt-5.5-image', 'ag/gemini-3.1-flash-image'], 'ag/gemini-3.1-flash-image');
 assert.deepEqual(prod.models.map(model => model.id), ['ag/gemini-3.1-flash-image']);
+// After 065 the gateway GPT Image ids are allowed too; the default stays Gemini.
+const after065 = resolveAssignedImageModels(ids, 'ag/gemini-3.1-flash-image');
+assert.deepEqual(after065.models.map(model => model.id), ids);
+assert.equal(after065.defaultModel, 'ag/gemini-3.1-flash-image');
 assert.equal(prod.defaultModel, 'ag/gemini-3.1-flash-image');
 const prodOld = resolveAssignedImageModels(['cx/gpt-5.5-image', 'ag/gemini-3.1-flash-image'], 'cx/gpt-5.5-image');
 assert.equal(prodOld.defaultModel, 'ag/gemini-3.1-flash-image');
@@ -83,5 +101,5 @@ assert.match(executable, /ALTER COLUMN default_model SET DEFAULT 'ag\/gemini-3\.
 assert.match(executable, /ALTER COLUMN allowed_models SET DEFAULT '\["ag\/gemini-3\.1-flash-image"\]'/);
 assert.doesNotMatch(executable, /\?|DELETE FROM|INSERT INTO|TRUNCATE|DROP TABLE|feature_model_assignments/i);
 
-assert.equal(IMAGE_MODELS.length, 1);
+assert.equal(IMAGE_MODELS.length, 7);
 console.log('image models catalog contract passed');

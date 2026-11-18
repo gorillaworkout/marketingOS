@@ -617,7 +617,7 @@ export default function GenerateImagePage() {
             </div>
             {!paidEnabled && paidModels.length > 0 && (
               <p className="text-xs text-[var(--mos-text-faint)]" data-testid="generate-image-paid-off">
-                Nano Banana and GPT Image models are paid per image through OpenRouter. An admin can turn on “Use paid OpenRouter models” in AI Models to use them.
+                The models in the Free group run on LLM Dupoin at no cost, including GPT Image through the ChatGPT account. The models in the Paid group are billed per image through OpenRouter, and an admin has to turn on “Use paid OpenRouter models” in AI Models before they can be used.
               </p>
             )}
             {selectedPaid && selectedModel && (

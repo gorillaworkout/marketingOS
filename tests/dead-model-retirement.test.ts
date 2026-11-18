@@ -145,7 +145,8 @@ test('pickers group models by provider in a fixed order', () => {
 
 test('image catalog drops nano-banana and (since 042) cx/gpt-5.5-image', () => {
   const ids = AVAILABLE_IMAGE_MODELS.map(model => model.id);
-  assert.deepEqual(ids, ['ag/gemini-3.1-flash-image']);
+  assert.equal(ids[0], 'ag/gemini-3.1-flash-image');
+  for (const dead of ['ag/nano-banana', 'ag/nano-banana-pro', 'cx/gpt-5.5-image', 'cx/gpt-5.4-image']) assert.equal(ids.includes(dead), false);
   assert.equal(DEFAULT_IMAGE_MODEL, 'ag/gemini-3.1-flash-image');
   assert.deepEqual({ ...RETIRED_IMAGE_MODEL_REPLACEMENTS }, {
     'ag/nano-banana': 'ag/gemini-3.1-flash-image',
