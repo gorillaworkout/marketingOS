@@ -704,7 +704,7 @@ export async function postImage(input: {
     if (!attempt.response.ok) {
       const errText = await attempt.response.text();
       // Keep any reset headers: the Error message is all the route sees.
-      throw new Error(`${explainLlmHttpError(usageProvider(provider), attempt.response.status, errText, 'image')}${quotaHeaderSuffix(attempt.response.headers)}`);
+      throw new Error(`${explainLlmHttpError(usageProvider(provider), attempt.response.status, errText, 'image')}${quotaHeaderSuffix(attempt.response.headers, attempt.response.status === 429 || /quota|exhausted|rate limit/i.test(errText) ? errText : '')}`);
     }
     const payload = await attempt.response.json() as ImageExchange;
     if (!payload?.data?.[0]?.b64_json && !payload?.data?.[0]?.url) {

@@ -67,48 +67,66 @@ function resetFromHeaders(headers: HeaderBag, now: number): number | null {
   return null;
 }
 
-/** Structured fields in the (possibly escaped) JSON body: RetryInfo.retryDelay, quotaResetDelay, resetAt / reset_at. */
+/**
+ * Structured fields in the (possibly escaped) JSON body. Antigravity sends
+ * ErrorInfo.metadata.quotaResetTimeStamp / quotaResetDelay and
+ * RetryInfo.retryDelay; the absolute timestamp is the most exact.
+ */
 function resetFromStructured(text: string, now: number): number | null {
   const unescaped = text.replace(/\\"/g, '"');
-  const delay = /"(?:retryDelay|quotaResetDelay|retry_after|retryAfter)"\s*:\s*"?(\d+(?:\.\d+)?(?:\s*(?:ms|d|h|m|s))*)"?/i.exec(unescaped);
-  if (delay) {
-    const raw = delay[1].trim();
-    const ms = /^\d+(?:\.\d+)?$/.test(raw) ? Number(raw) * 1000 : parseDurationMs(raw);
-    if (ms) return now + ms;
-  }
   const at = /"(?:quotaResetTimeStamp|resetAt|reset_at|resetTime|reset_time)"\s*:\s*"([^"]+)"/i.exec(unescaped);
   if (at) {
     const date = Date.parse(at[1]);
     if (Number.isFinite(date)) return date;
   }
+  const delay = /"(?:quotaResetDelay|retryDelay|retry_after|retryAfter)"\s*:\s*"?([0-9.\sdhms]+)"?/i.exec(unescaped);
+  if (delay) {
+    const raw = delay[1].trim();
+    const ms = /^\d+(?:\.\d+)?$/.test(raw) ? Number(raw) * 1000 : parseDurationMs(raw);
+    if (ms) return now + ms;
+  }
   return null;
 }
 
-/** Free text: "reset after 1h48m15s", "resets in about 1h48m", "try again in 30s", "reset after ~48m". */
+/**
+ * Free text: "reset after 1h48m15s", "resets in about 1h48m", "try again in 30s",
+ * "reset after ~48m". Several matches can appear (the gateway appends its own
+ * short "(reset after 8s)" cooldown), so the latest one wins.
+ */
 function resetFromText(text: string, now: number): number | null {
-  const re = /(?:reset(?:s)?|retry|try again)(?:\s+(?:after|in))\s+(?:about\s+|approximately\s+|approx\.?\s+|around\s+|~\s*)?((?:\d+(?:\.\d+)?\s*(?:ms|d|h|m|s)(?![a-z])\s*)+)/i;
-  const match = re.exec(text);
-  if (!match) return null;
-  const ms = parseDurationMs(match[1]);
-  return ms ? now + ms : null;
+  const re = /(?:reset(?:s)?|retry|try again)(?:\s+(?:after|in))\s+(?:about\s+|approximately\s+|approx\.?\s+|around\s+|~\s*)?((?:\d+(?:\.\d+)?\s*(?:ms|d|h|m|s)(?![a-z])\s*)+)/gi;
+  let best: number | null = null;
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(text))) {
+    const ms = parseDurationMs(match[1]);
+    if (ms && (best === null || ms > best)) best = ms;
+  }
+  return best === null ? null : now + best;
 }
 
 /**
  * Absolute reset time (epoch ms) for a quota error, or null when it cannot be
- * read. Headers win, then structured JSON fields, then the message text.
+ * read. Structured upstream fields win; otherwise the latest of the text
+ * and Retry-After / x-ratelimit-reset hints.
  */
 export function parseQuotaResetAt(reason: string, now: number = Date.now(), headers?: HeaderBag): number | null {
   const text = String(reason || '');
-  const candidates = [
-    resetFromHeaders(headers, now),
-    resetFromHeaders(headersFromReason(text), now),
-    resetFromStructured(text, now),
-    resetFromText(text, now),
-  ];
-  for (const value of candidates) {
-    if (value !== null && Number.isFinite(value) && value > now - 60_000 && value - now <= MAX_RESET_MS) return value;
+  const valid = (value: number | null): value is number =>
+    value !== null && Number.isFinite(value) && value > now - 60_000 && value - now <= MAX_RESET_MS;
+  // 0) llm-provider already read the full body and headers (the message is truncated).
+  const marked = /\[quota-reset-at: ([^\]]+)\]/.exec(text);
+  if (marked) {
+    const date = Date.parse(marked[1]);
+    if (valid(date)) return date;
   }
-  return null;
+  // 1) Upstream structured quota fields are exact.
+  const structured = resetFromStructured(text, now);
+  if (valid(structured)) return structured;
+  // 2) Otherwise the latest of the text and header hints. The gateway's own
+  //    Retry-After / "(reset after 8s)" is a short cooldown, not the quota
+  //    reset, so it must never win over a longer upstream reset.
+  const others = [resetFromText(text, now), resetFromHeaders(headers, now), resetFromHeaders(headersFromReason(text), now)].filter(valid);
+  return others.length ? Math.max(...others) : null;
 }
 
 /** llm-provider appends "[retry-after: …]" / "[x-ratelimit-reset: …]" to image errors so headers survive the Error. */
@@ -120,9 +138,15 @@ function headersFromReason(text: string): Record<string, string> {
   return out;
 }
 
-/** Suffix llm-provider adds to an image HTTP error when the response carried reset headers. */
-export function quotaHeaderSuffix(headers: HeaderBag): string {
+/**
+ * Suffix llm-provider adds to an image HTTP error: the quota reset read from
+ * the FULL body + headers (the error text itself is truncated to 500 chars,
+ * which cuts off quotaResetTimeStamp), plus the raw reset headers.
+ */
+export function quotaHeaderSuffix(headers: HeaderBag, body = '', now: number = Date.now()): string {
   const parts: string[] = [];
+  const resetAt = body ? parseQuotaResetAt(body, now, headers) : null;
+  if (resetAt !== null) parts.push(`[quota-reset-at: ${new Date(resetAt).toISOString()}]`);
   for (const name of ['retry-after', 'x-ratelimit-reset']) {
     const value = header(headers, name);
     if (value && value.length <= 64) parts.push(`[${name}: ${value.replace(/[\]\n]/g, '')}]`);

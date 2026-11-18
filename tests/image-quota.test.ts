@@ -52,18 +52,30 @@ test('parseQuotaResetAt: message text, "about"/"~" wording', () => {
   assert.equal(parseQuotaResetAt('reset after 400h', NOW), null, 'absurd values are ignored');
 });
 
-test('parseQuotaResetAt: headers and structured fields win over text', () => {
-  assert.equal(parseQuotaResetAt('reset after 1h', NOW, { 'Retry-After': '120' }), NOW + 120_000);
+test('parseQuotaResetAt: structured fields win; otherwise the latest of text and headers', () => {
+  assert.equal(parseQuotaResetAt('reset after 1h', NOW, { 'Retry-After': '120' }), NOW + HOUR, 'a short Retry-After never hides a longer reset');
+  assert.equal(parseQuotaResetAt('quota exhausted', NOW, { 'Retry-After': '120' }), NOW + 120_000);
   assert.equal(parseQuotaResetAt('x', NOW, new Headers({ 'retry-after': 'Wed, 18 Nov 2026 08:50:00 GMT' })), Date.parse('2026-11-18T08:50:00Z'));
   assert.equal(parseQuotaResetAt('x', NOW, { 'x-ratelimit-reset': String(Math.floor((NOW + 10 * MIN) / 1000)) }), NOW + 10 * MIN);
   const structured = 'Image API error 429: {"error":{"details":[{"@type":"type.googleapis.com/google.rpc.RetryInfo","retryDelay":"6497s"}]},"message":"reset after 1h"}';
   assert.equal(parseQuotaResetAt(structured, NOW), NOW + 6_497_000);
   assert.equal(parseQuotaResetAt('quota {"resetAt":"2026-11-18T08:50:00Z"}', NOW), Date.parse('2026-11-18T08:50:00Z'));
   // llm-provider keeps headers on the Error via this suffix.
+  // Live gateway body (2026-11-18 14:23 WIB): exact upstream timestamp + gateway's own 8s cooldown.
+  const live = readFileSync(path.join(process.cwd(), 'tests/fixtures/antigravity-image-quota-429.txt'), 'utf8');
+  assert.equal(parseQuotaResetAt(`${live} [retry-after: 8]`, Date.parse('2026-11-18T07:23:57Z')), Date.parse('2026-11-18T08:54:51Z'));
+  assert.equal(formatWibTime(parseQuotaResetAt(live, Date.parse('2026-11-18T07:23:57Z')) as number, Date.parse('2026-11-18T07:23:57Z')), '15:54 WIB');
+  // Without the timestamp, quotaResetDelay (with fractional seconds) is used.
+  assert.equal(parseQuotaResetAt('{"quotaResetDelay": "1h30m53.478925003s"}', NOW), NOW + Math.round(HOUR + 30 * MIN + 53_478.925003));
   const suffix = quotaHeaderSuffix(new Headers({ 'retry-after': '90' }));
   assert.equal(suffix, ' [retry-after: 90]');
   assert.equal(parseQuotaResetAt(`Image API error 429: busy${suffix}`, NOW), NOW + 90_000);
   assert.equal(quotaHeaderSuffix(new Headers()), '');
+  // Full body read before truncation: the exact timestamp survives as a marker.
+  const liveNow = Date.parse('2026-11-18T07:23:57Z');
+  const marker = quotaHeaderSuffix(new Headers({ 'retry-after': '8' }), live, liveNow);
+  assert.equal(marker, ' [quota-reset-at: 2026-11-18T08:54:51.000Z] [retry-after: 8]');
+  assert.equal(parseQuotaResetAt(`Image API error 429: ${live.slice(0, 500)}${marker}`, liveNow), Date.parse('2026-11-18T08:54:51Z'));
 });
 
 test('formatting: WIB clock time, other-day date, short labels', () => {
@@ -151,5 +163,5 @@ test('route, API and page wire the quota info through', () => {
   assert.match(page, /quotaPickerHint\(reset, clock\)/);
   assert.match(page, /generate-image-quota-hint/);
   const provider = read('src/lib/llm-provider.ts');
-  assert.match(provider, /quotaHeaderSuffix\(attempt\.response\.headers\)/);
+  assert.match(provider, /quotaHeaderSuffix\(attempt\.response\.headers, /);
 });
