@@ -83,6 +83,9 @@ test('formatting: WIB clock time, other-day date, short labels', () => {
   assert.equal(formatWibTime(reset, NOW), '15:50 WIB');
   assert.equal(formatWibTime(Date.parse('2026-11-18T18:30:00Z'), NOW), '19 Nov 01:30 WIB');
   assert.equal(shortModelName('Gemini 3.1 Flash Image (Antigravity)'), 'Gemini 3.1 Flash Image');
+  assert.equal(shortModelName('Nano Banana 2 (Gemini 3.1 Flash Image)'), 'Nano Banana 2 (Gemini 3.1 Flash Image)', 'a non-provider parenthetical is kept');
+  assert.equal(shortModelName('GPT Image 2 (ChatGPT)'), 'GPT Image 2');
+  assert.equal(shortModelName('Nano Banana 2.1 (OpenRouter, paid)'), 'Nano Banana 2.1');
   assert.equal(
     quotaFallbackNotice({ fromLabel: 'Gemini 3.1 Flash Image (Antigravity)', resetAt: reset, usedLabel: 'GPT Image 2 (ChatGPT)', usedFree: true, now: NOW }),
     'Gemini 3.1 Flash Image quota exhausted, resets around 15:50 WIB. This image was generated with GPT Image 2 (free) instead.',
@@ -92,7 +95,7 @@ test('formatting: WIB clock time, other-day date, short labels', () => {
   assert.equal(quotaPickerHint(null, NOW), 'Quota exhausted, try again later');
   assert.equal(
     allFreeModelsExhaustedText([{ label: 'GPT Image 2 (ChatGPT)', resetAt: NOW + 3 * HOUR }, { label: 'Gemini 3.1 Flash Image (Antigravity)', resetAt: reset }], NOW),
-    'All free image models are out of quota. The earliest reset is around 15:50 WIB (Gemini 3.1 Flash Image).',
+    'All free image models are out of quota. The earliest reset is around 15:50 WIB, for Gemini 3.1 Flash Image.',
   );
   assert.equal(allFreeModelsExhaustedText([{ label: 'A', resetAt: null }], NOW), 'All free image models are out of quota; try again later.');
 });
@@ -116,12 +119,12 @@ test('all-free-exhausted uses provider groups and gives the earliest reset', () 
   const enabled = ['ag/gemini-3.1-flash-image', 'cx/gpt-image-2', 'cx/gpt-image-2.5'];
   markImageModelExhausted('ag/gemini-3.1-flash-image', NOW + 108 * MIN, NOW);
   assert.equal(allImageModelsExhausted(enabled, NOW), null, 'GPT Image still has quota');
-  assert.match(explainQuotaFailure('ag/gemini-3.1-flash-image', 'cx/gpt-image-2', enabled, NOW), /^Gemini 3\.1 Flash Image quota exhausted, resets around 15:50 WIB; backup GPT Image 2 was also unavailable\./);
+  assert.match(explainQuotaFailure('ag/gemini-3.1-flash-image', 'cx/gpt-image-2', enabled, NOW), /^Nano Banana 2 \(Gemini 3\.1 Flash Image\) quota exhausted, resets around 15:50 WIB; backup GPT Image 2 was also unavailable\./);
   markImageModelExhausted('cx/gpt-image-2', NOW + 3 * HOUR, NOW);
   assert.equal(allImageModelsExhausted(enabled, NOW)?.length, 2);
   assert.equal(
     explainQuotaFailure('ag/gemini-3.1-flash-image', 'cx/gpt-image-2', enabled, NOW),
-    'All free image models are out of quota. The earliest reset is around 15:50 WIB (Gemini 3.1 Flash Image).',
+    'All free image models are out of quota. The earliest reset is around 15:50 WIB, for Nano Banana 2 (Gemini 3.1 Flash Image).',
   );
   resetImageQuotaStore();
   markImageModelExhausted('cx/gpt-image-2', null, NOW);
@@ -164,4 +167,28 @@ test('route, API and page wire the quota info through', () => {
   assert.match(page, /generate-image-quota-hint/);
   const provider = read('src/lib/llm-provider.ts');
   assert.match(provider, /quotaHeaderSuffix\(attempt\.response\.headers, /);
+});
+
+test('display labels: free Nano Banana 2 and paid Nano Banana models are distinct; ids and prices unchanged', async () => {
+  const { imageModelLabel, PAID_IMAGE_MODELS, AVAILABLE_IMAGE_MODELS, DEFAULT_IMAGE_MODEL } = await import('../src/lib/image-models');
+  assert.equal(DEFAULT_IMAGE_MODEL, 'ag/gemini-3.1-flash-image');
+  assert.equal(imageModelLabel('ag/gemini-3.1-flash-image'), 'Nano Banana 2 (Gemini 3.1 Flash Image)');
+  assert.ok(AVAILABLE_IMAGE_MODELS.every(model => !/Antigravity\)$/.test(model.name)));
+  const nano = PAID_IMAGE_MODELS.filter(model => model.family === 'nano-banana');
+  assert.deepEqual(nano.map(model => [model.id, model.estimatedCostUsd]), [
+    ['google/gemini-2.5-flash-image', 0.039],
+    ['google/gemini-3.1-flash-image', 0.067],
+    ['google/gemini-3.1-flash-lite-image', 0.034],
+    ['google/gemini-nano-banana-2.1', 0.034],
+    ['google/gemini-3-pro-image', 0.134],
+  ]);
+  for (const model of nano) assert.match(model.name, /^Nano Banana .*\(OpenRouter, paid\)$/, model.id);
+  const names = [...AVAILABLE_IMAGE_MODELS, ...PAID_IMAGE_MODELS].map(model => model.name);
+  assert.equal(new Set(names).size, names.length, 'no two picker entries share a label');
+  assert.equal(
+    quotaFallbackNotice({ fromLabel: imageModelLabel('ag/gemini-3.1-flash-image'), resetAt: Date.parse('2026-11-18T08:54:51Z'), usedLabel: imageModelLabel('cx/gpt-image-2'), usedFree: true, now: Date.parse('2026-11-18T07:23:57Z') }),
+    'Nano Banana 2 (Gemini 3.1 Flash Image) quota exhausted, resets around 15:54 WIB. This image was generated with GPT Image 2 (free) instead.',
+  );
+  const models = readFileSync(path.join(process.cwd(), 'src/app/dashboard/models/page.tsx'), 'utf8');
+  assert.match(models, /'ag\/gemini-3\.1-flash-image': 'Nano Banana 2 \(Gemini 3\.1 Flash Image\)'/);
 });

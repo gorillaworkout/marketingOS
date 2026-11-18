@@ -111,7 +111,7 @@ test('image quota fails over only to another enabled free model, otherwise one n
   assert.equal(nextImageFallback('ag/gemini-3.1-flash-image', ['ag/gemini-3.1-flash-image', 'cx/free-image']), 'cx/free-image');
   const notice = imageQuotaNotice('Gemini 3.1 Flash Image (Antigravity)', '8m 56s');
   assert.equal(notice, 'Image quota reached for Gemini 3.1 Flash Image (Antigravity), retry in 8m 56s; no other image model enabled — enable one in AI Models');
-  assert.equal(explainImageFailure('Image API error 429: usage limit (reset after 8m 56s)', 'ag/gemini-3.1-flash-image'), imageQuotaNotice('Gemini 3.1 Flash Image (Antigravity)', '8m 56s'));
+  assert.equal(explainImageFailure('Image API error 429: usage limit (reset after 8m 56s)', 'ag/gemini-3.1-flash-image'), imageQuotaNotice('Nano Banana 2 (Gemini 3.1 Flash Image)', '8m 56s'));
   const storyboard = readFileSync('src/components/video-storyboard.tsx', 'utf8');
   assert.match(storyboard, />Retry</);
 });

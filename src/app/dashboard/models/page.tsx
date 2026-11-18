@@ -35,7 +35,7 @@ const DUPON_LABELS: Record<string, string> = {
   'cc/claude-opus-5-5': 'Claude Opus 5.5',
   'cx/gpt-5.6-sol': 'GPT-5.6 Sol',
   'ag/gemini-3-flash': 'Gemini 3 Flash',
-  'ag/gemini-3.1-flash-image': 'Gemini 3.1 Flash Image',
+  'ag/gemini-3.1-flash-image': 'Nano Banana 2 (Gemini 3.1 Flash Image)',
 };
 
 function formatWhen(value: string | null | undefined): string {

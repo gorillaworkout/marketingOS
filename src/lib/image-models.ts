@@ -46,8 +46,9 @@ export const DEFAULT_IMAGE_MODEL = 'ag/gemini-3.1-flash-image';
 export const AVAILABLE_IMAGE_MODELS: ImageModelInfo[] = [
   {
     id: 'ag/gemini-3.1-flash-image',
-    name: 'Gemini 3.1 Flash Image (Antigravity)',
-    description: 'Free · gateway · Nano Banana 2 class',
+    // Gemini 3.1 Flash Image is Google's "Nano Banana 2"; Bayu asked for the Nano Banana name (2026-11-18).
+    name: 'Nano Banana 2 (Gemini 3.1 Flash Image)',
+    description: 'Free · gateway (Antigravity)',
     provider: 'gateway',
     family: 'gemini',
     paid: false,
@@ -90,11 +91,11 @@ export const AVAILABLE_IMAGE_MODELS: ImageModelInfo[] = [
  * and are left out to keep the picker short.
  */
 export const PAID_IMAGE_MODELS: ImageModelInfo[] = [
-  { id: 'google/gemini-2.5-flash-image', name: 'Nano Banana (Gemini 2.5 Flash Image)', description: 'Paid · OpenRouter · up to 3 input images', provider: 'openrouter', family: 'nano-banana', paid: true, maxInputImages: 3, estimatedCostUsd: 0.039 },
-  { id: 'google/gemini-3.1-flash-image', name: 'Nano Banana 2 (Gemini 3.1 Flash Image)', description: 'Paid · OpenRouter · up to 14 input images', provider: 'openrouter', family: 'nano-banana', paid: true, maxInputImages: 14, estimatedCostUsd: 0.067 },
-  { id: 'google/gemini-3.1-flash-lite-image', name: 'Nano Banana 2 Lite (Gemini 3.1 Flash Lite Image)', description: 'Paid · OpenRouter · up to 14 input images', provider: 'openrouter', family: 'nano-banana', paid: true, maxInputImages: 14, estimatedCostUsd: 0.034 },
-  { id: 'google/gemini-nano-banana-2.1', name: 'Nano Banana 2.1', description: 'Paid · OpenRouter · image input', provider: 'openrouter', family: 'nano-banana', paid: true, maxInputImages: 14, estimatedCostUsd: 0.034 },
-  { id: 'google/gemini-3-pro-image', name: 'Nano Banana Pro (Gemini 3 Pro Image)', description: 'Paid · OpenRouter · up to 14 input images', provider: 'openrouter', family: 'nano-banana', paid: true, maxInputImages: 14, estimatedCostUsd: 0.134 },
+  { id: 'google/gemini-2.5-flash-image', name: 'Nano Banana · Gemini 2.5 Flash Image (OpenRouter, paid)', description: 'Paid · OpenRouter · up to 3 input images', provider: 'openrouter', family: 'nano-banana', paid: true, maxInputImages: 3, estimatedCostUsd: 0.039 },
+  { id: 'google/gemini-3.1-flash-image', name: 'Nano Banana 2 · Gemini 3.1 Flash Image (OpenRouter, paid)', description: 'Paid · OpenRouter · up to 14 input images', provider: 'openrouter', family: 'nano-banana', paid: true, maxInputImages: 14, estimatedCostUsd: 0.067 },
+  { id: 'google/gemini-3.1-flash-lite-image', name: 'Nano Banana 2 Lite · Gemini 3.1 Flash Lite Image (OpenRouter, paid)', description: 'Paid · OpenRouter · up to 14 input images', provider: 'openrouter', family: 'nano-banana', paid: true, maxInputImages: 14, estimatedCostUsd: 0.034 },
+  { id: 'google/gemini-nano-banana-2.1', name: 'Nano Banana 2.1 (OpenRouter, paid)', description: 'Paid · OpenRouter · image input', provider: 'openrouter', family: 'nano-banana', paid: true, maxInputImages: 14, estimatedCostUsd: 0.034 },
+  { id: 'google/gemini-3-pro-image', name: 'Nano Banana Pro · Gemini 3 Pro Image (OpenRouter, paid)', description: 'Paid · OpenRouter · up to 14 input images', provider: 'openrouter', family: 'nano-banana', paid: true, maxInputImages: 14, estimatedCostUsd: 0.134 },
   { id: 'openai/gpt-image-1', name: 'GPT Image 1', description: 'Paid · OpenRouter · up to 16 input images', provider: 'openrouter', family: 'gpt-image', paid: true, maxInputImages: 16, estimatedCostUsd: 0.063 },
   { id: 'openai/gpt-image-1-mini', name: 'GPT Image 1 Mini', description: 'Paid · OpenRouter · listed until 1 Dec 2026', provider: 'openrouter', family: 'gpt-image', paid: true, maxInputImages: 16, estimatedCostUsd: 0.013, expiresOn: '2026-12-01' },
   { id: 'openai/gpt-image-2', name: 'GPT Image 2', description: 'Paid · OpenRouter · listed until 10 Feb 2027', provider: 'openrouter', family: 'gpt-image', paid: true, maxInputImages: 16, estimatedCostUsd: 0.048, expiresOn: '2027-02-10' },
