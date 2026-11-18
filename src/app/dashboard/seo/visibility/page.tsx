@@ -6,6 +6,7 @@ import { fetchJson, useSeoSites } from '@/components/seo/useSeoSites';
 import { VISIBILITY_DISCLAIMER } from '@/lib/seo/visibility-copy';
 import { EXAMPLE_BRAND, VISIBILITY_EXAMPLES, VISIBILITY_GUIDE_STEPS, visibilityCsvTemplate } from '@/lib/seo/visibility-examples';
 import { groupModelsByProvider } from '@/lib/model-groups';
+import { VisibilityGapsPanel } from '@/components/seo/VisibilityGapsPanel';
 
 type Prompt = { id: string; prompt: string; brand_terms: string[]; competitors: string[]; active: boolean; last_checked_at: string | null; checks: number; mentions: number };
 type Run = { id: string; status: 'running' | 'succeeded' | 'partial' | 'failed'; models: string[]; checks_planned: number; checks_done: number; checks_failed: number; prompts_skipped: number; cost: number; error: string | null; trigger: string; triggered_by_name: string | null; started_at: string; finished_at: string | null };
@@ -269,6 +270,8 @@ export default function SeoVisibilityPage() {
           {settings && <span className="text-[var(--mos-text-muted)]">Next run: about {plannedNext} checks ({activePrompts} active prompts × {settings.models.length} models, cap {settings.maxChecksPerRun}).</span>}
         </div>
       </Panel>
+
+      <VisibilityGapsPanel siteId={site.id} version={version} />
 
       <DataTableFrame title="Mention rate by model" description={`Last ${report?.weeks ?? 12} weeks. Answers the gateway served from a fallback model are left out of the rate and counted separately.`}>
         {report && report.byModel.length ? <div className="flex flex-col gap-4 p-4">
