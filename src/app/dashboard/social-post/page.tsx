@@ -14,7 +14,6 @@ import {
   TextArea,
 } from '@/components/ui/dashboard';
 import InlineModelSelector from '@/components/InlineModelSelector';
-import { SocialPostAdvanced } from '@/components/social-post-advanced';
 import { CaptionAnalyzer } from '@/components/caption-analyzer';
 import { imageModelLabel } from '@/lib/image-models';
 import { AI_RESEARCH_HANDOFF_QUERY, AI_RESEARCH_HANDOFF_VALUE, readAiResearchHandoff } from '@/lib/ai-research-handoff';
@@ -33,7 +32,6 @@ import {
   socialPostGenerateRequestBody,
   type SocialPostBrandGuideline,
 } from '@/lib/social-post-brand-guideline';
-import { readBrandVoiceChoices, type BrandVoiceChoice } from '@/lib/social-post-library';
 
 interface QCCheck {
   name: string;
@@ -271,11 +269,7 @@ export default function SocialPostPage() {
   const [targetAudience, setTargetAudience] = useState('');
   const [goal, setGoal] = useState('Awareness');
   const [brandGuidelines, setBrandGuidelines] = useState<SocialPostBrandGuideline[]>([]);
-  const [voices, setVoices] = useState<BrandVoiceChoice[]>([]);
-  const [voiceVersion, setVoiceVersion] = useState(0);
   const [brandGuidelineId, setBrandGuidelineId] = useState('');
-  const [campaignId, setCampaignId] = useState('');
-  const [competitorIds, setCompetitorIds] = useState<string[]>([]);
   const [workspace, setWorkspace] = useState<'generate' | 'analyze'>('generate');
   const [analyzeSeed, setAnalyzeSeed] = useState<{ caption: string; platform: string; goal: string; cta: string; taskId?: string | null; key: number } | null>(null);
   const [briefNotice, setBriefNotice] = useState('');
@@ -342,7 +336,6 @@ export default function SocialPostPage() {
         if (cancelled || data == null) return;
         const guidelines = readSocialPostBrandGuidelines(data);
         setBrandGuidelines(guidelines);
-        setVoices(readBrandVoiceChoices(data));
         if (!brandGuidelineTouched.current) {
           setBrandGuidelineId(defaultSocialPostBrandGuidelineId(guidelines));
         }
@@ -351,7 +344,7 @@ export default function SocialPostPage() {
     return () => {
       cancelled = true;
     };
-  }, [voiceVersion]);
+  }, []);
 
   const fetchPosts = async () => {
     try {
@@ -441,7 +434,6 @@ export default function SocialPostPage() {
         keyMessage,
         cta,
         ctaUrl,
-        campaignId,
       }),
     });
     const data = await response.json().catch(() => ({}));
@@ -522,8 +514,6 @@ export default function SocialPostPage() {
           ctaUrl,
           keyMessage,
           reference,
-          campaignId,
-          competitorRefIds: competitorIds,
         })),
         signal: controller.signal,
       });
@@ -753,8 +743,6 @@ export default function SocialPostPage() {
           brandGuidelineTouched.current = true;
           setBrandGuidelineId(stored.brandGuidelineId);
         }
-        setCampaignId(stored.campaignId || '');
-        setCompetitorIds(stored.competitorRefIds || []);
       }
       // Images already saved on this post (made here before, or on Generate Image).
       setImageHistory(history);
@@ -1194,21 +1182,6 @@ export default function SocialPostPage() {
                                   Open in Video Script
                                 </button>
                               )}
-                              <button type="button" onClick={() => {
-                                if (!brandGuidelineId) { setError('Choose a brand voice before saving a sample.'); return; }
-                                void fetch(`/api/brand-guidelines/${brandGuidelineId}/samples`, {
-                                  method: 'POST',
-                                  headers: { 'Content-Type': 'application/json' },
-                                  body: JSON.stringify({ caption: opt.caption, platform, contentType, note: 'Saved from a generated option' }),
-                                }).then(async response => {
-                                  const data = await response.json().catch(() => ({}));
-                                  setError(response.ok ? '' : data.error || 'Could not save the voice sample.');
-                                  if (response.ok) setVoiceVersion(version => version + 1);
-                                });
-                              }}
-                                className="text-xs px-3 py-1.5 bg-[var(--mos-raised)] hover:bg-[var(--mos-raised)] text-[var(--mos-text-secondary)] rounded-lg">
-                                Save as voice sample
-                              </button>
                               <button type="button" onClick={() => { setAnalyzeSeed({ caption: opt.caption, platform, goal, cta, taskId, key: Date.now() }); setWorkspace('analyze'); }}
                                 className="text-xs px-3 py-1.5 bg-[var(--mos-raised)] hover:bg-[var(--mos-raised)] text-[var(--mos-text-secondary)] rounded-lg">
                                 Analyze
@@ -1416,19 +1389,7 @@ export default function SocialPostPage() {
         {/* Right: Recent Posts */}
         <div className="lg:col-span-1 space-y-4">
           <Panel>
-            <SectionHeader title="Advanced" description="Choose a brand voice and, only if you want it used, a campaign." />
-            <SocialPostAdvanced
-              voices={voices}
-              brandGuidelineId={brandGuidelineId}
-              onBrandGuidelineId={id => { brandGuidelineTouched.current = true; setBrandGuidelineId(id); }}
-              onVoicesChanged={() => setVoiceVersion(version => version + 1)}
-              campaignId={campaignId}
-              onCampaignId={setCampaignId}
-              brief={brief}
-              competitorIds={competitorIds}
-              onCompetitorIds={setCompetitorIds}
-            />
-            <form className="mt-4 space-y-3" onSubmit={event => { event.preventDefault(); void suggestHashtags(); }}>
+            <form className="space-y-3" onSubmit={event => { event.preventDefault(); void suggestHashtags(); }}>
               <SectionHeader title="Hashtag generator" description="Grouped brand, campaign, niche, and broad tags for this platform." />
               <TextArea value={hashtagTopic} onChange={e => setHashtagTopic(e.target.value)} rows={3} placeholder="Topic or paste a caption" />
               <Button type="submit" disabled={hashtagBusy}>{hashtagBusy ? 'Generating…' : 'Generate hashtags'}</Button>

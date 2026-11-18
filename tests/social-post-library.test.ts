@@ -130,7 +130,7 @@ test('generation injects a selected campaign and only suggests a match otherwise
   assert.match(route, /selectedCampaignId/);
   assert.match(route, /campaignId: selectedCampaignId \|\| null/);
   const page = readFileSync('src/app/dashboard/social-post/page.tsx', 'utf8');
-  assert.match(page, /SocialPostAdvanced/);
+  assert.doesNotMatch(page, /SocialPostAdvanced/);
   assert.doesNotMatch(page, /Brand voice — coming soon/);
   assert.doesNotMatch(page, /Campaign — coming soon/);
 });
