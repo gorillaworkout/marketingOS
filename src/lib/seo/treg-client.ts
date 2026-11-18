@@ -168,18 +168,23 @@ export interface TregCallOptions {
   /** Per-call ceiling in USD; treg refuses (402 route_max_cost, nothing charged) above it. */
   maxCostUsd?: number;
   timeoutMs?: number;
+  /** GET endpoints (e.g. justoneapi.*) take query parameters instead of a JSON body. Default POST. */
+  method?: 'POST' | 'GET';
+  query?: Record<string, string>;
 }
 
 export async function tregCall(config: TregConfig, options: TregCallOptions, fetchImpl: FetchLike = fetch): Promise<TregCallResult> {
-  const extra: Record<string, string> = { 'content-type': 'application/json' };
+  const isGet = options.method === 'GET';
+  const extra: Record<string, string> = isGet ? {} : { 'content-type': 'application/json' };
   const meta = options.meta ? tregMetaHeader(options.meta) : '';
   if (meta) extra['X-Treg-Meta'] = meta;
   if (options.idempotencyKey) extra['Idempotency-Key'] = options.idempotencyKey.slice(0, 200);
   if (options.maxCostUsd && options.maxCostUsd > 0) extra['X-Treg-Route-Max-Cost'] = options.maxCostUsd.toFixed(4);
-  const response = await send(fetchImpl, `${config.baseUrl}${tregCallPath(options.endpointId)}`, {
-    method: 'POST',
+  const query = isGet && options.query ? `?${new URLSearchParams(options.query)}` : '';
+  const response = await send(fetchImpl, `${config.baseUrl}${tregCallPath(options.endpointId)}${query}`, {
+    method: isGet ? 'GET' : 'POST',
     headers: headers(config, extra),
-    body: JSON.stringify(options.body),
+    ...(isGet ? {} : { body: JSON.stringify(options.body) }),
     signal: AbortSignal.timeout(options.timeoutMs ?? 45_000),
   });
   const costMicro = intHeader(response, 'X-Treg-Cost-Micro');

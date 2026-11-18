@@ -10,6 +10,7 @@
     "db:migrate": "tsx scripts/migrate.ts",
     "research:watches": "tsx scripts/run-ai-research-watches.ts",
     "partnership:refresh": "tsx scripts/run-partnership-refresh.ts",
+    "media:refresh": "tsx scripts/run-media-refresh.ts",
     "seo:sync": "tsx scripts/seo-sync.ts",
     "seo:visibility": "tsx scripts/seo-visibility.ts",
     "seo:gsc-retention": "tsx scripts/seo-gsc-retention.ts",
