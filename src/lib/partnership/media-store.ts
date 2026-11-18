@@ -4,6 +4,7 @@ import {
   DEFAULT_AD_VALUE, MEDIA_BRAND_KEY, isOfficialMention, normalizeMediaSettings,
   type DateRange, type MediaInsights, type MediaMention, type MediaSettings, type RawMention, type Sentiment,
 } from './media';
+import { linkMentionToFeeds } from './google-alerts-store';
 
 /** Media Monitoring storage (migration 063). */
 
@@ -171,12 +172,12 @@ function mapMention(row: Record<string, unknown>): MediaMention {
 }
 
 /** Insert new mentions; refresh metrics on ones already stored (dedupe by normalized URL). */
-export async function upsertMentions(mentions: Array<RawMention & { urlKey: string }>, settings: MediaSettings, runId: string): Promise<{ inserted: number; updated: number }> {
+export async function upsertMentions(mentions: Array<RawMention & { urlKey: string }>, settings: MediaSettings, runId: string | null): Promise<{ inserted: number; updated: number }> {
   let inserted = 0;
   let updated = 0;
   for (const mention of mentions) {
     const official = isOfficialMention(mention, settings.officialHandles);
-    const row = await queryOne<{ inserted: boolean }>(
+    const row = await queryOne<{ id: string; inserted: boolean }>(
       `INSERT INTO partnership_media_mentions (id, brand_key, url_key, url, channel, source, source_name, author, title, snippet, published_at,
          likes, comments, shares, views, followers, is_official, matched_term, first_run_id)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -190,12 +191,14 @@ export async function upsertMentions(mentions: Array<RawMention & { urlKey: stri
          snippet = CASE WHEN length(EXCLUDED.snippet) > length(partnership_media_mentions.snippet) THEN EXCLUDED.snippet ELSE partnership_media_mentions.snippet END,
          is_official = partnership_media_mentions.is_official OR EXCLUDED.is_official,
          last_seen_at = CURRENT_TIMESTAMP
-       RETURNING (xmax = 0) AS inserted`,
+       RETURNING id, (xmax = 0) AS inserted`,
       [randomUUID(), settings.brandKey, mention.urlKey, mention.url.slice(0, 2000), mention.channel, mention.source, mention.sourceName?.slice(0, 200) ?? null, mention.author?.slice(0, 200) ?? null,
         mention.title.slice(0, 300), mention.snippet.slice(0, 1000), mention.publishedAt, mention.likes, mention.comments, mention.shares, mention.views, mention.followers, official,
         mention.matchedTerm?.slice(0, 120) ?? null, runId],
     );
     if (row?.inserted) inserted += 1; else updated += 1;
+    // Google Alerts page: remember which feed(s) delivered it (same row, deduped by URL).
+    if (row?.id && mention.alertFeedIds?.length) await linkMentionToFeeds(String(row.id), mention.alertFeedIds);
   }
   return { inserted, updated };
 }

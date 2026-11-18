@@ -37,6 +37,10 @@ test('migration 063 applies twice, a scheduled refresh stores deduped mentions f
     try {
       const current = await store.getMediaSettings();
       await store.saveMediaSettings(normalizeMediaSettings({ alertFeeds: ['https://www.google.com/alerts/feeds/1/2'], officialHandles: { website: 'https://news.example.co.id' } }, current).settings, 'admin-1');
+      // Migration 064 (Google Alerts page) carries the feed above into partnership_google_alert_feeds.
+      const up064 = readFileSync('db/migrations/064_partnership_google_alerts.sql', 'utf8');
+      await client.query(up064);
+      await client.query(up064);
 
       const id = await store.createMediaRun({ trigger: 'scheduled', mode: 'free', platforms: [], userId: 'admin-1' });
       await assert.rejects(store.createMediaRun({ trigger: 'manual', mode: 'free', platforms: [], userId: 'admin-1' }), store.MediaRunInProgressError);
@@ -78,6 +82,7 @@ test('migration 063 applies twice, a scheduled refresh stores deduped mentions f
       await closeDb();
     }
 
+    await client.query(readFileSync('db/rollbacks/064_partnership_google_alerts_down.sql', 'utf8'));
     await client.query(readFileSync('db/rollbacks/063_partnership_media_monitoring_down.sql', 'utf8'));
     const left = await client.query(`SELECT count(*)::int AS n FROM information_schema.tables WHERE table_schema = $1 AND table_name LIKE 'partnership_media_%'`, [schema]);
     assert.equal(left.rows[0].n, 0);

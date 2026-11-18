@@ -153,10 +153,36 @@ export interface FreeSourceDeps {
   onProgress?(progress: number, message: string): Promise<void> | void;
 }
 
+/** A Google Alerts RSS feed to read. `id` links collected items to the feed (null = not stored yet). */
+export interface AlertFeedRef { id: string | null; url: string; label?: string }
+
+export interface AlertFeedResult {
+  feed: AlertFeedRef;
+  ok: boolean;
+  feedTitle: string;
+  items: RawMention[];
+  error: string | null;
+}
+
+/** Reads each Google Alerts RSS feed (free, no key). One failing feed never stops the others. */
+export async function readAlertFeeds(feeds: AlertFeedRef[], fetchText: (url: string) => Promise<string>): Promise<AlertFeedResult[]> {
+  return Promise.all(feeds.map(async feed => {
+    try {
+      const parsed = parseGoogleAlertsAtom(await fetchText(feed.url));
+      const items = feed.id ? parsed.items.map(item => ({ ...item, alertFeedIds: [feed.id!] })) : parsed.items;
+      return { feed, ok: true, feedTitle: parsed.feedTitle, items, error: null };
+    } catch (error) {
+      return { feed, ok: false, feedTitle: '', items: [], error: error instanceof Error ? error.message.slice(0, 200) : 'error' };
+    }
+  }));
+}
+
 export interface FreeCollectResult {
   mentions: RawMention[];
   notes: string[];
   counts: Record<'google_alerts' | 'google_news' | 'gdelt' | 'youtube_api', number>;
+  /** Per-feed outcome, so the Google Alerts page can show when each feed was last read. */
+  alertFeeds: AlertFeedResult[];
 }
 
 export const GDELT_DELAY_MS = 5_500;
@@ -176,21 +202,23 @@ export function searchTerms(settings: Pick<MediaSettings, 'keywords' | 'hashtags
   return out;
 }
 
-export async function collectFreeMentions(settings: MediaSettings, deps: FreeSourceDeps, days = 30): Promise<FreeCollectResult> {
+export async function collectFreeMentions(settings: MediaSettings, deps: FreeSourceDeps, days = 30, feeds?: AlertFeedRef[]): Promise<FreeCollectResult> {
   const notes: string[] = [];
   const mentions: RawMention[] = [];
   const counts = { google_alerts: 0, google_news: 0, gdelt: 0, youtube_api: 0 };
   const terms = searchTerms(settings);
 
-  if (!settings.alertFeeds.length) notes.push('Google Alerts: no RSS feed in Settings yet. Create an alert at google.com/alerts with "Deliver to: RSS feed" and paste the feed URL.');
-  for (const [index, feed] of settings.alertFeeds.entries()) {
-    try {
-      const parsed = parseGoogleAlertsAtom(await deps.fetchText(feed));
-      mentions.push(...parsed.items);
-      counts.google_alerts += parsed.items.length;
-      notes.push(`Google Alerts "${parsed.feedTitle || `feed ${index + 1}`}": ${parsed.items.length} item(s).`);
-    } catch (error) {
-      notes.push(`Google Alerts feed ${index + 1} could not be read (${error instanceof Error ? error.message : 'error'}).`);
+  const alertFeeds = feeds ?? settings.alertFeeds.map(url => ({ id: null, url }));
+  if (!alertFeeds.length) notes.push('Google Alerts: no RSS feed yet. Add one on the Partnership > Google Alerts page.');
+  const alertResults = await readAlertFeeds(alertFeeds, deps.fetchText);
+  for (const [index, result] of alertResults.entries()) {
+    const name = result.feed.label || result.feedTitle || `feed ${index + 1}`;
+    if (result.ok) {
+      mentions.push(...result.items);
+      counts.google_alerts += result.items.length;
+      notes.push(`Google Alerts "${name}": ${result.items.length} item(s).`);
+    } else {
+      notes.push(`Google Alerts "${name}" could not be read (${result.error}).`);
     }
   }
   await deps.onProgress?.(15, 'Google Alerts read.');
@@ -241,5 +269,5 @@ export async function collectFreeMentions(settings: MediaSettings, deps: FreeSou
     }
   }
   await deps.onProgress?.(55, 'Free sources read.');
-  return { mentions, notes, counts };
+  return { mentions, notes, counts, alertFeeds: alertResults };
 }

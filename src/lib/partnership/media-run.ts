@@ -11,6 +11,7 @@ import {
   type DateRange, type MediaInsights, type MediaSettings, type RawMention,
 } from './media';
 import { collectFreeMentions, type FreeSourceDeps } from './media-sources';
+import { alertFeedRefs, recordAlertFeedResults } from './google-alerts-store';
 import {
   MediaRunInProgressError, createMediaRun, expireStaleMediaRuns, failMediaRun, finishMediaRun, getMediaRun, getMediaSettings, latestSucceededMediaRun,
   listMentionsInRange, mediaSystemUserId as systemUserId, saveMediaInsights, saveSentiments, unscoredMentions, updateMediaRunProgress, upsertMentions,
@@ -85,13 +86,15 @@ export async function runMediaRefresh(runId: string, options: MediaRunOptions = 
   try {
     const userId = run.createdBy || await systemUserId();
     const settings = await getMediaSettings();
-    if (!settings.keywords.length && !settings.hashtags.length && !settings.alertFeeds.length) {
-      await failMediaRun(runId, 'Add keywords, hashtags or a Google Alerts RSS feed in Settings first.');
+    const feeds = await alertFeedRefs();
+    if (!settings.keywords.length && !settings.hashtags.length && !feeds.length) {
+      await failMediaRun(runId, 'Add keywords or hashtags in Settings, or a feed on the Google Alerts page, first.');
       return;
     }
     const onProgress = (progress: number, message: string) => updateMediaRunProgress(runId, progress, message);
     await onProgress(2, 'Reading free sources.');
-    const free = await collectFreeMentions(settings, (options.freeDeps ?? realFreeSourceDeps)(onProgress), MEDIA_WINDOW_DAYS);
+    const free = await collectFreeMentions(settings, (options.freeDeps ?? realFreeSourceDeps)(onProgress), MEDIA_WINDOW_DAYS, feeds);
+    await recordAlertFeedResults(free.alertFeeds);
     notes.push(...free.notes);
     const collected: RawMention[] = [...free.mentions];
     let paidCount = 0;
