@@ -47,7 +47,13 @@ function importGraph(entry: string): Set<string> {
 const TREG_MODULE = /treg/i;
 
 test('the scheduled Media Monitoring path never imports a treg module (transitively)', () => {
-  for (const entry of ['scripts/run-media-refresh.ts', 'src/lib/partnership/media-run.ts', 'src/lib/partnership/media-sources.ts']) {
+  for (const entry of [
+    'scripts/run-media-refresh.ts', 'src/lib/partnership/media-run.ts', 'src/lib/partnership/media-sources.ts',
+    // Google Alerts page: "Fetch now" and feed management are free and must never reach treg either.
+    'src/lib/partnership/google-alerts.ts', 'src/lib/partnership/google-alerts-store.ts',
+    'src/app/api/partnership/google-alerts/route.ts', 'src/app/api/partnership/google-alerts/fetch/route.ts',
+    'src/app/api/partnership/google-alerts/feeds/route.ts', 'src/app/api/partnership/google-alerts/feeds/[id]/route.ts',
+  ]) {
     const graph = importGraph(entry);
     const tregFiles = [...graph].filter(file => TREG_MODULE.test(path.basename(file)));
     assert.deepEqual(tregFiles, [], `${entry} reaches treg code: ${tregFiles.join(', ')}`);

@@ -162,6 +162,8 @@ export interface RawMention {
   views: number;
   followers: number;
   matchedTerm: string | null;
+  /** Google Alerts feed id(s) (partnership_google_alert_feeds) that delivered this item. */
+  alertFeedIds?: string[];
 }
 
 export interface MediaMention extends RawMention {
@@ -224,9 +226,10 @@ export function dedupeMentions(mentions: RawMention[]): Array<RawMention & { url
     const urlKey = mentionUrlKey(url);
     const existing = byKey.get(urlKey);
     if (!existing) {
-      byKey.set(urlKey, { ...mention, url, urlKey });
+      byKey.set(urlKey, { ...mention, url, urlKey, ...(mention.alertFeedIds ? { alertFeedIds: [...mention.alertFeedIds] } : {}) });
       continue;
     }
+    if (mention.alertFeedIds?.length) existing.alertFeedIds = [...new Set([...(existing.alertFeedIds ?? []), ...mention.alertFeedIds])];
     existing.title ||= mention.title;
     existing.snippet = existing.snippet.length >= mention.snippet.length ? existing.snippet : mention.snippet;
     existing.sourceName ||= mention.sourceName;

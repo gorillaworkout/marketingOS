@@ -14,7 +14,7 @@ and **Export PDF** (A4, pdfkit, same fonts/logo as the proposal export).
 
 | Source | Cost | Scheduled (cron) | Manual |
 |---|---|---|---|
-| Google Alerts RSS (feeds pasted in Settings) | free | yes | yes |
+| Google Alerts RSS (feeds on the Google Alerts page) | free | yes | yes |
 | Google News RSS (keywords, ID/EN edition) | free | yes | yes |
 | GDELT DOC API (1 request / 5 s, retried once on 429) | free | yes | yes |
 | YouTube Data API — only when `YOUTUBE_API_KEY` is set | free quota | yes | yes |
@@ -24,7 +24,13 @@ and **Export PDF** (A4, pdfkit, same fonts/logo as the proposal export).
 
 1. google.com/alerts → type the query → **Show options** → **Deliver to: RSS feed** → Create alert.
 2. Click the RSS icon next to the alert and copy the URL (`https://www.google.com/alerts/feeds/<user>/<alert>`).
-3. Paste it in **Settings › Google Alerts RSS feeds** (one per line). Only Google Alerts feed URLs are accepted.
+3. Paste it on **Partnership › Google Alerts** (`/dashboard/partnership/google-alerts`) with an optional label. Only Google Alerts feed URLs are accepted (max 20).
+
+The Google Alerts page (migration 064) lists feeds with their last fetch status, has a free **Fetch now**, and shows the
+latest articles per alert. Articles are stored in `partnership_media_mentions` (deduplicated by URL, the same rows Media
+Monitoring reports on) and linked to their feed in `partnership_media_mention_alerts`. Feeds live in
+`partnership_google_alert_feeds`; `partnership_media_settings.alert_feeds` mirrors their URLs so a rollback of 064 keeps
+them. Media Monitoring Settings no longer edit feeds. Fetch now and the scheduled refresh never call treg.
 
 Entries are Atom; `google.com/url?...&url=<article>` redirect links are unwrapped to the article URL.
 

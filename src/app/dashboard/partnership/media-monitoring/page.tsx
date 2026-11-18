@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
 import {
   Button, DataTableFrame, EmptyState, FormField, LoadingState, MetricCard, PageHeader, PageStack, Panel, SectionHeader, Select, StatusBadge, TextArea, TextInput,
 } from '@/components/ui/dashboard';
@@ -19,7 +20,8 @@ type Run = {
 };
 type Overview = {
   range: DateRange; settings: MediaSettings; dashboard: MediaDashboard; insights: { result: MediaInsights; model: string | null; createdAt: string } | null;
-  runs: Run[]; running: Run | null; mentions: MediaMention[]; sources: { youtubeConfigured: boolean };
+  runs: Run[]; running: Run | null; mentions: MediaMention[];
+  sources: { youtubeConfigured: boolean; googleAlerts: { count: number; lastFetchedAt: string | null; lastItems: number; failing: number } };
 };
 
 const PRESETS = [7, 30, 90] as const;
@@ -58,7 +60,6 @@ function SettingsPanel({ settings, onSaved }: { settings: MediaSettings; onSaved
     brandName: settings.brandName,
     keywords: settings.keywords.join('\n'),
     hashtags: settings.hashtags.join('\n'),
-    alertFeeds: settings.alertFeeds.join('\n'),
     language: settings.language,
     handles: Object.fromEntries([...HANDLE_PLATFORMS, 'website'].map(key => [key, settings.officialHandles[key as keyof typeof settings.officialHandles] ?? ''])) as Record<string, string>,
     currency: settings.adValue.currency,
@@ -73,16 +74,16 @@ function SettingsPanel({ settings, onSaved }: { settings: MediaSettings; onSaved
     const { ok, data } = await fetchJson<{ settings: MediaSettings }>('/api/partnership/media/settings', {
       method: 'PUT', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
-        brandName: form.brandName, keywords: form.keywords, hashtags: form.hashtags, alertFeeds: form.alertFeeds, language: form.language, officialHandles: form.handles,
+        brandName: form.brandName, keywords: form.keywords, hashtags: form.hashtags, language: form.language, officialHandles: form.handles,
         adValue: { currency: form.currency, cpm: form.cpm, onlineMediaReach: form.onlineMediaReach, engagementToReach: form.engagementToReach },
       }),
     });
     setBusy(false);
     if (!ok) { setError(data.error || 'Could not save.'); return; }
-    onSaved('Settings saved. Refresh to collect with the new keywords and feeds.');
+    onSaved('Settings saved. Refresh to collect with the new keywords.');
   };
   return <Panel data-testid="media-settings">
-    <SectionHeader title="Settings" description="What to monitor, which accounts are official (owned), where Google Alerts deliver, and how the ad value is estimated." />
+    <SectionHeader title="Settings" description="What to monitor, which accounts are official (owned), and how the ad value is estimated." />
     <div className="mt-4 grid gap-4 md:grid-cols-2">
       <FormField label="Brand"><TextInput value={form.brandName} maxLength={120} onChange={event => setForm({ ...form, brandName: event.target.value })} /></FormField>
       <FormField label="Language" hint="Google News edition and treg news search.">
@@ -92,9 +93,10 @@ function SettingsPanel({ settings, onSaved }: { settings: MediaSettings; onSaved
       </FormField>
       <FormField label="Keywords" hint="One per line, e.g. Dupoin Futures. Used for Google News, GDELT, YouTube and treg."><TextArea rows={4} value={form.keywords} onChange={event => setForm({ ...form, keywords: event.target.value })} /></FormField>
       <FormField label="Hashtags" hint="One per line, e.g. #dupoin. Used by treg Instagram hashtag search."><TextArea rows={4} value={form.hashtags} onChange={event => setForm({ ...form, hashtags: event.target.value })} /></FormField>
-      <FormField label="Google Alerts RSS feeds" className="md:col-span-2" hint='At google.com/alerts create an alert, open "Show options", set "Deliver to: RSS feed", then copy the RSS link (https://www.google.com/alerts/feeds/…). One per line.'>
-        <TextArea rows={3} spellCheck={false} placeholder="https://www.google.com/alerts/feeds/…/…" value={form.alertFeeds} onChange={event => setForm({ ...form, alertFeeds: event.target.value })} />
-      </FormField>
+      <div className="rounded-[6px] border border-[var(--mos-border)] p-3 text-xs text-[var(--mos-text-muted)] md:col-span-2" data-testid="media-settings-alerts-link">
+        <span className="font-medium text-[var(--mos-text-secondary)]">Google Alerts RSS feeds</span> are managed on their own page.{' '}
+        <Link href="/dashboard/partnership/google-alerts" className="text-[var(--mos-accent-soft)] hover:underline">Open Google Alerts →</Link>
+      </div>
     </div>
     <h3 className="mt-6 text-xs font-medium uppercase tracking-wide text-[var(--mos-text-faint)]">Official accounts (owned media)</h3>
     <p className="mt-1 text-xs text-[var(--mos-text-muted)]">Only add accounts you have verified. Leave blank if unsure. Posts from these accounts are marked Official; everything else is Earned.</p>
@@ -116,6 +118,41 @@ function SettingsPanel({ settings, onSaved }: { settings: MediaSettings; onSaved
     {error && <p className="mt-3 text-sm text-red-300">{error}</p>}
     <div className="mt-4"><Button variant="primary" disabled={busy} onClick={save}>{busy ? 'Saving…' : 'Save settings'}</Button></div>
   </Panel>;
+}
+
+type SourceTile = { key: string; name: string; tone: 'success' | 'warning' | 'neutral' | 'danger' | 'info'; status: string; detail: string; action?: { href: string; label: string } };
+
+function SourcesStrip({ overview }: { overview: Overview }) {
+  const { settings, sources, runs } = overview;
+  const lastOk = runs.find(run => run.status === 'succeeded') ?? null;
+  const lastTreg = runs.find(run => run.mode === 'treg' && run.status === 'succeeded') ?? null;
+  const stat = (key: string) => (lastOk?.stats ? Number(lastOk.stats[key] ?? 0) : null);
+  const fromLast = (key: string) => (lastOk ? `${stat(key) ?? 0} item(s) on the last refresh (${when(lastOk.finishedAt)})` : 'Not refreshed yet');
+  const hasTerms = settings.keywords.length + settings.hashtags.length > 0;
+  const alerts = sources.googleAlerts;
+  const tiles: SourceTile[] = [
+    {
+      key: 'google_alerts', name: 'Google Alerts', tone: !alerts.count ? 'warning' : alerts.failing ? 'danger' : 'success',
+      status: !alerts.count ? 'No feeds' : `${alerts.count} feed(s)${alerts.failing ? ` · ${alerts.failing} failing` : ''}`,
+      detail: alerts.lastFetchedAt ? `${alerts.lastItems} item(s) on the last fetch (${when(alerts.lastFetchedAt)})` : alerts.count ? 'Not fetched yet' : 'Add RSS links on the Google Alerts page',
+      action: { href: '/dashboard/partnership/google-alerts', label: alerts.count ? 'Manage' : 'Add feed' },
+    },
+    { key: 'google_news', name: 'Google News', tone: hasTerms ? 'success' : 'warning', status: hasTerms ? 'On · keywords' : 'Needs keywords', detail: fromLast('google_news') },
+    { key: 'gdelt', name: 'GDELT (global news)', tone: hasTerms ? 'success' : 'warning', status: hasTerms ? 'On · keywords' : 'Needs keywords', detail: fromLast('gdelt') },
+    { key: 'youtube_api', name: 'YouTube', tone: sources.youtubeConfigured ? 'success' : 'neutral', status: sources.youtubeConfigured ? 'On' : 'Off · no YOUTUBE_API_KEY', detail: sources.youtubeConfigured ? fromLast('youtube_api') : 'Optional. Ask an admin to set the server key.' },
+    {
+      key: 'treg', name: 'Social via treg (paid)', tone: 'info', status: 'Manual only',
+      detail: lastTreg ? `${Number(lastTreg.stats?.paid ?? 0)} item(s) on the last treg run (${when(lastTreg.finishedAt)})` : 'Never run. Starts only when you click Generate with treg and confirm.',
+    },
+  ];
+  return <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-5" data-testid="media-sources-strip">
+    {tiles.map(tile => <div key={tile.key} className="rounded-[var(--mos-radius-control)] border border-[var(--mos-border)] bg-[var(--mos-raised)] p-3" data-testid={`media-source-${tile.key}`}>
+      <div className="flex items-center justify-between gap-2"><span className="text-xs font-medium text-[var(--mos-text)]">{tile.name}</span>
+        {tile.action && <Link href={tile.action.href} className="text-[11px] text-[var(--mos-accent-soft)] hover:underline">{tile.action.label}</Link>}</div>
+      <StatusBadge className="mt-2" tone={tile.tone}>{tile.status}</StatusBadge>
+      <p className="mt-2 text-[11px] leading-4 text-[var(--mos-text-muted)]">{tile.detail}</p>
+    </div>)}
+  </div>;
 }
 
 export default function MediaMonitoringPage() {
@@ -197,6 +234,17 @@ export default function MediaMonitoringPage() {
       description={`Mentions of ${settings.brandName} across online media and social, with sentiment, reach and ad value (estimates). Free sources refresh on a schedule; treg (paid) runs only when you start it.`}
     />
 
+    <Panel padding="compact" data-testid="media-intro">
+      <p className="text-sm leading-6 text-[var(--mos-text-secondary)]">
+        <span className="font-medium text-[var(--mos-text)]">What is this?</span> Media Monitoring is the Dataxet-style report for {settings.brandName}. It combines every source into one place:
+        your Google Alerts feeds, Google News, GDELT (global online news), YouTube, and, only when you start it, social posts from treg (paid). It removes duplicates,
+        scores sentiment, estimates reach and ad value, and turns the result into charts, insights and a PDF you can share. Just want to read the articles from your alerts?
+        Use the <Link href="/dashboard/partnership/google-alerts" className="text-[var(--mos-accent-soft)] hover:underline">Google Alerts</Link> page.
+      </p>
+      <h2 className="mb-2 mt-4 text-[11px] font-medium uppercase tracking-[0.14em] text-[var(--mos-text-faint)]">Sources</h2>
+      <SourcesStrip overview={overview} />
+    </Panel>
+
     <Panel padding="compact" data-testid="media-refresh-controls">
       <div className="flex flex-wrap items-end gap-3">
         <div className="flex gap-1">
@@ -213,11 +261,9 @@ export default function MediaMonitoringPage() {
       </div>
       <p className="mt-2 text-xs text-[var(--mos-text-muted)]">
         Last refresh: {lastRun ? `${when(lastRun.finishedAt ?? lastRun.createdAt)} · ${lastRun.trigger === 'scheduled' ? 'Scheduled' : 'Manual'} · ${lastRun.mode === 'treg' ? 'Free + treg' : 'Free'} · ${lastRun.status}` : 'never'}
-        {' · '}Feeds: {settings.alertFeeds.length} Google Alerts · YouTube {overview.sources.youtubeConfigured ? 'on' : 'off (no YOUTUBE_API_KEY)'}
       </p>
       {isRunning(running) && <div className="mt-3"><div className="h-1.5 w-full overflow-hidden rounded bg-white/10"><div className="h-full bg-[var(--mos-accent)] transition-all" style={{ width: `${running!.progress}%` }} /></div><p className="mt-1 text-xs text-[var(--mos-text-muted)]">{running!.message} ({running!.progress}%)</p></div>}
       {message && <p className="mt-2 text-sm text-[var(--mos-text-secondary)]">{message}</p>}
-      {!settings.alertFeeds.length && <p className="mt-2 text-xs text-amber-200">No Google Alerts RSS feed yet. Open Settings and paste the feed URL from google.com/alerts (Deliver to: RSS feed).</p>}
     </Panel>
 
     {showTreg && <Panel data-testid="media-treg-panel">

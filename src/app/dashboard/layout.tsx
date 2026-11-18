@@ -173,6 +173,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         { href: '/dashboard/partnership/proposal-builder', label: 'Proposal Builder', icon: 'template', feature: 'partnership' },
         { href: '/dashboard/partnership/global-trends', label: 'Global Industry Trends', icon: 'visibility', feature: 'partnership' },
         { href: '/dashboard/partnership/media-monitoring', label: 'Media Monitoring', icon: 'analytics', feature: 'partnership' },
+        { href: '/dashboard/partnership/google-alerts', label: 'Google Alerts', icon: 'article', feature: 'partnership' },
       ],
     },
     {
