@@ -16,7 +16,10 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: auth.error }, { status: auth.status || 401 });
   }
 
-  const paidEnabled = await getLlmSettings().then(settings => settings.usePaidOpenRouter === true).catch(() => false);
+  // Paid ids stay disabled unless the toggle is on AND an OpenRouter key is saved.
+  const paidEnabled = await getLlmSettings()
+    .then(settings => settings.usePaidOpenRouter === true && settings.openrouterKey.trim().length > 0)
+    .catch(() => false);
   const paidModels = livePaidImageModels();
 
   try {

@@ -208,3 +208,26 @@ test('Generate Image page shows paid cost and balance before a run and actual co
   assert.match(page, /disabled=\{!paidEnabled\}/);
   assert.match(page, /readGenerateImageHandoff\(/);
 });
+
+test('free gateway GPT Image models work without OpenRouter and back up an Antigravity quota hit', async () => {
+  const { nextImageFallback } = await import('../src/lib/image-generation-fallback');
+  const gpt = AVAILABLE_IMAGE_MODELS.filter(model => model.family === 'gpt-image');
+  assert.ok(gpt.length >= 1);
+  for (const model of gpt) {
+    assert.ok(model.id.startsWith('cx/'));
+    assert.equal(isPaidImageModel(model.id), false, `${model.id} never needs the paid toggle`);
+    assert.equal(isAllowedImageModel(model.id), true);
+    assert.equal(resolveImageModel(model.id), model.id);
+    assert.equal(maxInputImagesFor(model.id), 8, 'uploads are merged into one sheet for the gateway');
+  }
+  // Production allow list after 065: the ag quota retry lands on a free GPT Image id, never a paid one.
+  const fallback = nextImageFallback(DEFAULT_IMAGE_MODEL, IMAGE_MODELS);
+  assert.equal(fallback, 'cx/gpt-image-2');
+  assert.equal(isPaidImageModel(fallback), false);
+});
+
+test('paid image models stay disabled unless the toggle is on and an OpenRouter key is saved', () => {
+  const picker = read('src/app/api/image-models/route.ts');
+  assert.match(picker, /usePaidOpenRouter === true && settings\.openrouterKey\.trim\(\)\.length > 0/);
+  assert.match(read('src/app/dashboard/generate-image/page.tsx'), /run on LLM Dupoin at no cost/);
+});

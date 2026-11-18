@@ -255,7 +255,25 @@ test('013 creates image_model_assignments with the current catalog and is safe o
   assert.doesNotMatch(seeded, /gpt-5\.6-terra|gpt-image-2/);
   assert.match(imageAssignments, /LIKE '%gpt-5\.6-terra%'/);
   assert.match(imageAssignments, new RegExp(DEFAULT_IMAGE_MODEL.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  // Ids added after 013 reach existing rows through 065 (gateway GPT Image).
+  const gatewayGptImage = readFileSync('db/migrations/065_gateway_gpt_image_models.sql', 'utf8');
   for (const id of IMAGE_MODELS) {
-    assert.match(imageAssignments, new RegExp(id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+    const pattern = new RegExp(id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+    assert.ok(pattern.test(imageAssignments) || pattern.test(gatewayGptImage), `${id} is seeded by neither 013 nor 065`);
   }
+});
+
+test('065 appends the gateway GPT Image ids to allowed_models without touching the default', () => {
+  const sql = readFileSync('db/migrations/065_gateway_gpt_image_models.sql', 'utf8');
+  const executable = withoutSqlComments(sql);
+  assert.match(executable, /BEGIN;[\s\S]*COMMIT;/);
+  assert.doesNotMatch(executable, /default_model\s*=/, 'the picker default stays ag/gemini-3.1-flash-image');
+  assert.doesNotMatch(executable, /\?|DELETE FROM|INSERT INTO|TRUNCATE|DROP TABLE|feature_model_assignments/i);
+  for (const id of IMAGE_MODELS.filter(model => model.startsWith('cx/'))) {
+    assert.ok(executable.includes(`'${id}'`), `065 adds ${id}`);
+    assert.ok(executable.includes(`'%"${id}"%'`), `065 re-runs are a no-op for ${id}`);
+  }
+  const rollback = readFileSync('db/rollbacks/065_gateway_gpt_image_models_down.sql', 'utf8');
+  assert.match(rollback, /DELETE FROM schema_migrations WHERE name = '065_gateway_gpt_image_models\.sql'/);
+  assert.match(rollback, /THEN 'ag\/gemini-3\.1-flash-image'/);
 });

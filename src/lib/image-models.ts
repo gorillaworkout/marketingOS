@@ -27,7 +27,8 @@ export const DEFAULT_IMAGE_MODEL = 'ag/gemini-3.1-flash-image';
 
 /**
  * Social Post image-generation catalog served by the GorillaWorkout gateway
- * (`POST /images/generations`). Approved list: `ag/gemini-3.1-flash-image`.
+ * (`POST /images/generations`). Approved list: `ag/gemini-3.1-flash-image`
+ * plus the `cx/gpt-image-*` ids below (verified 2026-11-18).
  *
  * Intentionally omitted:
  * - `cx/gpt-5.5-image` — 400 on a ChatGPT-account Codex connection
@@ -55,6 +56,19 @@ export const AVAILABLE_IMAGE_MODELS: ImageModelInfo[] = [
     maxInputImages: 8,
     estimatedCostUsd: 0,
   },
+  // GPT Image on the connected Codex (ChatGPT) account through the same
+  // gateway: free, no OpenRouter. Listed by GET /v1/models/image and probed on
+  // production 2026-11-18 (POST /images/generations, with and without a
+  // reference image in `image`): every id returned an image and followed the
+  // reference. They pick the frame from the prompt's aspect-ratio line rather
+  // than `size`. One input image, like Antigravity, so uploads are merged into
+  // one labelled reference sheet.
+  { id: 'cx/gpt-image-2', name: 'GPT Image 2 (ChatGPT)', description: 'Free · gateway · ChatGPT account', provider: 'gateway', family: 'gpt-image', paid: false, maxInputImages: 8, estimatedCostUsd: 0 },
+  { id: 'cx/gpt-image-2.5', name: 'GPT Image 2.5 (ChatGPT)', description: 'Free · gateway · ChatGPT account', provider: 'gateway', family: 'gpt-image', paid: false, maxInputImages: 8, estimatedCostUsd: 0 },
+  { id: 'cx/gpt-image-2.5-flare', name: 'GPT Image 2.5 Flare (ChatGPT)', description: 'Free · gateway · ChatGPT account', provider: 'gateway', family: 'gpt-image', paid: false, maxInputImages: 8, estimatedCostUsd: 0 },
+  { id: 'cx/gpt-image-2.5-sunburst', name: 'GPT Image 2.5 Sunburst (ChatGPT)', description: 'Free · gateway · ChatGPT account', provider: 'gateway', family: 'gpt-image', paid: false, maxInputImages: 8, estimatedCostUsd: 0 },
+  { id: 'cx/gpt-image-1.5', name: 'GPT Image 1.5 (ChatGPT)', description: 'Free · gateway · ChatGPT account', provider: 'gateway', family: 'gpt-image', paid: false, maxInputImages: 8, estimatedCostUsd: 0 },
+  { id: 'cx/gpt-6-sol-image', name: 'GPT-6 Sol Image (ChatGPT)', description: 'Free · gateway · ChatGPT account', provider: 'gateway', family: 'gpt-image', paid: false, maxInputImages: 8, estimatedCostUsd: 0 },
 ];
 
 /**
