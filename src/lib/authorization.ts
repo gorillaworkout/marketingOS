@@ -36,11 +36,17 @@ export const SETTLEMENT_REPORT_FEATURE = 'settlement-report' as const;
 export const PARTNERSHIP_FEATURE = 'partnership' as const;
 
 /**
+ * Paid Media division: Google Ads reporting (read-only sync of every account under the MCC).
+ * Assignable per department on Accounts. Migration 066 creates a Paid Media department with it.
+ */
+export const GOOGLE_ADS_FEATURE = 'google-ads' as const;
+
+/**
  * Features an admin can assign per department on Accounts.
  * Generation workflows stay in GENERATION_FEATURES so model routing is unchanged.
  * FAQ & Guides (`internal-docs`) is first so it sits at the top of the Accounts list.
  */
-export const ACCOUNT_FEATURES = [INTERNAL_DOCS_FEATURE, ...GENERATION_FEATURES, SEO_FEATURE, MONTHLY_REPORT_FEATURE, SETTLEMENT_REPORT_FEATURE, PARTNERSHIP_FEATURE] as const;
+export const ACCOUNT_FEATURES = [INTERNAL_DOCS_FEATURE, ...GENERATION_FEATURES, SEO_FEATURE, MONTHLY_REPORT_FEATURE, SETTLEMENT_REPORT_FEATURE, PARTNERSHIP_FEATURE, GOOGLE_ADS_FEATURE] as const;
 export type AccountFeature = typeof ACCOUNT_FEATURES[number];
 
 export const ACCOUNT_FEATURE_LABELS: Record<AccountFeature, string> = {
@@ -55,6 +61,7 @@ export const ACCOUNT_FEATURE_LABELS: Record<AccountFeature, string> = {
   'monthly-report': 'Onboarding Reports',
   'settlement-report': 'Settlement Report',
   partnership: 'Partnership',
+  'google-ads': 'Google Ads',
 };
 
 /** Dashboard href for each account feature. Last path segment is not always the feature id. */
@@ -70,6 +77,7 @@ export const DASHBOARD_FEATURE_HREFS = {
   'monthly-report': '/dashboard/monthly-report',
   'settlement-report': '/dashboard/settlement-report',
   partnership: '/dashboard/partnership',
+  'google-ads': '/dashboard/paid-media/google-ads',
 } as const satisfies Record<AccountFeature, string>;
 
 export interface FeaturePrincipal {
@@ -115,7 +123,7 @@ export function generationFeatureFromPath(pathname: string): GenerationFeature |
 }
 
 /** Features whose whole route tree (href and every nested path) belongs to the feature. */
-const PREFIX_MATCHED_FEATURES = [INTERNAL_DOCS_FEATURE, SEO_FEATURE, MONTHLY_REPORT_FEATURE, SETTLEMENT_REPORT_FEATURE, PARTNERSHIP_FEATURE] as const;
+const PREFIX_MATCHED_FEATURES = [INTERNAL_DOCS_FEATURE, SEO_FEATURE, MONTHLY_REPORT_FEATURE, SETTLEMENT_REPORT_FEATURE, PARTNERSHIP_FEATURE, GOOGLE_ADS_FEATURE] as const;
 
 /**
  * Dashboard pages that belong to an existing feature without being its main href.
@@ -126,7 +134,7 @@ export const DASHBOARD_FEATURE_ALIAS_HREFS: Readonly<Record<string, AccountFeatu
   '/dashboard/generate-image': 'social-post',
 };
 
-/** Exact href match, plus nested routes for prefix-matched features (Internal Docs, SEO OS, Onboarding, Settlement, Partnership). */
+/** Exact href match, plus nested routes for prefix-matched features (Internal Docs, SEO OS, Onboarding, Settlement, Partnership, Google Ads). */
 export function accountFeatureFromPath(pathname: string): AccountFeature | undefined {
   const normalized = normalizeDashboardPath(pathname);
   const alias = DASHBOARD_FEATURE_ALIAS_HREFS[normalized];

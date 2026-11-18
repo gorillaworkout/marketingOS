@@ -14,6 +14,7 @@
     "seo:sync": "tsx scripts/seo-sync.ts",
     "seo:visibility": "tsx scripts/seo-visibility.ts",
     "seo:gsc-retention": "tsx scripts/seo-gsc-retention.ts",
+    "google-ads:sync": "tsx scripts/google-ads-sync.ts",
     "db:import-sqlite": "tsx scripts/migrate-sqlite-to-postgres.ts"
   },
   "dependencies": {

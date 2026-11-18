@@ -177,6 +177,12 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       ],
     },
     {
+      label: 'Paid Media',
+      items: [
+        { href: '/dashboard/paid-media/google-ads', label: 'Google Ads', icon: 'analytics', feature: 'google-ads' },
+      ],
+    },
+    {
       label: 'Library',
       items: resourceItems,
     },
