@@ -55,6 +55,7 @@ test('a member without the department feature is blocked from that feature path'
     ['/dashboard/monthly-report/uploads', 'monthly-report'],
     ['/dashboard/settlement-report/data', 'settlement-report'],
     ['/dashboard/partnership/competitor-intelligence', 'partnership'],
+    ['/dashboard/paid-media/google-ads', 'google-ads'],
   ];
   for (const [pathname, feature] of cases) {
     assert.equal(accountFeatureFromPath(pathname), feature, pathname);
