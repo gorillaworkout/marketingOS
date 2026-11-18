@@ -163,9 +163,13 @@ export function formatWibTime(at: number, now: number = Date.now()): string {
   return `${date} ${time} ${QUOTA_TIMEZONE_LABEL}`;
 }
 
-/** Catalog label without its provider suffix: "Gemini 3.1 Flash Image (Antigravity)" → "Gemini 3.1 Flash Image". */
+/**
+ * Catalog label without a trailing provider tag: "GPT Image 2 (ChatGPT)" → "GPT Image 2".
+ * Only provider tags are dropped, so "Nano Banana 2 (Gemini 3.1 Flash Image)" keeps its full name.
+ */
+const PROVIDER_TAG_RE = /\s*\((?:Antigravity|ChatGPT|OpenRouter(?:,\s*paid|\s+free)?|free|paid)\)\s*$/i;
 export function shortModelName(label: string): string {
-  return String(label || '').replace(/\s*\([^)]*\)\s*$/, '').trim() || String(label || '');
+  return String(label || '').replace(PROVIDER_TAG_RE, '').trim() || String(label || '');
 }
 
 /** "<model> quota exhausted, resets around 15:50 WIB" / "<model> quota exhausted, try again later". */
@@ -187,7 +191,7 @@ export function allFreeModelsExhaustedText(states: Array<{ label: string; resetA
   const known = states.filter(state => typeof state.resetAt === 'number').sort((a, b) => (a.resetAt as number) - (b.resetAt as number));
   if (known.length === 0) return 'All free image models are out of quota; try again later.';
   const first = known[0];
-  return `All free image models are out of quota. The earliest reset is around ${formatWibTime(first.resetAt as number, now)} (${shortModelName(first.label)}).`;
+  return `All free image models are out of quota. The earliest reset is around ${formatWibTime(first.resetAt as number, now)}, for ${shortModelName(first.label)}.`;
 }
 
 /** Model picker hint: "Quota resets ~15:50 WIB" / "Quota exhausted, try again later". */

@@ -78,7 +78,7 @@ export const EMBEDDINGS_FAILOVER_NOTE =
   'The stored knowledge vectors are a local 1024-number hash, saved as JSON text, not an external embedding. liquid/lfm-2.5-embedding-350m:free is the only free OpenRouter embedding model whose catalog text says it produces 1,024 dimensions. That width matches, but the vector space does not. Failover therefore does not write OpenRouter embeddings into the index. Retrieval stays on the local hash either way.';
 
 export const IMAGES_FAILOVER_NOTE =
-  'When the Gemini image quota is full, the image is retried once on recraft/recraft-v4.1-flash-v2:free (free on OpenRouter until 28 Nov 2026, not used in Dupoin-only mode). Provider failover to google/gemini-3.1-flash-image still needs OpenRouter credits; a key without credits fails with “image generation needs OpenRouter credits” instead of an empty file.';
+  'When the Nano Banana 2 (Gemini 3.1 Flash Image) quota is full, the image is retried once on recraft/recraft-v4.1-flash-v2:free (free on OpenRouter until 28 Nov 2026, not used in Dupoin-only mode). Provider failover to google/gemini-3.1-flash-image still needs OpenRouter credits; a key without credits fails with “image generation needs OpenRouter credits” instead of an empty file.';
 
 export type LlmModelMapping = {
   dupoinModel: string;
