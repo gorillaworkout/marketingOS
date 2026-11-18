@@ -29,7 +29,7 @@ test('maps ratios to supported gateway sizes and preserves exact composition int
   assert.deepEqual(getImageGenerationSpec('16:9'), {
     size: '1536x1024',
     orientation: 'landscape',
-    promptSuffix: 'Compose the image in an exact 16:9 landscape aspect ratio (1536x1024); keep all essential subjects and branding inside that frame.',
+    promptSuffix: 'Compose the image in an exact 16:9 landscape aspect ratio (1536x1024); keep all essential subjects and text inside that frame.',
   });
   assert.equal(getImageGenerationSpec('4:3').size, '1536x1024');
   assert.equal(getImageGenerationSpec('1:1').size, '1024x1024');

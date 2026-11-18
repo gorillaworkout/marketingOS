@@ -479,7 +479,7 @@ export default function GenerateImagePage() {
           <Panel>
             <SectionHeader
               title="Visual references"
-              description="The model sees these images and follows their style, layout, colors, and mood. Up to 4."
+              description="Guide style, pose, or subject only. They are never placed in the result. Up to 4."
               action={<StatusBadge tone={references.length ? 'info' : 'neutral'}>{references.length}/{MAX_REFERENCES}</StatusBadge>}
             />
             <label className="mt-4 flex cursor-pointer flex-col items-center justify-center gap-1 rounded-[var(--mos-radius-control)] border border-dashed border-[var(--mos-border-strong)] bg-[var(--mos-surface)] px-4 py-6 text-center">
@@ -500,7 +500,7 @@ export default function GenerateImagePage() {
           <Panel>
             <SectionHeader
               title="Assets to include"
-              description="Images that must appear inside the result, such as a product photo, a person, or a chart. Up to 4."
+              description="Items that must appear in the scene, such as a product, a person, or a chart. The model redraws them into the scene, not as pasted photos. For style or pose ideas, use Visual references. No need to upload the Dupoin logo: it is added automatically. Up to 4."
               action={<StatusBadge tone={assets.length ? 'info' : 'neutral'}>{assets.length}/{MAX_ASSETS}</StatusBadge>}
             />
             <label className="mt-4 flex cursor-pointer flex-col items-center justify-center gap-1 rounded-[var(--mos-radius-control)] border border-dashed border-[var(--mos-border-strong)] bg-[var(--mos-surface)] px-4 py-6 text-center">

@@ -24,6 +24,14 @@ const read = (relative: string) => readFileSync(path.join(process.cwd(), relativ
 const openai = read('src/lib/openai.ts');
 const route = read('src/app/api/social-post/generate/route.ts');
 
+/** Model-facing lock text must never name the logo, the brand, or the pill text (models paint names they read). */
+function assertNoBrandOrUiText(prompt: string) {
+  assert.doesNotMatch(prompt, /Dupoin/i, 'no brand name in model-facing locks');
+  assert.doesNotMatch(prompt, /ACADEMY/i, 'no Academy wording in model-facing locks');
+  assert.doesNotMatch(prompt, /Swipe left/i, 'no Swipe left wording in model-facing locks');
+  assert.doesNotMatch(prompt, /CNN|laurel/i);
+}
+
 test('image-prompt system encodes Dupoin Brand Guidelines 2026 locks', () => {
   const systemPrompt = getSystemPrompt('image-prompt');
   const smartPrompt = getSmartSystemPrompt('image-prompt', 'Instagram');
@@ -127,17 +135,16 @@ test('applyDupoinImagePromptLocks reserves chrome bands and locks the selected s
 
   assert.match(locked, new RegExp(`top ${clearance.headerPercent}%`));
   assert.match(locked, new RegExp(`bottom ${clearance.footerPercent}%`));
-  assert.match(locked, /composited Dupoin header lockup/);
-  assert.doesNotMatch(locked, /composited centered Dupoin header lockup/);
-  assert.match(locked, /composited white regulatory footer/);
+  assert.match(locked, /Keep the top \d+% of the frame as clean, empty background/);
+  assert.match(locked, /Keep the bottom \d+% of the frame as clean, empty background/);
+  assertNoBrandOrUiText(locked);
   assert.match(locked, /#2EB5C4/);
   assert.equal(locked.includes(DUPOIN_LOGO_REQUIRED_LINE), true);
   assert.match(locked, /No overlay/i, 'scene-integrity negatives ride along with every prompt');
   assert.equal(locked.includes(DUPOIN_IG_STYLE_LOCK), true, 'Instagram style lock rides along with every prompt');
   assert.equal(locked.split(DUPOIN_IG_STYLE_LOCK).length, 2, 'style lock is applied once');
-  assert.match(locked, /filled Dupoin Blue pill/);
-  assert.match(locked, /Swipe left →/);
-  assert.match(locked, /brief's own short CTA/);
+  assert.match(locked, /filled cyan #2EB5C4 pill/);
+  assert.match(locked, /if it gives none, draw no button/);
   assert.doesNotMatch(locked, /lower-right/);
   assert.doesNotMatch(locked, /graphic mark \+ wordmark/);
   assert.doesNotMatch(locked, /telah teregulasi/);
@@ -187,19 +194,19 @@ test('Social Post / Generate Image route composites Instagram chrome instead of 
 test('swipe-left prompt reservation is optional and does not stack', () => {
   const off = applyDupoinImagePromptLocks('Premium Instagram advertising poster', '3:4');
   assert.doesNotMatch(off, /additional \d+%/);
-  assert.doesNotMatch(off, /composited centered Swipe left button/);
-  assert.match(off, /filled Dupoin Blue pill/);
-  assert.match(off, /Swipe left →/);
+  assert.doesNotMatch(off, /Also keep about/);
+  assert.match(off, /filled cyan #2EB5C4 pill/);
+  assertNoBrandOrUiText(off);
 
   const on = applyDupoinImagePromptLocks('Premium Instagram advertising poster', '3:4', { includeSwipeLeft: true });
   const spec = getImageGenerationSpec('3:4');
   const [width, height] = spec.size.split('x').map(Number);
   const swipePercent = swipePromptClearancePercent(width, height);
-  assert.match(on, new RegExp(`additional ${swipePercent}%`));
-  assert.match(on, /composited centered Swipe left button/);
-  assert.match(on, /Do not draw a swipe button, pill, arrow/);
-  assert.doesNotMatch(on, /filled Dupoin Blue pill/);
-  assert.doesNotMatch(on, /Swipe left →/);
+  assert.match(on, new RegExp(`Also keep about ${swipePercent}%`));
+  assert.match(on, /Also keep about \d+% directly above that bottom band empty, with no text, buttons, pills or arrows/);
+  assert.match(on, /Draw no button, pill, arrow/);
+  assert.doesNotMatch(on, /filled cyan #2EB5C4 pill/);
+  assertNoBrandOrUiText(on);
   assert.equal(applyDupoinImagePromptLocks(on, '3:4', { includeSwipeLeft: true }), on, 'swipe-on locks stay idempotent');
   assert.equal(applyDupoinImagePromptLocks(on, '3:4'), off, 'turning the pill off removes its reservation');
 });
@@ -216,20 +223,21 @@ test('academy prompt reservation swaps the centered lockup and does not stack', 
   });
   assert.ok(academy.headerPercent > normal.headerPercent, 'the Academy logo is taller than the wordmark');
   assert.match(on, new RegExp(`top ${academy.headerPercent}%`));
-  assert.match(on, /composited centered Dupoin Academy logo/);
-  assert.match(on, /Do not draw a graduation cap or the word "ACADEMY"/);
-  assert.doesNotMatch(on, /Dupoin header lockup/);
+  assertNoBrandOrUiText(on);
+  assert.doesNotMatch(on, /graduation cap/i);
   assert.equal(applyDupoinImagePromptLocks(on, '3:4', { dupoinAcademy: true }), on, 'academy locks stay idempotent');
   assert.equal(applyDupoinImagePromptLocks(on, '3:4'), off, 'turning Academy off restores the Dupoin lockup');
 
   const legacy = 'Scene\n\nLeave the top 12% of the frame empty of type, faces, and logos (background and texture may continue) for the composited Dupoin header lockup, and the bottom 8% empty for the composited white regulatory footer. Draw no logo, no wordmark, no CNN badge, no laurel, no regulatory footer, and no "Dupoin" lettering anywhere in the image. Primary accent Dupoin Blue #2EB5C4 as real light inside the scene.';
   const relocked = applyDupoinImagePromptLocks(legacy, '3:4', { dupoinAcademy: true });
-  assert.equal(relocked.split('Leave the top').length, 2, 'a legacy left-era chrome line is replaced, not stacked');
-  assert.match(relocked, /composited centered Dupoin Academy logo/);
+  assert.doesNotMatch(relocked, /Leave the top/, 'a legacy chrome line is replaced, not stacked');
+  assert.equal(relocked.split('Keep the top').length, 2);
+  assertNoBrandOrUiText(relocked);
 
   const both = applyDupoinImagePromptLocks(on, '3:4', { includeSwipeLeft: true, dupoinAcademy: true });
-  assert.match(both, /composited centered Swipe left button/);
-  assert.match(both, /Dupoin Academy logo/);
+  assert.match(both, /Also keep about/);
+  assert.match(both, new RegExp(`top ${academy.headerPercent}%`));
+  assertNoBrandOrUiText(both);
   assert.equal(applyDupoinImagePromptLocks(both, '3:4', { includeSwipeLeft: true, dupoinAcademy: true }), both);
   assert.equal(applyDupoinImagePromptLocks(both, '3:4'), off);
 });

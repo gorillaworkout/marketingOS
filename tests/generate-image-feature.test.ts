@@ -21,6 +21,7 @@ import {
   applyDupoinImagePromptLocks,
   dupoinChromeLockLine,
   resolveDupoinLogoChoice,
+  stripBrandDrawingLanguage,
   stripDupoinImagePromptLocks,
 } from '../src/lib/dupoin-image-prompt';
 import {
@@ -73,15 +74,16 @@ test('logo / footer locks: default wording unchanged, other combinations reserve
 
   const noLogo = applyDupoinImagePromptLocks('Scene', '3:4', { logo: 'none' });
   assert.doesNotMatch(noLogo, /Leave the top/);
-  assert.match(noLogo, /Leave the bottom \d+% empty for the composited white regulatory footer/);
+  assert.doesNotMatch(noLogo, /Keep the top/);
+  assert.match(noLogo, /Keep the bottom \d+% of the frame as clean, empty background/);
 
   const noFooter = applyDupoinImagePromptLocks('Scene', '3:4', { footer: false });
-  assert.match(noFooter, /Leave the top \d+%/);
-  assert.doesNotMatch(noFooter, /regulatory footer\./);
+  assert.match(noFooter, /Keep the top \d+%/);
+  assert.doesNotMatch(noFooter, /Keep the bottom/);
 
   const bare = applyDupoinImagePromptLocks('Scene', '3:4', { logo: 'none', footer: false, brandStyle: false });
-  assert.doesNotMatch(bare, /Leave the/);
-  assert.match(bare, /Draw no logo/);
+  assert.doesNotMatch(bare, /Keep the/);
+  assert.match(bare, /No logos, no brand names, no wordmarks/);
 
   for (const options of [{ logo: 'none' as const }, { footer: false }, { logo: 'none' as const, footer: false, includeSwipeLeft: true }]) {
     const locked = applyDupoinImagePromptLocks('Scene', '3:4', options);
@@ -135,14 +137,20 @@ test('free gateway gets one labelled sheet; paid models get each image as real i
 test('reference prompt block tells the model how to use references and assets', () => {
   assert.equal(referencePromptBlock({ referenceCount: 0, assetCount: 0, sheet: false }), '');
   const sheet = referencePromptBlock({ referenceCount: 2, assetCount: 1, sheet: true, assetNote: 'Put the phone in her hand' });
-  assert.match(sheet, /STYLE REF/);
-  assert.match(sheet, /ASSET/);
-  assert.match(sheet, /Do not reproduce the sheet/);
+  assert.match(sheet, /"REFERENCE ONLY" are visual references: reference only, do not include, collage or reproduce these images/);
+  assert.match(sheet, /"ASSET" is a real item/);
+  assert.match(sheet, /Never paste the uploaded photo itself/);
+  assert.match(sheet, /Do not reproduce the sheet itself, its grid, grey panels, borders, labels or thumbnails/);
   assert.match(sheet, /How to use the uploads: Put the phone in her hand/);
   const direct = referencePromptBlock({ referenceCount: 2, assetCount: 1, sheet: false });
-  assert.match(direct, /Input images 1–2 are visual references/);
+  assert.match(direct, /Input images 1–2 are visual references: reference only, do not include, collage or reproduce these images/);
   assert.match(direct, /Input image 3 is an asset/);
-  assert.match(direct, /must appear in the new image/);
+  assert.match(direct, /must appear in the new image as part of the scene/);
+  assert.match(direct, /no inset, thumbnail, framed photo/);
+  assert.doesNotMatch(direct, /match their composition, layout/, 'references no longer ask for a close layout copy');
+  const refsOnly = referencePromptBlock({ referenceCount: 2, assetCount: 0, sheet: false });
+  assert.match(refsOnly, /none of them appears in the result/);
+  assert.doesNotMatch(refsOnly, /must appear/);
 });
 
 test('standalone Generate Image metadata round-trips per user and rejects unsafe names', () => {
@@ -230,4 +238,51 @@ test('paid image models stay disabled unless the toggle is on and an OpenRouter 
   const picker = read('src/app/api/image-models/route.ts');
   assert.match(picker, /usePaidOpenRouter === true && settings\.openrouterKey\.trim\(\)\.length > 0/);
   assert.match(read('src/app/dashboard/generate-image/page.tsx'), /run on LLM Dupoin at no cost/);
+});
+
+test('double logo: model-facing prompt never names the logo or brand, for every logo choice', () => {
+  const scene = 'Instagram post for a Dupoin Academy webinar in Dupoin Blue (#2EB5C4). Put the Dupoin Academy logo top centre. Headline "BELAJAR BERSAMA DUPOIN ACADEMY". She wears sneakers with no logos.';
+  for (const logo of ['academy', 'dupoin', 'none'] as const) {
+    for (const includeSwipeLeft of [false, true]) {
+      const locked = applyDupoinImagePromptLocks(scene, '3:4', { logo, includeSwipeLeft, footer: true });
+      const unquoted = locked.replace(/"[^"]*"/g, '""');
+      assert.doesNotMatch(unquoted, /Dupoin|ACADEMY|graduation cap|Swipe left|CNN|laurel|lockup/i, `${logo}/${includeSwipeLeft}`);
+      assert.doesNotMatch(locked, /logo top centre/, 'a request to draw the logo is dropped');
+      assert.match(locked, /"BELAJAR BERSAMA DUPOIN ACADEMY"/, 'quoted copy the user typed is kept');
+      assert.match(locked, /no logos/, 'negative sentences survive');
+      assert.match(locked, /No logos, no brand names, no wordmarks, no monograms, no badges, no watermarks/);
+      if (logo !== 'none') assert.match(locked, /Keep the top \d+% of the frame as clean, empty background/);
+      assert.equal(applyDupoinImagePromptLocks(locked, '3:4', { logo, includeSwipeLeft, footer: true }), locked, 'idempotent');
+    }
+  }
+  assert.equal(stripBrandDrawingLanguage("Headline 'JAGA MODALMU' in Dupoin Blue."), "Headline 'JAGA MODALMU' in cyan.");
+});
+
+test('Academy header band is taller than the Dupoin band; compositor keeps Academy centred / Dupoin left', () => {
+  const academy = applyDupoinImagePromptLocks('Scene', '3:4', { logo: 'academy' });
+  const dupoin = applyDupoinImagePromptLocks('Scene', '3:4', { logo: 'dupoin' });
+  const pct = (text: string) => Number(/Keep the top (\d+)%/.exec(text)?.[1]);
+  assert.ok(pct(academy) > pct(dupoin));
+  const chrome = read('src/lib/dupoin-ig-chrome.ts');
+  assert.match(chrome, /academy/i);
+});
+
+test('reference leak: route never composites uploads and never sends a brand logo file as model input', () => {
+  const route = read('src/app/api/generate-image/route.ts');
+  assert.match(route, /compositeDupoinInstagramChrome\(imageBytes, \{ includeSwipeLeft: swipeLeft, logo, footer \}\)/, 'compositor only gets the chrome options');
+  assert.doesNotMatch(route, /compositeDupoinInstagramChrome\([^)]*(?:references|assets|prepared)/);
+  assert.doesNotMatch(route, /public\/brand|dupoin-academy-logo|readFileSync\([^)]*brand/i, 'no logo file is read into the model request');
+  // Every provider path builds its prompt with the same reference block.
+  assert.ok((route.match(/referencePromptBlock\(/g) || []).length >= 2, 'gateway and paid→free fallback both label the uploads');
+  const inputs = read('src/lib/image-reference-inputs.ts');
+  assert.match(inputs, /SHEET_REFERENCE_LABEL = 'REFERENCE ONLY'/);
+});
+
+test('reference sheet labels say REFERENCE ONLY and ASSET', async () => {
+  const lists = readInputImageLists({ referenceImages: [await png('#ff0000')], assetImages: [await png('#0000ff')] });
+  const prepared = await prepareModelInputImages({ ...lists, maxInputImages: 8, singleInputOnly: true });
+  assert.equal(prepared.sheet, true);
+  const block = referencePromptBlock({ ...prepared });
+  assert.match(block, /reference only, do not include, collage or reproduce these images/);
+  assert.match(block, /Never paste the uploaded photo itself/);
 });

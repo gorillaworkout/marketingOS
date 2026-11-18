@@ -18,28 +18,32 @@ export const DUPOIN_BLUE_HEX = '#2EB5C4';
 export const DUPOIN_BLUE_RGB = '46,181,196';
 
 /**
- * Required chrome line for AI image prompts.
+ * Required no-logo line for AI image prompts.
  *
- * The model must NOT draw the Dupoin wordmark, the CNN 2025 badge, or the
- * regulatory footer. Those pixels are composited from
- * public/brand/dupoin-social-header.png and dupoin-social-footer.png
- * by src/lib/dupoin-ig-chrome.ts. Black on those plates is transparent.
- * Text-to-image invents logotypes and legal lines; the prompt only reserves
- * the top and bottom bands and describes the middle scene.
+ * The real logo (Dupoin wordmark + CNN badge, or the Dupoin Academy logo), the
+ * regulatory footer and the optional Swipe left pill are composited from
+ * public/brand/* by src/lib/dupoin-ig-chrome.ts after the image comes back.
+ *
+ * Model-facing text must never NAME the logo, the brand, or the pill text:
+ * text-to-image models (Gemini Flash Image especially) tend to render any
+ * name they read, even inside a "do not draw" sentence. That is how a garbled
+ * "DUPOIN ACADEMY" ended up under the real composited logo. The prompt only
+ * asks for plain empty bands and forbids logos/brand text generically.
  */
 export const DUPOIN_LOGO_REQUIRED_LINE =
-  'Draw no logo, no wordmark, no CNN badge, no laurel, no regulatory footer, and no "Dupoin" lettering'
+  'No logos, no brand names, no wordmarks, no monograms, no badges, no watermarks and no signature marks'
 
 /**
- * Style lock baked onto every Social Post image prompt.
+ * Style lock baked onto every Social Post / Generate Image prompt.
  * Wording is stable so re-applying the lock does not stack copies.
- * Carousel/story posts use Bayu's swipe label; other briefs keep their own CTA inside the same filled pill.
+ * It names no brand and no "Swipe left" text: the model draws only the
+ * brief's own CTA, and the Swipe left pill is composited when it is asked for.
  */
 export const DUPOIN_IG_STYLE_LOCK =
-  `Dupoin Instagram shell: dark navy or black field with atmospheric glow in Dupoin Blue ${DUPOIN_BLUE_HEX}. `
-  + 'Large bold sans headlines, with key promo words in Dupoin Blue and supporting copy in white; alignment may follow the scene. '
-  + 'CTA is one filled Dupoin Blue pill with white lettering, placed just above the footer band. '
-  + 'When the brief is a carousel or story, the pill reads "Swipe left →"; otherwise use the brief\'s own short CTA inside that same filled pill. '
+  `Visual style: dark navy or black field with atmospheric glow in cyan ${DUPOIN_BLUE_HEX}. `
+  + `Large bold sans headlines, with key promo words in cyan ${DUPOIN_BLUE_HEX} and supporting copy in white; alignment may follow the scene. `
+  + `If the brief gives a short CTA, set it in one filled cyan ${DUPOIN_BLUE_HEX} pill with white lettering just above the bottom band; if it gives none, draw no button. `
+  + 'Draw no other UI text, page indicators, arrows or navigation hints. '
   + 'Subject may be a person, a physical award, or a laptop with charts.';
 
 /**
@@ -47,10 +51,23 @@ export const DUPOIN_IG_STYLE_LOCK =
  * The model must not paint a second button into the reserved band.
  */
 export const DUPOIN_IG_STYLE_LOCK_SWIPE_COMPOSITED =
+  `Visual style: dark navy or black field with atmospheric glow in cyan ${DUPOIN_BLUE_HEX}. `
+  + `Large bold sans headlines, with key promo words in cyan ${DUPOIN_BLUE_HEX} and supporting copy in white; alignment may follow the scene. `
+  + 'Draw no button, pill, arrow, page indicator or navigation hint anywhere; the area just above the bottom band must stay empty of type. '
+  + 'Subject may be a person, a physical award, or a laptop with charts.';
+
+/** Pre-fix style locks. They named "Dupoin" and "Swipe left"; kept only so stored prompts are stripped. */
+const LEGACY_STYLE_LOCKS = [
+  `Dupoin Instagram shell: dark navy or black field with atmospheric glow in Dupoin Blue ${DUPOIN_BLUE_HEX}. `
+  + 'Large bold sans headlines, with key promo words in Dupoin Blue and supporting copy in white; alignment may follow the scene. '
+  + 'CTA is one filled Dupoin Blue pill with white lettering, placed just above the footer band. '
+  + 'When the brief is a carousel or story, the pill reads "Swipe left →"; otherwise use the brief\'s own short CTA inside that same filled pill. '
+  + 'Subject may be a person, a physical award, or a laptop with charts.',
   `Dupoin Instagram shell: dark navy or black field with atmospheric glow in Dupoin Blue ${DUPOIN_BLUE_HEX}. `
   + 'Large bold sans headlines, with key promo words in Dupoin Blue and supporting copy in white; alignment may follow the scene. '
   + 'Do not draw a CTA pill, swipe button, arrow, or the words "Swipe left"; that pill is composited above the footer and the area just above the footer must stay empty of type. '
-  + 'Subject may be a person, a physical award, or a laptop with charts.';
+  + 'Subject may be a person, a physical award, or a laptop with charts.',
+];
 
 /** @deprecated Use DUPOIN_LOGO_REQUIRED_LINE — image prompts must include the official mark. */
 export const DUPOIN_LOGO_IN_PROMPT_LINE = DUPOIN_LOGO_REQUIRED_LINE;
@@ -152,10 +169,11 @@ export interface SocialPostImagePromptInput {
  * original header+footer line and the Generate Image variants (no logo, no
  * footer), so re-applying the locks replaces rather than stacks.
  */
-const CHROME_LOCK_RE = /\n\n(?:Leave [^\n]*? )?Draw no logo, no wordmark, no CNN badge, no laurel, no regulatory footer, and no "Dupoin" lettering anywhere in the image\. Primary accent Dupoin Blue #2EB5C4 as real light inside the scene\./g;
-const CHROME_LOCK_ONLY_RE = /^(?:Leave [^\n]*? )?Draw no logo, no wordmark, no CNN badge, no laurel, no regulatory footer, and no "Dupoin" lettering anywhere in the image\. Primary accent Dupoin Blue #2EB5C4 as real light inside the scene\.$/;
+const TAIL_ALTERNATIVES = '(?:Draw no logo, no wordmark, no CNN badge, no laurel, no regulatory footer, and no "Dupoin" lettering anywhere in the image\\. Primary accent Dupoin Blue #2EB5C4 as real light inside the scene\\.|No logos, no brand names, no wordmarks, no monograms, no badges, no watermarks and no signature marks anywhere in the image\\. Primary accent colour #2EB5C4 \\(cyan\\) as real light inside the scene\\.)';
+const CHROME_LOCK_RE = new RegExp(`\\n\\n(?:(?:Leave|Keep|Also keep) [^\\n]*? )?${TAIL_ALTERNATIVES}`, 'g');
+const CHROME_LOCK_ONLY_RE = new RegExp(`^(?:(?:Leave|Keep|Also keep) [^\\n]*? )?${TAIL_ALTERNATIVES}$`);
 
-const STYLE_LOCKS = [DUPOIN_IG_STYLE_LOCK, DUPOIN_IG_STYLE_LOCK_SWIPE_COMPOSITED];
+const STYLE_LOCKS = [DUPOIN_IG_STYLE_LOCK, DUPOIN_IG_STYLE_LOCK_SWIPE_COMPOSITED, ...LEGACY_STYLE_LOCKS];
 
 /** Drop a previously baked Instagram style lock so re-applying it cannot stack. */
 export function stripDupoinStyleLock(prompt: string): string {
@@ -209,36 +227,23 @@ export function dupoinChromeLockLine(
     height,
     academy ? { headerPx: DUPOIN_IG_ACADEMY_HEADER_BAND_PX, footerPx: DUPOIN_IG_FOOTER_BAND_PX } : undefined,
   );
-  const tail = `${DUPOIN_LOGO_REQUIRED_LINE} anywhere in the image. Primary accent Dupoin Blue ${DUPOIN_BLUE_HEX} as real light inside the scene.`;
-  const swipeDont = 'Do not draw a swipe button, pill, arrow, or the words "Swipe left".';
-
-  if (logo !== 'none' && footer) {
-    // Original Social Post wording, kept byte-for-byte.
-    const swipeSentence = options?.includeSwipeLeft
-      ? ` Leave an additional ${swipePromptClearancePercent(width, height)}% directly above that footer empty of type, faces, and logos for the composited centered Swipe left button. ${swipeDont}`
-      : '';
-    const academySentence = academy
-      ? ' Do not draw a graduation cap or the word "ACADEMY"; the Dupoin Academy logo is composited in the top center.'
-      : '';
-    const lockupName = academy ? 'centered Dupoin Academy logo' : 'Dupoin header lockup';
-    return `Leave the top ${headerPercent}% of the frame empty of type, faces, and logos (background and texture may continue) for the composited ${lockupName}, and the bottom ${footerPercent}% empty for the composited white regulatory footer.${swipeSentence}${academySentence} ${tail}`;
-  }
-
+  const tail = `${DUPOIN_LOGO_REQUIRED_LINE} anywhere in the image. Primary accent colour ${DUPOIN_BLUE_HEX} (cyan) as real light inside the scene.`;
+  // Neutral wording only: never name the logo, the brand, or the pill text
+  // here, or the model paints them (see DUPOIN_LOGO_REQUIRED_LINE). The
+  // Academy choice only changes how tall the clean top band is.
   const sentences: string[] = [];
   if (logo !== 'none') {
-    const lockupName = academy ? 'centered Dupoin Academy logo' : 'Dupoin header lockup';
-    sentences.push(`Leave the top ${headerPercent}% of the frame empty of type, faces, and logos (background and texture may continue) for the composited ${lockupName}.`);
-    if (academy) sentences.push('Do not draw a graduation cap or the word "ACADEMY"; the Dupoin Academy logo is composited in the top center.');
+    sentences.push(`Keep the top ${headerPercent}% of the frame as clean, empty background (texture and lighting may continue) with no text, letters, faces, logos, icons or graphics in it.`);
   }
   if (footer) {
-    sentences.push(`Leave the bottom ${footerPercent}% empty for the composited white regulatory footer.`);
+    sentences.push(`Keep the bottom ${footerPercent}% of the frame as clean, empty background with no text, letters, logos or graphics in it.`);
   }
   if (options?.includeSwipeLeft) {
-    const where = footer ? 'directly above that footer' : 'near the bottom edge';
-    sentences.push(`Leave about ${swipePromptClearancePercent(width, height)}% ${where} empty of type, faces, and logos for the composited centered Swipe left button. ${swipeDont}`);
+    const where = footer ? 'directly above that bottom band' : 'just above the bottom edge';
+    sentences.push(`Also keep about ${swipePromptClearancePercent(width, height)}% ${where} empty, with no text, buttons, pills or arrows.`);
   }
   if (sentences.length === 0) return tail;
-  // Every branch opens with "Leave …", which CHROME_LOCK_RE relies on.
+  // Every reservation opens with "Keep …", which CHROME_LOCK_RE relies on.
   return `${sentences.join(' ')} ${tail}`;
 }
 
@@ -306,6 +311,40 @@ export function stripFlatOverlayLanguage(prompt: string): string {
     .trim();
 }
 
+const LOGO_WORD_RE = /\b(?:logos?|logotypes?|wordmarks?|lockups?|watermarks?|monograms?)\b/i;
+const NEGATION_RE = /\b(?:no|not|never|without|avoid|jangan|tanpa|free of|don't|do not)\b/i;
+/** Quoted copy the user wants rendered: "…", “…”, or a 'single-quoted' phrase. */
+const QUOTED_RE = /("[^"\n]*"|“[^”\n]*”|(?<=^|[\s(:])'[^'\n]+'(?=$|[\s.,;:!?)]))/;
+const BRAND_NAME_RE = /\bDupoin(?:\s+(?:Futures|Academy))?(?:\s+Indonesia)?\b/g;
+
+/**
+ * Keep brand drawing out of the model's hands. The real logo is composited,
+ * so a sentence asking the model to draw a logo/wordmark is dropped, and the
+ * brand name outside quoted copy is neutralised ("Dupoin Blue" → "cyan",
+ * "Dupoin Academy" → "the brand"). Quoted headline/CTA copy is left as typed.
+ * Negative sentences ("no logos") are kept. Idempotent.
+ */
+export function stripBrandDrawingLanguage(prompt: string): string {
+  const text = String(prompt || '');
+  if (!text.trim()) return '';
+  const lines = text.split('\n').map(line => {
+    if (!line.trim()) return line;
+    const sentences = line.split(/(?<=[.!?])\s+/);
+    const kept = sentences.filter(sentence => !(LOGO_WORD_RE.test(sentence) && !NEGATION_RE.test(sentence)));
+    const joined = kept.length === sentences.length ? line : kept.join(' ').replace(/[ \t]{2,}/g, ' ').trim();
+    return joined
+      .split(QUOTED_RE)
+      .map((part, index) => (index % 2 === 1
+        ? part
+        : part.replace(/\bDupoin Blue\b/g, 'cyan').replace(BRAND_NAME_RE, 'the brand')))
+      .join('');
+  });
+  return lines
+    .filter((line, index) => line.trim() || (index > 0 && lines[index - 1].trim()))
+    .join('\n')
+    .trim();
+}
+
 /** Negatives appended to every generated prompt so the renderer never adds a slab back. */
 const SCENE_INTEGRITY_NEGATIVES =
   'No overlay, no translucent panel or box behind the text, no gradient layer over the image, '
@@ -324,10 +363,11 @@ export function applyDupoinImagePromptLocks(
   const brandStyle = options?.brandStyle !== false;
   const cleaned = stripDupoinStyleLock(
     stripDupoinChromeLock(stripImageAspectPrompt(stripFlatOverlayLanguage(prompt))),
-  ).trim();
-  const guarded = cleaned.includes(SCENE_INTEGRITY_NEGATIVES)
-    ? cleaned
-    : `${cleaned}\n\n${SCENE_INTEGRITY_NEGATIVES}`.trim();
+  );
+  const debranded = stripBrandDrawingLanguage(cleaned).trim();
+  const guarded = debranded.includes(SCENE_INTEGRITY_NEGATIVES)
+    ? debranded
+    : `${debranded}\n\n${SCENE_INTEGRITY_NEGATIVES}`.trim();
   const styleLock = includeSwipeLeft ? DUPOIN_IG_STYLE_LOCK_SWIPE_COMPOSITED : DUPOIN_IG_STYLE_LOCK;
   const withStyle = !brandStyle || guarded.includes(styleLock)
     ? guarded

@@ -21,7 +21,7 @@ export function getImageOrientation(aspectRatio: ImageAspectRatio): 'landscape' 
   return Number(aspectRatio.split(':')[0]) > Number(aspectRatio.split(':')[1]) ? 'landscape' : 'portrait';
 }
 
-const ASPECT_PROMPT_SUFFIX_RE = /\n\nCompose the image in an exact \d+:\d+ (?:landscape|portrait|square) aspect ratio(?: \([^)]+\))?; keep all essential subjects and branding inside that frame\.\s*$/;
+const ASPECT_PROMPT_SUFFIX_RE = /\n\nCompose the image in an exact \d+:\d+ (?:landscape|portrait|square) aspect ratio(?: \([^)]+\))?; keep all essential subjects (?:and branding|and text) inside that frame\.\s*$/;
 
 export function getImageGenerationSpec(aspectRatio: ImageAspectRatio) {
   const orientation = getImageOrientation(aspectRatio);
@@ -29,7 +29,7 @@ export function getImageGenerationSpec(aspectRatio: ImageAspectRatio) {
   return {
     size,
     orientation,
-    promptSuffix: `Compose the image in an exact ${aspectRatio} ${orientation} aspect ratio (${size}); keep all essential subjects and branding inside that frame.`,
+    promptSuffix: `Compose the image in an exact ${aspectRatio} ${orientation} aspect ratio (${size}); keep all essential subjects and text inside that frame.`,
   } as const;
 }
 

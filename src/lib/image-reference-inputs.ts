@@ -5,7 +5,16 @@ import sharp from 'sharp';
  *
  * Visual references and assets are sent to the image model as real image
  * input (OpenRouter `input_references`, 9router `image`), never as a text
- * description. The prompt only says which input is which.
+ * description, and never composited onto the output by us: the compositor
+ * only adds the brand logo, footer and Swipe left pill.
+ *
+ * The two roles stay separate all the way to the prompt:
+ * - a visual reference only guides style, pose, subject, palette and mood;
+ *   the model is told not to include, collage or reproduce it;
+ * - an asset is a thing that must appear, so the model redraws that item
+ *   inside the scene, but never pastes the uploaded photo as an inset,
+ *   thumbnail or panel.
+ * The prompt says which input is which.
  */
 
 export const MAX_REFERENCE_IMAGES = 4;
@@ -70,13 +79,15 @@ function escapeXml(text: string): string {
 }
 
 export const SHEET_CELL_PX = 640;
+export const SHEET_REFERENCE_LABEL = 'REFERENCE ONLY';
+export const SHEET_ASSET_LABEL = 'ASSET';
 const SHEET_LABEL_PX = 56;
 const SHEET_GAP_PX = 16;
 
 /**
  * One labelled sheet holding every upload, for gateways that forward a single
- * input image. Panels read "STYLE REF n" or "ASSET n" so the prompt can point
- * at them.
+ * input image. Panels read "REFERENCE ONLY n" or "ASSET n" so the prompt can
+ * point at them.
  */
 export async function buildReferenceSheet(items: Array<{ role: InputImageRole; image: ParsedInputImage }>): Promise<Buffer> {
   if (items.length === 0) throw new Error('No images to place on the reference sheet.');
@@ -91,7 +102,7 @@ export async function buildReferenceSheet(items: Array<{ role: InputImageRole; i
   const layers: sharp.OverlayOptions[] = [];
   for (let i = 0; i < items.length; i += 1) {
     const { role, image } = items[i];
-    const label = role === 'reference' ? `STYLE REF ${++referenceIndex}` : `ASSET ${++assetIndex}`;
+    const label = role === 'reference' ? `${SHEET_REFERENCE_LABEL} ${++referenceIndex}` : `${SHEET_ASSET_LABEL} ${++assetIndex}`;
     const col = i % columns;
     const row = Math.floor(i / columns);
     const left = SHEET_GAP_PX + col * (SHEET_CELL_PX + SHEET_GAP_PX);
@@ -153,29 +164,39 @@ export async function prepareModelInputImages(input: {
   return { images: await Promise.all(items.map(item => toDataUrl(item.image))), sheet: false, ...base };
 }
 
+/** Reference rule: guidance only. Wording kept in one place so every provider path sends the same text. */
+export const REFERENCE_ONLY_RULE =
+  'reference only, do not include, collage or reproduce these images. Use them only as guidance for style, pose, subject, colour palette, lighting and mood. '
+  + 'Do not paste, inset, frame, thumbnail or tile them (or any part of them) into the result, and do not copy their text, buttons, UI elements, logos or watermarks. '
+  + 'Create one new, original image';
+
+/** Asset rule: the item must appear, redrawn into the scene, never pasted as a photo. */
+export const ASSET_RULE =
+  'it must appear in the new image as part of the scene, recognisable (same shape, colours, face or identity, and any text printed on the item itself), redrawn with the scene\'s light, perspective and scale. '
+  + 'Never paste the uploaded photo itself: no inset, thumbnail, framed photo, picture-in-picture, sticker, collage or side-by-side panel, and do not copy its background or borders';
+
 /**
  * Instructions placed before the scene prompt so the model treats each input
- * correctly: references steer the look, assets must appear in the result.
+ * correctly: references only steer the look, assets must appear in the result.
  */
 export function referencePromptBlock(input: { referenceCount: number; assetCount: number; sheet: boolean; assetNote?: string }): string {
   const { referenceCount, assetCount, sheet } = input;
   if (referenceCount + assetCount === 0) return '';
   const lines: string[] = [];
-  const styleRule = 'match their composition, layout, colour palette, lighting, typography style and overall mood closely; do not copy their exact text, watermarks, or logos';
-  const assetRule = 'it must appear in the new image, recognisable and unchanged (same shape, colours, face or identity, and any text printed on it), integrated naturally into the scene with matching light and perspective';
 
   if (sheet) {
-    lines.push('INPUT IMAGE: one reference sheet with labelled panels.');
-    if (referenceCount > 0) lines.push(`Panels labelled "STYLE REF" are visual references: ${styleRule}.`);
-    if (assetCount > 0) lines.push(`Each panel labelled "ASSET" is a real item: ${assetRule}.`);
-    lines.push('Do not reproduce the sheet itself, its grey panels, borders, or labels.');
+    lines.push('INPUT IMAGE: one sheet of labelled panels. It is input material, not a layout or a canvas to edit.');
+    if (referenceCount > 0) lines.push(`Panels labelled "${SHEET_REFERENCE_LABEL}" are visual references: ${REFERENCE_ONLY_RULE}.`);
+    if (assetCount > 0) lines.push(`Each panel labelled "${SHEET_ASSET_LABEL}" is a real item: ${ASSET_RULE}.`);
+    lines.push('Do not reproduce the sheet itself, its grid, grey panels, borders, labels or thumbnails.');
   } else {
     const range = (from: number, count: number) => (count === 1 ? `Input image ${from} is` : `Input images ${from}–${from + count - 1} are`);
-    if (referenceCount > 0) lines.push(`${range(1, referenceCount)} ${referenceCount === 1 ? 'a visual reference' : 'visual references'}: ${styleRule}.`);
+    if (referenceCount > 0) lines.push(`${range(1, referenceCount)} ${referenceCount === 1 ? 'a visual reference' : 'visual references'}: ${REFERENCE_ONLY_RULE}.`);
     if (assetCount > 0) {
       const subject = assetCount === 1 ? `${range(referenceCount + 1, 1)} an asset` : `${range(referenceCount + 1, assetCount)} assets`;
-      lines.push(`${subject}: ${assetCount === 1 ? '' : 'for each one, '}${assetRule}.`);
+      lines.push(`${subject}: ${assetCount === 1 ? '' : 'for each one, '}${ASSET_RULE}.`);
     }
+    if (referenceCount > 0 && assetCount === 0) lines.push('No input image is an asset, so none of them appears in the result.');
   }
   const note = input.assetNote?.trim();
   if (note) lines.push(`How to use the uploads: ${note.slice(0, 500)}`);
