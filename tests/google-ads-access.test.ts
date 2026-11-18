@@ -39,7 +39,7 @@ test('sidebar has a Paid Media group with Google Ads; /dashboard/paid-media redi
 });
 
 test('every Google Ads API route requires the google-ads feature', () => {
-  const routes = ['overview', 'report', 'sync', 'export'].map(name => `src/app/api/paid-media/google-ads/${name}/route.ts`);
+  const routes = ['overview', 'report', 'sync', 'export', 'paid-organic', 'search-terms', 'alerts', 'alerts/[id]'].map(name => `src/app/api/paid-media/google-ads/${name}/route.ts`);
   for (const route of routes) {
     const source = read(route);
     const handlers = [...source.matchAll(/export async function (GET|POST|PUT|PATCH|DELETE)\b[\s\S]*?\n}/g)];
@@ -81,4 +81,50 @@ test('no secrets committed; cron is documented, not auto-installed; never uses t
   const doc = read('docs/paid-media-google-ads.md');
   assert.match(doc, /npm run google-ads:sync -- --scheduled/);
   assert.match(doc, /GOOGLE_ADS_LOGIN_CUSTOMER_ID/);
+});
+
+test('insights UI: tabs with explanations, alerts badge in the sidebar, CSV exports for the new views', () => {
+  const page = read('src/app/dashboard/paid-media/google-ads/page.tsx');
+  for (const label of ['Overview', 'Paid vs Organic', 'Search term analysis', 'Alerts', 'Review alerts']) assert.ok(page.includes(label), label);
+  const paidOrganic = read('src/components/google-ads/PaidOrganicTab.tsx');
+  for (const label of ['Top 3 organic, still paying', 'SEO opportunity', 'Potential savings', 'Organic data not available', 'Organic pos.']) assert.ok(paidOrganic.includes(label), label);
+  const searchTerms = read('src/components/google-ads/SearchTermsTab.tsx');
+  for (const label of ['Negative keyword suggestions', 'Keyword candidates', 'Wasted spend', 'MarketingOS never changes Google Ads', "kind=${kind}"]) assert.ok(searchTerms.includes(label), label);
+  const alerts = read('src/components/google-ads/AlertsTab.tsx');
+  for (const label of ['Acknowledge', 'Dismiss', 'Reopen', 'nothing is emailed or posted']) assert.ok(alerts.includes(label), label);
+  for (const source of [paidOrganic, searchTerms, alerts]) assert.match(source, /<Explainer>/, 'each new view starts with an explanation');
+  const layout = read('src/app/dashboard/layout.tsx');
+  assert.match(layout, /\/api\/paid-media\/google-ads\/alerts\?summary=1/);
+  assert.match(layout, /item\.feature === 'google-ads' && googleAdsAlerts > 0/);
+  const exportRoute = read('src/lib/google-ads/insights-export.ts');
+  assert.match(exportRoute, /\['paid-organic', 'negatives', 'keyword-candidates'\]/);
+});
+
+test('migration 067 adds google_ads_alerts with one open alert per scope and kind; rollback drops it', () => {
+  const sql = read('db/migrations/067_google_ads_alerts.sql');
+  assert.match(sql, /^\s*(--[^\n]*\n\s*)*BEGIN;/);
+  assert.match(sql, /COMMIT;\s*$/);
+  assert.doesNotMatch(sql, /DROP TABLE|DELETE FROM|TRUNCATE|ALTER TABLE departments/i);
+  assert.match(sql, /CREATE TABLE IF NOT EXISTS google_ads_alerts\b/);
+  for (const kind of ['spend_spike', 'cpc_rise', 'cpa_rise', 'conversions_drop', 'spend_stopped']) assert.match(sql, new RegExp(`'${kind}'`), kind);
+  assert.match(sql, /'open', 'acknowledged', 'dismissed', 'resolved'/);
+  assert.match(sql, /CREATE UNIQUE INDEX IF NOT EXISTS \w+[\s\S]*?\(customer_id, campaign_id, kind\) WHERE status = 'open'/);
+  const rollback = read('db/rollbacks/067_google_ads_alerts_down.sql');
+  assert.match(rollback, /DROP TABLE IF EXISTS google_ads_alerts/);
+  assert.match(rollback, /DELETE FROM schema_migrations WHERE name = '067_google_ads_alerts.sql'/);
+});
+
+test('insights are read-only toward Google Ads, in-app only, and free (no treg, no outbound messaging)', () => {
+  const files = ['text.ts', 'insights-config.ts', 'paid-organic.ts', 'search-term-insights.ts', 'insights-export.ts', 'anomalies.ts', 'alerts.ts'].map(name => `src/lib/google-ads/${name}`)
+    .concat(['src/components/google-ads/PaidOrganicTab.tsx', 'src/components/google-ads/SearchTermsTab.tsx', 'src/components/google-ads/AlertsTab.tsx', 'db/migrations/067_google_ads_alerts.sql']);
+  for (const file of files) {
+    const source = read(file);
+    assert.doesNotMatch(source, /treg/i, `${file} must not use treg`);
+    assert.doesNotMatch(source, /:mutate|createGoogleAdsClient|googleAds:search/, `${file} must not call the Google Ads API`);
+    assert.doesNotMatch(source, /slack|nodemailer|sendMail|smtp|webhook|openrouter/i, `${file} must not send messages or call paid APIs`);
+  }
+  const script = read('scripts/google-ads-sync.ts');
+  assert.match(script, /evaluateAlertsAfterSync\(result\)/);
+  assert.match(script, /--alerts-only/);
+  assert.match(read('src/app/api/paid-media/google-ads/sync/route.ts'), /evaluateAlertsAfterSync\(result\)/);
 });

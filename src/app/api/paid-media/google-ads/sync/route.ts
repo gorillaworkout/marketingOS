@@ -1,6 +1,6 @@
 import { after, NextRequest, NextResponse } from 'next/server';
 import { requireFeature } from '@/lib/auth';
-import { googleAdsConfigStatus, runGoogleAdsSyncNow } from '@/lib/google-ads/service';
+import { evaluateAlertsAfterSync, googleAdsConfigStatus, runGoogleAdsSyncNow } from '@/lib/google-ads/service';
 import { runningSync } from '@/lib/google-ads/store';
 
 export const dynamic = 'force-dynamic';
@@ -23,6 +23,8 @@ export async function POST(request: NextRequest) {
     try {
       const result = await runGoogleAdsSyncNow({ mode: 'incremental', trigger: 'manual', triggeredBy: auth.id });
       console.log(`Google Ads sync (manual): ${result.status}${'rowsUpserted' in result ? `, ${result.rowsUpserted} rows` : ''}.`);
+      const alerts = await evaluateAlertsAfterSync(result);
+      if (alerts.error) console.error('Google Ads alerts failed', alerts.error);
     } catch (error) {
       console.error('Google Ads sync failed', error instanceof Error ? error.message : error);
     }

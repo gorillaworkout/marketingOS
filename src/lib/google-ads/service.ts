@@ -1,4 +1,5 @@
 import { v4 as uuidv4 } from 'uuid';
+import { evaluateGoogleAdsAlerts, type AlertEvaluation } from './alerts';
 import { createGoogleAdsClient } from './client';
 import { readGoogleAdsConfig, requireGoogleAdsConfig, secretValues, GOOGLE_ADS_REQUIRED_ENV_KEYS } from './config';
 import { postgresGoogleAdsSyncStore } from './store';
@@ -14,6 +15,19 @@ export async function runGoogleAdsSyncNow(options: RunGoogleAdsSyncOptions): Pro
       return { client: createGoogleAdsClient(config), loginCustomerId: config.loginCustomerId, extraCustomerIds: config.customerIds, secrets: secretValues(config) };
     },
   });
+}
+
+/**
+ * After a sync that stored data (succeeded or partial), recompute alerts from
+ * the synced tables. Alert errors never fail the sync; they are returned.
+ */
+export async function evaluateAlertsAfterSync(result: GoogleAdsSyncResult): Promise<{ evaluation: AlertEvaluation | null; error: string | null }> {
+  if (result.status !== 'succeeded' && result.status !== 'partial') return { evaluation: null, error: null };
+  try {
+    return { evaluation: await evaluateGoogleAdsAlerts(), error: null };
+  } catch (error) {
+    return { evaluation: null, error: error instanceof Error ? error.message : String(error) };
+  }
 }
 
 /** Safe-to-show configuration status: key names only, never values. */

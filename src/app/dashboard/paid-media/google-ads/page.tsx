@@ -6,6 +6,9 @@ import {
 } from '@/components/ui/dashboard';
 import { sparklinePoints } from '@/lib/seo/format';
 import { changeVs, formatConversions, formatCount, formatCustomerId, formatMoney, formatRate, presetRange } from '@/lib/google-ads/format';
+import { AlertsTab } from '@/components/google-ads/AlertsTab';
+import { PaidOrganicTab } from '@/components/google-ads/PaidOrganicTab';
+import { SearchTermsTab } from '@/components/google-ads/SearchTermsTab';
 
 type Totals = { impressions: number; clicks: number; cost: number; conversions: number; conversionsValue: number; ctr: number; avgCpc: number; costPerConversion: number | null };
 type Account = {
@@ -30,6 +33,8 @@ type Report = {
   limits: { tableRows: number };
 };
 type TrendMetric = 'cost' | 'clicks' | 'impressions' | 'conversions' | 'ctr' | 'avgCpc';
+type Tab = 'overview' | 'paid-organic' | 'search-terms' | 'alerts';
+type AlertCounts = { open: number; critical: number };
 
 const RANGE_OPTIONS = [['today', 'Today'], ['7d', 'Last 7 days'], ['14d', 'Last 14 days'], ['30d', 'Last 30 days'], ['90d', 'Last 90 days'], ['custom', 'Custom range']] as const;
 const RUN_TONE: Record<string, 'success' | 'warning' | 'danger' | 'info' | 'neutral'> = { succeeded: 'success', partial: 'warning', failed: 'danger', running: 'info' };
@@ -53,6 +58,9 @@ export default function GoogleAdsPage() {
   const [syncMessage, setSyncMessage] = useState('');
   const [starting, setStarting] = useState(false);
   const [trendMetric, setTrendMetric] = useState<TrendMetric>('cost');
+  const [tab, setTab] = useState<Tab>('overview');
+  const [alertCounts, setAlertCounts] = useState<AlertCounts | null>(null);
+  const [alertVersion, setAlertVersion] = useState(0);
 
   const loadOverview = useCallback(async () => {
     try {
@@ -74,6 +82,17 @@ export default function GoogleAdsPage() {
     }).catch(() => { if (!cancelled) setOverviewError('Could not load Google Ads.'); });
     return () => { cancelled = true; };
   }, []);
+
+  // Open alert count for the Alerts tab badge; refreshed after syncs and alert actions.
+  useEffect(() => {
+    let cancelled = false;
+    fetchJson<AlertCounts>('/api/paid-media/google-ads/alerts?summary=1').then(({ ok, data }) => {
+      if (cancelled || !ok) return;
+      setAlertCounts({ open: data.open, critical: data.critical });
+      window.dispatchEvent(new CustomEvent('google-ads-alerts', { detail: data.open }));
+    }).catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [version, alertVersion]);
 
   const running = overview?.running ?? null;
   // Poll while a sync runs; refresh the report when it finishes.
@@ -140,13 +159,13 @@ export default function GoogleAdsPage() {
       description="Spend, impressions, clicks, and conversions for every Google Ads account under the Dupoin MCC. Data is copied read-only from the Google Ads API once a day (free) and on Sync now; nothing in Google Ads is ever changed."
       actions={headerActions} />
 
-    <Panel padding="compact">
+    {tab === 'overview' && <Panel padding="compact">
       <ul className="list-disc space-y-1 pl-5 text-xs leading-5 text-[var(--mos-text-muted)]">
         <li>Dates and spend follow each account&apos;s own time zone and currency (Dupoin accounts: Asia/Jakarta, IDR). Today&apos;s numbers are partial and recent conversions can still change, so the last 14 days are re-pulled on every sync.</li>
         <li>CTR = clicks / impressions. Avg CPC = cost / clicks. Cost / conv. = cost / conversions. KPIs and the trend come from campaign data; the search term table lists terms with at least one click.</li>
         <li>Tables show the top {report?.limits.tableRows ?? 500} rows by cost; Export CSV downloads every row for the selected range and account.</li>
       </ul>
-    </Panel>
+    </Panel>}
 
     {overviewError && <Panel><p className="text-sm text-red-300">{overviewError}</p></Panel>}
     {syncMessage && <Panel><p className="text-sm text-[var(--mos-text-secondary)]">{syncMessage}</p></Panel>}
@@ -160,7 +179,8 @@ export default function GoogleAdsPage() {
       description="Press Sync now to pull the last 90 days for every account. It takes a minute or two; this page updates when it is done." /></Panel>}
 
     {hasData && <>
-      <Toolbar>
+      <TabBar tab={tab} onTab={setTab} alertCounts={alertCounts} />
+      {tab !== 'alerts' && <Toolbar>
         <FilterGroup>
           <Select aria-label="Date range" value={preset} onChange={event => setPreset(event.target.value)} className="w-auto">
             {RANGE_OPTIONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
@@ -170,9 +190,21 @@ export default function GoogleAdsPage() {
             <TextInput type="date" aria-label="End date" value={custom.end} onChange={event => setCustom(value => ({ ...value, end: event.target.value }))} className="w-auto" />
           </>}
         </FilterGroup>
-        {report && <span className="text-xs text-[var(--mos-text-faint)]">{report.range.start} to {report.range.end} vs previous {report.range.days} days{report.currencies.length > 1 && account === 'all' ? ' · accounts use different currencies; pick one account for exact money totals' : ''}</span>}
-      </Toolbar>
+        {tab !== 'overview' && range && <span className="text-xs text-[var(--mos-text-faint)]">{range.start} to {range.end}</span>}
+        {tab === 'overview' && report && <span className="text-xs text-[var(--mos-text-faint)]">{report.range.start} to {report.range.end} vs previous {report.range.days} days{report.currencies.length > 1 && account === 'all' ? ' · accounts use different currencies; pick one account for exact money totals' : ''}</span>}
+      </Toolbar>}
 
+      {tab === 'paid-organic' && <PaidOrganicTab range={range} account={account} currency={currency} version={version} />}
+      {tab === 'search-terms' && <SearchTermsTab range={range} account={account} currency={currency} version={version} />}
+      {tab === 'alerts' && <AlertsTab account={account} version={version} onChanged={() => setAlertVersion(value => value + 1)} />}
+
+      {tab === 'overview' && alertCounts && alertCounts.open > 0 && <Panel padding="compact">
+        <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
+          <span className={alertCounts.critical ? 'text-red-300' : 'text-amber-200'}>{alertCounts.open} open alert{alertCounts.open === 1 ? '' : 's'}{alertCounts.critical ? ` (${alertCounts.critical} critical)` : ''} from the latest daily check.</span>
+          <Button size="sm" onClick={() => setTab('alerts')}>Review alerts</Button>
+        </div>
+      </Panel>}
+      {tab === 'overview' && <>
       {current?.error && <Panel><p className="text-sm text-red-300">{current.error}</p></Panel>}
       {!report && !current?.error && range && <LoadingState label="Loading report" />}
       {report && <>
@@ -199,8 +231,21 @@ export default function GoogleAdsPage() {
             { key: 'campaign', label: 'Campaign / ad group', value: row => `${row.campaignName} ${row.adGroupName}`, render: row => <span className="text-[var(--mos-text-muted)]">{row.campaignName}<span className="text-[var(--mos-text-faint)]"> / {row.adGroupName}</span></span> },
           ]} />
       </>}
+      </>}
     </>}
   </PageStack>;
+}
+
+const TABS: Array<[Tab, string]> = [['overview', 'Overview'], ['paid-organic', 'Paid vs Organic'], ['search-terms', 'Search term analysis'], ['alerts', 'Alerts']];
+
+function TabBar({ tab, onTab, alertCounts }: { tab: Tab; onTab: (tab: Tab) => void; alertCounts: AlertCounts | null }) {
+  return <div role="tablist" aria-label="Google Ads views" className="flex flex-wrap gap-1 border-b border-[var(--mos-border)]">
+    {TABS.map(([key, label]) => <button key={key} type="button" role="tab" aria-selected={tab === key} onClick={() => onTab(key)}
+      className={`-mb-px flex items-center gap-2 border-b-2 px-3 py-2 text-sm ${tab === key ? 'border-[var(--mos-accent-soft,#818cf8)] text-[var(--mos-text)]' : 'border-transparent text-[var(--mos-text-muted)] hover:text-[var(--mos-text)]'}`}>
+      {label}
+      {key === 'alerts' && alertCounts && alertCounts.open > 0 && <span className={`rounded-full px-1.5 text-[11px] tabular-nums ${alertCounts.critical ? 'bg-red-500/20 text-red-300' : 'bg-amber-400/15 text-amber-200'}`}>{alertCounts.open}</span>}
+    </button>)}
+  </div>;
 }
 
 const humanize = (value: string) => value ? value.toLowerCase().replace(/_/g, ' ').replace(/^./, char => char.toUpperCase()) : '—';
