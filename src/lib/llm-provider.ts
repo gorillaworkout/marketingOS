@@ -1,4 +1,5 @@
 import { resolveGorillaWorkoutApiBase, resolveGorillaWorkoutApiKey } from '@/lib/gateway-config';
+import { quotaHeaderSuffix } from './image-quota';
 import {
   DEFAULT_OPENROUTER_CHAT_MODEL,
   DEFAULT_OPENROUTER_EMBEDDING_MODEL,
@@ -702,7 +703,8 @@ export async function postImage(input: {
     if (attempt.kind !== 'http') throw attempt.error;
     if (!attempt.response.ok) {
       const errText = await attempt.response.text();
-      throw new Error(explainLlmHttpError(usageProvider(provider), attempt.response.status, errText, 'image'));
+      // Keep any reset headers: the Error message is all the route sees.
+      throw new Error(`${explainLlmHttpError(usageProvider(provider), attempt.response.status, errText, 'image')}${quotaHeaderSuffix(attempt.response.headers)}`);
     }
     const payload = await attempt.response.json() as ImageExchange;
     if (!payload?.data?.[0]?.b64_json && !payload?.data?.[0]?.url) {

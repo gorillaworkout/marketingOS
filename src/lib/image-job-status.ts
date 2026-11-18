@@ -1,4 +1,5 @@
 import type { ImageAspectRatio } from '@/lib/image-aspect-ratio';
+import type { ImageQuotaInfo } from '@/lib/image-quota';
 
 export type ImageJobStatus = 'queued' | 'generating' | 'processing' | 'done' | 'error';
 
@@ -15,6 +16,8 @@ export interface ImageJobResult {
   fallbackFrom?: string;
   /** Toast-friendly notice when capacity fallback ran. */
   fallbackMessage?: string;
+  /** The requested model that ran out of quota and when it resets (ISO, or null if unknown). */
+  quota?: ImageQuotaInfo;
   aspectRatio?: ImageAspectRatio;
   /** Social Post only: the fixed Swipe left pill was composited onto this image. */
   includeSwipeLeft?: boolean;

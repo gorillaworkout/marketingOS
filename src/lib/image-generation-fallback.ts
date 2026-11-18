@@ -119,12 +119,15 @@ export async function generateWithAntigravityCapacityFallback<T>(
     onFallbackError?: (fallbackModel: string, error: unknown) => void;
     /** Override the configured fallback (tests). `null` disables the retry. */
     fallbackModel?: string | null;
+    /** Called for every failed attempt (requested model and backup), e.g. to record quota state. */
+    onAttemptError?: (model: string, error: unknown) => void;
   },
 ): Promise<ImageGenerationFallbackResult<T>> {
   try {
     const payload = await generate(requestedModel);
     return { payload, requestedModel, usedModel: requestedModel };
   } catch (error) {
+    options?.onAttemptError?.(requestedModel, error);
     const reason = error instanceof Error ? error.message : 'unknown error';
     const fallbackModel = options && 'fallbackModel' in options
       ? options.fallbackModel ?? null
@@ -150,6 +153,7 @@ export async function generateWithAntigravityCapacityFallback<T>(
         fallbackMessage: antigravityCapacityFallbackMessage(requestedModel, fallbackModel),
       };
     } catch (fallbackError) {
+      options?.onAttemptError?.(fallbackModel, fallbackError);
       options?.onFallbackError?.(fallbackModel, fallbackError);
       throw error;
     }
