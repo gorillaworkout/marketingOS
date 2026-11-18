@@ -121,6 +121,22 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     });
   }, [router, pathname]);
 
+  // Open Google Ads alerts, shown as a count on the Google Ads nav item (in-app only).
+  const [googleAdsAlerts, setGoogleAdsAlerts] = useState(0);
+  const canSeeGoogleAds = Boolean(user && (user.role === 'admin' || (user.enabledFeatures || []).includes('google-ads')));
+  useEffect(() => {
+    if (!canSeeGoogleAds) return;
+    let cancelled = false;
+    fetch('/api/paid-media/google-ads/alerts?summary=1', { cache: 'no-store' })
+      .then(response => (response.ok ? response.json() : null))
+      .then((data: { open?: number } | null) => { if (!cancelled && data) setGoogleAdsAlerts(Number(data.open) || 0); })
+      .catch(() => undefined);
+    // The Google Ads page announces new counts after alert actions.
+    const onChange = (event: Event) => setGoogleAdsAlerts(Number((event as CustomEvent<number>).detail) || 0);
+    window.addEventListener('google-ads-alerts', onChange);
+    return () => { cancelled = true; window.removeEventListener('google-ads-alerts', onChange); };
+  }, [canSeeGoogleAds, pathname]);
+
 
   const handleLogout = async () => {
     await fetch('/api/auth', {
@@ -240,6 +256,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                   <Link key={item.href} href={item.href} onClick={() => setMobileOpen(false)} className={`group flex h-8.5 items-center gap-2.5 rounded-[6px] px-2.5 text-[13px] transition ${active ? 'bg-white/[0.065] text-[var(--mos-text)] shadow-[inset_2px_0_0_var(--mos-accent)]' : 'text-[var(--mos-text-muted)] hover:bg-white/[0.035] hover:text-[var(--mos-text-secondary)]'}`}>
                     <NavIcon name={item.icon} />
                     <span>{item.label}</span>
+                    {item.feature === 'google-ads' && googleAdsAlerts > 0 && <span title={`${googleAdsAlerts} open Google Ads alert${googleAdsAlerts === 1 ? '' : 's'}`} className="ml-auto rounded-full bg-amber-400/15 px-1.5 text-[11px] tabular-nums text-amber-200">{googleAdsAlerts}</span>}
                   </Link>
                 );
               })}

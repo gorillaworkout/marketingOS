@@ -11,6 +11,9 @@ import { dateChunks, dateInTimeZone, discoverAccounts, fetchRangeSnapshot, syncR
 //   npm run google-ads:sync -- --days=30          custom window (max 400)
 //   npm run google-ads:sync -- --customer=1234567890   one account only
 //   npm run google-ads:sync -- --dry-run          fetch and map only; no database writes; prints row counts
+//   npm run google-ads:sync -- --alerts-only      recompute alerts from stored data (no Google Ads calls)
+//
+// After every sync that stores data, alerts are recomputed (see src/lib/google-ads/alerts.ts).
 //
 // Daily VPS cron, 09:00 WIB (02:00 UTC). Not installed automatically; see docs/paid-media-google-ads.md:
 // 0 2 * * * cd /home/ubuntu/apps/marketingos && npm run google-ads:sync -- --scheduled >> /home/ubuntu/logs/google-ads-sync.log 2>&1
@@ -62,8 +65,16 @@ async function main(): Promise<number> {
   const only = customerArg ? normalizeCustomerId(customerArg) : null;
   if (customerArg && !only) throw new Error('--customer must be a 10-digit customer id.');
   if (process.argv.includes('--dry-run')) return dryRun(days, backfill, only);
+  if (process.argv.includes('--alerts-only')) {
+    const { evaluateGoogleAdsAlerts } = await import('../src/lib/google-ads/alerts');
+    const asOf = argValue('as-of');
+    if (asOf && !/^\d{4}-\d{2}-\d{2}$/.test(asOf)) { console.error('--as-of must be YYYY-MM-DD'); return 1; }
+    const a = await evaluateGoogleAdsAlerts(asOf);
+    console.log(`Google Ads alerts as of ${a.asOf}: ${a.detected} detected, ${a.opened} new, ${a.refreshed} still open, ${a.snoozed} snoozed, ${a.resolved} resolved.`);
+    return 0;
+  }
 
-  const { runGoogleAdsSyncNow } = await import('../src/lib/google-ads/service');
+  const { evaluateAlertsAfterSync, runGoogleAdsSyncNow } = await import('../src/lib/google-ads/service');
   const result = await runGoogleAdsSyncNow({
     mode: backfill ? 'backfill' : 'incremental',
     trigger: process.argv.includes('--scheduled') ? 'scheduled' : 'cli',
@@ -78,6 +89,12 @@ async function main(): Promise<number> {
     console.log(`  ${detail.name} ${maskCustomerId(detail.customerId)}: ${detail.status}${detail.rangeStart ? ` ${detail.rangeStart}..${detail.rangeEnd}` : ''}; ${rows}${detail.error ? `; ${detail.error}` : ''}`);
   }
   console.log(`Google Ads sync ${result.status}: ${result.accountsSynced} synced, ${result.accountsFailed} failed, ${result.rowsUpserted} rows.${result.error ? ` ${result.error}` : ''}`);
+  // Daily alerts (in-app only) from the synced data: last 7 days vs the 28 before.
+  const alerts = await evaluateAlertsAfterSync(result);
+  if (alerts.evaluation) {
+    const a = alerts.evaluation;
+    console.log(`Google Ads alerts as of ${a.asOf}: ${a.detected} detected, ${a.opened} new, ${a.refreshed} still open, ${a.snoozed} snoozed, ${a.resolved} resolved.`);
+  } else if (alerts.error) console.error(`Google Ads alerts failed: ${sanitizeGoogleAdsError(alerts.error)}`);
   return result.status === 'succeeded' ? 0 : 1;
 }
 

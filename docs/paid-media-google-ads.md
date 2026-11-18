@@ -50,6 +50,8 @@ npm run google-ads:sync                         # last 14 days, every account (9
 npm run google-ads:sync -- --backfill           # 90 days, every account
 npm run google-ads:sync -- --customer=1234567890
 npm run google-ads:sync -- --dry-run            # fetch + map only, no DB writes, prints row counts
+npm run google-ads:sync -- --alerts-only        # recompute alerts from stored data (no Google Ads calls)
+npm run google-ads:sync -- --alerts-only --as-of=2026-11-17
 ```
 
 ## Daily cron (not installed automatically)
@@ -60,6 +62,16 @@ Server crontab runs in UTC. 09:00 WIB = 02:00 UTC:
 0 2 * * * cd /home/ubuntu/apps/marketingos && npm run google-ads:sync -- --scheduled >> /home/ubuntu/logs/google-ads-sync.log 2>&1
 ```
 
+## Insights (Paid vs Organic, Search term analysis, Alerts)
+
+Tabs on the Google Ads page. All are free: they read only data already in MarketingOS (the Google Ads sync and the SEO OS Search Console sync). Nothing is written to Google Ads, nothing is emailed or posted, and no paid API (treg, OpenRouter) is used. Thresholds live in `src/lib/google-ads/insights-config.ts`.
+
+- **Paid vs Organic**: Google Ads search terms (or keywords) joined to Search Console queries for the Dupoin site in SEO OS (`seo_sites` matching `dupoin.co.id`), after lowercasing, trimming, and collapsing spaces. Flags: *Top 3 organic, still paying* (avg organic position <= 3, >= 10 organic clicks, >= IDR 50,000 ad spend; the spend is an upper bound of savings) and *SEO opportunity* (paid conversions >= 1 with no organic data, position > 10, or < 5 organic clicks). If Dupoin has no Search Console data for the range, the tab says so and raises no flags. CSV: `export?kind=paid-organic`.
+- **Search term analysis**: negative keyword suggestions (search terms with >= the spend threshold, default IDR 100,000, and 0 conversions, per campaign; total = wasted spend) and keyword candidates (converting search terms that are not a keyword in that account and not already added/excluded). CSV: `export?kind=negatives`, `export?kind=keyword-candidates` (same `minCost`/`minConversions` params).
+- **Alerts** (`google_ads_alerts`, migration 067): after every sync that stores data (cron and Sync now), the last 7 complete days (ending yesterday, Jakarta) are compared with the 28 days before, per account and campaign: spend spike, CPC rise, cost per conversion rise, conversions drop, and spend stopped (steady spend, then 0 for 2 days; removed campaigns skipped). One open alert per scope and kind; it is refreshed while the condition holds and resolved when it clears. Acknowledge or Dismiss keeps a repeating condition quiet for 7 days. The open count shows on the Alerts tab and on the Google Ads sidebar item. Recent conversions can still be attributed for a few days, so a conversions drop on the newest days can shrink after later syncs.
+
 ## Rollback
+
+Alerts only: `db/rollbacks/067_google_ads_alerts_down.sql` drops `google_ads_alerts` (run it before 066's rollback).
 
 `db/rollbacks/066_paid_media_google_ads_down.sql` drops the Google Ads tables, removes `google-ads` from every department, and keeps the Paid Media department row. Remove the cron line first.
