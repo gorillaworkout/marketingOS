@@ -104,3 +104,21 @@ test('public reference reader skips social hosts and clips HTML', async () => {
   const blocked = await readPublicReferenceUrl('https://x.com/dupoin', async () => { throw new Error('should not fetch'); });
   assert.match('error' in blocked ? blocked.error : '', /not fetched/);
 });
+
+test('brief generation groups hashtags with brand and campaign tags, capped to the platform range', async () => {
+  const { buildHashtagGroups, outputShape } = await import('../src/lib/social-post-brief');
+  assert.match(outputShape('photo'), /"hashtagGroups"/);
+  const { groups, recommended } = buildHashtagGroups(
+    { groups: { brand: ['Dupoin'], campaign: ['#goldrush'], niche: ['gold outlook', 'pasti untung', '#xauusd'], broad: ['#trading', '#investasi', '#forex'] } },
+    'Twitter/X',
+    ['#DupoinGold'],
+  );
+  assert.deepEqual(groups.brand, ['#dupoin', '#dupoinfutures']);
+  assert.deepEqual(groups.campaign, ['#dupoingold']);
+  assert.deepEqual(recommended, ['#dupoin', '#dupoinfutures', '#dupoingold']);
+  assert.deepEqual(groups.niche, []);
+
+  const flat = buildHashtagGroups({ flat: ['#gold', '#dupoin'] }, 'Instagram');
+  assert.deepEqual(flat.groups.brand, ['#dupoin', '#dupoinfutures']);
+  assert.deepEqual(flat.groups.niche, ['#gold']);
+});

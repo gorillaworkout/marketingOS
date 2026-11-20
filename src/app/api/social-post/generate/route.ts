@@ -4,7 +4,7 @@ import { requireFeature } from '@/lib/auth';
 import { rateLimit } from '@/lib/rate-limit';
 import { guardGeneratedText, mergeBrandFacts } from '@/lib/brand-fact-guard';
 import { generateContent, getSmartSystemPrompt, fetchContextMemory, fetchStyleContext, fetchKnowledgeContext, getUserPreferredModel, runQC, generateDupoinFileName, type BrandGuidelines, type QCResult } from '@/lib/openai';
-import { SOCIAL_POST_STORY_RULE, buildBriefPromptBlock, capSocialPostEmojis, emojiLimit, emojiPromptRule, outputShape, parseSocialPostBrief, type SocialPostBriefInput } from '@/lib/social-post-brief';
+import { SOCIAL_POST_STORY_RULE, buildBriefPromptBlock, capSocialPostEmojis, emojiLimit, emojiPromptRule, buildHashtagGroups, hashtagGroupsPromptRule, outputShape, parseSocialPostBrief, type SocialPostBriefInput } from '@/lib/social-post-brief';
 import { getEmbedding } from '@/lib/embeddings';
 import {
   buildBrandVoiceBlock,
@@ -336,6 +336,9 @@ export async function POST(request: NextRequest) {
             message: 'Generating 3 style options in parallel...',
           })));
 
+          const campaignHashtags: string[] = Array.isArray(campaign?.hashtags)
+            ? campaign.hashtags.filter((tag: unknown): tag is string => typeof tag === 'string')
+            : [];
           const optionPromises = STYLE_VARIANTS.map(async (variant, index) => {
             const stylePrompt = `Create a social media post with these details:
 Brief: ${String(brief).slice(0, 2_000)}
@@ -349,6 +352,7 @@ ${competitorBlock}
 
 ${variant.instruction}
 - ${emojiPromptRule(platform, variant.style)}
+- ${hashtagGroupsPromptRule(platform, campaignHashtags)}
 ${bestExamples}
 ${contextMemory}
 ${knowledgeContext}
@@ -387,12 +391,14 @@ Follow the SOP strictly. Return citationIds for every WEB_RESEARCH excerpt you u
           const options = optionResults.map(({ variant, result }) => {
             let captionData;
             try { captionData = JSON.parse(result); } catch { captionData = { caption: result, hook: '', hashtags: [] }; }
+            const tags = buildHashtagGroups({ groups: captionData.hashtagGroups, flat: captionData.hashtags }, platform, campaignHashtags);
             return {
               style: variant.style,
               styleLabel: variant.styleLabel,
               hook: captionData.hook || '',
               caption: captionData.caption || result,
-              hashtags: Array.isArray(captionData.hashtags) ? captionData.hashtags : [],
+              hashtags: tags.recommended,
+              hashtagGroups: tags.groups,
               citations: resolveSocialPostCitations(captionData, webResearch.sources),
               videoHook: typeof captionData.videoHook === 'string' ? captionData.videoHook : '',
               shotList: Array.isArray(captionData.shotList) ? captionData.shotList.filter((line: unknown) => typeof line === 'string') : [],

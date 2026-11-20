@@ -282,7 +282,7 @@ export function outputShape(contentType: SocialContentType): string {
     : contentType === 'video'
       ? ', "videoHook": "...", "shotList": ["..."]'
       : '';
-  return `{ "hook": "...", "caption": "...", "hashtags": ["..."], "citationIds": [1], "cta": "..."${extra} }`;
+  return `{ "hook": "...", "caption": "...", "hashtagGroups": { "brand": ["..."], "campaign": ["..."], "niche": ["..."], "broad": ["..."] }, "citationIds": [1], "cta": "..."${extra} }`;
 }
 
 const BANNED_TAG_BITS = ['dijamin', 'pastiuntung', 'tanparisiko', 'bebasrisiko', 'pastiprofit', 'uangmudah', 'cepatkaya'];
@@ -307,6 +307,53 @@ export function dedupeHashtags(tags: string[]): string[] {
     result.push(normalized);
   }
   return result;
+}
+
+export const BRAND_HASHTAGS = ['#dupoin', '#dupoinfutures'];
+
+export interface HashtagGroups {
+  brand: string[];
+  campaign: string[];
+  niche: string[];
+  broad: string[];
+}
+
+export const HASHTAG_GROUP_NAMES = ['brand', 'campaign', 'niche', 'broad'] as const;
+
+function tagList(value: unknown): string[] {
+  return dedupeHashtags(Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : []);
+}
+
+/** Prompt rule for the grouped hashtags returned with each caption. */
+export function hashtagGroupsPromptRule(platform?: string, campaignTags: string[] = []): string {
+  const range = hashtagRange(platform);
+  return `Hashtags: return hashtagGroups with ${range.min}-${range.max} tags in total, grouped as brand (Dupoin tags), campaign${campaignTags.length ? ` (keep these when they fit: ${campaignTags.join(' ')})` : ''}, niche (topic-specific), and broad (wider reach). Do not put hashtags inside the caption text. Never invent trend volumes or use guaranteed-profit wording.`;
+}
+
+/**
+ * Normalises model hashtag output into brand/campaign/niche/broad groups capped to the platform range.
+ * Accepts grouped output or a flat list (older shape), which lands in niche.
+ */
+export function buildHashtagGroups(
+  input: { groups?: unknown; flat?: unknown },
+  platform?: string,
+  campaignTags: string[] = [],
+): { groups: HashtagGroups; recommended: string[] } {
+  const raw = input.groups && typeof input.groups === 'object' ? input.groups as Record<string, unknown> : {};
+  const groups: HashtagGroups = {
+    brand: dedupeHashtags([...BRAND_HASHTAGS, ...tagList(raw.brand)]),
+    campaign: dedupeHashtags([...campaignTags, ...tagList(raw.campaign)]),
+    niche: dedupeHashtags([...tagList(raw.niche), ...tagList(input.flat)]),
+    broad: tagList(raw.broad),
+  };
+  const recommended = dedupeHashtags(HASHTAG_GROUP_NAMES.flatMap(name => groups[name])).slice(0, hashtagRange(platform).max);
+  const allowed = new Set(recommended);
+  const claimed = new Set<string>();
+  for (const name of HASHTAG_GROUP_NAMES) {
+    groups[name] = groups[name].filter(tag => allowed.has(tag) && !claimed.has(tag));
+    groups[name].forEach(tag => claimed.add(tag));
+  }
+  return { groups, recommended };
 }
 
 const CTA_CUES: Record<string, string[]> = {

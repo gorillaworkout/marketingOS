@@ -17,7 +17,7 @@ import InlineModelSelector from '@/components/InlineModelSelector';
 import { CaptionAnalyzer } from '@/components/caption-analyzer';
 import { imageModelLabel } from '@/lib/image-models';
 import { AI_RESEARCH_HANDOFF_QUERY, AI_RESEARCH_HANDOFF_VALUE, readAiResearchHandoff } from '@/lib/ai-research-handoff';
-import { readStoredSocialPostInput, VIDEO_HANDOFF_STORAGE_KEY, videoScriptHref, type SocialContentType, type SocialCta, type SocialReference, type SocialTone } from '@/lib/social-post-brief';
+import { readStoredSocialPostInput, VIDEO_HANDOFF_STORAGE_KEY, videoScriptHref, type SocialContentType, type SocialCta, type SocialReference, type SocialTone, HASHTAG_GROUP_NAMES, type HashtagGroups } from '@/lib/social-post-brief';
 import {
   mergeConfirmedSocialPostStatus,
   socialPostStatusFromResponse,
@@ -90,6 +90,7 @@ interface PostOption {
   hook: string;
   caption: string;
   hashtags: string[];
+  hashtagGroups?: HashtagGroups;
   imagePrompt: string;
   citations?: SocialPostCitation[];
   videoHook?: string;
@@ -261,8 +262,6 @@ export default function SocialPostPage() {
   const [referenceUrl, setReferenceUrl] = useState('');
   const [reference, setReference] = useState<SocialReference | null>(null);
   const [referenceNote, setReferenceNote] = useState('');
-  const [hashtagTopic, setHashtagTopic] = useState('');
-  const [hashtagResult, setHashtagResult] = useState<{ recommended: string[]; notes?: string; groups?: { brand: string[]; campaign: string[]; niche: string[]; broad: string[] } } | null>(null);
   const [hashtagBusy, setHashtagBusy] = useState(false);
   const [researchHandoff, setResearchHandoff] = useState(false);
   const [platform, setPlatform] = useState('Instagram');
@@ -419,14 +418,14 @@ export default function SocialPostPage() {
     setReferenceNote(data.text);
   };
 
-  const suggestHashtags = async (caption?: string, style?: string) => {
+  const suggestHashtags = async (caption: string, style?: string) => {
     setHashtagBusy(true);
     setError('');
     const response = await fetch('/api/social-post/hashtags', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        topic: caption || hashtagTopic || brief || keyMessage,
+        topic: caption || brief || keyMessage,
         caption,
         platform,
         contentType,
@@ -439,8 +438,7 @@ export default function SocialPostPage() {
     const data = await response.json().catch(() => ({}));
     setHashtagBusy(false);
     if (!response.ok) { setError(data.error || 'Could not generate hashtags.'); return null; }
-    setHashtagResult({ recommended: data.recommended || [], notes: data.notes, groups: data.groups });
-    return data as { recommended: string[]; qc?: { checks: unknown[]; score: number; allPassed: boolean } };
+    return data as { recommended: string[]; groups?: HashtagGroups; qc?: { checks: unknown[]; score: number; allPassed: boolean } };
   };
 
   const openVideoScript = (option: PostOption) => {
@@ -824,7 +822,7 @@ export default function SocialPostPage() {
           {/* Form */}
           <Panel>
           <form onSubmit={handleGenerate} className="space-y-5">
-            <SectionHeader title="Generation brief" description="Define the channel, audience, objective, and content direction." />
+            <SectionHeader title="Generation brief" description="Define the channel, audience, objective, and content direction. Each option comes with caption, hook, and grouped hashtags." />
             {briefNotice && <p className="text-xs text-[var(--mos-text-secondary)]">{briefNotice}</p>}
             {researchHandoff && (
               <p role="status" data-testid="social-post-research-handoff" className="rounded-xl border border-indigo-400/30 bg-indigo-500/10 px-3 py-2 text-xs leading-5 text-indigo-100">
@@ -1145,6 +1143,16 @@ export default function SocialPostPage() {
                               {opt.hashtags && opt.hashtags.length > 0 && (
                                 <p className="text-blue-600 text-sm mt-3">{opt.hashtags.join(' ')}</p>
                               )}
+                              {opt.hashtagGroups && (
+                                <div className="mt-3 space-y-1 border-t border-gray-200 pt-3 text-xs">
+                                  {HASHTAG_GROUP_NAMES.map(name => opt.hashtagGroups?.[name]?.length ? (
+                                    <p key={name}>
+                                      <span className="mr-2 uppercase tracking-wide text-gray-400">{name}</span>
+                                      <span className="text-blue-600">{opt.hashtagGroups[name].join(' ')}</span>
+                                    </p>
+                                  ) : null)}
+                                </div>
+                              )}
                               {contentType === 'carousel' && opt.slides && opt.slides.length > 0 && (
                                 <ol className="mt-3 list-decimal space-y-1 pl-4 text-sm text-gray-700">
                                   {opt.slides.map((slide, slideIndex) => <li key={`${slide.title || 'slide'}-${slideIndex}`}><span className="font-medium">{slide.title}</span>{slide.text ? ` — ${slide.text}` : ''}</li>)}
@@ -1170,11 +1178,11 @@ export default function SocialPostPage() {
                               )}
                               <button type="button" onClick={() => void suggestHashtags(opt.caption, opt.style).then(data => {
                                 if (!data?.recommended) return;
-                                setOptions(current => current?.map((item, itemIndex) => itemIndex === index ? { ...item, hashtags: data.recommended } : item) || null);
+                                setOptions(current => current?.map((item, itemIndex) => itemIndex === index ? { ...item, hashtags: data.recommended, hashtagGroups: data.groups ?? item.hashtagGroups } : item) || null);
                                 if (data.qc) setQcResults(current => current.map((item, itemIndex) => itemIndex === index ? data.qc as typeof item : item));
                               })}
                                 className="text-xs px-3 py-1.5 bg-[var(--mos-raised)] hover:bg-[var(--mos-raised)] text-[var(--mos-text-secondary)] rounded-lg">
-                                {hashtagBusy ? 'Hashtags…' : 'Hashtags'}
+                                {hashtagBusy ? 'Regenerating…' : 'Regenerate hashtags'}
                               </button>
                               {contentType === 'video' && (
                                 <button type="button" onClick={() => openVideoScript(opt)}
@@ -1388,27 +1396,6 @@ export default function SocialPostPage() {
 
         {/* Right: Recent Posts */}
         <div className="lg:col-span-1 space-y-4">
-          <Panel>
-            <form className="space-y-3" onSubmit={event => { event.preventDefault(); void suggestHashtags(); }}>
-              <SectionHeader title="Hashtag generator" description="Grouped brand, campaign, niche, and broad tags for this platform." />
-              <TextArea value={hashtagTopic} onChange={e => setHashtagTopic(e.target.value)} rows={3} placeholder="Topic or paste a caption" />
-              <Button type="submit" disabled={hashtagBusy}>{hashtagBusy ? 'Generating…' : 'Generate hashtags'}</Button>
-              {hashtagResult?.groups && (
-                <div className="space-y-2 text-xs">
-                  {(['brand', 'campaign', 'niche', 'broad'] as const).map(name => hashtagResult.groups?.[name]?.length ? (
-                    <p key={name}>
-                      <span className="mr-2 uppercase tracking-wide text-[var(--mos-text-faint)]">{name}</span>
-                      <span className="text-blue-300">{hashtagResult.groups[name].join(' ')}</span>
-                    </p>
-                  ) : null)}
-                </div>
-              )}
-              {hashtagResult && !hashtagResult.groups && (
-                <p className="text-sm text-blue-300">{hashtagResult.recommended.join(' ')}</p>
-              )}
-              {hashtagResult?.notes && <p className="text-xs text-[var(--mos-text-muted)]">{hashtagResult.notes}</p>}
-            </form>
-          </Panel>
           <Panel padding="none" className="sticky top-8">
             <div className="p-4 border-b border-[var(--mos-border)]">
               <h3 className="text-sm font-semibold text-white">Recent posts</h3>

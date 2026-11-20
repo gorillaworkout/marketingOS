@@ -1091,7 +1091,7 @@ Tone: seperti teman yang ngerti trading lagi ngasih tau info penting, bukan sale
 
 ${SOCIAL_POST_STORY_RULE}
 
-Output JSON: { "hook": "...", "caption": "...", "hashtags": ["..."] }`,
+Output JSON: { "hook": "...", "caption": "...", "hashtagGroups": { "brand": ["..."], "campaign": ["..."], "niche": ["..."], "broad": ["..."] } }`,
 
     'video-script': `You are a senior video scriptwriter at Dupoin Futures Indonesia, specializing in Instagram Reels, TikTok, and YouTube Shorts. You follow the company's SOP strictly.
 
