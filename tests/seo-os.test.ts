@@ -66,7 +66,7 @@ test('dashboard layout has an SEO OS section and protects settings as admin only
 
 test('new departments do not get SEO OS by default', () => {
   const accounts = read('src/app/dashboard/accounts/AccountsClient.tsx');
-  assert.match(accounts, /NEW_DEPARTMENT_FEATURES: readonly AccountFeature\[\] = ASSIGNABLE_FEATURES\.filter\(feature => feature !== SEO_FEATURE\)/);
+  assert.match(accounts, /NEW_DEPARTMENT_FEATURES: readonly AccountFeature\[\] = ASSIGNABLE_FEATURES\.filter\(feature => feature !== SEO_FEATURE( && feature !== DPM_INVITATION_FEATURE)?\)/);
   assert.doesNotMatch(accounts, /\[\.\.\.ASSIGNABLE_FEATURES\]/);
 });
 
@@ -125,8 +125,8 @@ test('migration 035 is transactional, idempotent, and seeds Operations and sites
   }
   assert.match(sql, /DROP CONSTRAINT IF EXISTS departments_permitted_features_valid/);
   const check = sql.match(/ADD CONSTRAINT departments_permitted_features_valid[\s\S]*?\);/)?.[0] ?? '';
-  // `monthly-report` was added later by migration 041; `settlement-report` by 046; `partnership` by 057; `google-ads` by 066.
-  for (const feature of ACCOUNT_FEATURES.filter(f => f !== 'monthly-report' && f !== 'settlement-report' && f !== 'partnership' && f !== 'google-ads')) assert.match(check, new RegExp(`'${feature}'`), feature);
+  // `monthly-report` was added later by migration 041; `settlement-report` by 046; `partnership` by 057; `google-ads` by 066; `dpm-invitation` by 068.
+  for (const feature of ACCOUNT_FEATURES.filter(f => f !== 'monthly-report' && f !== 'settlement-report' && f !== 'partnership' && f !== 'google-ads' && f !== 'dpm-invitation')) assert.match(check, new RegExp(`'${feature}'`), feature);
 
   assert.match(sql, /'00000000-0000-0000-0000-000000000005',\s*'Operations'/);
   assert.match(sql, /ARRAY\['seo', 'internal-docs'\]/);
