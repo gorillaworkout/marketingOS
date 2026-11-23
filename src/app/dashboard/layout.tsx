@@ -199,12 +199,6 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       ],
     },
     {
-      label: 'DPM',
-      items: [
-        { href: '/dashboard/dpm/invitation', label: 'Invitation', icon: 'event', feature: 'dpm-invitation' },
-      ],
-    },
-    {
       label: 'Library',
       items: resourceItems,
     },

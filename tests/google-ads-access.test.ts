@@ -56,8 +56,7 @@ test('migration 066 adds the feature, a Paid Media department, and the tables; r
   assert.match(sql, /COMMIT;\s*$/);
   assert.doesNotMatch(sql, /DROP TABLE|DELETE FROM|TRUNCATE/i);
   const check = sql.match(/ADD CONSTRAINT departments_permitted_features_valid[\s\S]*?\);/)?.[0] ?? '';
-  // `dpm-invitation` was added later by migration 068.
-  for (const feature of ACCOUNT_FEATURES.filter(f => f !== 'dpm-invitation')) assert.match(check, new RegExp(`'${feature}'`), feature);
+  for (const feature of ACCOUNT_FEATURES) assert.match(check, new RegExp(`'${feature}'`), feature);
   assert.match(sql, /'Paid Media', ARRAY\['google-ads'\]/);
   for (const table of ['google_ads_accounts', 'google_ads_campaign_daily', 'google_ads_ad_group_daily', 'google_ads_keyword_daily', 'google_ads_search_term_daily', 'google_ads_sync_runs']) {
     assert.match(sql, new RegExp(`CREATE TABLE IF NOT EXISTS ${table}\\b`), table);
