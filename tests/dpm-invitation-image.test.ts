@@ -6,7 +6,9 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import sharp from 'sharp';
 
-process.env.DPM_INVITATION_IMAGE_DIR = mkdtempSync(path.join(tmpdir(), 'dpm-inv-'));
+// Each test file runs in its own process, so moving into a temp folder keeps saved images out of the repo.
+process.chdir(mkdtempSync(path.join(tmpdir(), 'dpm-inv-')));
+const imageDir = path.join(process.cwd(), 'data', 'dpm-invitations');
 const load = () => import('../src/lib/dpm-invitation/image');
 
 const make = (width: number, height: number, format: 'jpeg' | 'png' | 'gif' = 'jpeg') =>
@@ -41,7 +43,7 @@ test('save, read and remove by safe key only', async () => {
   const img = await load();
   const saved = await img.saveInvitationImage(await make(800, 1200));
   assert.match(saved.key, /^[0-9a-f-]{36}\.webp$/);
-  assert.ok(existsSync(path.join(process.env.DPM_INVITATION_IMAGE_DIR!, saved.key)));
+  assert.ok(existsSync(path.join(imageDir, saved.key)));
   assert.ok((await img.readInvitationImage(saved.key))!.length > 0);
   assert.equal(await img.readInvitationImage('../etc/passwd'), null);
   assert.equal(img.isSafeImageKey('../x.webp'), false);

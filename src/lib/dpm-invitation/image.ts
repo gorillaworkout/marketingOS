@@ -13,8 +13,9 @@ const IMAGE_KEY = /^[0-9a-f-]{36}\.(jpg|png|webp)$/;
 
 export class ImageInputError extends Error {}
 
+/** A fixed folder (no env override): a dynamic path makes Next trace the whole project into the route bundle. */
 function imageDir(): string {
-  return process.env.DPM_INVITATION_IMAGE_DIR || path.join(process.cwd(), 'data', 'dpm-invitations');
+  return path.join(process.cwd(), 'data', 'dpm-invitations');
 }
 
 export function isSafeImageKey(key: string): boolean {
