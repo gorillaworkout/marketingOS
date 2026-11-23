@@ -55,3 +55,44 @@ export function rateLimit(request: NextRequest, authenticatedKey?: string): Next
 
   return null;
 }
+
+// Named buckets: each caller gets its own counters, unlike rateLimit() above,
+// which shares one counter per IP across every route. Production runs one pm2
+// process, so in-memory is enough.
+const buckets = new Map<string, Map<string, RateLimitEntry>>();
+
+export function consumeRateLimit(bucket: string, key: string, limit: number, windowMs: number, now: number = Date.now()): { allowed: boolean; retryAfterSeconds: number } {
+  let entries = buckets.get(bucket);
+  if (!entries) {
+    entries = new Map();
+    buckets.set(bucket, entries);
+  }
+  if (entries.size > 5000) {
+    for (const [k, entry] of entries) if (now >= entry.resetTime) entries.delete(k);
+  }
+  const entry = entries.get(key);
+  if (!entry || now >= entry.resetTime) {
+    entries.set(key, { count: 1, resetTime: now + windowMs });
+    return { allowed: true, retryAfterSeconds: 0 };
+  }
+  if (entry.count >= limit) return { allowed: false, retryAfterSeconds: Math.ceil((entry.resetTime - now) / 1000) };
+  entry.count++;
+  return { allowed: true, retryAfterSeconds: 0 };
+}
+
+/** Test helper. */
+export function resetRateLimitBuckets(): void {
+  buckets.clear();
+}
+
+/**
+ * Visitor IP. Production (marketing-aws) comes through the Cloudflare tunnel
+ * straight to :3021, so CF-Connecting-IP is the real one. nginx (port 80,
+ * marketingos.gorillaworkout.id) sets X-Real-IP and X-Forwarded-For.
+ */
+export function clientIpFromHeaders(headers: Headers): string {
+  return headers.get('cf-connecting-ip')?.trim()
+    || headers.get('x-real-ip')?.trim()
+    || headers.get('x-forwarded-for')?.split(',')[0]?.trim()
+    || 'unknown';
+}
