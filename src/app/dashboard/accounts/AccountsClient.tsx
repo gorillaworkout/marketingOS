@@ -2,11 +2,11 @@
 import { useEffect, useState, useCallback } from 'react';
 import { passwordInputType } from '@/lib/password-visibility';
 import { Button, DataTableFrame, EmptyState, LoadingState, MetricCard, Panel, PageHeader, PageStack, SectionHeader, StatusBadge, TextInput } from '@/components/ui/dashboard';
-import { ACCOUNT_FEATURES, ACCOUNT_FEATURE_LABELS, SEO_FEATURE, type AccountFeature } from '@/lib/authorization';
+import { ACCOUNT_FEATURES, ACCOUNT_FEATURE_LABELS, DPM_INVITATION_FEATURE, SEO_FEATURE, type AccountFeature } from '@/lib/authorization';
 
 const ASSIGNABLE_FEATURES: readonly AccountFeature[] = ACCOUNT_FEATURES;
-/** SEO OS is opt-in: a new department starts with every feature except SEO OS. */
-const NEW_DEPARTMENT_FEATURES: readonly AccountFeature[] = ASSIGNABLE_FEATURES.filter(feature => feature !== SEO_FEATURE);
+/** SEO OS and DPM Invitation (employee personal data) are opt-in: a new department starts with every other feature. */
+const NEW_DEPARTMENT_FEATURES: readonly AccountFeature[] = ASSIGNABLE_FEATURES.filter(feature => feature !== SEO_FEATURE && feature !== DPM_INVITATION_FEATURE);
 
 interface User {
   id: string;
