@@ -16,12 +16,11 @@ function walk(dir: string, fileName: string): string[] {
   return out;
 }
 
-/** Routes that are public on purpose: login, health, a signed share token, and the DPM invitation submit (rate-limited, writes only). */
+/** Routes that are public on purpose: login, health, and a signed share token. */
 const PUBLIC_ROUTES = new Set([
   'src/app/api/auth/route.ts',
   'src/app/api/health/route.ts',
   'src/app/api/ai-research/share/route.ts',
-  'src/app/api/public/dpm-invitations/[slug]/responses/route.ts',
 ]);
 
 const GATE = /requireFeature\(|requireAdmin\(|getSession\(|getAuthorizedUser\(|watchCronAuthorization\(|partnershipCronAuthorization\(|requireInternalDocsUser\(|requireInternalDocsManager\(|requireMonthlyReport\(|requireSettlementReport\(|authenticateSync\(/;
