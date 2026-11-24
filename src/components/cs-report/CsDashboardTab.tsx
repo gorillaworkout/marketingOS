@@ -5,8 +5,12 @@ import { Button, DataTableFrame, EmptyState, FilterGroup, LoadingState, MetricCa
 import { CATEGORY_FIELDS, CHANNEL_FIELDS, COUNT_FIELDS, STATUS_LABELS } from '@/lib/cs-report/fields';
 import { periodRange, todayWib, type PeriodKind } from '@/lib/cs-report/dates';
 import type { CsDashboard } from '@/lib/cs-report/metrics';
+import { CsComplaintForm, deleteComplaintWithConfirm, draftFromComplaint, editedLabel, type ComplaintDraft } from './CsComplaintForm';
 
-type Data = CsDashboard & { agentOptions: Array<{ id: string; name: string }> };
+type Data = Omit<CsDashboard, 'complaints'> & {
+  complaints: Array<CsDashboard['complaints'][number] & { canEdit: boolean }>;
+  isAdmin: boolean; agentOptions: Array<{ id: string; name: string }>;
+};
 
 const CHANNEL_COLORS = ['#2EB5C4', '#818cf8', '#34d399', '#f59e0b', '#f472b6'];
 const fmt = (n: number) => n.toLocaleString('en-US');
@@ -21,6 +25,9 @@ export function CsDashboardTab() {
   const [data, setData] = useState<Data | null>(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
+  const [version, setVersion] = useState(0);
+  const [editing, setEditing] = useState<ComplaintDraft | null>(null);
+  const [complaintError, setComplaintError] = useState('');
   const range = useMemo(() => periodRange(kind, anchor, customTo), [kind, anchor, customTo]);
   const query = useMemo(() => {
     const params = new URLSearchParams({ from: range.from, to: range.to });
@@ -41,7 +48,7 @@ export function CsDashboardTab() {
       .then(({ ok, status, body }) => { if (!cancelled) apply(ok, status, body); })
       .catch(() => { if (!cancelled) { setLoading(false); setError('Could not load the dashboard.'); } });
     return () => { cancelled = true; };
-  }, [query, apply]);
+  }, [query, apply, version]);
 
   if (loading && !data) return <LoadingState label="Loading CS dashboard" />;
   const k = data?.kpis;
@@ -170,11 +177,16 @@ export function CsDashboardTab() {
         </div>
       </DataTableFrame>}
 
-      <DataTableFrame title="Report Complaint" description="Imported cases have no agent and show under All agents.">
+      <DataTableFrame title="Report Complaint" description={data.isAdmin
+        ? 'Imported cases have no agent and show under All agents. As an admin you can edit or delete any case, imported ones included.'
+        : 'Imported cases have no agent and show under All agents. You can edit or delete the cases you recorded.'}>
+        {editing && <CsComplaintForm key={editing.id ?? 'new'} initial={editing} today={todayWib()} onCancel={() => setEditing(null)}
+          onSaved={() => { setEditing(null); setVersion(v => v + 1); }} />}
+        {complaintError && <p className="px-5 pt-3 text-xs text-red-300">{complaintError}</p>}
         <div className="max-h-[520px] overflow-y-auto">
           <table className="w-full min-w-[1100px] text-sm">
             <thead className="sticky top-0 border-b border-[var(--mos-border)] bg-[var(--mos-panel)] text-left text-xs text-[var(--mos-text-faint)]">
-              <tr><th className="p-3">Date</th><th className="p-3">Client</th><th className="p-3">UID</th><th className="p-3">Platform</th><th className="p-3">Description</th><th className="p-3">Category</th><th className="p-3">Status</th><th className="p-3">SLA</th><th className="p-3">Completed</th><th className="p-3">Agent</th></tr>
+              <tr><th className="p-3">Date</th><th className="p-3">Client</th><th className="p-3">UID</th><th className="p-3">Platform</th><th className="p-3">Description</th><th className="p-3">Category</th><th className="p-3">Status</th><th className="p-3">SLA</th><th className="p-3">Completed</th><th className="p-3">Agent</th><th className="p-3" /></tr>
             </thead>
             <tbody>
               {data.complaints.map(c => <tr key={c.id} className="border-b border-[var(--mos-border)] align-top text-[var(--mos-text-secondary)]">
@@ -182,8 +194,18 @@ export function CsDashboardTab() {
                 <td className="max-w-[360px] p-3">{c.description}</td><td className="p-3">{c.category || '—'}</td>
                 <td className="p-3"><StatusBadge tone={/^(solved|resolved|closed|done|completed)$/i.test(c.status) ? 'success' : 'warning'}>{c.status || '—'}</StatusBadge></td>
                 <td className="p-3">{c.slaMet === null ? '—' : c.slaMet ? 'Yes' : 'No'}</td><td className="whitespace-nowrap p-3">{c.completionDate || '—'}</td><td className="p-3">{c.agentName || '—'}</td>
+                <td className="whitespace-nowrap p-3 text-right" title={editedLabel(c.updatedByName, c.updatedAt)}>{c.canEdit && <>
+                  <Button size="sm" variant="ghost" onClick={() => { setComplaintError(''); setEditing(draftFromComplaint(c)); }}>Edit</Button>
+                  <Button size="sm" variant="ghost" onClick={async () => {
+                    const result = await deleteComplaintWithConfirm(c.id);
+                    if (result === null) return;
+                    if (result) { setComplaintError(result); return; }
+                    if (editing?.id === c.id) setEditing(null);
+                    setVersion(v => v + 1);
+                  }}>Delete</Button>
+                </>}</td>
               </tr>)}
-              {!data.complaints.length && <tr><td colSpan={10} className="p-6 text-center text-xs text-[var(--mos-text-faint)]">No complaints in this period.</td></tr>}
+              {!data.complaints.length && <tr><td colSpan={11} className="p-6 text-center text-xs text-[var(--mos-text-faint)]">No complaints in this period.</td></tr>}
             </tbody>
           </table>
         </div>

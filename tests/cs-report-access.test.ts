@@ -5,7 +5,7 @@ import path from 'node:path';
 import {
   ACCOUNT_FEATURES, ACCOUNT_FEATURE_LABELS, CS_REPORT_FEATURE, DASHBOARD_FEATURE_HREFS, accountFeatureFromPath, canAccessFeature, isDashboardNavItemVisible, shouldBlockDashboardGenerationPath,
 } from '../src/lib/authorization';
-import { canEditComplaint, canUseCsReport } from '../src/lib/cs-report/access';
+import { canDeleteEntry, canEditComplaint, canEditEntry, canUseCsReport } from '../src/lib/cs-report/access';
 
 const read = (file: string) => readFileSync(file, 'utf8');
 const member = (features: string[]) => ({ role: 'member', features });
@@ -65,6 +65,35 @@ test('complaint edit rights: own agent or creator; admins any', () => {
   assert.equal(canEditComplaint(user, 'ag1', { agentId: 'ag2', createdBy: 'u1' }), true);
   assert.equal(canEditComplaint(user, 'ag1', { agentId: null, createdBy: 'u9' }), false, 'imported cases are admin-only');
   assert.equal(canEditComplaint({ ...user, role: 'admin' }, null, { agentId: null, createdBy: null }), true);
+});
+
+test('daily entry rights: agents edit their own (any date), admins edit and delete any', () => {
+  const user = { id: 'u1', role: 'member', features: ['cs-report'] };
+  const admin = { id: 'a1', role: 'admin', features: [] };
+  assert.equal(canEditEntry(user, 'ag1', { agentId: 'ag1' }), true);
+  assert.equal(canEditEntry(user, 'ag1', { agentId: 'ag2' }), false, "not another agent's entry");
+  assert.equal(canEditEntry(user, null, { agentId: 'ag1' }), false, 'no agent yet means nothing to edit');
+  assert.equal(canEditEntry(admin, null, { agentId: 'ag2' }), true);
+  assert.equal(canDeleteEntry(user), false);
+  assert.equal(canDeleteEntry(admin), true);
+});
+
+test('edit routes: entry history, admin-only entry delete, and per-complaint canEdit on the dashboard', () => {
+  const list = readFileSync('src/app/api/cs-report/entries/list/route.ts', 'utf8');
+  assert.match(list, /auth\.role === 'admin' \? readAgentId\(params\) : null/, 'members only ever list their own entries');
+  assert.match(list, /store\.agentForUser\(auth\.id\)/);
+  const del = readFileSync('src/app/api/cs-report/entries/[id]/route.ts', 'utf8');
+  assert.match(del, /if \(!canDeleteEntry\(auth\)\) return NextResponse\.json\(\{ error: [^}]+\}, \{ status: 403 \}\);/);
+  assert.ok(del.indexOf('canDeleteEntry(auth)') < del.indexOf('store.deleteEntry'), 'the admin check runs before the delete');
+  assert.doesNotMatch(del, /export async function (GET|PUT|PATCH|POST)/);
+  const entries = readFileSync('src/app/api/cs-report/entries/route.ts', 'utf8');
+  assert.match(entries, /export async function PUT/);
+  const dashboard = readFileSync('src/app/api/cs-report/dashboard/route.ts', 'utf8');
+  assert.match(dashboard, /canEdit: canEditComplaint\(auth, own\?\.id \?\? null, c\)/);
+  const daily = readFileSync('src/components/cs-report/CsDailyInputTab.tsx', 'utf8');
+  assert.match(daily, /\/api\/cs-report\/entries\/list/);
+  assert.match(daily, /window\.confirm\(`Delete the daily entry/);
+  assert.match(daily, /data\?\.isAdmin && data\.entry && <Button variant="danger"/, 'the delete button is admin only');
 });
 
 test('migration 069 adds the feature, a Customer Service department and the tables; rollback reverses it', () => {

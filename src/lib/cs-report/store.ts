@@ -15,13 +15,14 @@ const COUNT_COLUMNS = COUNT_FIELDS.map(field => field.column);
 type EntryRow = Record<string, unknown> & {
   id: string; agent_id: string; agent_name: string; entry_date: string; status: DailyEntry['status']; unsolved_uids: string;
   follow_up_minutes: number; frequent_question: string; difficult_question: string; source: 'web' | 'upload'; updated_at: string | null;
+  updated_by_name: string | null;
 };
 
 function toEntry(row: EntryRow): DailyEntry {
   const entry = {
     id: row.id, agentId: row.agent_id, agentName: row.agent_name, date: row.entry_date, status: row.status,
     unsolvedUids: row.unsolved_uids, followUpMinutes: row.follow_up_minutes, frequentQuestion: row.frequent_question,
-    difficultQuestion: row.difficult_question, source: row.source, updatedAt: row.updated_at,
+    difficultQuestion: row.difficult_question, source: row.source, updatedAt: row.updated_at, updatedByName: row.updated_by_name,
   } as DailyEntry;
   for (const field of COUNT_FIELDS) {
     const v = row[field.column];
@@ -33,7 +34,7 @@ function toEntry(row: EntryRow): DailyEntry {
 type ComplaintRow = {
   id: string; agent_id: string | null; agent_name: string | null; complaint_date: string; client_name: string; uid: string; account: string;
   platform: string; description: string; cause: string; resolution: string; completion_date: string | null; status: string; sla_met: boolean | null;
-  urgency: string; category: string; source: 'web' | 'upload'; created_by: string | null;
+  urgency: string; category: string; source: 'web' | 'upload'; created_by: string | null; updated_at: string | null; updated_by_name: string | null;
 };
 
 function toComplaint(row: ComplaintRow): Complaint {
@@ -41,21 +42,21 @@ function toComplaint(row: ComplaintRow): Complaint {
     id: row.id, agentId: row.agent_id, agentName: row.agent_name, date: row.complaint_date, clientName: row.client_name, uid: row.uid,
     account: row.account, platform: row.platform, description: row.description, cause: row.cause, resolution: row.resolution,
     completionDate: row.completion_date, status: row.status, slaMet: row.sla_met, urgency: row.urgency, category: row.category,
-    source: row.source, createdBy: row.created_by,
+    source: row.source, createdBy: row.created_by, updatedAt: row.updated_at, updatedByName: row.updated_by_name,
   };
 }
 
 const ENTRY_SELECT = `
   SELECT e.id, e.agent_id, a.display_name AS agent_name, to_char(e.entry_date, 'YYYY-MM-DD') AS entry_date, e.status,
     ${COUNT_COLUMNS.map(c => `e.${c}`).join(', ')}, e.unsolved_uids, e.follow_up_minutes, e.frequent_question, e.difficult_question,
-    e.source, e.updated_at::text AS updated_at
-  FROM cs_daily_entries e JOIN cs_agents a ON a.id = e.agent_id`;
+    e.source, to_char(e.updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS updated_at, ub.name AS updated_by_name
+  FROM cs_daily_entries e JOIN cs_agents a ON a.id = e.agent_id LEFT JOIN users ub ON ub.id = e.updated_by`;
 
 const COMPLAINT_SELECT = `
   SELECT c.id, c.agent_id, a.display_name AS agent_name, to_char(c.complaint_date, 'YYYY-MM-DD') AS complaint_date, c.client_name, c.uid,
     c.account, c.platform, c.description, c.cause, c.resolution, to_char(c.completion_date, 'YYYY-MM-DD') AS completion_date, c.status,
-    c.sla_met, c.urgency, c.category, c.source, c.created_by
-  FROM cs_complaints c LEFT JOIN cs_agents a ON a.id = c.agent_id`;
+    c.sla_met, c.urgency, c.category, c.source, c.created_by, to_char(c.updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS updated_at, ub.name AS updated_by_name
+  FROM cs_complaints c LEFT JOIN cs_agents a ON a.id = c.agent_id LEFT JOIN users ub ON ub.id = c.updated_by`;
 
 export async function listAgents(): Promise<CsAgent[]> {
   return (await queryAll<AgentRow>('SELECT id, display_name, user_id, aliases FROM cs_agents ORDER BY display_name')).map(toAgent);
@@ -105,6 +106,16 @@ export async function listEntries(from: string, to: string, agentId: string | nu
   let sql = `${ENTRY_SELECT} WHERE e.entry_date BETWEEN ?::date AND ?::date`;
   if (agentId) { sql += ' AND e.agent_id = ?'; params.push(agentId); }
   return (await queryAll<EntryRow>(`${sql} ORDER BY e.entry_date, a.display_name`, params)).map(toEntry);
+}
+
+export async function getEntryById(id: string): Promise<DailyEntry | null> {
+  const row = await queryOne<EntryRow>(`${ENTRY_SELECT} WHERE e.id = ?`, [id]);
+  return row ? toEntry(row) : null;
+}
+
+/** Admin only (checked by the route). Complaints are separate rows and stay. */
+export async function deleteEntry(id: string): Promise<boolean> {
+  return (await execute('DELETE FROM cs_daily_entries WHERE id = ?', [id])) > 0;
 }
 
 /** Upsert one agent-day from the web form (one row per agent per date). */

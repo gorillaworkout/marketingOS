@@ -19,7 +19,7 @@ function entry(agent: string, date: string, over: Partial<DailyEntry> = {}): Dai
 }
 
 function complaint(date: string, status: string, slaMet: boolean | null, agentId: string | null = null): Complaint {
-  return { id: `${date}-${status}-${slaMet}`, agentId, agentName: agentId, date, clientName: 'C', uid: '1', account: '2', platform: 'MT5', description: 'd', cause: '', resolution: '', completionDate: null, status, slaMet, urgency: '', category: '', source: 'web', createdBy: null };
+  return { id: `${date}-${status}-${slaMet}`, agentId, agentName: agentId, date, clientName: 'C', uid: '1', account: '2', platform: 'MT5', description: 'd', cause: '', resolution: '', completionDate: null, status, slaMet, urgency: '', category: '', source: 'web', createdBy: null, updatedAt: null, updatedByName: null };
 }
 
 test('dates: WIB today, week (Mon-Sun), month, custom range', () => {

@@ -18,6 +18,8 @@ export interface DailyEntry extends DailyEntryInput {
   agentName: string;
   source: 'web' | 'upload';
   updatedAt: string | null;
+  /** Name of the user who last saved this row (the uploader for imported rows). */
+  updatedByName: string | null;
 }
 
 export interface ComplaintInput {
@@ -42,6 +44,8 @@ export interface Complaint extends ComplaintInput {
   agentName: string | null;
   source: 'web' | 'upload';
   createdBy: string | null;
+  updatedAt: string | null;
+  updatedByName: string | null;
 }
 
 export interface WeeklyNote {

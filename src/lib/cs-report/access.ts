@@ -16,3 +16,14 @@ export function canEditComplaint(principal: CsPrincipal & { id: string }, ownAge
   if (principal.role === 'admin') return true;
   return complaint.createdBy === principal.id || (ownAgentId !== null && complaint.agentId === ownAgentId);
 }
+
+/** Daily entries: an agent edits their own rows (any past date); admins edit any agent's. */
+export function canEditEntry(principal: CsPrincipal, ownAgentId: string | null, entry: { agentId: string }): boolean {
+  if (principal.role === 'admin') return true;
+  return ownAgentId !== null && entry.agentId === ownAgentId;
+}
+
+/** Deleting a daily entry is admin only (agents correct their entry by saving it again). */
+export function canDeleteEntry(principal: CsPrincipal): boolean {
+  return principal.role === 'admin';
+}

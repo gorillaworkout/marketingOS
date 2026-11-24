@@ -2,7 +2,9 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { Button, DataTableFrame, FormField, LoadingState, Panel, SectionHeader, Select, StatusBadge, TextArea, TextInput } from '@/components/ui/dashboard';
-import { CATEGORY_FIELDS, CHANNEL_FIELDS, COMPLAINT_STATUS_OPTIONS, DEFAULT_FOLLOW_UP_MINUTES, OTHER_COUNT_FIELDS, PLATFORM_OPTIONS, STATUS_LABELS, STATUSES, type CsStatus } from '@/lib/cs-report/fields';
+import { CATEGORY_FIELDS, CHANNEL_FIELDS, DEFAULT_FOLLOW_UP_MINUTES, OTHER_COUNT_FIELDS, STATUS_LABELS, STATUSES, type CsStatus } from '@/lib/cs-report/fields';
+import { conversations } from '@/lib/cs-report/metrics';
+import { CsComplaintForm, deleteComplaintWithConfirm, draftFromComplaint, editedLabel, emptyComplaint, type ComplaintDraft } from './CsComplaintForm';
 import type { Complaint, DailyEntry } from '@/lib/cs-report/types';
 
 type Loaded = {
@@ -31,8 +33,6 @@ function formFromEntry(entry: DailyEntry | null): FormState {
   return form;
 }
 
-type ComplaintForm = { id: string | null; clientName: string; uid: string; account: string; platform: string; description: string; cause: string; resolution: string; completionDate: string; status: string; slaMet: '' | 'yes' | 'no'; category: string };
-const emptyComplaint = (): ComplaintForm => ({ id: null, clientName: '', uid: '', account: '', platform: 'MT5', description: '', cause: '', resolution: '', completionDate: '', status: 'On Progress', slaMet: '', category: '' });
 
 export function CsDailyInputTab() {
   const [date, setDate] = useState('');
@@ -42,8 +42,19 @@ export function CsDailyInputTab() {
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const [saving, setSaving] = useState(false);
-  const [complaint, setComplaint] = useState<ComplaintForm | null>(null);
+  const [complaint, setComplaint] = useState<ComplaintDraft | null>(null);
+  const [complaintKey, setComplaintKey] = useState(0);
   const [complaintError, setComplaintError] = useState('');
+  const [history, setHistory] = useState<DailyEntry[] | null>(null);
+
+  // "My entries": the selected agent's saved days (last 92 days), newest first. Clicking one loads it into the form.
+  const loadHistory = useCallback(async (agent: string) => {
+    const params = new URLSearchParams();
+    if (agent) params.set('agentId', agent);
+    const response = await fetch(`/api/cs-report/entries/list?${params}`, { cache: 'no-store' });
+    const body = await response.json().catch(() => ({})) as { entries?: DailyEntry[] };
+    setHistory(response.ok ? body.entries ?? [] : []);
+  }, []);
 
   const load = useCallback(async (d: string, agent: string) => {
     const params = new URLSearchParams();
@@ -56,6 +67,7 @@ export function CsDailyInputTab() {
     setData(body);
     setDate(body.date);
     setForm(formFromEntry(body.entry));
+    setComplaint(null);
   }, []);
 
   useEffect(() => {
@@ -64,9 +76,10 @@ export function CsDailyInputTab() {
       if (cancelled) return;
       if (!ok) { setError(b.error || 'Could not load the daily input.'); return; }
       setData(b); setDate(b.date); setForm(formFromEntry(b.entry));
+      void loadHistory('');
     }).catch(() => { if (!cancelled) setError('Could not load the daily input.'); });
     return () => { cancelled = true; };
-  }, []);
+  }, [loadHistory]);
 
   if (!data && !error) return <LoadingState label="Loading Daily Input" />;
 
@@ -82,28 +95,28 @@ export function CsDailyInputTab() {
     setSaving(false);
     if (!response.ok) { setError(body.error || `Could not save (${response.status}).`); return; }
     setMessage(`Saved for ${date}. Saving again on the same date updates this entry.`);
-    await load(date, agentId);
+    await Promise.all([load(date, agentId), loadHistory(agentId)]);
   };
 
-  const saveComplaint = async () => {
-    if (!complaint) return;
-    setComplaintError('');
-    const payload: Record<string, unknown> = { ...complaint, date, slaMet: complaint.slaMet === '' ? null : complaint.slaMet === 'yes' };
-    delete payload.id;
-    if (data?.isAdmin && agentId) payload.agentId = agentId;
-    const response = await fetch(complaint.id ? `/api/cs-report/complaints/${complaint.id}` : '/api/cs-report/complaints', {
-      method: complaint.id ? 'PATCH' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
-    });
+  const openDate = (d: string) => { setMessage(''); setDate(d); void load(d, agentId); window.scrollTo({ top: 0, behavior: 'smooth' }); };
+
+  const deleteEntry = async () => {
+    if (!data?.entry) return;
+    if (!window.confirm(`Delete the daily entry of ${data.agent.name} on ${date}? Complaint cases on this date are kept. This cannot be undone.`)) return;
+    setMessage(''); setError('');
+    const response = await fetch(`/api/cs-report/entries/${data.entry.id}`, { method: 'DELETE' });
     const body = await response.json().catch(() => ({})) as { error?: string };
-    if (!response.ok) { setComplaintError(body.error || `Could not save the complaint (${response.status}).`); return; }
-    setComplaint(null);
-    await load(date, agentId);
+    if (!response.ok) { setError(body.error || `Could not delete (${response.status}).`); return; }
+    setMessage(`Deleted the entry for ${date}.`);
+    await Promise.all([load(date, agentId), loadHistory(agentId)]);
   };
 
+  const openComplaint = (draft: ComplaintDraft) => { setComplaintError(''); setComplaint(draft); setComplaintKey(k => k + 1); };
   const removeComplaint = async (id: string) => {
-    if (!window.confirm('Delete this complaint?')) return;
-    const response = await fetch(`/api/cs-report/complaints/${id}`, { method: 'DELETE' });
-    if (!response.ok) { const body = await response.json().catch(() => ({})) as { error?: string }; setComplaintError(body.error || 'Could not delete.'); return; }
+    const result = await deleteComplaintWithConfirm(id);
+    if (result === null) return;
+    if (result) { setComplaintError(result); return; }
+    setComplaint(null);
     await load(date, agentId);
   };
 
@@ -121,7 +134,7 @@ export function CsDailyInputTab() {
         </FormField>
         {data?.isAdmin
           ? <FormField label="Agent" hint="admin">
-            <Select value={agentId} onChange={e => { setAgentId(e.target.value); void load(date, e.target.value); }} className="w-64">
+            <Select value={agentId} onChange={e => { setAgentId(e.target.value); setMessage(''); void load(date, e.target.value); void loadHistory(e.target.value); }} className="w-64">
               <option value="">My own entry</option>
               {data.agents.map(a => <option key={a.id} value={a.id}>{a.name}{a.linked ? '' : ' (name only)'}</option>)}
             </Select>
@@ -130,7 +143,9 @@ export function CsDailyInputTab() {
         <div className="pb-2">{data?.entry
           ? <StatusBadge tone="success" dot>Saved {data.entry.source === 'upload' ? '(imported)' : ''}</StatusBadge>
           : <StatusBadge tone="warning" dot>Not filled yet</StatusBadge>}</div>
+        {data?.entry?.updatedAt && <div className="pb-2 text-xs text-[var(--mos-text-faint)]">{editedLabel(data.entry.updatedByName, data.entry.updatedAt)}</div>}
       </div>
+      <p className="mt-2 text-xs text-[var(--mos-text-faint)]">Wrong data? Pick any past date (or click a row in My entries below), change the values and press Update entry.</p>
     </Panel>
 
     {error && <Panel padding="compact"><p className="text-sm text-red-300">{error}</p></Panel>}
@@ -169,42 +184,15 @@ export function CsDailyInputTab() {
 
       <div className="mt-6 flex flex-wrap items-center gap-3">
         <Button variant="primary" onClick={save} disabled={saving || !date}>{saving ? 'Saving…' : data?.entry ? 'Update entry' : 'Save entry'}</Button>
+        {data?.isAdmin && data.entry && <Button variant="danger" onClick={deleteEntry}>Delete entry</Button>}
         {message && <span className="text-xs text-emerald-300">{message}</span>}
       </div>
     </Panel>
 
     <DataTableFrame title={`Complaints on ${date}`} description="Add complaint cases one by one. You can edit or delete the ones you added."
-      action={!complaint && <Button size="sm" variant="primary" onClick={() => { setComplaint(emptyComplaint()); setComplaintError(''); }}>Add complaint</Button>}>
-      {complaint && <div className="grid grid-cols-1 gap-4 border-b border-[var(--mos-border-subtle)] p-5 md:grid-cols-4">
-        <FormField label="Client name"><TextInput value={complaint.clientName} onChange={e => setComplaint({ ...complaint, clientName: e.target.value })} /></FormField>
-        <FormField label="UID"><TextInput value={complaint.uid} onChange={e => setComplaint({ ...complaint, uid: e.target.value })} /></FormField>
-        <FormField label="Account"><TextInput value={complaint.account} onChange={e => setComplaint({ ...complaint, account: e.target.value })} /></FormField>
-        <FormField label="Platform">
-          <Select value={complaint.platform} onChange={e => setComplaint({ ...complaint, platform: e.target.value })}>
-            {[...new Set([...PLATFORM_OPTIONS, complaint.platform].filter(Boolean))].map(p => <option key={p} value={p}>{p}</option>)}
-          </Select>
-        </FormField>
-        <FormField label="Complaint description" required className="md:col-span-2"><TextArea value={complaint.description} onChange={e => setComplaint({ ...complaint, description: e.target.value })} className="min-h-20" /></FormField>
-        <FormField label="Cause analysis" className="md:col-span-2"><TextArea value={complaint.cause} onChange={e => setComplaint({ ...complaint, cause: e.target.value })} className="min-h-20" /></FormField>
-        <FormField label="Resolution actions" className="md:col-span-2"><TextArea value={complaint.resolution} onChange={e => setComplaint({ ...complaint, resolution: e.target.value })} className="min-h-20" /></FormField>
-        <FormField label="Category" hint="optional"><TextInput value={complaint.category} onChange={e => setComplaint({ ...complaint, category: e.target.value })} /></FormField>
-        <FormField label="Completion date"><TextInput type="date" value={complaint.completionDate} min={date} onChange={e => setComplaint({ ...complaint, completionDate: e.target.value })} /></FormField>
-        <FormField label="Status">
-          <Select value={complaint.status} onChange={e => setComplaint({ ...complaint, status: e.target.value })}>
-            {[...new Set([...COMPLAINT_STATUS_OPTIONS, complaint.status].filter(Boolean))].map(s => <option key={s} value={s}>{s}</option>)}
-          </Select>
-        </FormField>
-        <FormField label="SLA met">
-          <Select value={complaint.slaMet} onChange={e => setComplaint({ ...complaint, slaMet: e.target.value as ComplaintForm['slaMet'] })}>
-            <option value="">Not set</option><option value="yes">Yes</option><option value="no">No</option>
-          </Select>
-        </FormField>
-        <div className="flex items-end gap-2 md:col-span-4">
-          <Button variant="primary" size="sm" onClick={saveComplaint}>{complaint.id ? 'Update complaint' : 'Save complaint'}</Button>
-          <Button size="sm" variant="ghost" onClick={() => setComplaint(null)}>Cancel</Button>
-          {complaintError && <span className="text-xs text-red-300">{complaintError}</span>}
-        </div>
-      </div>}
+      action={!complaint && <Button size="sm" variant="primary" onClick={() => openComplaint(emptyComplaint(date))}>Add complaint</Button>}>
+      {complaint && <CsComplaintForm key={complaintKey} initial={complaint} today={data?.today ?? date} agentId={data?.isAdmin && agentId ? agentId : undefined}
+        onCancel={() => setComplaint(null)} onSaved={async () => { setComplaint(null); await load(date, agentId); }} />}
       {!complaint && complaintError && <p className="px-5 pt-3 text-xs text-red-300">{complaintError}</p>}
       <table className="w-full min-w-[900px] text-sm">
         <thead className="border-b border-[var(--mos-border)] text-left text-xs text-[var(--mos-text-faint)]">
@@ -216,11 +204,33 @@ export function CsDailyInputTab() {
             <td className="max-w-[380px] p-3">{c.description}</td><td className="p-3">{c.status || '—'}</td>
             <td className="p-3">{c.slaMet === null ? '—' : c.slaMet ? 'Yes' : 'No'}</td><td className="p-3">{c.completionDate || '—'}</td>
             <td className="whitespace-nowrap p-3 text-right">
-              <Button size="sm" variant="ghost" onClick={() => { setComplaintError(''); setComplaint({ id: c.id, clientName: c.clientName, uid: c.uid, account: c.account, platform: c.platform, description: c.description, cause: c.cause, resolution: c.resolution, completionDate: c.completionDate ?? '', status: c.status, slaMet: c.slaMet === null ? '' : c.slaMet ? 'yes' : 'no', category: c.category }); }}>Edit</Button>
+              <Button size="sm" variant="ghost" onClick={() => openComplaint(draftFromComplaint(c))}>Edit</Button>
               <Button size="sm" variant="ghost" onClick={() => removeComplaint(c.id)}>Delete</Button>
             </td>
           </tr>)}
           {!data?.complaints.length && <tr><td colSpan={8} className="p-6 text-center text-xs text-[var(--mos-text-faint)]">No complaints recorded for this date.</td></tr>}
+        </tbody>
+      </table>
+    </DataTableFrame>
+
+    <DataTableFrame title={data?.isAdmin && agentId ? `Entries of ${data.agent.name}` : 'My entries'} description="Saved daily entries of the last 3 months, newest first. Click a row to open and edit it.">
+      <table className="w-full min-w-[760px] text-sm">
+        <thead className="border-b border-[var(--mos-border)] text-left text-xs text-[var(--mos-text-faint)]">
+          <tr><th className="p-3">Date</th><th className="p-3">Status</th><th className="p-3 text-right">Conversations</th><th className="p-3 text-right">Not followed up</th><th className="p-3">Source</th><th className="p-3">Last edited</th><th className="p-3" /></tr>
+        </thead>
+        <tbody>
+          {(history ?? []).map(e => <tr key={e.id} onClick={() => openDate(e.date)}
+            className={`cursor-pointer border-b border-[var(--mos-border)] text-[var(--mos-text-secondary)] hover:bg-[var(--mos-surface-hover,rgba(255,255,255,0.04))] ${e.date === date ? 'bg-[rgba(255,255,255,0.05)]' : ''}`}>
+            <td className="p-3 tabular-nums text-[var(--mos-text)]">{e.date}</td>
+            <td className="p-3">{STATUS_LABELS[e.status]}</td>
+            <td className="p-3 text-right tabular-nums">{conversations(e)}</td>
+            <td className="p-3 text-right tabular-nums">{e.notFollowedUp ?? '—'}</td>
+            <td className="p-3">{e.source === 'upload' ? 'Imported' : 'Web form'}</td>
+            <td className="p-3 text-xs">{editedLabel(e.updatedByName, e.updatedAt).replace('Last edited ', '') || '—'}</td>
+            <td className="p-3 text-right"><Button size="sm" variant="ghost" onClick={ev => { ev.stopPropagation(); openDate(e.date); }}>Edit</Button></td>
+          </tr>)}
+          {history && !history.length && <tr><td colSpan={7} className="p-6 text-center text-xs text-[var(--mos-text-faint)]">No saved entries in the last 3 months.</td></tr>}
+          {!history && <tr><td colSpan={7} className="p-6 text-center text-xs text-[var(--mos-text-faint)]">Loading…</td></tr>}
         </tbody>
       </table>
     </DataTableFrame>

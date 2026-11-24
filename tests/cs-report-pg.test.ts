@@ -7,7 +7,7 @@ import { buildSyntheticWorkbook } from './fixtures/cs-report-workbook';
 
 const databaseUrl = process.env.SETTLEMENT_TEST_DATABASE_URL || process.env.MODEL_TIERS_TEST_DATABASE_URL || '';
 
-test('migration 069 + CS Report store on PostgreSQL: upsert, complaints, bulk upload dedupe, name linking, dashboard, rollback', { skip: databaseUrl ? false : 'PostgreSQL URL is not set' }, async () => {
+test('migration 069 + CS Report store on PostgreSQL: upsert, edit, delete, complaints, bulk upload dedupe, name linking, dashboard, rollback', { skip: databaseUrl ? false : 'PostgreSQL URL is not set' }, async () => {
   const client = new Client({ connectionString: databaseUrl });
   await client.connect();
   const schema = `csreport_${Date.now()}`;
@@ -58,6 +58,8 @@ test('migration 069 + CS Report store on PostgreSQL: upsert, complaints, bulk up
       assert.equal(updated.imReception, 99);
       assert.equal(updated.frequentQuestion, 'Q2');
       assert.equal((await store.listEntries('2026-06-01', '2026-06-01', null)).length, 1, 'saving the same date again updates');
+      assert.equal(updated.updatedByName, 'Agent Alpha', 'who last edited is recorded');
+      assert.match(updated.updatedAt ?? '', /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/, 'updatedAt is an ISO UTC timestamp');
 
       // Complaints: insert, duplicate rejected, update, delete.
       const c = { date: '2026-06-10', clientName: 'Client X', uid: '42', account: 'A', platform: 'MT5', description: 'Late fill', cause: '', resolution: '', completionDate: null, status: 'On Progress', slaMet: null, urgency: '', category: '' };
@@ -113,6 +115,30 @@ test('migration 069 + CS Report store on PostgreSQL: upsert, complaints, bulk up
       const exported = await service.exportWorkbook('2026-06-01', '2026-07-31', null);
       const reparsed = await parseCsWorkbook(exported.buffer);
       assert.equal(reparsed.entries.length, dashboard.kpis.entries + (await store.listEntries('2026-07-01', '2026-07-31', null)).length);
+
+      // Editing: an admin corrects an agent's past entry; the edit is attributed to the admin.
+      const before = await store.getEntry(alphaAgent.id, '2026-06-01');
+      const fixed = await store.upsertEntry(alphaAgent.id, { ...input, imReception: 7 } as never, 'admin-1');
+      assert.equal(fixed.id, before!.id, 'editing a past date updates the same row');
+      assert.equal(fixed.imReception, 7);
+      assert.equal(fixed.updatedByName, 'Admin');
+      // Imported rows (entries and agent-less complaints) are editable too and keep their source.
+      const imported = (await store.listEntries('2026-06-01', '2026-06-30', bravoName.id))[0];
+      assert.equal(imported.source, 'upload');
+      assert.equal(imported.updatedByName, 'Admin', 'imported rows show the uploader');
+      const importedComplaint = (await store.listComplaints('2026-01-01', '2026-12-31', null)).find(x => x.agentId === null)!;
+      assert.ok(importedComplaint, 'the workbook has agent-less complaints');
+      const ic = importedComplaint;
+      const complaintInput = { date: ic.date, clientName: ic.clientName, uid: ic.uid, account: ic.account, platform: ic.platform, description: ic.description, cause: ic.cause, resolution: ic.resolution, completionDate: ic.completionDate, status: ic.status, slaMet: ic.slaMet, urgency: ic.urgency, category: ic.category };
+      const editedImported = await store.updateComplaint(ic.id, { ...complaintInput, status: 'Solved', resolution: 'Refunded' }, 'admin-1');
+      assert.deepEqual([editedImported.status, editedImported.resolution, editedImported.source, editedImported.agentId, editedImported.updatedByName], ['Solved', 'Refunded', 'upload', null, 'Admin']);
+
+      // Admin delete of a daily entry: the row goes, the agent's complaints stay.
+      assert.equal((await store.getEntryById(fixed.id))?.date, '2026-06-01');
+      assert.equal(await store.deleteEntry(fixed.id), true);
+      assert.equal(await store.deleteEntry(fixed.id), false, 'deleting twice is a no-op');
+      assert.equal(await store.getEntry(alphaAgent.id, '2026-06-01'), null);
+      assert.equal((await store.getComplaint(saved.id))?.agentId, alphaAgent.id, 'complaints are not deleted with the entry');
 
       await store.deleteComplaint(saved.id);
       assert.equal(await store.getComplaint(saved.id), null);

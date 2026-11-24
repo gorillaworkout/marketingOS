@@ -85,6 +85,28 @@ restores the previous CHECK and deletes the schema_migrations row. The Customer 
   (client name, UID, account, platform, description, cause, resolution, completion date, status, SLA met yes/no).
   A non-admin can edit only complaints they created or that belong to their agent.
 
+## Editing and corrections
+
+Users can enter wrong data, so everything an agent types stays editable:
+
+- **Daily entries, any past date.** An agent picks a date (or clicks a row in **My entries**, the list of their saved
+  days of the last 3 months, `GET /api/cs-report/entries/list`) and the form loads the stored values; **Update entry**
+  saves over the same row (upsert on agent + date). Imported entries load and save the same way and keep
+  `source = upload`. Future dates stay rejected.
+- **Admins** pick any agent in the Agent dropdown (the My entries list then shows that agent's days) and edit their
+  entries. Admins can also **delete** a daily entry (`DELETE /api/cs-report/entries/:id`, confirm dialog). Agents
+  cannot delete an entry (403); they correct it by saving again. Complaint cases of that day are separate rows and are
+  not deleted with the entry.
+- **Complaints.** Agents edit and delete their own cases (their agent or created by them) from Daily Input or from
+  the Report Complaint table on the Dashboard. Admins can edit and delete every case there, including imported cases
+  (no agent). The dashboard API returns `canEdit` per case so the table shows Edit / Delete only where allowed; the
+  PATCH / DELETE routes re-check the same rule (`canEditComplaint`). The edit form includes the complaint date and
+  keeps fields the form does not show (urgency).
+- **Audit.** `cs_daily_entries` and `cs_complaints` already have `updated_by` / `updated_at` in migration 069
+  (no schema change was needed). Every save sets them; reads join `users` and return `updatedByName` and
+  `updatedAt` (ISO UTC). The form and My entries show "Last edited by <name> on <date time> WIB"; for imported rows
+  the name is the uploader until someone edits the row.
+
 ## Dashboard tab
 
 - Filters: Day, Week (Mon–Sun containing the picked date), Month, Custom range; agent (all or one).
@@ -123,4 +145,4 @@ Complaint table and the recomputed summary rows.
 
 ## Out of scope
 
-Editing imported weekly notes in the UI; SLA timers; per-agent targets; notifications/reminders to fill the form.
+Editing imported weekly notes in the UI; a full edit history (only the last editor and time are kept); SLA timers; per-agent targets; notifications/reminders to fill the form.
