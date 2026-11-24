@@ -1,10 +1,12 @@
 /**
  * Minimal read-only Google Ads REST client.
  *
- * Only two endpoints are ever called: customers:listAccessibleCustomers and
- * customers/{id}/googleAds:search (GAQL SELECT, paginated). There is no
- * mutate path in this module, and assertReadOnlyGaql rejects anything that is
- * not a SELECT. Errors are sanitized so tokens never reach logs or the UI.
+ * Only three endpoints are ever called: customers:listAccessibleCustomers,
+ * customers/{id}/googleAds:search (GAQL SELECT, paginated), and
+ * customers/{id}:generateKeywordIdeas (Keyword Planner ideas, a read-only
+ * planning call used by Keyword Trends). There is no mutate path in this
+ * module, and assertReadOnlyGaql rejects anything that is not a SELECT.
+ * Errors are sanitized so tokens never reach logs or the UI.
  */
 import { sanitizeGoogleAdsError, secretValues, type GoogleAdsConfig } from './config';
 
@@ -34,6 +36,25 @@ export interface GoogleAdsClient {
   listAccessibleCustomers(): Promise<string[]>;
   /** All rows for a GAQL SELECT on one customer, following nextPageToken. */
   search(customerId: string, query: string, options?: { loginCustomerId?: string | null }): Promise<GoogleAdsRow[]>;
+}
+
+/** Body of KeywordPlanIdeaService.GenerateKeywordIdeas (REST JSON field names). pageToken is set by the client. */
+export interface GenerateKeywordIdeasRequest {
+  language?: string;
+  geoTargetConstants?: string[];
+  keywordPlanNetwork?: 'GOOGLE_SEARCH' | 'GOOGLE_SEARCH_AND_PARTNERS';
+  includeAdultKeywords?: boolean;
+  keywordAnnotation?: string[];
+  pageSize?: number;
+  keywordSeed?: { keywords: string[] };
+  siteSeed?: { site: string };
+  urlSeed?: { url: string };
+  keywordAndUrlSeed?: { keywords: string[]; url: string };
+}
+
+export interface KeywordPlannerClient {
+  /** Keyword ideas for one client account, following nextPageToken until `limit` ideas (default 1000). Read-only and free. */
+  generateKeywordIdeas(customerId: string, request: GenerateKeywordIdeasRequest, options?: { loginCustomerId?: string | null; limit?: number }): Promise<GoogleAdsRow[]>;
 }
 
 export function assertReadOnlyGaql(query: string): void {
@@ -66,7 +87,7 @@ function describeError(status: number, body: ApiErrorBody | null): { message: st
   return { message, code, retryDelayMs: retry };
 }
 
-export function createGoogleAdsClient(config: GoogleAdsConfig, deps: { fetch?: FetchFn; sleep?: SleepFn; baseDelayMs?: number } = {}): GoogleAdsClient {
+export function createGoogleAdsClient(config: GoogleAdsConfig, deps: { fetch?: FetchFn; sleep?: SleepFn; baseDelayMs?: number } = {}): GoogleAdsClient & KeywordPlannerClient {
   const doFetch: FetchFn = deps.fetch ?? ((input, init) => fetch(input, init));
   const sleep = deps.sleep ?? defaultSleep;
   const baseDelayMs = deps.baseDelayMs ?? 1000;
@@ -144,6 +165,21 @@ export function createGoogleAdsClient(config: GoogleAdsConfig, deps: { fetch?: F
         if (!pageToken) return rows;
       }
       throw new GoogleAdsApiError('Google Ads search returned too many pages; narrow the date range.', 0, null);
+    },
+    async generateKeywordIdeas(customerId, request, options = {}) {
+      if (!/^[0-9]{10}$/.test(customerId)) throw new Error('Invalid customer id.');
+      const limit = Math.max(1, Math.min(options.limit ?? 1000, 10_000));
+      const ideas: GoogleAdsRow[] = [];
+      let pageToken: string | undefined;
+      for (let page = 0; page < MAX_PAGES; page += 1) {
+        const body = await call<{ results?: GoogleAdsRow[]; nextPageToken?: string }>(`${base}/customers/${customerId}:generateKeywordIdeas`, {
+          method: 'POST', body: pageToken ? { ...request, pageToken } : request, loginCustomerId: options.loginCustomerId,
+        });
+        ideas.push(...(body.results ?? []));
+        pageToken = body.nextPageToken || undefined;
+        if (!pageToken || ideas.length >= limit) return ideas.slice(0, limit);
+      }
+      return ideas.slice(0, limit);
     },
   };
 }
