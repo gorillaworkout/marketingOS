@@ -128,10 +128,13 @@ const PREFIX_MATCHED_FEATURES = [INTERNAL_DOCS_FEATURE, SEO_FEATURE, MONTHLY_REP
 /**
  * Dashboard pages that belong to an existing feature without being its main href.
  * Generate Image grew out of Social Post (which is now caption-only), so the
- * same Social Post grant opens it. No new Accounts feature, no migration.
+ * same Social Post grant opens it. Keyword Trends (Paid Media) opens with the
+ * Google Ads grant. No new Accounts feature, no migration.
  */
 export const DASHBOARD_FEATURE_ALIAS_HREFS: Readonly<Record<string, AccountFeature>> = {
   '/dashboard/generate-image': 'social-post',
+  // Paid Media / Keyword Trends: same Paid Media grant as Google Ads.
+  '/dashboard/paid-media/keyword-trends': 'google-ads',
 };
 
 /** Exact href match, plus nested routes for prefix-matched features (Internal Docs, SEO OS, Onboarding, Settlement, Partnership, Google Ads). */

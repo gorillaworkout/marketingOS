@@ -196,6 +196,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       label: 'Paid Media',
       items: [
         { href: '/dashboard/paid-media/google-ads', label: 'Google Ads', icon: 'analytics', feature: 'google-ads' },
+        { href: '/dashboard/paid-media/keyword-trends', label: 'Keyword Trends', icon: 'keyword', feature: 'google-ads' },
       ],
     },
     {
