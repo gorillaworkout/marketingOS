@@ -200,6 +200,12 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       ],
     },
     {
+      label: 'Customer Service',
+      items: [
+        { href: '/dashboard/cs-report', label: 'CS Report', icon: 'report', feature: 'cs-report' },
+      ],
+    },
+    {
       label: 'Library',
       items: resourceItems,
     },
