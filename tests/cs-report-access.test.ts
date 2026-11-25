@@ -118,6 +118,27 @@ test('migration 069 adds the feature, a Customer Service department and the tabl
   assert.doesNotMatch(rollback.match(/ADD CONSTRAINT[\s\S]*?\);/)?.[0] ?? '', /cs-report/);
   assert.match(rollback, /DELETE FROM schema_migrations WHERE name = '069_cs_report.sql'/);
   const migrations = readdirSync('db/migrations').filter(n => n.endsWith('.sql')).sort();
-  assert.equal(migrations.at(-1), '069_cs_report.sql');
   assert.equal(migrations.filter(n => n.startsWith('069_')).length, 1);
+});
+
+test('migration 070 adds Customer Service at ...0009 when the name is missing; rollback only touches that row', () => {
+  const sql = read('db/migrations/070_cs_department.sql');
+  assert.ok(!sql.includes('?'), 'the migration runner does not allow ? in SQL');
+  assert.match(sql, /^\s*(--[^\n]*\n\s*)*BEGIN;/);
+  assert.match(sql, /COMMIT;\s*$/);
+  assert.doesNotMatch(sql, /DROP TABLE|TRUNCATE/i);
+  assert.match(sql, /'00000000-0000-0000-0000-000000000009', 'Customer Service', ARRAY\['cs-report'\]/);
+  assert.match(sql, /WHERE NOT EXISTS \(\s*SELECT 1 FROM departments WHERE name = 'Customer Service'\s*\)/);
+  assert.doesNotMatch(sql, /id = '00000000-0000-0000-0000-000000000008'/, '070 must not retarget or change DPM at ...0008');
+  assert.match(sql, /permitted_features = permitted_features \|\| ARRAY\['cs-report'\]/);
+  const rollback = read('db/rollbacks/070_cs_department_down.sql');
+  assert.ok(!rollback.includes('?'), 'the migration runner does not allow ? in SQL');
+  assert.match(rollback, /array_remove\(permitted_features, 'cs-report'\)/);
+  assert.match(rollback, /id = '00000000-0000-0000-0000-000000000009'/);
+  assert.match(rollback, /NOT EXISTS \(\s*SELECT 1 FROM users WHERE users\.department_id = departments\.id\s*\)/);
+  assert.match(rollback, /DELETE FROM schema_migrations WHERE name = '070_cs_department.sql'/);
+  assert.doesNotMatch(rollback, /00000000-0000-0000-0000-000000000008/, 'rollback must not touch DPM');
+  const migrations = readdirSync('db/migrations').filter(n => n.endsWith('.sql')).sort();
+  assert.equal(migrations.at(-1), '070_cs_department.sql');
+  assert.equal(migrations.filter(n => n.startsWith('070_')).length, 1);
 });

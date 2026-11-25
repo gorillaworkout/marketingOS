@@ -157,3 +157,98 @@ test('migration 069 + CS Report store on PostgreSQL: upsert, edit, delete, compl
     await client.end();
   }
 });
+
+test('migration 070 adds Customer Service at ...0009 when ...0008 is DPM, leaves DPM alone, and rolls back safely', { skip: databaseUrl ? false : 'PostgreSQL URL is not set' }, async () => {
+  const client = new Client({ connectionString: databaseUrl });
+  await client.connect();
+  const schema = `csdept_${Date.now()}`;
+  const up069 = readFileSync('db/migrations/069_cs_report.sql', 'utf8');
+  const up070 = readFileSync('db/migrations/070_cs_department.sql', 'utf8');
+  const down070 = readFileSync('db/rollbacks/070_cs_department_down.sql', 'utf8');
+  const id8 = '00000000-0000-0000-0000-000000000008';
+  const id9 = '00000000-0000-0000-0000-000000000009';
+  try {
+    await client.query(`CREATE SCHEMA ${schema}`);
+    await client.query(`SET search_path TO ${schema}`);
+    await client.query(`
+      CREATE TABLE departments (
+        id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, permitted_features TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],
+        created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        CONSTRAINT departments_permitted_features_valid CHECK (permitted_features <@ ARRAY['social-post','google-ads']::TEXT[])
+      );
+      CREATE TABLE users (id TEXT PRIMARY KEY, username TEXT UNIQUE NOT NULL, name TEXT NOT NULL, password_hash TEXT NOT NULL, role TEXT NOT NULL DEFAULT 'member', department_id TEXT REFERENCES departments(id));
+      CREATE TABLE schema_migrations (name TEXT PRIMARY KEY);
+      INSERT INTO departments (id, name, permitted_features) VALUES ('${id8}', 'DPM', ARRAY[]::TEXT[]);
+    `);
+
+    // Prod-like: ...0008 is already DPM, so 069 must not rename it or invent Customer Service there.
+    await client.query(up069);
+    await client.query(up069);
+    const after069 = await client.query(`SELECT id, name, permitted_features FROM departments ORDER BY name`);
+    assert.deepEqual(after069.rows, [{ id: id8, name: 'DPM', permitted_features: [] }]);
+    assert.equal((await client.query(`SELECT 1 FROM information_schema.tables WHERE table_schema = $1 AND table_name = 'cs_agents'`, [schema])).rowCount, 1);
+
+    await client.query(up070);
+    await client.query(up070);
+    const dpm = await client.query(`SELECT id, name, permitted_features FROM departments WHERE id = $1`, [id8]);
+    assert.deepEqual(dpm.rows[0], { id: id8, name: 'DPM', permitted_features: [] }, 'DPM at ...0008 is unchanged');
+    const cs = await client.query(`SELECT id, name, permitted_features FROM departments WHERE name = 'Customer Service'`);
+    assert.deepEqual(cs.rows[0], { id: id9, name: 'Customer Service', permitted_features: ['cs-report'] });
+    await client.query(`INSERT INTO schema_migrations (name) VALUES ('069_cs_report.sql'), ('070_cs_department.sql')`);
+
+    // Rollback 070 with no users assigned: the ...0009 row goes, DPM and 069 stay.
+    await client.query(down070);
+    assert.equal((await client.query(`SELECT 1 FROM departments WHERE name = 'Customer Service'`)).rowCount, 0);
+    assert.deepEqual((await client.query(`SELECT id, name, permitted_features FROM departments WHERE id = $1`, [id8])).rows[0], { id: id8, name: 'DPM', permitted_features: [] });
+    assert.equal((await client.query(`SELECT 1 FROM schema_migrations WHERE name = '070_cs_department.sql'`)).rowCount, 0);
+    assert.equal((await client.query(`SELECT 1 FROM schema_migrations WHERE name = '069_cs_report.sql'`)).rowCount, 1);
+    assert.equal((await client.query(`SELECT 1 FROM information_schema.tables WHERE table_schema = $1 AND table_name = 'cs_agents'`, [schema])).rowCount, 1);
+
+    // Re-apply, assign a user: rollback keeps the row and only removes the feature.
+    await client.query(up070);
+    await client.query(`INSERT INTO schema_migrations (name) VALUES ('070_cs_department.sql')`);
+    await client.query(`INSERT INTO users (id, username, name, password_hash, department_id) VALUES ('u-cs', 'cs', 'CS Agent', 'hash', $1)`, [id9]);
+    await client.query(down070);
+    const kept = await client.query(`SELECT id, name, permitted_features FROM departments WHERE name = 'Customer Service'`);
+    assert.deepEqual(kept.rows[0], { id: id9, name: 'Customer Service', permitted_features: [] }, 'row kept when a user is assigned');
+    assert.equal((await client.query(`SELECT department_id FROM users WHERE id = 'u-cs'`)).rows[0].department_id, id9);
+    assert.deepEqual((await client.query(`SELECT name FROM departments WHERE id = $1`, [id8])).rows[0], { name: 'DPM' });
+  } finally {
+    await client.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`);
+    await client.end();
+  }
+});
+
+test('migration 070 is a no-op when 069 already created Customer Service at ...0008, and its rollback leaves that row alone', { skip: databaseUrl ? false : 'PostgreSQL URL is not set' }, async () => {
+  const client = new Client({ connectionString: databaseUrl });
+  await client.connect();
+  const schema = `csdept_fresh_${Date.now()}`;
+  const id8 = '00000000-0000-0000-0000-000000000008';
+  try {
+    await client.query(`CREATE SCHEMA ${schema}`);
+    await client.query(`SET search_path TO ${schema}`);
+    await client.query(`
+      CREATE TABLE departments (
+        id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, permitted_features TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],
+        created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        CONSTRAINT departments_permitted_features_valid CHECK (permitted_features <@ ARRAY['social-post','google-ads']::TEXT[])
+      );
+      CREATE TABLE users (id TEXT PRIMARY KEY, username TEXT UNIQUE NOT NULL, name TEXT NOT NULL, password_hash TEXT NOT NULL, role TEXT NOT NULL DEFAULT 'member', department_id TEXT REFERENCES departments(id));
+      CREATE TABLE schema_migrations (name TEXT PRIMARY KEY);
+    `);
+    await client.query(readFileSync('db/migrations/069_cs_report.sql', 'utf8'));
+    assert.deepEqual((await client.query(`SELECT id, permitted_features FROM departments WHERE name = 'Customer Service'`)).rows[0], { id: id8, permitted_features: ['cs-report'] });
+    await client.query(readFileSync('db/migrations/070_cs_department.sql', 'utf8'));
+    await client.query(readFileSync('db/migrations/070_cs_department.sql', 'utf8'));
+    const rows = await client.query(`SELECT id, name, permitted_features FROM departments ORDER BY name`);
+    assert.equal(rows.rowCount, 1, '070 must not insert a second Customer Service row');
+    assert.deepEqual(rows.rows[0], { id: id8, name: 'Customer Service', permitted_features: ['cs-report'] });
+    assert.equal((await client.query(`SELECT 1 FROM departments WHERE id = '00000000-0000-0000-0000-000000000009'`)).rowCount, 0);
+    await client.query(`INSERT INTO schema_migrations (name) VALUES ('070_cs_department.sql')`);
+    await client.query(readFileSync('db/rollbacks/070_cs_department_down.sql', 'utf8'));
+    assert.deepEqual((await client.query(`SELECT id, name, permitted_features FROM departments WHERE name = 'Customer Service'`)).rows[0], { id: id8, name: 'Customer Service', permitted_features: ['cs-report'] }, 'rollback of 070 must not strip a 069-created department');
+  } finally {
+    await client.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`);
+    await client.end();
+  }
+});
