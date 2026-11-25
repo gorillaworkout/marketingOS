@@ -43,7 +43,8 @@ export const GOOGLE_ADS_FEATURE = 'google-ads' as const;
 
 /**
  * Customer Service division: CS Report (daily agent input, dashboard, bulk upload, export).
- * Assignable per department on Accounts. Migration 069 creates a Customer Service department with it.
+ * Assignable per department on Accounts. Migration 070 creates the Customer Service department (...0009) with it
+ * (069 targeted ...0008, which is already DPM on production and was left untouched).
  * View = input = upload. No per-user personal grant.
  */
 export const CS_REPORT_FEATURE = 'cs-report' as const;

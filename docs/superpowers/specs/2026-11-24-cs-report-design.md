@@ -11,8 +11,11 @@ bulk upload of the current Excel workbook. A dashboard and an Excel export repla
 ## Access
 
 - New Accounts feature `cs-report` (label "CS Report", href `/dashboard/cs-report`, prefix-matched like Onboarding
-  and Settlement). Migration 069 adds it to the `departments_permitted_features_valid` CHECK and creates the
-  department **Customer Service** (`00000000-0000-0000-0000-000000000008`) with `['cs-report']`. No user is moved;
+  and Settlement). Migration 069 adds it to the `departments_permitted_features_valid` CHECK. It also tried to
+  create the department **Customer Service** at `00000000-0000-0000-0000-000000000008`, but that id is already
+  **DPM** on production, so the insert was skipped. Migration 070 (`070_cs_department.sql`) creates Customer
+  Service at `00000000-0000-0000-0000-000000000009` with `['cs-report']`, and leaves DPM (...0008) untouched.
+  069 itself is not edited (the runner records applied files by name only, with no checksum). No user is moved;
   an admin assigns the CS agents to the department in Accounts.
 - View = input = upload: anyone who can open CS Report can fill their own daily form, add complaints, and run a bulk
   upload. Admins always have access (same as every feature).
@@ -72,6 +75,10 @@ Known data quirks in the sample (all handled; counts verified locally):
 Rollback `db/rollbacks/069_cs_report_down.sql` drops the five tables, removes `cs-report` from every department,
 restores the previous CHECK and deletes the schema_migrations row. The Customer Service department row is kept
 (users may be assigned), same as 066.
+
+Migration 070 only inserts or updates the Customer Service department (id `...0009` when the name is missing).
+Its rollback removes `cs-report` from the `...0009` row and deletes that row only if no users are assigned to it.
+A Customer Service row created by 069 on a fresh database (`...0008`) is left alone.
 
 ## Daily Input tab
 
