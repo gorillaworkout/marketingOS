@@ -56,7 +56,7 @@ test('migration 057 adds the feature, a Partnership department, the tables, and 
   assert.doesNotMatch(sql, /DROP TABLE|DELETE FROM|TRUNCATE/i);
   const check = sql.match(/ADD CONSTRAINT departments_permitted_features_valid[\s\S]*?\);/)?.[0] ?? '';
   // `google-ads` was added later by migration 066.
-  for (const feature of ACCOUNT_FEATURES.filter(f => f !== 'google-ads')) assert.match(check, new RegExp(`'${feature}'`), feature);
+  for (const feature of ACCOUNT_FEATURES.filter(f => f !== 'google-ads' && f !== 'cs-report')) assert.match(check, new RegExp(`'${feature}'`), feature);
   assert.match(sql, /'Partnership', ARRAY\['partnership'\]/);
   for (const table of ['partnership_competitors', 'partnership_evidence', 'partnership_reports']) {
     assert.match(sql, new RegExp(`CREATE TABLE IF NOT EXISTS ${table}\\b`), table);

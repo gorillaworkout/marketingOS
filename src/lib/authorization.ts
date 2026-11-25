@@ -42,11 +42,18 @@ export const PARTNERSHIP_FEATURE = 'partnership' as const;
 export const GOOGLE_ADS_FEATURE = 'google-ads' as const;
 
 /**
+ * Customer Service division: CS Report (daily agent input, dashboard, bulk upload, export).
+ * Assignable per department on Accounts. Migration 069 creates a Customer Service department with it.
+ * View = input = upload. No per-user personal grant.
+ */
+export const CS_REPORT_FEATURE = 'cs-report' as const;
+
+/**
  * Features an admin can assign per department on Accounts.
  * Generation workflows stay in GENERATION_FEATURES so model routing is unchanged.
  * FAQ & Guides (`internal-docs`) is first so it sits at the top of the Accounts list.
  */
-export const ACCOUNT_FEATURES = [INTERNAL_DOCS_FEATURE, ...GENERATION_FEATURES, SEO_FEATURE, MONTHLY_REPORT_FEATURE, SETTLEMENT_REPORT_FEATURE, PARTNERSHIP_FEATURE, GOOGLE_ADS_FEATURE] as const;
+export const ACCOUNT_FEATURES = [INTERNAL_DOCS_FEATURE, ...GENERATION_FEATURES, SEO_FEATURE, MONTHLY_REPORT_FEATURE, SETTLEMENT_REPORT_FEATURE, PARTNERSHIP_FEATURE, GOOGLE_ADS_FEATURE, CS_REPORT_FEATURE] as const;
 export type AccountFeature = typeof ACCOUNT_FEATURES[number];
 
 export const ACCOUNT_FEATURE_LABELS: Record<AccountFeature, string> = {
@@ -62,6 +69,7 @@ export const ACCOUNT_FEATURE_LABELS: Record<AccountFeature, string> = {
   'settlement-report': 'Settlement Report',
   partnership: 'Partnership',
   'google-ads': 'Google Ads',
+  'cs-report': 'CS Report',
 };
 
 /** Dashboard href for each account feature. Last path segment is not always the feature id. */
@@ -78,6 +86,7 @@ export const DASHBOARD_FEATURE_HREFS = {
   'settlement-report': '/dashboard/settlement-report',
   partnership: '/dashboard/partnership',
   'google-ads': '/dashboard/paid-media/google-ads',
+  'cs-report': '/dashboard/cs-report',
 } as const satisfies Record<AccountFeature, string>;
 
 export interface FeaturePrincipal {
@@ -123,7 +132,7 @@ export function generationFeatureFromPath(pathname: string): GenerationFeature |
 }
 
 /** Features whose whole route tree (href and every nested path) belongs to the feature. */
-const PREFIX_MATCHED_FEATURES = [INTERNAL_DOCS_FEATURE, SEO_FEATURE, MONTHLY_REPORT_FEATURE, SETTLEMENT_REPORT_FEATURE, PARTNERSHIP_FEATURE, GOOGLE_ADS_FEATURE] as const;
+const PREFIX_MATCHED_FEATURES = [INTERNAL_DOCS_FEATURE, SEO_FEATURE, MONTHLY_REPORT_FEATURE, SETTLEMENT_REPORT_FEATURE, PARTNERSHIP_FEATURE, GOOGLE_ADS_FEATURE, CS_REPORT_FEATURE] as const;
 
 /**
  * Dashboard pages that belong to an existing feature without being its main href.
