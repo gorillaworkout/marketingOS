@@ -30,7 +30,8 @@ import {
   GENERATE_IMAGE_HANDOFF_VALUE,
   readGenerateImageHandoff,
 } from '@/lib/generate-image-handoff';
-import { prepareUpload, type PreparedUpload } from '@/lib/client-image-upload';
+import { dataUrlToFile, prepareUpload, type PreparedUpload } from '@/lib/client-image-upload';
+import { ImageAssetPicker } from '@/components/image-asset-picker';
 
 const MAX_REFERENCES = 4;
 const MAX_ASSETS = 4;
@@ -113,10 +114,14 @@ function formatUsd(value: number | null | undefined, digits = 3): string {
 function UploadList({
   items,
   onRemove,
+  onSave,
+  savingId,
   testId,
 }: {
   items: PreparedUpload[];
   onRemove: (id: string) => void;
+  onSave: (item: PreparedUpload) => void;
+  savingId: string | null;
   testId: string;
 }) {
   if (items.length === 0) return null;
@@ -131,6 +136,21 @@ function UploadList({
             <button type="button" onClick={() => onRemove(item.id)} className="shrink-0 text-[11px] font-medium text-red-300 hover:underline" aria-label={`Remove ${item.name}`}>
               Remove
             </button>
+          </div>
+          <div className="border-t border-[var(--mos-border)] px-2 py-1">
+            {item.libraryAssetId ? (
+              <span className="text-[11px] text-[var(--mos-text-faint)]">In library</span>
+            ) : (
+              <button
+                type="button"
+                data-testid="generate-image-save-to-library"
+                disabled={savingId === item.id}
+                onClick={() => onSave(item)}
+                className="text-[11px] font-medium text-[var(--mos-accent-soft)] hover:underline disabled:opacity-50"
+              >
+                {savingId === item.id ? 'Saving…' : 'Save to library'}
+              </button>
+            )}
           </div>
         </li>
       ))}
@@ -147,6 +167,8 @@ export default function GenerateImagePage() {
   const [assets, setAssets] = useState<PreparedUpload[]>([]);
   const [assetNote, setAssetNote] = useState('');
   const [uploadError, setUploadError] = useState('');
+  const [pickerKind, setPickerKind] = useState<'reference' | 'asset' | null>(null);
+  const [savingUploadId, setSavingUploadId] = useState<string | null>(null);
   const [logo, setLogo] = useState<DupoinLogoChoice>('dupoin');
   const [footer, setFooter] = useState(true);
   const [includeSwipeLeft, setIncludeSwipeLeft] = useState(false);
@@ -303,6 +325,32 @@ export default function GenerateImagePage() {
     return () => window.clearTimeout(timer);
   }, []);
 
+
+  /** Library / gallery picks join the same upload lists as files from disk. */
+  const addPicked = (items: PreparedUpload[], kind: 'reference' | 'asset') => {
+    if (kind === 'reference') setReferences(prev => [...prev, ...items].slice(0, MAX_REFERENCES));
+    else setAssets(prev => [...prev, ...items].slice(0, MAX_ASSETS));
+  };
+
+  const saveToLibrary = async (item: PreparedUpload, kind: 'reference' | 'asset') => {
+    setUploadError('');
+    setSavingUploadId(item.id);
+    try {
+      const body = new FormData();
+      body.append('file', await dataUrlToFile(item.dataUrl, item.name));
+      const res = await fetch('/api/image-assets', { method: 'POST', body });
+      const data = await readJson<{ asset?: { id: string } | null; error?: string }>(res);
+      if (!res.ok || !data.asset) throw new Error(data.error || 'The image could not be saved to the library.');
+      const assetId = data.asset.id;
+      const mark = (list: PreparedUpload[]) => list.map(entry => (entry.id === item.id ? { ...entry, libraryAssetId: assetId } : entry));
+      if (kind === 'reference') setReferences(mark);
+      else setAssets(mark);
+    } catch (error) {
+      setUploadError(error instanceof Error ? error.message : 'The image could not be saved to the library.');
+    } finally {
+      setSavingUploadId(null);
+    }
+  };
 
   const addFiles = async (files: FileList | null, kind: 'reference' | 'asset') => {
     if (!files || files.length === 0) return;
@@ -523,7 +571,8 @@ export default function GenerateImagePage() {
                 onChange={event => { void addFiles(event.target.files, 'reference'); event.target.value = ''; }}
               />
             </label>
-            <UploadList items={references} onRemove={id => setReferences(prev => prev.filter(item => item.id !== id))} testId="generate-image-references" />
+            <Button size="sm" className="mt-3" data-testid="generate-image-pick-reference" onClick={() => setPickerKind('reference')}>Pick from library</Button>
+            <UploadList items={references} onRemove={id => setReferences(prev => prev.filter(item => item.id !== id))} onSave={item => void saveToLibrary(item, 'reference')} savingId={savingUploadId} testId="generate-image-references" />
           </Panel>
 
           <Panel>
@@ -544,7 +593,8 @@ export default function GenerateImagePage() {
                 onChange={event => { void addFiles(event.target.files, 'asset'); event.target.value = ''; }}
               />
             </label>
-            <UploadList items={assets} onRemove={id => setAssets(prev => prev.filter(item => item.id !== id))} testId="generate-image-assets" />
+            <Button size="sm" className="mt-3" data-testid="generate-image-pick-asset" onClick={() => setPickerKind('asset')}>Pick from library</Button>
+            <UploadList items={assets} onRemove={id => setAssets(prev => prev.filter(item => item.id !== id))} onSave={item => void saveToLibrary(item, 'asset')} savingId={savingUploadId} testId="generate-image-assets" />
             {(assets.length > 0 || references.length > 0) && (
               <FormField label="How to use the uploads" hint="Optional. 500 characters or fewer.">
                 <input
@@ -760,6 +810,14 @@ export default function GenerateImagePage() {
           </Panel>
         </div>
       </div>
+
+      <ImageAssetPicker
+        open={pickerKind !== null}
+        kindLabel={pickerKind === 'asset' ? 'Assets' : 'Visual references'}
+        room={pickerKind === 'asset' ? MAX_ASSETS - assets.length : MAX_REFERENCES - references.length}
+        onClose={() => setPickerKind(null)}
+        onPick={items => { if (pickerKind) addPicked(items, pickerKind); }}
+      />
 
       {previewImage && (
         <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/85 p-4 sm:p-8" role="presentation" onClick={() => setPreviewImage(null)}>
