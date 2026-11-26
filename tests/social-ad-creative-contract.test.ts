@@ -155,8 +155,8 @@ test('applyDupoinImagePromptLocks reserves chrome bands and locks the selected s
   const square = getImageGenerationSpec('1:1');
   const [squareWidth, squareHeight] = square.size.split('x').map(Number);
   const squareClearance = chromeClearancePercents(squareWidth, squareHeight);
-  assert.match(switched, /exact 1:1 square aspect ratio \(2048x2048\)/);
-  assert.doesNotMatch(switched, /exact 4:3 landscape aspect ratio \(2048x1536\)/);
+  assert.match(switched, /exact 1:1 square aspect ratio \(1024x1024\)/);
+  assert.doesNotMatch(switched, /exact 4:3 landscape aspect ratio \(1536x1024\)/);
   assert.match(switched, new RegExp(`top ${squareClearance.headerPercent}%`));
   assert.notEqual(squareClearance.headerPercent, clearance.headerPercent);
   assert.doesNotMatch(switched, new RegExp(`top ${clearance.headerPercent}%`));

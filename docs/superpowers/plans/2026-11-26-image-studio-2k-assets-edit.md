@@ -1,5 +1,8 @@
 # Image Studio 2K / assets / edit — implementation plan
 
+> 2026-11-26 18:24 WIB: 2K output is deferred. Steps 1–4 ship behind `IMAGE_2K_OUTPUT_ENABLED = false`
+> (classic sizes, 1K paid, no upscale). Size tests live in `tests/image-output-size.test.ts`.
+
 Spec: `docs/superpowers/specs/2026-11-26-image-studio-2k-assets-edit-design.md`. Base: `origin/main` `f943a2a`.
 
 ## PR A — `feat/image-studio-2k-gallery` (base main)
