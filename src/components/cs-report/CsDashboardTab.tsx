@@ -69,7 +69,10 @@ export function CsDashboardTab() {
         </Select>
         <span className="text-xs text-[var(--mos-text-faint)]">{range.from === range.to ? range.from : `${range.from} to ${range.to}`}</span>
       </FilterGroup>
-      <a href={`/api/cs-report/export?${query}`} className="inline-flex h-9 items-center whitespace-nowrap rounded-[var(--mos-radius-control)] border border-[var(--mos-border)] px-3 text-sm text-[var(--mos-text-secondary)] hover:text-[var(--mos-text)]">Export Excel</a>
+      <div className="flex items-center gap-2">
+        <a href={`/api/cs-report/export?${query}`} className="inline-flex h-9 items-center whitespace-nowrap rounded-[var(--mos-radius-control)] border border-[var(--mos-border)] px-3 text-sm text-[var(--mos-text-secondary)] hover:text-[var(--mos-text)]">Export Excel</a>
+        <a href={`/api/cs-report/export?${query}&format=docx&kind=${kind}`} className="inline-flex h-9 items-center whitespace-nowrap rounded-[var(--mos-radius-control)] border border-[var(--mos-border)] px-3 text-sm text-[var(--mos-text-secondary)] hover:text-[var(--mos-text)]">Export to Word</a>
+      </div>
     </Toolbar>
 
     {error && <Panel padding="compact"><p className="text-sm text-red-300">{error}</p></Panel>}
