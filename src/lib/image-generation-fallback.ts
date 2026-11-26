@@ -71,18 +71,53 @@ export function isAntigravityImageModel(model: string): boolean {
 }
 
 /**
+ * Google disabled the Antigravity account behind 9router (403 PERMISSION_DENIED
+ * / TOS_VIOLATION, seen on production 2026-11-26). Nothing a MarketingOS user
+ * or admin setting can change; the account owner must appeal or reconnect.
+ */
+export function isUpstreamAccountDisabledFailure(reason: string): boolean {
+  const lower = reason.toLowerCase();
+  return lower.includes('tos_violation')
+    || lower.includes('violation of terms of service')
+    || lower.includes('disabled in this account')
+    || (parseImageApiErrorStatus(reason) === 403 && lower.includes('permission_denied'));
+}
+
+/**
+ * Upstream refused the request for access reasons (401/403, expired token,
+ * permission denied, disabled account). For an `ag/…` image model the same
+ * prompt can still succeed on another free gateway model, so it is retried
+ * once like a quota hit.
+ */
+export function isAccessOrAuthFailure(reason: string): boolean {
+  const status = parseImageApiErrorStatus(reason);
+  if (status === 401 || status === 403) return true;
+  if (isUpstreamAccountDisabledFailure(reason)) return true;
+  const lower = reason.toLowerCase();
+  return lower.includes('permission_denied')
+    || lower.includes('token expired')
+    || lower.includes('token is expired')
+    || lower.includes('re-authenticate');
+}
+
+/** Failures on an `ag/…` image model that a single retry on another model can cover. */
+export function isAntigravityRetryableFailure(reason: string): boolean {
+  return isCapacityOrRateLimitFailure(reason) || isAccessOrAuthFailure(reason);
+}
+
+/**
  * Auto-fallback is only for Antigravity T2I (`ag/…`) capacity / quota /
- * rate-limit failures (including 502s that wrap those markers).
+ * rate-limit failures (including 502s that wrap those markers) and access
+ * failures (401/403, expired token, account disabled by Google).
  *
- * We do **not** fallback on auth, 403/404, billing, timeouts, empty images,
- * or a true 5xx outage without capacity text — those need a different fix,
- * and sending the same prompt to another model would hide the real cause.
+ * We do **not** fallback on 404, billing, timeouts, empty images, or a true
+ * 5xx outage without capacity text — those need a different fix.
  * Returns false while no fallback model is configured.
  */
 export function shouldFallbackAntigravityImage(model: string, reason: string): boolean {
   if (!isAntigravityImageModel(model)) return false;
   if (!antigravityImageFallbackFor(model)) return false;
-  return isCapacityOrRateLimitFailure(reason);
+  return isAntigravityRetryableFailure(reason);
 }
 
 export function antigravityCapacityFallbackMessage(
@@ -90,6 +125,25 @@ export function antigravityCapacityFallbackMessage(
   toModel: string,
 ): string {
   return `Antigravity quota full — used ${imageModelLabel(toModel)} instead`;
+}
+
+/** Toast copy when an `ag/…` image model was refused (401/403) and the backup made the image. */
+export function antigravityAccessFallbackMessage(
+  fromModel: string,
+  toModel: string,
+  reason: string,
+): string {
+  const cause = isUpstreamAccountDisabledFailure(reason)
+    ? 'its Google (Antigravity) account was disabled by Google'
+    : 'it was refused by the image service';
+  return `${imageModelLabel(fromModel)} is unavailable (${cause}) — used ${imageModelLabel(toModel)} instead`;
+}
+
+/** Fallback toast copy that matches why the first attempt failed. */
+export function antigravityFallbackMessage(fromModel: string, toModel: string, reason: string): string {
+  return isCapacityOrRateLimitFailure(reason)
+    ? antigravityCapacityFallbackMessage(fromModel, toModel)
+    : antigravityAccessFallbackMessage(fromModel, toModel, reason);
 }
 
 export interface ImageGenerationFallbackResult<T> {
@@ -102,7 +156,7 @@ export interface ImageGenerationFallbackResult<T> {
 
 /**
  * Try `requestedModel` once. If it is an Antigravity image id, the failure is
- * capacity/quota/rate-limit, and a fallback is configured
+ * capacity/quota/rate-limit or access (401/403), and a fallback is configured
  * (`ANTIGRAVITY_IMAGE_FALLBACK_MODEL`, currently `null`), retry exactly once
  * with it. With no fallback the first error propagates unchanged.
  *
@@ -114,7 +168,7 @@ export async function generateWithAntigravityCapacityFallback<T>(
   requestedModel: string,
   generate: (model: string) => Promise<T>,
   options?: {
-    onRetry?: (fallbackModel: string, fromModel: string) => void | Promise<void>;
+    onRetry?: (fallbackModel: string, fromModel: string, reason: string) => void | Promise<void>;
     /** Called with the backup's own failure before the original error is rethrown. */
     onFallbackError?: (fallbackModel: string, error: unknown) => void;
     /** Override the configured fallback (tests). `null` disables the retry. */
@@ -136,12 +190,13 @@ export async function generateWithAntigravityCapacityFallback<T>(
       !fallbackModel
       || fallbackModel === requestedModel
       || !isAntigravityImageModel(requestedModel)
-      || !isCapacityOrRateLimitFailure(reason)
+      || !isAntigravityRetryableFailure(reason)
     ) {
       throw error;
     }
 
-    await options?.onRetry?.(fallbackModel, requestedModel);
+    // Exactly one retry: the backup's own failure is never retried again.
+    await options?.onRetry?.(fallbackModel, requestedModel, reason);
 
     try {
       const payload = await generate(fallbackModel);
@@ -150,7 +205,7 @@ export async function generateWithAntigravityCapacityFallback<T>(
         requestedModel,
         usedModel: fallbackModel,
         fallbackFrom: requestedModel,
-        fallbackMessage: antigravityCapacityFallbackMessage(requestedModel, fallbackModel),
+        fallbackMessage: antigravityFallbackMessage(requestedModel, fallbackModel, reason),
       };
     } catch (fallbackError) {
       options?.onAttemptError?.(fallbackModel, fallbackError);

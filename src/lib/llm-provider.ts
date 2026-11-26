@@ -17,7 +17,7 @@ import {
 } from '@/lib/llm-provider-defaults';
 import { scrubSecrets } from '@/lib/llm-crypto';
 import { authCooldownModels, authFailoverNotice, clearAuthExpired, isAuthFailure, isAuthFailureMessage, noteAuthExpired } from '@/lib/llm-auth';
-import { imageModelLabel } from '@/lib/image-models';
+import { DEFAULT_IMAGE_MODEL, imageModelLabel } from '@/lib/image-models';
 import { parseGatewayCompletion } from '@/lib/gateway-response';
 import { openRouterChainForTier, tierForFeature } from '@/lib/model-tiers';
 import {
@@ -759,12 +759,12 @@ export async function testLlmProvider(input: {
   settingsReader = async () => forced;
   try {
     if (input.kind === 'image') {
-      const model = input.provider === 'openrouter' ? forced.defaultImageModel : 'ag/gemini-3.1-flash-image';
+      const model = input.provider === 'openrouter' ? forced.defaultImageModel : DEFAULT_IMAGE_MODEL;
       if (input.provider === 'openrouter' && !openRouterImageSupported(model)) {
         return { ok: false, provider: input.provider, kind: 'image', message: `OpenRouter image model ${model} is not in the verified image catalog.` };
       }
       await postImage({
-        model: input.provider === 'dupoin' ? 'ag/gemini-3.1-flash-image' : model,
+        model: input.provider === 'dupoin' ? DEFAULT_IMAGE_MODEL : model,
         prompt: 'A flat blue square on a white background',
         size: '1024x1024',
         aspectRatio: '1:1',

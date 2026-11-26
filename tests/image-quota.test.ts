@@ -171,7 +171,7 @@ test('route, API and page wire the quota info through', () => {
 
 test('display labels: free Nano Banana 2 and paid Nano Banana models are distinct; ids and prices unchanged', async () => {
   const { imageModelLabel, PAID_IMAGE_MODELS, AVAILABLE_IMAGE_MODELS, DEFAULT_IMAGE_MODEL } = await import('../src/lib/image-models');
-  assert.equal(DEFAULT_IMAGE_MODEL, 'ag/gemini-3.1-flash-image');
+  assert.equal(DEFAULT_IMAGE_MODEL, 'cx/gpt-image-2');
   assert.equal(imageModelLabel('ag/gemini-3.1-flash-image'), 'Nano Banana 2 (Gemini 3.1 Flash Image)');
   assert.ok(AVAILABLE_IMAGE_MODELS.every(model => !/Antigravity\)$/.test(model.name)));
   const nano = PAID_IMAGE_MODELS.filter(model => model.family === 'nano-banana');

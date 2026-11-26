@@ -22,6 +22,7 @@ const AUTH_401 = 'Image API error 401: token is expired';
 // Stand-in for a future verified non-ag/ image model, passed explicitly so the
 // retry mechanism stays covered while the configured fallback is null.
 const FAKE_FALLBACK = 'cx/test-fallback-image';
+const NANO_BANANA_2 = 'ag/gemini-3.1-flash-image';
 
 const root = path.resolve(import.meta.dirname, '..');
 const read = (file: string) => readFileSync(path.join(root, file), 'utf8');
@@ -53,18 +54,18 @@ test('no image fallback is configured: cx/gpt-5.5-image is broken and Gemini is 
   assert.doesNotMatch(source, /=\s*DEFAULT_IMAGE_MODEL/, 'fallback must not alias the default model');
 });
 
-test('capacity on the default ag/ model fails once with the clear quota error (no retry)', async () => {
+test('capacity on Nano Banana 2 (ag/) fails once with the clear quota error (no retry)', async () => {
   const attempted: string[] = [];
   await assert.rejects(
-    () => generateWithAntigravityCapacityFallback(DEFAULT_IMAGE_MODEL, async (model) => {
+    () => generateWithAntigravityCapacityFallback(NANO_BANANA_2, async (model) => {
       attempted.push(model);
       throw new Error(CAPACITY_502);
     }),
     (error: unknown) => error instanceof Error && error.message === CAPACITY_502,
   );
-  assert.deepEqual(attempted, [DEFAULT_IMAGE_MODEL]);
+  assert.deepEqual(attempted, [NANO_BANANA_2]);
 
-  const explained = explainImageFailure(CAPACITY_502, DEFAULT_IMAGE_MODEL);
+  const explained = explainImageFailure(CAPACITY_502, NANO_BANANA_2);
   assert.match(explained, /Image quota reached/);
   assert.match(explained, /Gemini 3\.1 Flash Image/);
   assert.match(explained, /no other image model enabled/);

@@ -12,6 +12,7 @@ import {
   generateWithAntigravityCapacityFallback,
   imageQuotaNotice,
   isCapacityOrRateLimitFailure,
+  isUpstreamAccountDisabledFailure,
   nextImageFallback,
   parseImageApiErrorStatus,
 } from '@/lib/image-generation-fallback';
@@ -262,12 +263,15 @@ async function runImageJob(job: ImageJob, options: ImageJobOptions) {
         {
           ...(fallback ? { fallbackModel: fallback } : { fallbackModel: null }),
           onAttemptError: recordQuotaFailure,
-          onRetry: (fallbackModel, fromModel) => {
-            console.warn(`[generate-image] ${fromModel} capacity/quota exhausted; retrying once with ${fallbackModel}`);
+          onRetry: (fallbackModel, fromModel, reason) => {
+            const capacity = isCapacityOrRateLimitFailure(reason);
+            console.warn(`[generate-image] ${fromModel} ${capacity ? 'capacity/quota exhausted' : 'refused (auth/permission)'}; retrying once with ${fallbackModel}`);
             imageJobs.update(job.id, job.ownerId, {
               status: 'generating',
               progress: 55,
-              message: `Antigravity quota full — retrying with ${imageModelLabel(fallbackModel)} instead of ${imageModelLabel(fromModel)}...`,
+              message: capacity
+                ? `Antigravity quota full — retrying with ${imageModelLabel(fallbackModel)} instead of ${imageModelLabel(fromModel)}...`
+                : `${imageModelLabel(fromModel)} is unavailable — retrying with ${imageModelLabel(fallbackModel)}...`,
             });
           },
           onFallbackError: (fallbackModel, fallbackError) => {
@@ -500,11 +504,18 @@ export function explainImageFailure(reason: string, model: string, backupName?: 
     }
     return `Usage limit reached for ${model}.${waitHint} You can also pick a different image model.`;
   }
+  const backupNote = backupName?.trim() ? ` Backup image model ${backupName.trim()} also failed.` : '';
+  if (isUpstreamAccountDisabledFailure(reason)) {
+    // 403 PERMISSION_DENIED / TOS_VIOLATION from Google: the shared upstream
+    // account is blocked, not the MarketingOS user.
+    const owner = model.startsWith('ag/') ? 'Google (Antigravity) account' : 'upstream provider account';
+    return `The ${owner} behind ${imageModelLabel(model)} was disabled by Google. Pick GPT Image 2 or another model.${backupNote}`;
+  }
   if (status === 401 || lower.includes('token is expired') || lower.includes('token expired') || lower.includes('authentication')) {
-    return `Model ${imageModelLabel(model)} token expired. Please re-authenticate it in AI Models.`;
+    return `Model ${imageModelLabel(model)} token expired. Please re-authenticate it in AI Models.${backupNote}`;
   }
   if (status === 403) {
-    return `This account is not allowed to use ${model}. Please choose another image model or contact the administrator.`;
+    return `The image service refused ${imageModelLabel(model)} (403 permission denied upstream). This is not a problem with your MarketingOS account. Please choose another image model, such as GPT Image 2, or contact the administrator.${backupNote}`;
   }
   if (status === 404 || lower.includes('model not found') || lower.includes('unknown model')) {
     return `Image model ${model} is unavailable right now. Please choose another model.`;
