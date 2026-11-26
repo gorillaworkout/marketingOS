@@ -38,6 +38,8 @@ export interface ImageJobResult {
   height?: number;
   /** "WxH" of the model output when it was upscaled to 2K. */
   upscaledFrom?: string;
+  /** Edit result: the gallery image it was made from. */
+  parentFileName?: string;
 }
 
 export interface ImageJob {

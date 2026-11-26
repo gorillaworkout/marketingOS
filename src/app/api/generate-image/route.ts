@@ -6,6 +6,9 @@ import { rateLimit } from '@/lib/rate-limit';
 import { createImageJobStore, type ImageJob, type ImageJobResult } from '@/lib/image-job-status';
 import { gatewayImageSize, legacyGatewayImageSize, parseImageAspectRatio, type ImageAspectRatio } from '@/lib/image-aspect-ratio';
 import { ensureMinLongSide } from '@/lib/image-upscale';
+import { buildEditPrompt, loadEditSource, nearestAspectRatio, saveGeneratedImageOriginal } from '@/lib/image-edit';
+import { MAX_EDIT_INSTRUCTION, resolveEditImageModel } from '@/lib/image-edit-shared';
+import { isDeletableImageFilename } from '@/lib/generated-image-delete';
 import { applyDupoinImagePromptLocks, resolveDupoinLogoChoice, type DupoinLogoChoice } from '@/lib/dupoin-image-prompt';
 import { compositeDupoinInstagramChrome } from '@/lib/dupoin-ig-chrome';
 import { compositeDupoinLogo } from '@/lib/dupoin-logo-composite';
@@ -67,6 +70,8 @@ export interface ImageJobOptions {
   references: ParsedInputImage[];
   assets: ParsedInputImage[];
   assetNote: string;
+  /** Edit of an existing gallery image: the source is the only input image. */
+  edit?: { parentFileName: string; source: string; clean: boolean; instruction: string };
 }
 
 export async function POST(request: NextRequest) {
@@ -85,6 +90,7 @@ export async function POST(request: NextRequest) {
     prompt?: unknown; type?: unknown; brief?: unknown; model?: unknown; taskId?: unknown; aspectRatio?: unknown;
     includeSwipeLeft?: unknown; dupoinAcademy?: unknown; logo?: unknown; footer?: unknown; brandStyle?: unknown;
     referenceImages?: unknown; assetImages?: unknown; assetNote?: unknown;
+    editOf?: unknown;
   };
   try {
     body = await request.json();
@@ -97,9 +103,15 @@ export async function POST(request: NextRequest) {
   }
 
   const prompt = body.prompt.trim();
-  const type = typeof body.type === 'string' ? body.type : 'social-post';
-  const brief = typeof body.brief === 'string' ? body.brief : prompt;
-  const model = typeof body.model === 'string' && body.model.trim() ? body.model.trim() : DEFAULT_IMAGE_MODEL;
+  // Edit: `editOf` names a gallery image, `prompt` is the change to make.
+  const editOf = body.editOf === undefined || body.editOf === null || body.editOf === '' ? null : body.editOf;
+  if (editOf !== null && !isDeletableImageFilename(editOf)) return jsonError('Invalid image to edit', 400);
+  if (editOf !== null && prompt.length > MAX_EDIT_INSTRUCTION) return jsonError(`Keep the edit instruction under ${MAX_EDIT_INSTRUCTION} characters`, 400);
+  const type = editOf !== null ? 'generate-image' : typeof body.type === 'string' ? body.type : 'social-post';
+  const brief = editOf !== null ? prompt : typeof body.brief === 'string' ? body.brief : prompt;
+  const model = editOf !== null
+    ? resolveEditImageModel(body.model)
+    : typeof body.model === 'string' && body.model.trim() ? body.model.trim() : DEFAULT_IMAGE_MODEL;
   const taskId = typeof body.taskId === 'string' && body.taskId.trim() ? body.taskId.trim() : null;
   let aspectRatio: ImageAspectRatio;
   try {
@@ -107,9 +119,17 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     return jsonError(error instanceof Error ? error.message : 'Invalid image aspect ratio', 400);
   }
+  let edit: ImageJobOptions['edit'];
+  if (editOf !== null) {
+    const source = await loadEditSource(editOf).catch(() => null);
+    if (!source) return jsonError('That image is no longer available to edit', 404);
+    // The source frame decides the ratio, so the edit keeps its shape.
+    aspectRatio = nearestAspectRatio(source.width, source.height);
+    edit = { parentFileName: editOf, source: source.dataUrl, clean: source.clean, instruction: prompt };
+  }
   let uploads: { references: ParsedInputImage[]; assets: ParsedInputImage[] };
   try {
-    uploads = readInputImageLists(body);
+    uploads = editOf !== null ? { references: [], assets: [] } : readInputImageLists(body);
   } catch (error) {
     return jsonError(error instanceof Error ? error.message : 'Invalid uploaded image', 400);
   }
@@ -143,6 +163,7 @@ export async function POST(request: NextRequest) {
     references: uploads.references,
     assets: uploads.assets,
     assetNote: typeof body.assetNote === 'string' ? body.assetNote.slice(0, 500) : '',
+    ...(edit ? { edit } : {}),
   });
 
   return NextResponse.json({ jobId: job.id, status: job.status }, { status: 202 });
@@ -189,13 +210,17 @@ async function runImageJob(job: ImageJob, options: ImageJobOptions) {
   // fall back to the default image model, before anything is shown or sent.
   const safeModel = resolveImageModel(model);
   const paid = isPaidImageModel(safeModel);
-  const hasUploads = options.references.length + options.assets.length > 0;
+  const edit = options.edit;
+  const hasUploads = Boolean(edit) || options.references.length + options.assets.length > 0;
   const enabled = await enabledImageIds();
   // An enabled catalog model wins; otherwise the free OpenRouter backup covers
   // an Antigravity quota hit while it is still offered. The Recraft backup is
   // text-only, so it is skipped when the user uploaded visual references or
   // assets: a result that ignores them would look like success but is not.
-  const fallback = paid ? null : (nextImageFallback(safeModel, enabled) ?? (hasUploads ? null : freeImageBackupModel()));
+  // An edit only falls back to another edit-capable model (GPT Image 2).
+  const fallback = paid ? null : edit
+    ? (safeModel !== DEFAULT_IMAGE_MODEL ? DEFAULT_IMAGE_MODEL : null)
+    : (nextImageFallback(safeModel, enabled) ?? (hasUploads ? null : freeImageBackupModel()));
 
   try {
     imageJobs.update(job.id, job.ownerId, {
@@ -209,9 +234,11 @@ async function runImageJob(job: ImageJob, options: ImageJobOptions) {
     const footer = type === 'social-post' ? true : options.footer;
     const brandStyle = type === 'social-post' ? true : options.brandStyle;
     const academy = chrome && logo === 'academy';
-    const lockedPrompt = applyDupoinImagePromptLocks(prompt, aspectRatio, { includeSwipeLeft: swipeLeft, logo, footer, brandStyle });
+    const lockedPrompt = edit
+      ? applyDupoinImagePromptLocks(buildEditPrompt(edit.instruction, edit.clean), aspectRatio, { includeSwipeLeft: swipeLeft, logo, footer, brandStyle: false })
+      : applyDupoinImagePromptLocks(prompt, aspectRatio, { includeSwipeLeft: swipeLeft, logo, footer, brandStyle });
 
-    const prepared = await prepareModelInputImages({
+    const prepared = edit ? { images: [edit.source], sheet: false, referenceCount: 0, assetCount: 0 } : await prepareModelInputImages({
       references: options.references,
       assets: options.assets,
       maxInputImages: maxInputImagesFor(safeModel),
@@ -224,7 +251,9 @@ async function runImageJob(job: ImageJob, options: ImageJobOptions) {
     imageJobs.update(job.id, job.ownerId, {
       status: 'generating',
       progress: 30,
-      message: `🤖 Generating image with ${imageModelLabel(safeModel)}${prepared.images.length ? ` using ${prepared.referenceCount + prepared.assetCount} uploaded image(s)` : ''} (30-90s)...`,
+      message: edit
+        ? `🤖 Editing ${edit.parentFileName} with ${imageModelLabel(safeModel)} (30-90s)...`
+        : `🤖 Generating image with ${imageModelLabel(safeModel)}${prepared.images.length ? ` using ${prepared.referenceCount + prepared.assetCount} uploaded image(s)` : ''} (30-90s)...`,
     });
 
     let paidFallbackMessage: string | undefined;
@@ -312,6 +341,7 @@ async function runImageJob(job: ImageJob, options: ImageJobOptions) {
     // logo / footer / pill are composited once, at the final canvas size.
     const sized = await ensureMinLongSide(imageBytes);
     imageBytes = sized.bytes;
+    const preChrome = sized.bytes;
 
     // Social Post / Generate Image wear Bayu's Instagram chrome: the left
     // header lockup (or the centered Academy logo, or no logo) plus the white
@@ -326,6 +356,12 @@ async function runImageJob(job: ImageJob, options: ImageJobOptions) {
     const fileName = `${sopName}.png`;
     if (fs.existsSync(path.join(directory, fileName))) throw new Error('Image file name collision; please try again.');
     fs.writeFileSync(path.join(directory, fileName), imageBytes);
+    // Pre-chrome original for later edits (data/generated-image-originals/<file>.jpg).
+    try {
+      await saveGeneratedImageOriginal(fileName, preChrome, cwd);
+    } catch (error) {
+      console.error('[generate-image] Failed to save pre-chrome original:', error instanceof Error ? error.message : error);
+    }
 
     const usage = parseImageGenerationUsage(payload);
     const costUsd = payload.provider === 'openrouter' && Number.isFinite(usage.cost) ? usage.cost : null;
@@ -349,6 +385,7 @@ async function runImageJob(job: ImageJob, options: ImageJobOptions) {
       width: sized.width,
       height: sized.height,
       ...(sized.upscaledFrom ? { upscaledFrom: sized.upscaledFrom } : {}),
+      ...(edit ? { parentFileName: edit.parentFileName } : {}),
       ...(fallbackFrom ? { fallbackFrom, fallbackMessage: finalFallbackMessage } : {}),
       ...(quota ? { quota } : {}),
     };
@@ -400,6 +437,7 @@ async function runImageJob(job: ImageJob, options: ImageJobOptions) {
           paid: result.paid === true,
           costUsd,
           taskId,
+          ...(edit ? { parentFileName: edit.parentFileName, editInstruction: edit.instruction } : {}),
           ...(fallbackFrom ? { fallbackFrom, fallbackMessage: finalFallbackMessage } : {}),
           generatedAt: new Date().toISOString(),
         }, cwd);

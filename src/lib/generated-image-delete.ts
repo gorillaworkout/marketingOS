@@ -7,8 +7,8 @@ import { imageFileBasename, linkedGeneratedImages } from '@/lib/image-remix';
  * Server-only. Permanent delete of one generated image from the Image Gallery.
  *
  * Removes the PNG in public/outputs/images, its Generate Image meta sidecar,
- * the pre-chrome original (data/generated-image-originals, written by the
- * edit flow), and every reference in tasks.output_data (images[] / imageUrl).
+ * the pre-chrome original (data/generated-image-originals/<file>.jpg, written
+ * for every image since the edit flow), and every reference in tasks.output_data (images[] / imageUrl).
  * There is no trash: Bayu chose permanent delete behind a confirm dialog.
  *
  * Who may delete: the owner (task user_id or meta userId) or an admin. An
@@ -133,7 +133,9 @@ export async function deleteGeneratedImage(input: {
   const imagePath = resolveInside(generatedImagesDir(cwd), filename);
   const metaPath = resolveInside(generatedImageMetaDir(cwd), `${filename}.json`);
   const originalPath = resolveInside(generatedImageOriginalsDir(cwd), filename);
-  if (!imagePath || !metaPath || !originalPath) return { ok: false, status: 400, error: 'Invalid image file name.' };
+  // The edit flow stores the pre-chrome original as `<file>.jpg`.
+  const originalJpegPath = resolveInside(generatedImageOriginalsDir(cwd), `${filename}.jpg`);
+  if (!imagePath || !metaPath || !originalPath || !originalJpegPath) return { ok: false, status: 400, error: 'Invalid image file name.' };
 
   const candidates = await store.tasksReferencing(filename);
   const linked = candidates
@@ -159,7 +161,7 @@ export async function deleteGeneratedImage(input: {
   }
 
   let removedFiles = 0;
-  for (const file of [imagePath, metaPath, originalPath]) {
+  for (const file of [imagePath, metaPath, originalPath, originalJpegPath]) {
     if (fs.existsSync(file)) {
       fs.rmSync(file, { force: true });
       removedFiles += 1;

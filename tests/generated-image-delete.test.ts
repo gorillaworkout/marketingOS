@@ -79,7 +79,7 @@ test('pruneImageFromTaskOutput removes every reference and moves imageUrl', () =
 test('owner delete removes PNG, meta, pre-chrome original and task entries', async () => {
   const cwd = sandbox();
   fs.writeFileSync(path.join(generatedImagesDir(cwd), FILE), 'png');
-  fs.writeFileSync(path.join(generatedImageOriginalsDir(cwd), FILE), 'raw');
+  fs.writeFileSync(path.join(generatedImageOriginalsDir(cwd), `${FILE}.jpg`), 'raw');
   fs.writeFileSync(path.join(generatedImageMetaDir(cwd), `${FILE}.json`), JSON.stringify({ fileName: FILE, userId: 'u1', prompt: 'p' }));
   const keep = 'DUPOIN_Keep_GenImage_V1_20261126.png';
   fs.writeFileSync(path.join(generatedImagesDir(cwd), keep), 'png');
@@ -91,7 +91,7 @@ test('owner delete removes PNG, meta, pre-chrome original and task entries', asy
   const outcome = await deleteGeneratedImage({ actor: { id: 'u1', role: 'member' }, filename: FILE, store, cwd });
   assert.deepEqual(outcome, { ok: true, removedFiles: 3, updatedTasks: 1 });
   assert.equal(fs.existsSync(path.join(generatedImagesDir(cwd), FILE)), false);
-  assert.equal(fs.existsSync(path.join(generatedImageOriginalsDir(cwd), FILE)), false);
+  assert.equal(fs.existsSync(path.join(generatedImageOriginalsDir(cwd), `${FILE}.jpg`)), false);
   assert.equal(fs.existsSync(path.join(generatedImageMetaDir(cwd), `${FILE}.json`)), false);
   assert.equal(fs.existsSync(path.join(generatedImagesDir(cwd), keep)), true);
   assert.deepEqual(updates.map(u => u.id), ['t1']);
