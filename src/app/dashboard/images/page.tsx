@@ -2,6 +2,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button, EmptyState, FilterGroup, LoadingState, Panel, PageHeader, PageStack, StatusBadge, Toolbar } from '@/components/ui/dashboard';
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { imageRemixHref, imageRemixTarget, writeImageRemix } from '@/lib/image-remix';
 
 interface ImageItem {
@@ -23,7 +24,15 @@ interface ImageItem {
   logo?: 'dupoin' | 'academy' | 'none' | null;
   footer?: boolean | null;
   linked: boolean;
+  /** Owner or admin: the server re-checks on DELETE. */
+  canDelete?: boolean;
+  mine?: boolean;
 }
+
+const SCOPES = [
+  { key: 'all', label: 'All' },
+  { key: 'mine', label: 'Mine' },
+] as const;
 
 const FILTERS = [
   { key: 'all', label: 'All images' },
@@ -37,34 +46,90 @@ export default function ImagesPage() {
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('all');
+  const [scope, setScope] = useState<'all' | 'mine'>('all');
+  const [pendingDelete, setPendingDelete] = useState<ImageItem | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [offset, setOffset] = useState(0);
   const [lightbox, setLightbox] = useState<ImageItem | null>(null);
   const [copiedUrl, setCopiedUrl] = useState<string | null>(null);
   const [copiedPrompt, setCopiedPrompt] = useState<string | null>(null);
   const limit = 20;
 
-  const fetchImages = useCallback(async () => {
-    setLoading(true);
-    try {
-      const res = await fetch(`/api/images?filter=${filter}&limit=${limit}&offset=${offset}`);
-      const data = await res.json();
-      if (data.images) {
-        setImages(data.images);
-        setTotal(data.total);
+  const [reloadKey, setReloadKey] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch(`/api/images?filter=${filter}&scope=${scope}&limit=${limit}&offset=${offset}`);
+        const data = await res.json();
+        if (!cancelled && data.images) {
+          setImages(data.images);
+          setTotal(data.total);
+        }
+      } catch {
+        // ignore
       }
-    } catch {
-      // ignore
-    }
-    setLoading(false);
-  }, [filter, offset]);
+      if (!cancelled) setLoading(false);
+    })();
+    return () => { cancelled = true; };
+  }, [filter, scope, offset, reloadKey]);
 
-  useEffect(() => {
-    fetchImages();
-  }, [fetchImages]);
+  /** Reload the current page (Refresh button, after a delete). */
+  const fetchImages = useCallback(() => {
+    setLoading(true);
+    setReloadKey(key => key + 1);
+  }, []);
 
-  useEffect(() => {
+  const changeFilter = (next: string) => {
+    if (next === filter) return;
+    setLoading(true);
     setOffset(0);
-  }, [filter]);
+    setFilter(next);
+  };
+
+  const changeScope = (next: 'all' | 'mine') => {
+    if (next === scope) return;
+    setLoading(true);
+    setOffset(0);
+    setScope(next);
+  };
+
+  const changeOffset = (next: number) => {
+    setLoading(true);
+    setOffset(next);
+  };
+
+  const askDelete = (img: ImageItem) => {
+    setDeleteError(null);
+    setPendingDelete(img);
+  };
+
+  const confirmDelete = async () => {
+    if (!pendingDelete) return;
+    setDeleting(true);
+    setDeleteError(null);
+    try {
+      const res = await fetch(`/api/generated-images/${encodeURIComponent(pendingDelete.filename)}`, { method: 'DELETE' });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setDeleteError(typeof data.error === 'string' ? data.error : 'The image could not be deleted.');
+        return;
+      }
+      const removed = pendingDelete.filename;
+      setPendingDelete(null);
+      setLightbox(current => (current?.filename === removed ? null : current));
+      setNotice('Image deleted.');
+      setTimeout(() => setNotice(null), 3000);
+      fetchImages();
+    } catch {
+      setDeleteError('The image could not be deleted.');
+    } finally {
+      setDeleting(false);
+    }
+  };
 
   const handleDownload = async (img: ImageItem) => {
     try {
@@ -140,12 +205,13 @@ export default function ImagesPage() {
   };
 
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
+    if (pendingDelete) return;
     if (e.key === 'Escape') setLightbox(null);
     if (!lightbox) return;
     const idx = images.findIndex(i => i.filename === lightbox.filename);
     if (e.key === 'ArrowRight' && idx < images.length - 1) setLightbox(images[idx + 1]);
     if (e.key === 'ArrowLeft' && idx > 0) setLightbox(images[idx - 1]);
-  }, [lightbox, images]);
+  }, [lightbox, images, pendingDelete]);
 
   useEffect(() => {
     document.addEventListener('keydown', handleKeyDown);
@@ -170,10 +236,26 @@ export default function ImagesPage() {
 
       {/* Filters */}
       <Toolbar><FilterGroup>
+        <div role="group" aria-label="Owner" data-testid="gallery-scope" className="mr-2 inline-flex rounded-lg border border-[var(--mos-border)] p-0.5">
+          {SCOPES.map(option => (
+            <button
+              key={option.key}
+              type="button"
+              aria-pressed={scope === option.key}
+              data-testid={`gallery-scope-${option.key}`}
+              onClick={() => changeScope(option.key)}
+              className={`px-3 py-1.5 rounded-md text-sm transition-colors ${
+                scope === option.key ? 'bg-[var(--mos-accent)] text-white' : 'text-[var(--mos-text-muted)] hover:text-white'
+              }`}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
         {FILTERS.map(f => (
           <button
             key={f.key}
-            onClick={() => setFilter(f.key)}
+            onClick={() => changeFilter(f.key)}
             className={`px-4 py-2 rounded-lg text-sm transition-colors ${
               filter === f.key
                 ? 'bg-blue-600 text-white'
@@ -185,6 +267,8 @@ export default function ImagesPage() {
         ))}
       </FilterGroup></Toolbar>
 
+      {notice && <p role="status" className="text-sm text-emerald-400">{notice}</p>}
+
       {/* Loading */}
       {loading && (
         <LoadingState label="Loading images" />
@@ -192,7 +276,7 @@ export default function ImagesPage() {
 
       {/* Empty State */}
       {!loading && images.length === 0 && (
-        <Panel padding="none"><EmptyState title="No images generated yet" description="Generate images from the Social Post or Image Generator to see them here." /></Panel>
+        <Panel padding="none"><EmptyState title={scope === 'mine' ? 'You have no images yet' : 'No images generated yet'} description="Generate images on Generate image to see them here." /></Panel>
       )}
 
       {/* Image Grid */}
@@ -260,6 +344,17 @@ export default function ImagesPage() {
                     >
                       {copiedUrl === img.filename ? 'Copied' : 'Copy URL'}
                     </button>
+                    {img.canDelete && (
+                      <button
+                        type="button"
+                        data-testid="gallery-delete"
+                        aria-label={`Delete ${img.filename}`}
+                        onClick={() => askDelete(img)}
+                        className="px-2.5 bg-red-500/10 hover:bg-red-500/20 text-red-300 text-xs py-1.5 rounded-lg transition-colors"
+                      >
+                        Delete
+                      </button>
+                    )}
                   </div>
                 </div>
               </Panel>
@@ -270,7 +365,7 @@ export default function ImagesPage() {
           {totalPages > 1 && (
             <div className="flex items-center justify-center gap-2 mt-8">
               <button
-                onClick={() => setOffset(Math.max(0, offset - limit))}
+                onClick={() => changeOffset(Math.max(0, offset - limit))}
                 disabled={offset === 0}
                 className="px-3 py-2 rounded-lg text-sm bg-[var(--mos-raised)] text-[var(--mos-text-muted)] hover:text-white hover:bg-[var(--mos-raised)] disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
               >
@@ -280,7 +375,7 @@ export default function ImagesPage() {
                 Page {currentPage} of {totalPages}
               </span>
               <button
-                onClick={() => setOffset(offset + limit)}
+                onClick={() => changeOffset(offset + limit)}
                 disabled={offset + limit >= total}
                 className="px-3 py-2 rounded-lg text-sm bg-[var(--mos-raised)] text-[var(--mos-text-muted)] hover:text-white hover:bg-[var(--mos-raised)] disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
               >
@@ -405,11 +500,37 @@ export default function ImagesPage() {
                     Re-generate
                   </button>
                 )}
+                {lightbox.canDelete && (
+                  <button
+                    type="button"
+                    data-testid="gallery-lightbox-delete"
+                    onClick={() => askDelete(lightbox)}
+                    className="bg-red-500/10 hover:bg-red-500/20 text-red-300 text-xs px-4 py-2 rounded-lg transition-colors"
+                  >
+                    Delete
+                  </button>
+                )}
               </div>
             </div>
           </div>
         </div>
       )}
+      <ConfirmDialog
+        open={pendingDelete !== null}
+        title="Delete this image permanently?"
+        confirmLabel="Delete permanently"
+        busyLabel="Deleting…"
+        busy={deleting}
+        error={deleteError}
+        onConfirm={() => void confirmDelete()}
+        onCancel={() => { if (!deleting) setPendingDelete(null); }}
+        testId="gallery-delete-dialog"
+      >
+        <p>
+          <span className="font-mono text-xs text-[var(--mos-text-secondary)] break-all">{pendingDelete?.filename}</span>
+        </p>
+        <p className="mt-2">The file and its saved prompt are removed for everyone, and it disappears from any Social Post it was attached to. This cannot be undone.</p>
+      </ConfirmDialog>
     </PageStack>
   );
 }

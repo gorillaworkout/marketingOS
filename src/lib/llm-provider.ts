@@ -18,6 +18,7 @@ import {
 import { scrubSecrets } from '@/lib/llm-crypto';
 import { authCooldownModels, authFailoverNotice, clearAuthExpired, isAuthFailure, isAuthFailureMessage, noteAuthExpired } from '@/lib/llm-auth';
 import { DEFAULT_IMAGE_MODEL, imageModelLabel } from '@/lib/image-models';
+import { IMAGE_2K_OUTPUT_ENABLED } from '@/lib/image-aspect-ratio';
 import { parseGatewayCompletion } from '@/lib/gateway-response';
 import { openRouterChainForTier, tierForFeature } from '@/lib/model-tiers';
 import {
@@ -534,6 +535,17 @@ export function openRouterInputReferences(inputImages: readonly string[] | undef
 }
 
 /**
+ * OpenRouter `resolution` for a paid Google image id. 1K while 2K output is
+ * off (same as before). With it on, Gemini 3.x and Nano Banana 2.x ask for
+ * 2K natively; Gemini 2.5 has no 2K tier.
+ */
+export function openRouterImageResolution(model: string, enabled: boolean = IMAGE_2K_OUTPUT_ENABLED): '1K' | '2K' {
+  if (!enabled) return '1K';
+  const id = model.trim().toLowerCase();
+  return /^google\/(gemini-3|gemini-nano-banana-2)/.test(id) ? '2K' : '1K';
+}
+
+/**
  * 9router's Antigravity image adapter reads one input image from `image`
  * (data URI) and also accepts `images[0]`. Callers merge several uploads into
  * one reference sheet before this point, so only the first entry is sent.
@@ -576,8 +588,9 @@ export async function postPaidOpenRouterImage(input: {
       prompt: input.prompt,
       n: 1,
       ...(input.aspectRatio ? { aspect_ratio: input.aspectRatio } : {}),
-      // Keep the per-image charge near the estimate shown in the UI.
-      ...(isOpenAi ? { quality: 'medium' } : { resolution: '1K' }),
+      // Keep the per-image charge near the estimate shown in the UI (1K /
+      // medium). openRouterImageResolution only returns 2K when 2K output is on.
+      ...(isOpenAi ? { quality: 'medium' } : { resolution: openRouterImageResolution(input.model) }),
       ...(references ? { input_references: references } : {}),
     },
     referer: input.referer || 'https://marketingos.local',

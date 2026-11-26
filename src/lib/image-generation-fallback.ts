@@ -214,3 +214,9 @@ export async function generateWithAntigravityCapacityFallback<T>(
     }
   }
 }
+
+/** HTTP 400 that names the size / resolution / dimensions. */
+export function isSizeRefusal(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error ?? '');
+  return /\b400\b/.test(message) && /\b(size|resolution|dimension|dimensions|width|height)\b/i.test(message);
+}

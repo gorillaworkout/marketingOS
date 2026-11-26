@@ -4,7 +4,8 @@ import { hasGenerationFeature } from '@/lib/authorization';
 import { queryOne, execute } from '@/lib/database';
 import { rateLimit } from '@/lib/rate-limit';
 import { createImageJobStore, type ImageJob, type ImageJobResult } from '@/lib/image-job-status';
-import { getImageGenerationSpec, parseImageAspectRatio, type ImageAspectRatio } from '@/lib/image-aspect-ratio';
+import { gatewayImageSize, legacyGatewayImageSize, outputMinLongSide, parseImageAspectRatio, type ImageAspectRatio } from '@/lib/image-aspect-ratio';
+import { ensureMinLongSide } from '@/lib/image-upscale';
 import { applyDupoinImagePromptLocks, resolveDupoinLogoChoice, type DupoinLogoChoice } from '@/lib/dupoin-image-prompt';
 import { compositeDupoinInstagramChrome } from '@/lib/dupoin-ig-chrome';
 import { compositeDupoinLogo } from '@/lib/dupoin-logo-composite';
@@ -12,6 +13,7 @@ import {
   generateWithAntigravityCapacityFallback,
   imageQuotaNotice,
   isCapacityOrRateLimitFailure,
+  isSizeRefusal,
   isUpstreamAccountDisabledFailure,
   nextImageFallback,
   parseImageApiErrorStatus,
@@ -21,6 +23,7 @@ import { postImage, postPaidOpenRouterImage } from '@/lib/llm-provider';
 import { getLlmSettings } from '@/lib/llm-provider-store';
 import { prepareModelInputImages, readInputImageLists, referencePromptBlock, type ParsedInputImage } from '@/lib/image-reference-inputs';
 import { writeGeneratedImageMeta } from '@/lib/generated-image-meta';
+import { nextSopVersion } from '@/lib/generated-images';
 import {
   allFreeModelsExhaustedText,
   allImageModelsExhausted,
@@ -199,7 +202,6 @@ async function runImageJob(job: ImageJob, options: ImageJobOptions) {
       status: 'generating', progress: 20, message: hasUploads ? '🖼️ Preparing your reference images...' : `🤖 Generating image with ${imageModelLabel(safeModel)} (30-90s)...`,
     });
 
-    const generationSpec = getImageGenerationSpec(aspectRatio);
     const chrome = CHROME_TYPES.has(type);
     const swipeLeft = chrome && options.includeSwipeLeft;
     // Social Post keeps its old behaviour: Dupoin or Academy header plus footer, always.
@@ -250,7 +252,7 @@ async function runImageJob(job: ImageJob, options: ImageJobOptions) {
           singleInputOnly: true,
         });
         const freeBlock = referencePromptBlock({ ...freeInputs, assetNote: options.assetNote });
-        const payload = await requestGatewayImage(DEFAULT_IMAGE_MODEL, freeBlock ? `${freeBlock}\n\n${lockedPrompt}` : lockedPrompt, generationSpec, aspectRatio, freeInputs.images);
+        const payload = await requestGatewayImage(DEFAULT_IMAGE_MODEL, freeBlock ? `${freeBlock}\n\n${lockedPrompt}` : lockedPrompt, aspectRatio, freeInputs.images);
         return { payload, usedModel: DEFAULT_IMAGE_MODEL, fallbackFrom: safeModel, fallbackMessage: paidFallbackMessage };
       }
     };
@@ -259,7 +261,7 @@ async function runImageJob(job: ImageJob, options: ImageJobOptions) {
       ? await runPaid()
       : await generateWithAntigravityCapacityFallback(
         safeModel,
-        (attemptModel) => requestGatewayImage(attemptModel, gatewayPrompt, generationSpec, aspectRatio, prepared.images),
+        (attemptModel) => requestGatewayImage(attemptModel, gatewayPrompt, aspectRatio, prepared.images),
         {
           ...(fallback ? { fallbackModel: fallback } : { fallbackModel: null }),
           onAttemptError: recordQuotaFailure,
@@ -306,6 +308,12 @@ async function runImageJob(job: ImageJob, options: ImageJobOptions) {
 
     if (imageBytes.length < 10_000) throw new Error('Image API returned a suspiciously small image.');
 
+    // 2K floor (only when IMAGE_2K_OUTPUT_ENABLED): upscale (lanczos3) BEFORE
+    // the chrome so the logo / footer / pill are composited once, at the final
+    // canvas size. While 2K is off the floor is 0: bytes pass through unchanged.
+    const sized = await ensureMinLongSide(imageBytes, outputMinLongSide());
+    imageBytes = sized.bytes;
+
     // Social Post / Generate Image wear Bayu's Instagram chrome: the left
     // header lockup (or the centered Academy logo, or no logo) plus the white
     // regulatory footer when it is on. A lower-right wordmark on the same
@@ -317,6 +325,7 @@ async function runImageJob(job: ImageJob, options: ImageJobOptions) {
     const directory = path.join(cwd, 'public', 'outputs', 'images');
     if (!fs.existsSync(directory)) fs.mkdirSync(directory, { recursive: true });
     const fileName = `${sopName}.png`;
+    if (fs.existsSync(path.join(directory, fileName))) throw new Error('Image file name collision; please try again.');
     fs.writeFileSync(path.join(directory, fileName), imageBytes);
 
     const usage = parseImageGenerationUsage(payload);
@@ -338,6 +347,9 @@ async function runImageJob(job: ImageJob, options: ImageJobOptions) {
       costUsd,
       referenceCount: prepared.referenceCount,
       assetCount: prepared.assetCount,
+      width: sized.width,
+      height: sized.height,
+      ...(sized.upscaledFrom ? { upscaledFrom: sized.upscaledFrom } : {}),
       ...(fallbackFrom ? { fallbackFrom, fallbackMessage: finalFallbackMessage } : {}),
       ...(quota ? { quota } : {}),
     };
@@ -361,6 +373,9 @@ async function runImageJob(job: ImageJob, options: ImageJobOptions) {
       brandStyle,
       referenceCount: prepared.referenceCount,
       assetCount: prepared.assetCount,
+      width: sized.width,
+      height: sized.height,
+      ...(sized.upscaledFrom ? { upscaledFrom: sized.upscaledFrom } : {}),
       ...(costUsd !== null ? { costUsd } : {}),
       ...(fallbackFrom ? { fallbackFrom, fallbackMessage: finalFallbackMessage } : {}),
     };
@@ -458,20 +473,30 @@ type GatewayImagePayload = {
 async function requestGatewayImage(
   model: string,
   gatewayPrompt: string,
-  generationSpec: { size: string },
   aspectRatio: ImageAspectRatio,
   inputImages: string[] = [],
 ): Promise<GatewayImagePayload> {
   // Dupoin keeps POST /images/generations. OpenRouter uses POST /api/v1/images.
   // Uploaded references/assets ride along as real image input.
-  return postImage({
+  const generationSpec = { size: gatewayImageSize(model, aspectRatio) };
+  const send = (size: string) => postImage({
     model,
     prompt: gatewayPrompt,
-    size: generationSpec.size,
+    size,
     aspectRatio,
     ...(inputImages.length ? { inputImages } : {}),
     timeoutMs: 240_000,
   });
+  const legacy = legacyGatewayImageSize(aspectRatio);
+  try {
+    return await send(generationSpec.size);
+  } catch (error) {
+    // A model that refuses the 2K size gets one retry at the classic size; the
+    // result is upscaled to 2K afterwards. Every other failure is unchanged.
+    if (generationSpec.size === legacy || !isSizeRefusal(error)) throw error;
+    console.warn(`[generate-image] ${model} refused size ${generationSpec.size}; retrying at ${legacy}`);
+    return send(legacy);
+  }
 }
 
 /**
@@ -561,6 +586,9 @@ async function recordImageOnTask(
     brandStyle?: boolean;
     referenceCount?: number;
     assetCount?: number;
+    width?: number;
+    height?: number;
+    upscaledFrom?: string;
     costUsd?: number;
     fallbackFrom?: string;
     fallbackMessage?: string;
@@ -636,6 +664,6 @@ function generateSOPFileName(brief: string, type: string): string {
   const date = new Date().toISOString().split('T')[0].replace(/-/g, '');
   const directory = path.join(process.cwd(), 'public', 'outputs', 'images');
   const baseName = `DUPOIN_${contentName}_${fileType}`;
-  const version = fs.existsSync(directory) ? fs.readdirSync(directory).filter(file => file.startsWith(baseName)).length + 1 : 1;
-  return `DUPOIN_${contentName}_${fileType}_V${version}_${date}`;
+  const existing = fs.existsSync(directory) ? fs.readdirSync(directory) : [];
+  return `DUPOIN_${contentName}_${fileType}_V${nextSopVersion(existing, baseName)}_${date}`;
 }

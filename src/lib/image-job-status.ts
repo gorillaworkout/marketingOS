@@ -33,6 +33,11 @@ export interface ImageJobResult {
   costUsd?: number | null;
   referenceCount?: number;
   assetCount?: number;
+  /** Delivered pixel size (long side >= 2048). */
+  width?: number;
+  height?: number;
+  /** "WxH" of the model output when it was upscaled to 2K. */
+  upscaledFrom?: string;
 }
 
 export interface ImageJob {

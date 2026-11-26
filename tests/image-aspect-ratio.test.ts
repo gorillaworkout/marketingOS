@@ -71,7 +71,8 @@ test('route threads ratio through gateway request, job result, and task history'
   assert.match(route, /runImageJob\([\s\S]*aspectRatio/);
   assert.match(route, /applyDupoinImagePromptLocks\(prompt, aspectRatio, \{ includeSwipeLeft: swipeLeft, logo, footer, brandStyle \}\)/);
   assert.match(route, /prompt: gatewayPrompt/);
-  assert.match(route, /size: generationSpec\.size/);
+  assert.match(route, /generationSpec = \{ size: gatewayImageSize\(model, aspectRatio\) \}/);
+  assert.match(route, /send\(generationSpec\.size\)/);
   assert.match(route, /result: ImageJobResult = \{[\s\S]*aspectRatio/);
   assert.match(route, /recordImageOnTask\([\s\S]*aspectRatio/);
   assert.match(status, /aspectRatio\?: ImageAspectRatio/);
