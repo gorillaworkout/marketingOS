@@ -31,16 +31,39 @@ test('dates: WIB today, week (Mon-Sun), month, custom range', () => {
   assert.deepEqual(periodRange('custom', '2026-11-24', '2026-11-01'), { from: '2026-11-01', to: '2026-11-24' });
 });
 
-test('daily entry validation: present needs every count, leave makes them optional, no future dates', () => {
+test('daily entry validation: present allows blank counts as 0 if at least one is filled, leave makes them optional, no future dates', () => {
   const counts = Object.fromEntries(COUNT_FIELDS.map(f => [f.key, '3']));
   const ok = parseDailyEntryInput({ date: '2026-11-24', status: 'present', ...counts, followUpMinutes: '', frequentQuestion: '  How to deposit? ' }, '2026-11-24');
   assert.ok('value' in ok);
   if ('value' in ok) { assert.equal(ok.value.imReception, 3); assert.equal(ok.value.followUpMinutes, 4); assert.equal(ok.value.frequentQuestion, 'How to deposit?'); }
-  assert.match((parseDailyEntryInput({ date: '2026-11-24', status: 'present' }, '2026-11-24') as { error: string }).error, /required/);
+
+  assert.equal((parseDailyEntryInput({ date: '2026-11-24', status: 'present' }, '2026-11-24') as { error: string }).error, 'Fill in at least one number before saving.');
+  assert.equal((parseDailyEntryInput({ date: '2026-11-24', status: 'present', ...Object.fromEntries(COUNT_FIELDS.map(f => [f.key, ''])) }, '2026-11-24') as { error: string }).error, 'Fill in at least one number before saving.');
+
+  const partial = parseDailyEntryInput({ date: '2026-11-24', status: 'present', imReception: '5' }, '2026-11-24');
+  assert.ok('value' in partial);
+  if ('value' in partial) {
+    assert.equal(partial.value.imReception, 5);
+    assert.equal(partial.value.emailReception, 0);
+    assert.equal(partial.value.notFollowedUp, 0);
+    assert.ok(COUNT_FIELDS.every(f => partial.value[f.key] === (f.key === 'imReception' ? 5 : 0)));
+  }
+
+  const allZero = parseDailyEntryInput({ date: '2026-11-24', status: 'present', ...Object.fromEntries(COUNT_FIELDS.map(f => [f.key, 0])) }, '2026-11-24');
+  assert.ok('value' in allZero);
+  if ('value' in allZero) assert.ok(COUNT_FIELDS.every(f => allZero.value[f.key] === 0));
+
+  const existing = parseDailyEntryInput({ date: '2026-11-24', status: 'present', ...counts, imReception: '', followUpMinutes: 4 }, '2026-11-24');
+  assert.ok('value' in existing && existing.value.imReception === 0 && existing.value.callReception === 3);
+
   const sick = parseDailyEntryInput({ date: '2026-11-24', status: 'sick' }, '2026-11-24');
   assert.ok('value' in sick && sick.value.imReception === null);
+  const leave = parseDailyEntryInput({ date: '2026-11-24', status: 'annual_leave', imReception: '2' }, '2026-11-24');
+  assert.ok('value' in leave && leave.value.imReception === 2 && leave.value.emailReception === null);
+
   assert.match((parseDailyEntryInput({ date: '2026-11-25', status: 'sick' }, '2026-11-24') as { error: string }).error, /future/);
   assert.match((parseDailyEntryInput({ date: '2026-11-24', status: 'present', ...counts, callReception: '-1' }, '2026-11-24') as { error: string }).error, /Call Reception/);
+  assert.match((parseDailyEntryInput({ date: '2026-11-24', status: 'present', callReception: '-1' }, '2026-11-24') as { error: string }).error, /Call Reception/);
   assert.match((parseDailyEntryInput({ date: '2026-11-24', status: 'away' }, '2026-11-24') as { error: string }).error, /status/);
   assert.match((parseDailyEntryInput({ date: '2026-11-24', status: 'sick', followUpMinutes: 0 }, '2026-11-24') as { error: string }).error, /minutes/);
 });

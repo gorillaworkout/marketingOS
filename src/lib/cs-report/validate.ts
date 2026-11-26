@@ -19,8 +19,9 @@ function count(value: unknown): number | null | 'invalid' {
 }
 
 /**
- * Validates a daily entry from the form. Present: every count is required (0 allowed).
- * Sick / Annual Leave: counts are optional and stored as null when blank.
+ * Validates a daily entry from the form. Present: individual counts may be blank
+ * (stored as 0), but at least one count must be filled. Sick / Annual Leave:
+ * counts are optional and stored as null when blank.
  */
 export function parseDailyEntryInput(body: unknown, today: string): Result<DailyEntryInput> {
   if (!body || typeof body !== 'object') return { error: 'Invalid request body.' };
@@ -31,12 +32,18 @@ export function parseDailyEntryInput(body: unknown, today: string): Result<Daily
   const status = raw.status as CsStatus;
   if (!STATUSES.includes(status)) return { error: 'Pick a status: Present, Sick, or Annual Leave.' };
   const out: Partial<DailyEntryInput> = { date, status };
+  let anyPresentCount = false;
   for (const field of COUNT_FIELDS) {
     const parsed = count(raw[field.key]);
     if (parsed === 'invalid') return { error: `${field.label} must be a whole number of 0 or more.` };
-    if (parsed === null && status === 'present') return { error: `${field.label} is required (enter 0 if none).` };
-    out[field.key] = parsed;
+    if (status === 'present') {
+      if (parsed !== null) anyPresentCount = true;
+      out[field.key] = parsed ?? 0;
+    } else {
+      out[field.key] = parsed;
+    }
   }
+  if (status === 'present' && !anyPresentCount) return { error: 'Fill in at least one number before saving.' };
   const minutes = raw.followUpMinutes === undefined || raw.followUpMinutes === '' || raw.followUpMinutes === null ? DEFAULT_FOLLOW_UP_MINUTES : Number(raw.followUpMinutes);
   if (!Number.isInteger(minutes) || minutes < 1 || minutes > 240) return { error: 'Follow-up minutes must be between 1 and 240.' };
   out.followUpMinutes = minutes;

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Button, DataTableFrame, FormField, LoadingState, Panel, SectionHeader, Select, StatusBadge, TextArea, TextInput } from '@/components/ui/dashboard';
 import { CATEGORY_FIELDS, CHANNEL_FIELDS, DEFAULT_FOLLOW_UP_MINUTES, OTHER_COUNT_FIELDS, STATUS_LABELS, STATUSES, type CsStatus } from '@/lib/cs-report/fields';
+import { parseDailyEntryInput } from '@/lib/cs-report/validate';
 import { conversations } from '@/lib/cs-report/metrics';
 import { CsComplaintForm, deleteComplaintWithConfirm, draftFromComplaint, editedLabel, emptyComplaint, type ComplaintDraft } from './CsComplaintForm';
 import type { Complaint, DailyEntry } from '@/lib/cs-report/types';
@@ -89,6 +90,8 @@ export function CsDailyInputTab() {
     setSaving(true); setMessage(''); setError('');
     const payload: Record<string, unknown> = { date, status: form.status, unsolvedUids: form.unsolvedUids, followUpMinutes: form.followUpMinutes, frequentQuestion: form.frequentQuestion, difficultQuestion: form.difficultQuestion };
     for (const k of COUNT_KEYS) payload[k] = form[k] === '' ? null : Number(form[k]);
+    const parsed = parseDailyEntryInput(payload, data?.today ?? date);
+    if ('error' in parsed) { setSaving(false); setError(parsed.error); return; }
     if (data?.isAdmin && agentId) payload.agentId = agentId;
     const response = await fetch('/api/cs-report/entries', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
     const body = await response.json().catch(() => ({})) as { error?: string };
@@ -121,8 +124,8 @@ export function CsDailyInputTab() {
   };
 
   const numberField = (field: { key: string; label: string }) => (
-    <FormField key={field.key} label={field.label} required={!onLeave}>
-      <TextInput type="number" inputMode="numeric" min={0} step={1} value={form[field.key]} onChange={e => set(field.key, e.target.value)} placeholder={onLeave ? 'optional' : '0'} />
+    <FormField key={field.key} label={field.label}>
+      <TextInput type="number" inputMode="numeric" min={0} step={1} value={form[field.key]} onChange={e => set(field.key, e.target.value)} placeholder={onLeave ? 'optional' : ''} />
     </FormField>
   );
 
@@ -151,7 +154,7 @@ export function CsDailyInputTab() {
     {error && <Panel padding="compact"><p className="text-sm text-red-300">{error}</p></Panel>}
 
     <Panel>
-      <SectionHeader title="Status" description="On Sick or Annual Leave the numbers are optional." />
+      <SectionHeader title="Status" description={onLeave ? 'On Sick or Annual Leave the numbers are optional.' : 'Leave blank if 0. At least one number is required.'} />
       <div className="mt-3 flex flex-wrap gap-2">
         {STATUSES.map(s => <Button key={s} variant={form.status === s ? 'primary' : 'secondary'} size="sm" onClick={() => set('status', s)}>{STATUS_LABELS[s]}</Button>)}
       </div>
@@ -168,8 +171,8 @@ export function CsDailyInputTab() {
         <FormField label="Unsolved customer UIDs" hint="optional">
           <TextInput value={form.unsolvedUids} onChange={e => set('unsolvedUids', e.target.value)} placeholder="e.g. 1234567, 7654321" />
         </FormField>
-        <FormField label={`Not followed up within ${form.followUpMinutes || DEFAULT_FOLLOW_UP_MINUTES} minutes`} required={!onLeave}>
-          <TextInput type="number" min={0} step={1} value={form.notFollowedUp} onChange={e => set('notFollowedUp', e.target.value)} placeholder={onLeave ? 'optional' : '0'} />
+        <FormField label={`Not followed up within ${form.followUpMinutes || DEFAULT_FOLLOW_UP_MINUTES} minutes`}>
+          <TextInput type="number" min={0} step={1} value={form.notFollowedUp} onChange={e => set('notFollowedUp', e.target.value)} placeholder={onLeave ? 'optional' : ''} />
         </FormField>
         <FormField label="Follow-up threshold (minutes)" hint={`default ${DEFAULT_FOLLOW_UP_MINUTES}`}>
           <TextInput type="number" min={1} max={240} step={1} value={form.followUpMinutes} onChange={e => set('followUpMinutes', e.target.value)} />
