@@ -2,13 +2,43 @@ export const IMAGE_ASPECT_RATIOS = ['16:9', '4:3', '1:1', '3:4', '9:16'] as cons
 export type ImageAspectRatio = (typeof IMAGE_ASPECT_RATIOS)[number];
 export const DEFAULT_IMAGE_ASPECT_RATIO: ImageAspectRatio = '16:9';
 
-const GATEWAY_SIZES: Record<ImageAspectRatio, '1536x1024' | '1024x1024' | '1024x1536'> = {
+/** Shortest acceptable long side for a delivered image ("2K"). Smaller results are upscaled. */
+export const MIN_OUTPUT_LONG_SIDE = 2048;
+
+/**
+ * 2K-class sizes requested from the gateway. Every edge is a multiple of 16,
+ * at most 3840 px, ratio at most 3:1 and 0.65–8.3 MP: the GPT Image 2 size
+ * rules. 9router forwards `size` to the cx image tool and turns it into an
+ * aspect ratio (gcd) for ag/* Gemini, so these also give exact 16:9 / 4:3.
+ */
+const GATEWAY_SIZES: Record<ImageAspectRatio, string> = {
+  '16:9': '2048x1152',
+  '4:3': '2048x1536',
+  '1:1': '2048x2048',
+  '3:4': '1536x2048',
+  '9:16': '1152x2048',
+};
+
+/** The three classic GPT Image sizes: used by gpt-image-1.5 and as the retry when a 2K size is refused. */
+const LEGACY_GATEWAY_SIZES: Record<ImageAspectRatio, '1536x1024' | '1024x1024' | '1024x1536'> = {
   '16:9': '1536x1024',
   '4:3': '1536x1024',
   '1:1': '1024x1024',
   '3:4': '1024x1536',
   '9:16': '1024x1536',
 };
+
+/** Gateway models documented to accept only the classic sizes. */
+const LEGACY_SIZE_MODELS = new Set(['cx/gpt-image-1.5']);
+
+export function legacyGatewayImageSize(aspectRatio: ImageAspectRatio): string {
+  return LEGACY_GATEWAY_SIZES[aspectRatio];
+}
+
+/** Size sent to the gateway for this model: 2K-class unless the model only knows the classic sizes. */
+export function gatewayImageSize(model: string, aspectRatio: ImageAspectRatio): string {
+  return LEGACY_SIZE_MODELS.has(model.trim()) ? LEGACY_GATEWAY_SIZES[aspectRatio] : GATEWAY_SIZES[aspectRatio];
+}
 
 export function parseImageAspectRatio(value: unknown): ImageAspectRatio {
   if (value === undefined) return DEFAULT_IMAGE_ASPECT_RATIO;

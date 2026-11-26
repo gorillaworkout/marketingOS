@@ -1,19 +1,22 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { queryAll } from '@/lib/database';
-import { getSession } from '@/lib/auth';
+import { getAuthorizedUser } from '@/lib/auth';
 import { linkedGeneratedImages } from '@/lib/image-remix';
 import { readAllGeneratedImageMeta } from '@/lib/generated-image-meta';
 import fs from 'fs';
 import path from 'path';
 
 export async function GET(request: NextRequest) {
-  const auth = await getSession(request);
-  if (auth.error) return NextResponse.json({ error: auth.error }, { status: auth.status });
-  const userId = auth.userId;
+  const auth = await getAuthorizedUser(request);
+  if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status });
+  const userId = auth.id;
+  const isAdmin = auth.role === 'admin';
   const searchParams = request.nextUrl.searchParams;
   const limit = parseInt(searchParams.get('limit') || '50', 10);
   const offset = parseInt(searchParams.get('offset') || '0', 10);
   const filter = searchParams.get('filter') || 'all'; // 'all' | 'linked' | 'unlinked'
+  // 'mine' = images owned by the viewer (task user_id or Generate Image meta userId).
+  const scope = searchParams.get('scope') === 'mine' ? 'mine' : 'all';
 
   // 1. Scan filesystem for all images
   const imagesDir = path.join(process.cwd(), 'public', 'outputs', 'images');
@@ -136,6 +139,15 @@ export async function GET(request: NextRequest) {
     };
   });
 
+  // Owner or admin may delete (the DELETE route re-checks on the server).
+  let withAccess = allImages.map(img => ({
+    ...img,
+    mine: img.userId === userId,
+    canDelete: isAdmin || (img.userId !== null && img.userId === userId),
+  }));
+  if (scope === 'mine') withAccess = withAccess.filter(img => img.mine);
+  allImages = withAccess;
+
   // 4. Apply filter
   if (filter === 'linked') {
     allImages = allImages.filter(img => img.linked);
@@ -146,5 +158,5 @@ export async function GET(request: NextRequest) {
   const total = allImages.length;
   const paginated = allImages.slice(offset, offset + limit);
 
-  return NextResponse.json({ images: paginated, total, limit, offset });
+  return NextResponse.json({ images: paginated, total, limit, offset, scope, viewer: { id: userId, isAdmin } });
 }

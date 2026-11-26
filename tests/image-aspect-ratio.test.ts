@@ -25,16 +25,16 @@ test('rejects invalid ratio input at the server boundary', () => {
   assert.throws(() => parseImageAspectRatio(16), /Invalid image aspect ratio/);
 });
 
-test('maps ratios to supported gateway sizes and preserves exact composition intent', () => {
+test('maps ratios to 2K gateway sizes and preserves exact composition intent', () => {
   assert.deepEqual(getImageGenerationSpec('16:9'), {
-    size: '1536x1024',
+    size: '2048x1152',
     orientation: 'landscape',
-    promptSuffix: 'Compose the image in an exact 16:9 landscape aspect ratio (1536x1024); keep all essential subjects and text inside that frame.',
+    promptSuffix: 'Compose the image in an exact 16:9 landscape aspect ratio (2048x1152); keep all essential subjects and text inside that frame.',
   });
-  assert.equal(getImageGenerationSpec('4:3').size, '1536x1024');
-  assert.equal(getImageGenerationSpec('1:1').size, '1024x1024');
-  assert.equal(getImageGenerationSpec('3:4').size, '1024x1536');
-  assert.equal(getImageGenerationSpec('9:16').size, '1024x1536');
+  assert.equal(getImageGenerationSpec('4:3').size, '2048x1536');
+  assert.equal(getImageGenerationSpec('1:1').size, '2048x2048');
+  assert.equal(getImageGenerationSpec('3:4').size, '1536x2048');
+  assert.equal(getImageGenerationSpec('9:16').size, '1152x2048');
   for (const ratio of IMAGE_ASPECT_RATIOS) {
     const spec = getImageGenerationSpec(ratio);
     assert.match(spec.promptSuffix, new RegExp(`exact ${ratio.replace(':', '\\:')}`));
@@ -44,9 +44,9 @@ test('maps ratios to supported gateway sizes and preserves exact composition int
 
 test('withImageAspectPrompt bakes dropdown size into prompt text without stacking', () => {
   const first = withImageAspectPrompt('Premium Instagram advertising poster', '9:16');
-  assert.match(first, /exact 9:16 portrait aspect ratio \(1024x1536\)/);
+  assert.match(first, /exact 9:16 portrait aspect ratio \(1152x2048\)/);
   const second = withImageAspectPrompt(first, '1:1');
-  assert.match(second, /exact 1:1 square aspect ratio \(1024x1024\)/);
+  assert.match(second, /exact 1:1 square aspect ratio \(2048x2048\)/);
   assert.equal(second.includes(getImageGenerationSpec('9:16').promptSuffix), false);
   assert.equal(withImageAspectPrompt(second, '1:1'), second);
 });
@@ -71,7 +71,8 @@ test('route threads ratio through gateway request, job result, and task history'
   assert.match(route, /runImageJob\([\s\S]*aspectRatio/);
   assert.match(route, /applyDupoinImagePromptLocks\(prompt, aspectRatio, \{ includeSwipeLeft: swipeLeft, logo, footer, brandStyle \}\)/);
   assert.match(route, /prompt: gatewayPrompt/);
-  assert.match(route, /size: generationSpec\.size/);
+  assert.match(route, /generationSpec = \{ size: gatewayImageSize\(model, aspectRatio\) \}/);
+  assert.match(route, /send\(generationSpec\.size\)/);
   assert.match(route, /result: ImageJobResult = \{[\s\S]*aspectRatio/);
   assert.match(route, /recordImageOnTask\([\s\S]*aspectRatio/);
   assert.match(status, /aspectRatio\?: ImageAspectRatio/);

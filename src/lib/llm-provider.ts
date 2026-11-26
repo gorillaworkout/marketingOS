@@ -538,6 +538,15 @@ export function openRouterInputReferences(inputImages: readonly string[] | undef
  * (data URI) and also accepts `images[0]`. Callers merge several uploads into
  * one reference sheet before this point, so only the first entry is sent.
  */
+/**
+ * OpenRouter `resolution` for a paid Google image id. 2K is the delivery floor
+ * (long side >= 2048); only Gemini 3.x and Nano Banana 2.x offer it natively.
+ */
+export function openRouterImageResolution(model: string): '1K' | '2K' {
+  const id = model.trim().toLowerCase();
+  return /^google\/(gemini-3|gemini-nano-banana-2)/.test(id) ? '2K' : '1K';
+}
+
 export function gatewayImageInputFields(inputImages: readonly string[] | undefined): { image?: string; images?: string[] } {
   const first = (inputImages || []).find(url => typeof url === 'string' && url.length > 0);
   return first ? { image: first, images: [first] } : {};
@@ -576,8 +585,9 @@ export async function postPaidOpenRouterImage(input: {
       prompt: input.prompt,
       n: 1,
       ...(input.aspectRatio ? { aspect_ratio: input.aspectRatio } : {}),
-      // Keep the per-image charge near the estimate shown in the UI.
-      ...(isOpenAi ? { quality: 'medium' } : { resolution: '1K' }),
+      // OpenAI ids keep medium quality (upscaled to 2K afterwards when needed).
+      // Gemini 3.x / Nano Banana 2.x render 2K natively; Gemini 2.5 has no 2K tier.
+      ...(isOpenAi ? { quality: 'medium' } : { resolution: openRouterImageResolution(input.model) }),
       ...(references ? { input_references: references } : {}),
     },
     referer: input.referer || 'https://marketingos.local',

@@ -14,6 +14,7 @@ data/competitor-references/
 data/event-plan-quotations/
 data/partnership-evidence/
 data/generated-image-meta/
+data/generated-image-originals/
 data/*.db
 data/*.db-journal
 data/*.db-wal

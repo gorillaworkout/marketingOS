@@ -63,6 +63,11 @@ function asRecord(value: unknown): Record<string, unknown> | null {
   return value as Record<string, unknown>;
 }
 
+/** File name from a stored image URL or path (no query, no traversal). */
+export function imageFileBasename(value: unknown): string | null {
+  return basename(value);
+}
+
 function basename(value: unknown): string | null {
   if (typeof value !== 'string') return null;
   const trimmed = value.trim();

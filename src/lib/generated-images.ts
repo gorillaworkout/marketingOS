@@ -19,3 +19,19 @@ function extensionOf(filename: string): string {
   const dot = filename.lastIndexOf('.');
   return dot === -1 ? '' : filename.slice(dot).toLowerCase();
 }
+
+/**
+ * Next free `_V<n>` for this base name: highest existing version + 1. Counting
+ * files instead would reuse a live version after a gallery delete and
+ * overwrite that image.
+ */
+export function nextSopVersion(existingFiles: readonly string[], baseName: string): number {
+  let max = 0;
+  const prefix = `${baseName}_V`;
+  for (const file of existingFiles) {
+    if (!file.startsWith(prefix)) continue;
+    const match = /^(\d+)_/.exec(file.slice(prefix.length));
+    if (match) max = Math.max(max, Number(match[1]));
+  }
+  return max + 1;
+}
