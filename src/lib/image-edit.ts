@@ -7,7 +7,7 @@ import { generatedImageOriginalsDir, generatedImagesDir, isDeletableImageFilenam
 /**
  * Server-only helpers for editing a generated image.
  *
- * Every new image keeps a pre-chrome original (after the 2K upscale, before
+ * Every new image keeps a pre-chrome original (after any 2K upscale — none while 2K is off — before
  * the logo / footer / pill) as `<fileName>.jpg` in data/generated-image-originals
  * (outside public/). Edits send that original as the input image, so the
  * chrome is never fed back to the model. Older images only have the
