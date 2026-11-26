@@ -1,3 +1,5 @@
+import fs from 'fs';
+import { assetOwnerDir } from '@/lib/image-assets';
 import { NextRequest, NextResponse } from 'next/server';
 import bcrypt from 'bcryptjs';
 import { v4 as uuidv4 } from 'uuid';
@@ -141,6 +143,9 @@ export async function DELETE(request: NextRequest) {
   await execute('DELETE FROM kanban_tasks WHERE user_id = ?', [id]);
   await execute('DELETE FROM tasks WHERE user_id = ?', [id]);
   await execute('DELETE FROM users WHERE id = ?', [id]);
+  // image_assets rows cascade with the user (072); remove their files too.
+  const assetDir = assetOwnerDir(id);
+  if (assetDir) fs.rmSync(assetDir, { recursive: true, force: true });
 
   return NextResponse.json({ success: true });
 }

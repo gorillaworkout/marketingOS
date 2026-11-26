@@ -11,6 +11,8 @@ export interface PreparedUpload {
   dataUrl: string;
   width: number;
   height: number;
+  /** Set when the image came from, or was saved to, the asset library. */
+  libraryAssetId?: string;
 }
 
 function readAsDataUrl(file: Blob): Promise<string> {
@@ -57,4 +59,19 @@ export async function prepareUpload(file: File): Promise<PreparedUpload> {
     dataUrl = file.type === 'image/jpeg' ? canvas.toDataURL('image/jpeg', 0.9) : canvas.toDataURL('image/png');
   }
   return { id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, name: file.name, dataUrl, width, height };
+}
+
+/** Turn a library or gallery image URL into the same prepared upload a file input gives. */
+export async function prepareUploadFromUrl(url: string, name: string): Promise<PreparedUpload> {
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(`${name}: the image could not be loaded.`);
+  const blob = await response.blob();
+  const type = (ACCEPTED_UPLOAD_TYPES as readonly string[]).includes(blob.type) ? blob.type : 'image/png';
+  return prepareUpload(new File([blob], name, { type }));
+}
+
+/** Data URL back to a File, for "Save to library". */
+export async function dataUrlToFile(dataUrl: string, name: string): Promise<File> {
+  const blob = await (await fetch(dataUrl)).blob();
+  return new File([blob], name, { type: blob.type || 'image/png' });
 }
