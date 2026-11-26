@@ -3,6 +3,8 @@ import { parseCsWorkbook, type ParsedWorkbook } from './parse';
 import { suggestMappings, type MappingChoice, type NameSuggestion } from './mapping';
 import { buildCsDashboard, type CsDashboard } from './metrics';
 import { buildCsWorkbook } from './export';
+import { buildCsDocx, csDocxFileName } from './docx-export';
+import type { PeriodKind } from './dates';
 import { normalizeText } from './dedupe';
 import * as store from './store';
 
@@ -103,4 +105,13 @@ export async function exportWorkbook(from: string, to: string, agentId: string |
   ]);
   const buffer = await buildCsWorkbook({ entries, complaints, notes });
   return { buffer, filename: `cs-report-${from}-to-${to}.xlsx` };
+}
+
+/** Word report for the same period and agent filter as the dashboard (figures from getDashboard). */
+export async function exportDocx(from: string, to: string, agentId: string | null, kind: PeriodKind): Promise<{ buffer: Buffer; filename: string }> {
+  const [dashboard, agent] = await Promise.all([getDashboard(from, to, agentId), agentId ? store.getAgent(agentId) : Promise.resolve(null)]);
+  const agentName = agent?.displayName ?? null;
+  const generatedAt = `${new Date(Date.now() + 7 * 3600_000).toISOString().slice(0, 16).replace('T', ' ')} WIB`;
+  const buffer = await buildCsDocx(dashboard, { kind, agentName, generatedAt });
+  return { buffer, filename: csDocxFileName(dashboard, { kind, agentName }) };
 }

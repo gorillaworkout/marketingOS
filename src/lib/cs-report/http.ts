@@ -1,4 +1,4 @@
-import { daysBetween, isIsoDate } from './dates';
+import { daysBetween, isIsoDate, type PeriodKind } from './dates';
 
 export const MAX_RANGE_DAYS = 400;
 
@@ -14,4 +14,10 @@ export function readRange(params: URLSearchParams): { from: string; to: string }
 export function readAgentId(params: URLSearchParams): string | null {
   const value = params.get('agentId');
   return value && /^[\w-]{1,80}$/.test(value) ? value : null;
+}
+
+/** Period preset for export titles; anything else (or missing) is a custom range. */
+export function readPeriodKind(params: URLSearchParams): PeriodKind {
+  const value = params.get('kind');
+  return value === 'day' || value === 'week' || value === 'month' ? value : 'custom';
 }
