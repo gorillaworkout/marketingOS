@@ -115,15 +115,21 @@ images, else the meta sidecar's `userId`. Images with no owner record only show 
 
 ## C. Edit (PR C, stacked on B)
 
-- From now on every new image also saves its **pre-chrome original** (after upscale, before chrome) to
-  `data/generated-image-originals/<file>` (outside `public/`).
+- From now on every new image also saves its **pre-chrome original** (after any upscale, which is off while 2K is deferred, before chrome) to
+  `data/generated-image-originals/<file>.jpg` (outside `public/`). It is JPEG q92 (~1–2 MB) rather than a second
+  PNG, to spare the VPS disk (5.9 GB free). Gallery delete removes `<file>.jpg` as well as `<file>`.
 - Gallery **Edit** button → dialog with a text instruction (whole image). `POST /api/generate-image` with
   `editOf: <filename>` and `editInstruction`. The server loads the pre-chrome original (or the composited file for
   older images, with a UI note that the result may be less clean because the logo/footer are baked in), sends it as
   the single input image to an edit-capable model (`cx/gpt-image-2` family; 9router turns the input into
-  `action: "edit"`), upscales if needed, re-applies the same chrome options as the parent, and saves a **new**
+  `action: "edit"`), upscales only when 2K is on, re-applies the same chrome options as the parent, and saves a **new**
   image. The parent is kept; the new meta records `parentFileName`.
-- Only owners / admins can edit (same as delete) — edits create images under the editor's name.
+- Edit is non-destructive, so anyone who can generate images may edit any gallery image (the gallery is
+  org-wide). The new image belongs to the editor. Delete stays owner / admin only.
+- The aspect ratio comes from the source image (nearest supported ratio). Edit models: `cx/gpt-image-2`
+  (default), `-2.5`, `-2.5-flare`, `-2.5-sunburst`, `-1.5`; fallback is GPT Image 2 only. No paid models.
+- For older images the prompt asks the model to repaint the baked header/footer bands as clean background
+  before the chrome is applied again.
 - **Later phase (not built)**: mask / inpaint (paint an area). TODO left in the edit route.
 
 ## Out of scope

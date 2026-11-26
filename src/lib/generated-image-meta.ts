@@ -29,6 +29,9 @@ export interface GeneratedImageMeta {
   taskId: string | null;
   fallbackFrom?: string;
   fallbackMessage?: string;
+  /** Set on an Edit result: the gallery image it was made from (kept). */
+  parentFileName?: string;
+  editInstruction?: string;
   generatedAt: string;
 }
 

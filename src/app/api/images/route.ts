@@ -3,6 +3,7 @@ import { queryAll } from '@/lib/database';
 import { getAuthorizedUser } from '@/lib/auth';
 import { linkedGeneratedImages } from '@/lib/image-remix';
 import { readAllGeneratedImageMeta } from '@/lib/generated-image-meta';
+import { hasGeneratedImageOriginal } from '@/lib/image-edit';
 import fs from 'fs';
 import path from 'path';
 
@@ -142,6 +143,9 @@ export async function GET(request: NextRequest) {
   // Owner or admin may delete (the DELETE route re-checks on the server).
   let withAccess = allImages.map(img => ({
     ...img,
+    // Pre-chrome original exists: Edit can send a clean image.
+    hasOriginal: hasGeneratedImageOriginal(img.filename),
+    parentFileName: metaByFile.get(img.filename)?.parentFileName ?? null,
     mine: img.userId === userId,
     canDelete: isAdmin || (img.userId !== null && img.userId === userId),
   }));
