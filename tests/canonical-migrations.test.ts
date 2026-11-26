@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import { AVAILABLE_MODELS, CLAUDE_OPUS_5_5_MODEL, CLAUDE_OPUS_5_MODEL, CLAUDE_SONNET_5_5_MODEL, CLAUDE_SONNET_5_MODEL, RETIRED_MODEL_REPLACEMENTS } from '../src/lib/openai';
-import { IMAGE_MODELS, DEFAULT_IMAGE_MODEL, RETIRED_IMAGE_MODEL_REPLACEMENTS } from '../src/lib/image-models';
+import { IMAGE_MODELS, RETIRED_IMAGE_MODEL_REPLACEMENTS } from '../src/lib/image-models';
 import { GENERATION_FEATURES } from '../src/lib/authorization';
 
 const migrate = readFileSync('scripts/migrate.ts', 'utf8');
@@ -254,7 +254,8 @@ test('013 creates image_model_assignments with the current catalog and is safe o
   const seeded = executable.split(/UPDATE image_model_assignments/)[0];
   assert.doesNotMatch(seeded, /gpt-5\.6-terra|gpt-image-2/);
   assert.match(imageAssignments, /LIKE '%gpt-5\.6-terra%'/);
-  assert.match(imageAssignments, new RegExp(DEFAULT_IMAGE_MODEL.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  // 013 seeded the Nano Banana 2 default; 071 moved the default to GPT Image 2 (seeded by 065).
+  assert.match(imageAssignments, /ag\/gemini-3\.1-flash-image/);
   // Ids added after 013 reach existing rows through 065 (gateway GPT Image).
   const gatewayGptImage = readFileSync('db/migrations/065_gateway_gpt_image_models.sql', 'utf8');
   for (const id of IMAGE_MODELS) {

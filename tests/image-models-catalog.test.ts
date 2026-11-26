@@ -14,7 +14,7 @@ import {
 
 const ids = AVAILABLE_IMAGE_MODELS.map(model => model.id);
 
-assert.equal(DEFAULT_IMAGE_MODEL, 'ag/gemini-3.1-flash-image');
+assert.equal(DEFAULT_IMAGE_MODEL, 'cx/gpt-image-2');
 assert.deepEqual(ids, [
   'ag/gemini-3.1-flash-image',
   // Free GPT Image on the LLM Dupoin gateway (ChatGPT account), probed on prod 2026-11-18.

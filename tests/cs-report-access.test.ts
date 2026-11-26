@@ -139,6 +139,6 @@ test('migration 070 adds Customer Service at ...0009 when the name is missing; r
   assert.match(rollback, /DELETE FROM schema_migrations WHERE name = '070_cs_department.sql'/);
   assert.doesNotMatch(rollback, /00000000-0000-0000-0000-000000000008/, 'rollback must not touch DPM');
   const migrations = readdirSync('db/migrations').filter(n => n.endsWith('.sql')).sort();
-  assert.equal(migrations.at(-1), '070_cs_department.sql');
+  assert.ok(migrations.includes('070_cs_department.sql'));
   assert.equal(migrations.filter(n => n.startsWith('070_')).length, 1);
 });

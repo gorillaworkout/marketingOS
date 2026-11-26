@@ -10,7 +10,8 @@ export const TEXT_SHORTLIST = [
   'ag/gemini-3-flash',
 ] as const;
 
-export const IMAGE_SHORTLIST = ['ag/gemini-3.1-flash-image'] as const;
+/** GPT Image 2 first: the Antigravity account behind Nano Banana 2 was disabled by Google on 2026-11-26. */
+export const IMAGE_SHORTLIST = ['cx/gpt-image-2', 'ag/gemini-3.1-flash-image'] as const;
 
 /** Verified on https://openrouter.ai/api/v1/models on 2026-11-12. Gemma is not in this chain. */
 export const FREE_TEXT_CHAIN = [
@@ -32,7 +33,7 @@ export const TIER_PRIMARY: Record<ModelTier, string> = {
   smart: 'cc/claude-sonnet-5-5',
   fast: 'ag/gemini-3-flash',
   research: 'cx/gpt-5.6-sol',
-  image: 'ag/gemini-3.1-flash-image',
+  image: 'cx/gpt-image-2',
 };
 
 /** Verified paid ids. Image always needs OpenRouter credits. */

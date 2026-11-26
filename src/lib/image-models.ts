@@ -19,11 +19,14 @@ export interface ImageModelInfo {
 }
 
 /**
- * Default Social Post / generate-image model. Production switched to this id on
- * 2026-11-02 after `cx/gpt-5.5-image` started answering 400 ("The 'gpt-5.5'
- * model is not supported when using Codex with a ChatGPT account").
+ * Default Social Post / generate-image model. History: `cx/gpt-5.5-image` until
+ * 2026-11-02 (400 on a ChatGPT-account Codex connection), then
+ * `ag/gemini-3.1-flash-image` until 2026-11-26, when Google disabled the
+ * Antigravity account behind 9router (403 PERMISSION_DENIED / TOS_VIOLATION).
+ * GPT Image 2 runs on the ChatGPT account through the same gateway, free.
+ * Nano Banana 2 stays selectable and falls back to this on 401/403/quota.
  */
-export const DEFAULT_IMAGE_MODEL = 'ag/gemini-3.1-flash-image';
+export const DEFAULT_IMAGE_MODEL = 'cx/gpt-image-2';
 
 /**
  * Social Post image-generation catalog served by the GorillaWorkout gateway

@@ -229,7 +229,7 @@ test('free gateway GPT Image models work without OpenRouter and back up an Antig
     assert.equal(maxInputImagesFor(model.id), 8, 'uploads are merged into one sheet for the gateway');
   }
   // Production allow list after 065: the ag quota retry lands on a free GPT Image id, never a paid one.
-  const fallback = nextImageFallback(DEFAULT_IMAGE_MODEL, IMAGE_MODELS);
+  const fallback = nextImageFallback('ag/gemini-3.1-flash-image', IMAGE_MODELS);
   assert.equal(fallback, 'cx/gpt-image-2');
   assert.equal(isPaidImageModel(fallback), false);
 });
