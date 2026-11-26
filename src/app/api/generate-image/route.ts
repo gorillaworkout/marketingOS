@@ -4,7 +4,7 @@ import { hasGenerationFeature } from '@/lib/authorization';
 import { queryOne, execute } from '@/lib/database';
 import { rateLimit } from '@/lib/rate-limit';
 import { createImageJobStore, type ImageJob, type ImageJobResult } from '@/lib/image-job-status';
-import { gatewayImageSize, legacyGatewayImageSize, parseImageAspectRatio, type ImageAspectRatio } from '@/lib/image-aspect-ratio';
+import { gatewayImageSize, legacyGatewayImageSize, outputMinLongSide, parseImageAspectRatio, type ImageAspectRatio } from '@/lib/image-aspect-ratio';
 import { ensureMinLongSide } from '@/lib/image-upscale';
 import { buildEditPrompt, loadEditSource, nearestAspectRatio, saveGeneratedImageOriginal } from '@/lib/image-edit';
 import { MAX_EDIT_INSTRUCTION, resolveEditImageModel } from '@/lib/image-edit-shared';
@@ -337,9 +337,10 @@ async function runImageJob(job: ImageJob, options: ImageJobOptions) {
 
     if (imageBytes.length < 10_000) throw new Error('Image API returned a suspiciously small image.');
 
-    // 2K floor: long side >= 2048. Upscale (lanczos3) BEFORE the chrome so the
-    // logo / footer / pill are composited once, at the final canvas size.
-    const sized = await ensureMinLongSide(imageBytes);
+    // 2K floor (only when IMAGE_2K_OUTPUT_ENABLED): upscale (lanczos3) BEFORE
+    // the chrome so the logo / footer / pill are composited once, at the final
+    // canvas size. While 2K is off the floor is 0: bytes pass through unchanged.
+    const sized = await ensureMinLongSide(imageBytes, outputMinLongSide());
     imageBytes = sized.bytes;
     const preChrome = sized.bytes;
 
